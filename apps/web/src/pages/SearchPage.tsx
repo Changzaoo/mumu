@@ -1,36 +1,33 @@
 /**
- * /search — instant search with type pills, top result, grouped carousels,
- * recent searches and (when supported) voice input.
+ * /search — instant search over the Audius catalog (tracks + artists), with a
+ * 300ms debounce, top result, track list, recent searches and voice input.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { Mic, Search, SearchX, X } from 'lucide-react';
-import type { SearchResultsDto, SearchType, TrackDto } from '@aurial/shared';
-import { ArtistCard } from '@/components/media/ArtistCard';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PlayButton } from '@/components/media/PlayButton';
-import { PlaylistCard } from '@/components/media/PlaylistCard';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useTrackLikes } from '@/features/library/api';
-import { useRecentSearches, useSearch } from '@/features/search/api';
+import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
+import { useRecentSearches } from '@/features/search/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
-const TYPE_PILLS: Array<{ value: SearchType; label: string }> = [
+type Tab = 'all' | 'track' | 'artist';
+
+const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'all', label: 'Tudo' },
   { value: 'track', label: 'Músicas' },
-  { value: 'album', label: 'Álbuns' },
   { value: 'artist', label: 'Artistas' },
-  { value: 'playlist', label: 'Playlists' },
-  { value: 'podcast', label: 'Podcasts' },
-  { value: 'radio', label: 'Rádios' },
 ];
+
+const artistPath = (id: string): string => `/catalogo/artista/${id.replace(/^audius-user:/, '')}`;
 
 // ── Voice search (webkitSpeechRecognition; hidden when unsupported) ──
 
@@ -98,149 +95,12 @@ function VoiceButton({ onResult }: { onResult: (text: string) => void }) {
   );
 }
 
-// ── Top result ──────────────────────────────────────────────────
-
-interface TopResultInfo {
-  title: string;
-  subtitle: string;
-  imageUrl: string | null;
-  to?: string;
-  round?: boolean;
-  track?: TrackDto;
-}
-
-function resolveTopResult(results: SearchResultsDto): TopResultInfo | null {
-  const top = results.topResult;
-  if (!top) return null;
-  switch (top.type) {
-    case 'track': {
-      const track = results.tracks.find((t) => t.id === top.id);
-      return track
-        ? {
-            title: track.title,
-            subtitle: `Música · ${trackArtistNames(track)}`,
-            imageUrl: track.coverUrl,
-            to: track.album ? `/album/${track.album.id}` : undefined,
-            track,
-          }
-        : null;
-    }
-    case 'album': {
-      const album = results.albums.find((a) => a.id === top.id);
-      return album
-        ? {
-            title: album.title,
-            subtitle: `Álbum · ${album.artists.map((a) => a.name).join(', ')}`,
-            imageUrl: album.coverUrl,
-            to: `/album/${album.id}`,
-          }
-        : null;
-    }
-    case 'artist': {
-      const artist = results.artists.find((a) => a.id === top.id);
-      return artist
-        ? {
-            title: artist.name,
-            subtitle: 'Artista',
-            imageUrl: artist.imageUrl,
-            to: `/artist/${artist.id}`,
-            round: true,
-          }
-        : null;
-    }
-    case 'playlist': {
-      const playlist = results.playlists.find((p) => p.id === top.id);
-      return playlist
-        ? {
-            title: playlist.title,
-            subtitle: `Playlist · ${playlist.owner.displayName}`,
-            imageUrl: playlist.coverUrl,
-            to: `/playlist/${playlist.id}`,
-          }
-        : null;
-    }
-    case 'podcast': {
-      const podcast = results.podcasts.find((p) => p.id === top.id);
-      return podcast
-        ? {
-            title: podcast.title,
-            subtitle: `Podcast · ${podcast.publisher}`,
-            imageUrl: podcast.coverUrl,
-            to: `/podcast/${podcast.id}`,
-          }
-        : null;
-    }
-    default:
-      return null;
-  }
-}
-
-function TopResultCard({ info, query }: { info: TopResultInfo; query: string }) {
-  const playQueue = usePlayerStore((s) => s.playQueue);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const active = info.track ? currentTrack?.id === info.track.id : false;
-
-  const body = (
-    <div className="group relative flex h-full flex-col justify-between rounded-xl border border-border bg-bg-elevated p-5 transition-colors duration-200 hover:bg-fg/5">
-      <div
-        className={cn(
-          'size-24 overflow-hidden bg-fg/6 shadow-lg',
-          info.round ? 'rounded-full' : 'rounded-lg',
-        )}
-      >
-        {info.imageUrl && <img src={info.imageUrl} alt="" className="size-full object-cover" />}
-      </div>
-      <div className="mt-4 min-w-0">
-        <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">{info.title}</p>
-        <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">{info.subtitle}</p>
-      </div>
-      {info.track && (
-        <PlayButton
-          size="lg"
-          playing={active && isPlaying}
-          onClick={(event) => {
-            event.preventDefault();
-            event.stopPropagation();
-            if (info.track) {
-              playQueue([info.track], 0, { source: 'search', sourceId: query });
-            }
-          }}
-          className={cn(
-            'absolute bottom-5 right-5 translate-y-1 opacity-0 transition-[opacity,transform] duration-200',
-            'group-hover:translate-y-0 group-hover:opacity-100',
-            active && 'translate-y-0 opacity-100',
-          )}
-        />
-      )}
-    </div>
-  );
-
-  return (
-    <section aria-label="Melhor resultado" className="min-w-0">
-      <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Melhor resultado</h2>
-      {info.to ? (
-        <Link to={info.to} className="block h-[calc(100%-2.25rem)]">
-          {body}
-        </Link>
-      ) : (
-        body
-      )}
-    </section>
-  );
-}
-
 function ResultsSkeleton() {
   return (
-    <div className="space-y-8" aria-busy>
-      <div className="grid gap-6 lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]">
-        <Skeleton className="h-56 rounded-xl" />
-        <div className="space-y-2 pt-9">
-          {Array.from({ length: 4 }, (_, i) => (
-            <Skeleton key={i} className="h-12 rounded-lg" />
-          ))}
-        </div>
-      </div>
+    <div className="space-y-2" aria-busy>
+      {Array.from({ length: 6 }, (_, i) => (
+        <Skeleton key={i} className="h-14 rounded-lg" />
+      ))}
     </div>
   );
 }
@@ -248,12 +108,11 @@ function ResultsSkeleton() {
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const urlQuery = searchParams.get('q') ?? '';
-  const urlType = (searchParams.get('type') ?? 'all') as SearchType;
+  const [tab, setTab] = useState<Tab>('all');
   const [input, setInput] = useState(urlQuery);
   const inputRef = useRef<HTMLInputElement>(null);
   const debounced = useDebounce(input, 300);
   const { recent, addRecent, removeRecent, clearRecent } = useRecentSearches();
-  const likes = useTrackLikes();
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -271,42 +130,29 @@ export default function SearchPage() {
     );
   }, [debounced, setSearchParams]);
 
-  const { data, isLoading, isError, refetch, isFetching } = useSearch(debounced, urlType);
+  const tracksQuery = useCatalogSearch(debounced);
+  const artistsQuery = useCatalogSearchArtists(debounced);
   const hasQuery = debounced.trim().length > 0;
-
-  const setType = (type: SearchType): void => {
-    setSearchParams(
-      (params) => {
-        if (type === 'all') params.delete('type');
-        else params.set('type', type);
-        return params;
-      },
-      { replace: true },
-    );
-  };
 
   const commitSearch = (term: string): void => {
     setInput(term);
     addRecent(term);
   };
 
-  const topResult = data && urlType === 'all' ? resolveTopResult(data) : null;
-  const tracksShown = data ? (urlType === 'all' ? data.tracks.slice(0, 5) : data.tracks) : [];
+  const tracks = tracksQuery.data ?? [];
+  const artists = artistsQuery.data ?? [];
+  const showTracks = tab === 'all' || tab === 'track';
+  const showArtists = tab === 'all' || tab === 'artist';
+  const topTrack = tab === 'all' ? tracks[0] : undefined;
+
+  const isLoading = hasQuery && (tracksQuery.isLoading || artistsQuery.isLoading);
+  const isError = hasQuery && tracksQuery.isError && artistsQuery.isError;
+  const isEmpty = hasQuery && !isLoading && !isError && tracks.length === 0 && artists.length === 0;
 
   const playFromSearch = (index: number): void => {
-    if (!data) return;
     addRecent(debounced);
-    playQueue(tracksShown, index, { source: 'search', sourceId: data.query });
+    playQueue(tracks, index, { source: 'search', sourceId: debounced.trim() });
   };
-
-  const isEmptyResults =
-    data &&
-    data.tracks.length === 0 &&
-    data.albums.length === 0 &&
-    data.artists.length === 0 &&
-    data.playlists.length === 0 &&
-    data.podcasts.length === 0 &&
-    data.radios.length === 0;
 
   return (
     <div className="space-y-6 py-4">
@@ -356,16 +202,16 @@ export default function SearchPage() {
         aria-label="Filtrar por tipo"
         className="no-scrollbar flex gap-2 overflow-x-auto"
       >
-        {TYPE_PILLS.map((pill) => (
+        {TABS.map((pill) => (
           <button
             key={pill.value}
             type="button"
             role="tab"
-            aria-selected={urlType === pill.value}
-            onClick={() => setType(pill.value)}
+            aria-selected={tab === pill.value}
+            onClick={() => setTab(pill.value)}
             className={cn(
               'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-              urlType === pill.value
+              tab === pill.value
                 ? 'bg-fg text-bg'
                 : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
             )}
@@ -420,129 +266,99 @@ export default function SearchPage() {
           ) : (
             <EmptyState
               icon={Search}
-              title="Busque por músicas, artistas e mais"
-              description="Digite acima ou use a busca por voz para encontrar qualquer coisa no Aurial."
+              title="Busque por músicas e artistas"
+              description="Digite acima ou use a busca por voz para encontrar músicas livres no catálogo Audius."
             />
           )}
         </section>
       )}
 
       {/* Results */}
-      {hasQuery && isLoading && <ResultsSkeleton />}
-      {hasQuery && isError && (
+      {isLoading && <ResultsSkeleton />}
+      {isError && (
         <div className="py-8">
-          <ErrorState onRetry={() => void refetch()} />
+          <ErrorState
+            onRetry={() => {
+              void tracksQuery.refetch();
+              void artistsQuery.refetch();
+            }}
+          />
         </div>
       )}
 
-      {hasQuery && data && (
-        <div className={cn('space-y-8 transition-opacity', isFetching && 'opacity-70')}>
-          {data.correctedQuery && data.correctedQuery !== data.query && (
-            <p className="text-sm text-fg-muted">
-              Você quis dizer{' '}
-              <button
-                type="button"
-                onClick={() => commitSearch(data.correctedQuery ?? '')}
-                className="font-medium text-info hover:underline"
-              >
-                {data.correctedQuery}
-              </button>
-              ?
-            </p>
+      {hasQuery && !isLoading && !isError && (
+        <div
+          className={cn(
+            'space-y-8 transition-opacity',
+            (tracksQuery.isFetching || artistsQuery.isFetching) && 'opacity-70',
           )}
-
-          {isEmptyResults ? (
+        >
+          {isEmpty ? (
             <EmptyState
               icon={SearchX}
-              title={`Nada encontrado para "${data.query}"`}
+              title={`Nada encontrado para "${debounced.trim()}"`}
               description="Confira a grafia ou tente termos mais gerais."
             />
           ) : (
             <>
-              <div
-                className={cn(
-                  'grid gap-6',
-                  topResult &&
-                    tracksShown.length > 0 &&
-                    'lg:grid-cols-[minmax(0,2fr)_minmax(0,3fr)]',
-                )}
-              >
-                {topResult && <TopResultCard info={topResult} query={data.query} />}
-                {tracksShown.length > 0 && (
-                  <section aria-label="Músicas" className="min-w-0">
-                    <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Músicas</h2>
-                    <TrackList>
-                      {tracksShown.map((track, index) => (
-                        <TrackRow
-                          key={track.id}
-                          track={track}
-                          index={index}
-                          showAlbum={false}
-                          active={track.id === currentTrack?.id}
-                          playing={track.id === currentTrack?.id && isPlaying}
-                          liked={likes.isLiked(track)}
-                          onToggleLike={(liked) => likes.toggle(track, liked)}
-                          onPlay={() => playFromSearch(index)}
-                        />
-                      ))}
-                    </TrackList>
-                  </section>
-                )}
-              </div>
+              {showTracks && topTrack && (
+                <section aria-label="Melhor resultado" className="min-w-0">
+                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
+                    Melhor resultado
+                  </h2>
+                  <div className="group relative flex max-w-md flex-col justify-between rounded-xl border border-border bg-bg-elevated p-5">
+                    <div className="size-24 overflow-hidden rounded-lg bg-fg/6 shadow-lg">
+                      {topTrack.coverUrl && (
+                        <img src={topTrack.coverUrl} alt="" className="size-full object-cover" />
+                      )}
+                    </div>
+                    <div className="mt-4 min-w-0">
+                      <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
+                        {topTrack.title}
+                      </p>
+                      <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
+                        Música · {trackArtistNames(topTrack)}
+                      </p>
+                    </div>
+                    <PlayButton
+                      size="lg"
+                      playing={currentTrack?.id === topTrack.id && isPlaying}
+                      onClick={() => playFromSearch(0)}
+                      className="absolute bottom-5 right-5"
+                    />
+                  </div>
+                </section>
+              )}
 
-              {(urlType === 'all' || urlType === 'artist') && data.artists.length > 0 && (
+              {showTracks && tracks.length > 0 && (
+                <section aria-label="Músicas" className="min-w-0">
+                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Músicas</h2>
+                  <TrackList>
+                    {tracks.map((track, index) => (
+                      <TrackRow
+                        key={`${track.id}:${index}`}
+                        track={track}
+                        index={index}
+                        showAlbum={false}
+                        active={track.id === currentTrack?.id}
+                        playing={track.id === currentTrack?.id && isPlaying}
+                        onPlay={() => playFromSearch(index)}
+                      />
+                    ))}
+                  </TrackList>
+                </section>
+              )}
+
+              {showArtists && artists.length > 0 && (
                 <SectionCarousel title="Artistas">
-                  {data.artists.map((artist) => (
-                    <ArtistCard key={artist.id} artist={artist} />
-                  ))}
-                </SectionCarousel>
-              )}
-
-              {(urlType === 'all' || urlType === 'album') && data.albums.length > 0 && (
-                <SectionCarousel title="Álbuns">
-                  {data.albums.map((album) => (
+                  {artists.map((artist) => (
                     <MediaCard
-                      key={album.id}
-                      title={album.title}
-                      subtitle={album.artists.map((a) => a.name).join(', ')}
-                      imageUrl={album.coverUrl}
-                      to={`/album/${album.id}`}
-                    />
-                  ))}
-                </SectionCarousel>
-              )}
-
-              {(urlType === 'all' || urlType === 'playlist') && data.playlists.length > 0 && (
-                <SectionCarousel title="Playlists">
-                  {data.playlists.map((playlist) => (
-                    <PlaylistCard key={playlist.id} playlist={playlist} />
-                  ))}
-                </SectionCarousel>
-              )}
-
-              {(urlType === 'all' || urlType === 'podcast') && data.podcasts.length > 0 && (
-                <SectionCarousel title="Podcasts">
-                  {data.podcasts.map((podcast) => (
-                    <MediaCard
-                      key={podcast.id}
-                      title={podcast.title}
-                      subtitle={podcast.publisher}
-                      imageUrl={podcast.coverUrl}
-                      to={`/podcast/${podcast.id}`}
-                    />
-                  ))}
-                </SectionCarousel>
-              )}
-
-              {(urlType === 'all' || urlType === 'radio') && data.radios.length > 0 && (
-                <SectionCarousel title="Rádios">
-                  {data.radios.map((radio) => (
-                    <MediaCard
-                      key={radio.id}
-                      title={radio.name}
-                      subtitle={radio.genre ? `Rádio · ${radio.genre}` : 'Rádio ao vivo'}
-                      imageUrl={radio.imageUrl}
-                      to="/radios"
+                      key={artist.id}
+                      title={artist.name}
+                      subtitle="Artista"
+                      shape="round"
+                      imageUrl={artist.imageUrl}
+                      to={artistPath(artist.id)}
                     />
                   ))}
                 </SectionCarousel>

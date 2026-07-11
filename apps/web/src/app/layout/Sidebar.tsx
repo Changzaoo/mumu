@@ -3,6 +3,7 @@ import { NavLink } from 'react-router';
 import {
   Compass,
   Download,
+  HardDriveDownload,
   Heart,
   History,
   Home,
@@ -12,6 +13,7 @@ import {
   Podcast,
   Radio,
   Search,
+  Share2,
   Upload,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
@@ -34,6 +36,11 @@ const MAIN_NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: Home },
   { to: '/search', label: 'Buscar', icon: Search },
   { to: '/discover', label: 'Descobrir', icon: Compass },
+];
+
+const DEVICE_NAV: NavEntry[] = [
+  { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
+  { to: '/compartilhar', label: 'Compartilhar', icon: Share2 },
 ];
 
 const LIBRARY_NAV: NavEntry[] = [
@@ -116,6 +123,13 @@ export function Sidebar() {
       <nav aria-label="Menu principal" className="flex min-h-0 flex-1 flex-col px-3 pb-3">
         <div className="space-y-0.5">
           {MAIN_NAV.map((entry) => (
+            <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
+          ))}
+        </div>
+
+        <SectionLabel collapsed={collapsed}>Meu espaço</SectionLabel>
+        <div className="space-y-0.5">
+          {DEVICE_NAV.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
         </div>

@@ -13,6 +13,10 @@ import { api } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadManager';
+import {
+  hydrate as hydrateLocalLibrary,
+  localAudioUrl as localLibraryAudioUrl,
+} from '@/lib/local/localLibrary';
 
 export interface PlayContext {
   source: PlaySource;
@@ -400,8 +404,12 @@ export function initPlayerEngine(): void {
 
   const store = usePlayerStore;
 
-  // Prefer offline copies: the engine asks this resolver before the network.
-  audioEngine.setLocalSourceResolver((track) => localAudioUrl(track.id));
+  // Prefer local copies: the engine asks this resolver before the network.
+  // Consults both the on-device local library and the offline-download cache.
+  audioEngine.setLocalSourceResolver(
+    (track) => localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id),
+  );
+  void hydrateLocalLibrary();
   void hydrateDownloads();
 
   // Restore persisted volume / apply audio settings.

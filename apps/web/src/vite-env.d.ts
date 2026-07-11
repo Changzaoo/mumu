@@ -5,6 +5,8 @@ interface ImportMetaEnv {
   readonly VITE_API_URL?: string;
   /** socket.io origin, e.g. http://localhost:4000. */
   readonly VITE_WS_URL?: string;
+  /** P2P signaling WebSocket URL, e.g. wss://host/rtc (defaults to same-origin /rtc). */
+  readonly VITE_SIGNALING_URL?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;
   readonly VITE_FIREBASE_PROJECT_ID?: string;

@@ -1,68 +1,55 @@
 /**
- * /discover — mood grid (→ /discover?mood=x → GET /recs/mood/:mood),
- * new releases and trending.
+ * /discover — browse the Audius catalog by genre (grid → ?genre=x → trending by
+ * genre) plus trending playlists. Everything directly playable.
  */
 import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { ArrowLeft, Compass, Play, Sparkles } from 'lucide-react';
-import { MOODS, type Mood } from '@aurial/shared';
+import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
-import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useMoodTracks, useNewReleases, useTrending } from '@/features/browse/api';
-import { useTrackLikes } from '@/features/library/api';
+import { CATALOG_GENRES } from '@/lib/catalog/audius';
+import { useTrending, useTrendingPlaylists } from '@/features/catalog/api';
 import { usePlayerStore } from '@/stores/playerStore';
-import { trackArtistNames } from '@/lib/utils';
-import { radioToTrack } from '@/features/browse/api';
-import { ArtistCard } from '@/components/media/ArtistCard';
-import { PlaylistCard } from '@/components/media/PlaylistCard';
-import type { HomeSectionItem } from '@aurial/shared';
 
-/** pt-BR labels + hue pairs for the tinted mood tiles (ambient, low-opacity). */
-const MOOD_META: Record<Mood, { label: string; hue: number }> = {
-  chill: { label: 'Relaxar', hue: 190 },
-  focus: { label: 'Foco', hue: 220 },
-  workout: { label: 'Treino', hue: 10 },
-  gaming: { label: 'Games', hue: 270 },
-  lofi: { label: 'Lo-fi', hue: 30 },
-  party: { label: 'Festa', hue: 320 },
-  sleep: { label: 'Dormir', hue: 240 },
-  romance: { label: 'Romance', hue: 350 },
-  sad: { label: 'Melancolia', hue: 210 },
-  happy: { label: 'Alegria', hue: 45 },
-};
+/** A stable-ish hue per genre for the tinted tiles. */
+function hueFor(genre: string): number {
+  let hash = 0;
+  for (let i = 0; i < genre.length; i++) hash = (hash * 31 + genre.charCodeAt(i)) % 360;
+  return hash;
+}
 
-function MoodGrid() {
+function GenreGrid() {
   return (
-    <section aria-label="Moods">
-      <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Como você está hoje?</h2>
+    <section aria-label="Gêneros">
+      <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Explorar por gênero</h2>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {MOODS.map((mood, index) => {
-          const meta = MOOD_META[mood];
+        {CATALOG_GENRES.map((genre, index) => {
+          const hue = hueFor(genre);
           return (
             <motion.div
-              key={mood}
+              key={genre}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index, 12) * 0.03, duration: 0.2 }}
             >
               <Link
-                to={`/discover?mood=${mood}`}
+                to={`/discover?genre=${encodeURIComponent(genre)}`}
                 className="group relative block overflow-hidden rounded-xl border border-border bg-bg-elevated p-4 pt-12 transition-transform duration-200 hover:scale-[1.02] focus-visible:scale-[1.02]"
                 style={{
-                  backgroundImage: `linear-gradient(135deg, hsl(${meta.hue} 80% 50% / 0.28) 0%, hsl(${(meta.hue + 40) % 360} 80% 45% / 0.10) 100%)`,
+                  backgroundImage: `linear-gradient(135deg, hsl(${hue} 80% 50% / 0.28) 0%, hsl(${(hue + 40) % 360} 80% 45% / 0.10) 100%)`,
                 }}
               >
-                <span className="text-base font-semibold tracking-tight text-fg">{meta.label}</span>
+                <span className="text-base font-semibold tracking-tight text-fg">{genre}</span>
                 <span
                   aria-hidden
                   className="pointer-events-none absolute -right-4 -top-4 size-16 rounded-full opacity-40 blur-2xl transition-opacity duration-200 group-hover:opacity-70"
-                  style={{ background: `hsl(${meta.hue} 80% 55%)` }}
+                  style={{ background: `hsl(${hue} 80% 55%)` }}
                 />
               </Link>
             </motion.div>
@@ -73,64 +60,13 @@ function MoodGrid() {
   );
 }
 
-function TrendingItem({ item }: { item: HomeSectionItem }) {
-  const playTrack = usePlayerStore((s) => s.playTrack);
-  switch (item.kind) {
-    case 'track':
-      return (
-        <MediaCard
-          title={item.item.title}
-          subtitle={trackArtistNames(item.item)}
-          imageUrl={item.item.coverUrl}
-          to={item.item.album ? `/album/${item.item.album.id}` : undefined}
-          onPlay={() => playTrack(item.item, { source: 'recommendation', sourceId: 'trending' })}
-        />
-      );
-    case 'album':
-      return (
-        <MediaCard
-          title={item.item.title}
-          subtitle={item.item.artists.map((a) => a.name).join(', ')}
-          imageUrl={item.item.coverUrl}
-          to={`/album/${item.item.id}`}
-        />
-      );
-    case 'artist':
-      return <ArtistCard artist={item.item} />;
-    case 'playlist':
-      return <PlaylistCard playlist={item.item} />;
-    case 'podcast':
-      return (
-        <MediaCard
-          title={item.item.title}
-          subtitle={item.item.publisher}
-          imageUrl={item.item.coverUrl}
-          to={`/podcast/${item.item.id}`}
-        />
-      );
-    case 'radio':
-      return (
-        <MediaCard
-          title={item.item.name}
-          subtitle="Rádio ao vivo"
-          imageUrl={item.item.imageUrl}
-          to="/radios"
-          onPlay={() =>
-            playTrack(radioToTrack(item.item), { source: 'radio', sourceId: item.item.id })
-          }
-        />
-      );
-  }
-}
-
-/** ?mood=x view — tracks for the selected mood. */
-function MoodView({ mood }: { mood: Mood }) {
-  const { data, isLoading, isError, refetch } = useMoodTracks(mood);
-  const likes = useTrackLikes();
+function GenreView({ genre }: { genre: string }) {
+  const { data, isLoading, isError, refetch, isFetching } = useTrending(genre);
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const meta = MOOD_META[mood];
+  const hue = hueFor(genre);
+  const tracks = data ?? [];
 
   return (
     <div className="space-y-6 py-4">
@@ -139,7 +75,7 @@ function MoodView({ mood }: { mood: Mood }) {
           aria-hidden
           className="pointer-events-none absolute -inset-x-16 -top-32 h-80 opacity-25 blur-[120px]"
           style={{
-            background: `radial-gradient(60% 60% at 35% 30%, hsl(${meta.hue} 80% 50%) 0%, transparent 70%)`,
+            background: `radial-gradient(60% 60% at 35% 30%, hsl(${hue} 80% 50%) 0%, transparent 70%)`,
           }}
         />
         <div className="relative space-y-4">
@@ -149,15 +85,14 @@ function MoodView({ mood }: { mood: Mood }) {
           >
             <ArrowLeft className="size-4" /> Descobrir
           </Link>
-          <h1 className="text-4xl font-bold tracking-tight text-fg md:text-5xl">{meta.label}</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-fg md:text-5xl">{genre}</h1>
           <Button
             variant="accent"
             onClick={() =>
-              data &&
-              data.length > 0 &&
-              playQueue(data, 0, { source: 'recommendation', sourceId: `mood:${mood}` })
+              tracks.length > 0 &&
+              playQueue(tracks, 0, { source: 'recommendation', sourceId: `genre:${genre}` })
             }
-            disabled={!data || data.length === 0}
+            disabled={tracks.length === 0}
           >
             <Play className="fill-current" /> Tocar tudo
           </Button>
@@ -166,26 +101,25 @@ function MoodView({ mood }: { mood: Mood }) {
 
       {isLoading && <PageSkeleton variant="list" />}
       {isError && <ErrorState onRetry={() => void refetch()} />}
-      {data && data.length === 0 && (
+      {data && tracks.length === 0 && (
         <EmptyState
           icon={Sparkles}
-          title="Nada para este mood ainda"
-          description="Volte em breve — as recomendações são atualizadas todo dia."
+          title="Nada neste gênero ainda"
+          description="Tente outro gênero — o catálogo muda o tempo todo."
         />
       )}
-      {data && data.length > 0 && (
-        <TrackList aria-label={`Faixas para ${meta.label}`}>
-          {data.map((track, index) => (
+      {tracks.length > 0 && (
+        <TrackList aria-label={`Faixas de ${genre}`} className={isFetching ? 'opacity-70' : ''}>
+          {tracks.map((track, index) => (
             <TrackRow
-              key={track.id}
+              key={`${track.id}:${index}`}
               track={track}
               index={index}
+              showAlbum={false}
               active={track.id === currentTrack?.id}
               playing={track.id === currentTrack?.id && isPlaying}
-              liked={likes.isLiked(track)}
-              onToggleLike={(liked) => likes.toggle(track, liked)}
               onPlay={() =>
-                playQueue(data, index, { source: 'recommendation', sourceId: `mood:${mood}` })
+                playQueue(tracks, index, { source: 'recommendation', sourceId: `genre:${genre}` })
               }
             />
           ))}
@@ -197,13 +131,14 @@ function MoodView({ mood }: { mood: Mood }) {
 
 export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
-  const moodParam = searchParams.get('mood');
-  const mood = (MOODS as readonly string[]).includes(moodParam ?? '') ? (moodParam as Mood) : null;
+  const genreParam = searchParams.get('genre');
+  const genre = (CATALOG_GENRES as readonly string[]).includes(genreParam ?? '')
+    ? (genreParam as string)
+    : null;
 
-  const newReleases = useNewReleases();
-  const trending = useTrending();
+  const playlists = useTrendingPlaylists();
 
-  if (mood) return <MoodView mood={mood} />;
+  if (genre) return <GenreView genre={genre} />;
 
   return (
     <div className="space-y-8 py-4">
@@ -211,9 +146,9 @@ export default function DiscoverPage() {
         <Compass className="size-7 text-fg-muted" /> Descobrir
       </h1>
 
-      <MoodGrid />
+      <GenreGrid />
 
-      {newReleases.isLoading && (
+      {playlists.isLoading && (
         <div className="no-scrollbar flex gap-1 overflow-hidden">
           {Array.from({ length: 6 }, (_, i) => (
             <div key={i} className="w-40 shrink-0 p-3 md:w-44">
@@ -223,25 +158,17 @@ export default function DiscoverPage() {
           ))}
         </div>
       )}
-      {newReleases.isError && <ErrorState onRetry={() => void newReleases.refetch()} />}
-      {newReleases.data && newReleases.data.length > 0 && (
-        <SectionCarousel title="Lançamentos" subtitle="Álbuns e singles recém-chegados">
-          {newReleases.data.map((album) => (
+      {playlists.isError && <ErrorState onRetry={() => void playlists.refetch()} />}
+      {playlists.data && playlists.data.length > 0 && (
+        <SectionCarousel title="Playlists em alta" subtitle="Coleções da comunidade Audius">
+          {playlists.data.map((playlist) => (
             <MediaCard
-              key={album.id}
-              title={album.title}
-              subtitle={album.artists.map((a) => a.name).join(', ')}
-              imageUrl={album.coverUrl}
-              to={`/album/${album.id}`}
+              key={playlist.id}
+              title={playlist.title}
+              subtitle={playlist.userName}
+              imageUrl={playlist.coverUrl}
+              to={`/catalogo/playlist/${playlist.id}`}
             />
-          ))}
-        </SectionCarousel>
-      )}
-
-      {trending.data && trending.data.items.length > 0 && (
-        <SectionCarousel title={trending.data.title} subtitle={trending.data.subtitle ?? undefined}>
-          {trending.data.items.map((item) => (
-            <TrendingItem key={`${item.kind}:${item.item.id}`} item={item} />
           ))}
         </SectionCarousel>
       )}
