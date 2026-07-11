@@ -1,11 +1,10 @@
 /**
- * Downloads registry — typed localStorage wrapper for the PWA offline seam.
+ * Downloads registry — typed localStorage index of offline tracks.
  *
- * This layer only tracks WHICH tracks the user marked for offline listening.
- * TODO(pwa): the actual audio caching (Cache Storage of HLS segments via the
- * service worker + background sync) is an integration-team concern; when it
- * lands, `addDownload` should also request the SW to prefetch
- * `/stream/:trackId/...` and `removeDownload` should evict the cache entries.
+ * This is the metadata index (which tracks, when, how big). The actual audio
+ * bytes live in the Cache Storage API (lib/offline/audioCache.ts), orchestrated
+ * by features/downloads/downloadManager.ts. Track DTOs are stored here so the
+ * library stays browsable while offline.
  */
 import type { TrackDto } from '@aurial/shared';
 
@@ -14,6 +13,8 @@ const STORAGE_KEY = 'aurial:downloads';
 export interface DownloadEntry {
   track: TrackDto;
   downloadedAt: string;
+  /** Cached audio size in bytes (0 when unknown). */
+  sizeBytes: number;
 }
 
 type Listener = () => void;
@@ -50,9 +51,14 @@ export function isDownloaded(trackId: string): boolean {
   return read().some((entry) => entry.track.id === trackId);
 }
 
-export function addDownload(track: TrackDto): void {
+export function addDownload(track: TrackDto, sizeBytes = 0): void {
   if (isDownloaded(track.id)) return;
-  write([{ track, downloadedAt: new Date().toISOString() }, ...read()]);
+  write([{ track, downloadedAt: new Date().toISOString(), sizeBytes }, ...read()]);
+}
+
+/** Total bytes of all cached tracks. */
+export function totalDownloadedBytes(): number {
+  return read().reduce((sum, entry) => sum + (entry.sizeBytes || 0), 0);
 }
 
 export function removeDownload(trackId: string): void {

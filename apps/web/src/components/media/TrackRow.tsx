@@ -1,9 +1,12 @@
 import { Fragment, type ComponentProps, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
+  ArrowDownToLine,
+  CircleCheckBig,
   Disc3,
   ListEnd,
   ListPlus,
+  Loader2,
   MicVocal,
   MoreHorizontal,
   Music,
@@ -20,6 +23,12 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import {
+  downloadTrack,
+  isDownloadable,
+  removeDownloadedTrack,
+} from '@/features/downloads/downloadManager';
+import { useDownloadState } from '@/features/downloads/useDownloads';
 import { formatDuration, cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -82,6 +91,16 @@ export function TrackRow({
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const playNextInQueue = usePlayerStore((s) => s.playNext);
   const toggle = usePlayerStore((s) => s.toggle);
+  const download = useDownloadState(track.id);
+  const canDownload = isDownloadable(track);
+
+  const handleDownload = (): void => {
+    toast.promise(downloadTrack(track), {
+      loading: `Baixando ${track.title}…`,
+      success: 'Disponível offline',
+      error: 'Não foi possível baixar',
+    });
+  };
 
   const handlePlay = (): void => {
     if (active) toggle();
@@ -214,6 +233,15 @@ export function TrackRow({
             liked && 'opacity-100',
           )}
         />
+        {download.status === 'downloaded' && (
+          <ArrowDownToLine
+            aria-label="Disponível offline"
+            className="size-3.5 shrink-0 text-accent"
+          />
+        )}
+        {download.status === 'downloading' && (
+          <Loader2 aria-label="Baixando" className="size-3.5 shrink-0 animate-spin text-fg-muted" />
+        )}
         <span className="w-12 text-right font-mono text-[13px] tabular-nums text-fg-muted">
           {formatDuration(track.durationMs)}
         </span>
@@ -250,6 +278,37 @@ export function TrackRow({
             {onAddToPlaylist && (
               <DropdownMenuItem onSelect={() => onAddToPlaylist(track)}>
                 <ListPlus /> Adicionar à playlist
+              </DropdownMenuItem>
+            )}
+            {canDownload && download.status !== 'downloaded' && (
+              <DropdownMenuItem
+                disabled={download.status === 'downloading'}
+                onSelect={handleDownload}
+              >
+                {download.status === 'downloading' ? (
+                  <>
+                    <Loader2 className="animate-spin" /> Baixando…{' '}
+                    {Math.round(download.progress * 100)}%
+                  </>
+                ) : download.status === 'error' ? (
+                  <>
+                    <ArrowDownToLine /> Tentar baixar de novo
+                  </>
+                ) : (
+                  <>
+                    <ArrowDownToLine /> Baixar para ouvir offline
+                  </>
+                )}
+              </DropdownMenuItem>
+            )}
+            {download.status === 'downloaded' && (
+              <DropdownMenuItem
+                onSelect={() => {
+                  void removeDownloadedTrack(track.id);
+                  toast('Download removido');
+                }}
+              >
+                <CircleCheckBig className="text-accent" /> Baixada · remover
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />

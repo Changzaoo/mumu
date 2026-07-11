@@ -1,36 +1,52 @@
 /**
- * /downloads — offline listening (PWA seam).
+ * /downloads — offline listening.
  *
- * Lists tracks marked for offline via the localStorage registry
- * (features/downloads/registry.ts). The actual audio caching is a
- * service-worker concern — documented TODO in the registry.
+ * Lists tracks whose audio is cached on the device (Cache Storage API, managed
+ * by features/downloads/downloadManager.ts). Downloaded tracks play with no
+ * network connection; the player prefers the local copy automatically.
  */
-import { useSyncExternalStore } from 'react';
-import { CloudDownload, Trash2 } from 'lucide-react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
+import { CloudDownload, HardDrive, Trash2, WifiOff } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import {
-  clearDownloads,
   getDownloads,
-  removeDownload,
   subscribeDownloads,
+  totalDownloadedBytes,
   type DownloadEntry,
 } from '@/features/downloads/registry';
+import {
+  downloadsSupported,
+  removeDownloadedTrack,
+  subscribeDownloadManager,
+} from '@/features/downloads/downloadManager';
+import { estimateStorage } from '@/lib/offline/audioCache';
 import { useTrackLikes } from '@/features/library/api';
+import { useOnline } from '@/hooks/useOnline';
+import { formatBytes } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
 const EMPTY: DownloadEntry[] = [];
 
 export default function DownloadsPage() {
   const downloads = useSyncExternalStore(subscribeDownloads, getDownloads, () => EMPTY);
+  // Re-render when a download completes/removes (manager owns object URLs).
+  useSyncExternalStore(subscribeDownloadManager, () => downloads.length, () => 0);
   const likes = useTrackLikes();
+  const online = useOnline();
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
+  const [quota, setQuota] = useState<{ usage: number; quota: number } | null>(null);
+  useEffect(() => {
+    void estimateStorage().then(setQuota);
+  }, [downloads.length]);
+
+  const supported = downloadsSupported();
   const tracks = downloads.map((entry) => entry.track);
+  const totalBytes = totalDownloadedBytes();
 
   return (
     <div className="space-y-6 py-4">
@@ -40,55 +56,68 @@ export default function DownloadsPage() {
             <CloudDownload className="size-7 text-fg-muted" /> Downloads
           </h1>
           <p className="max-w-lg text-sm text-fg-muted">
-            Faixas marcadas para ouvir offline. Como app instalado (PWA), o Aurial guarda o áudio no
-            dispositivo e toca mesmo sem conexão.
+            Faixas guardadas no dispositivo para ouvir sem conexão. O player usa a cópia local
+            automaticamente, mesmo offline.
           </p>
+          {downloads.length > 0 && (
+            <p className="flex items-center gap-1.5 text-[13px] text-fg-subtle">
+              <HardDrive className="size-3.5" />
+              {downloads.length} {downloads.length === 1 ? 'faixa' : 'faixas'} ·{' '}
+              {formatBytes(totalBytes)}
+              {quota && quota.quota > 0 && ` de ${formatBytes(quota.quota)} disponíveis`}
+            </p>
+          )}
         </div>
         {downloads.length > 0 && (
-          <Button variant="outline" size="sm" onClick={clearDownloads}>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => {
+              for (const entry of downloads) void removeDownloadedTrack(entry.track.id);
+            }}
+          >
             <Trash2 /> Limpar tudo
           </Button>
         )}
       </header>
 
+      {!online && (
+        <div className="flex items-center gap-2 rounded-xl border border-border bg-bg-elevated/60 px-4 py-3 text-sm text-fg-muted">
+          <WifiOff className="size-4 text-accent" />
+          Você está offline — apenas as faixas baixadas estão disponíveis.
+        </div>
+      )}
+
+      {!supported && (
+        <div className="rounded-xl border border-border bg-bg-elevated/60 px-4 py-3 text-sm text-fg-muted">
+          Downloads offline exigem uma conexão segura (HTTPS) ou o app instalado. Acesse o Aurial por
+          HTTPS para baixar faixas.
+        </div>
+      )}
+
       {downloads.length === 0 ? (
         <EmptyState
           icon={CloudDownload}
           title="Nenhum download ainda"
-          description="Use o menu de uma faixa para disponibilizá-la offline."
+          description={
+            supported
+              ? 'Abra o menu de uma faixa e escolha “Baixar para ouvir offline”.'
+              : 'Disponível ao acessar o Aurial por HTTPS.'
+          }
         />
       ) : (
         <TrackList aria-label="Faixas baixadas">
           {downloads.map((entry, index) => (
-            <div key={entry.track.id} className="group/dl relative">
-              <TrackRow
-                track={entry.track}
-                index={index}
-                active={entry.track.id === currentTrack?.id}
-                playing={entry.track.id === currentTrack?.id && isPlaying}
-                liked={likes.isLiked(entry.track)}
-                onToggleLike={(liked) => likes.toggle(entry.track, liked)}
-                onPlay={() =>
-                  playQueue(tracks, index, { source: 'library', sourceId: 'downloads' })
-                }
-                className="pr-10"
-              />
-              <Tooltip>
-                <TooltipTrigger asChild>
-                  <button
-                    type="button"
-                    aria-label={`Remover ${entry.track.title} dos downloads`}
-                    onClick={() => removeDownload(entry.track.id)}
-                    className="absolute right-1 top-1/2 grid size-8 -translate-y-1/2 place-items-center rounded-full text-fg-muted opacity-0 transition-opacity duration-200 hover:text-danger group-hover/dl:opacity-100 focus-visible:opacity-100"
-                  >
-                    <Trash2 className="size-4" />
-                  </button>
-                </TooltipTrigger>
-                <TooltipContent side="left">
-                  Baixada em {new Date(entry.downloadedAt).toLocaleDateString('pt-BR')}
-                </TooltipContent>
-              </Tooltip>
-            </div>
+            <TrackRow
+              key={entry.track.id}
+              track={entry.track}
+              index={index}
+              active={entry.track.id === currentTrack?.id}
+              playing={entry.track.id === currentTrack?.id && isPlaying}
+              liked={likes.isLiked(entry.track)}
+              onToggleLike={(liked) => likes.toggle(entry.track, liked)}
+              onPlay={() => playQueue(tracks, index, { source: 'library', sourceId: 'downloads' })}
+            />
           ))}
         </TrackList>
       )}

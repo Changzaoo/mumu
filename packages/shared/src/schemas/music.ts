@@ -48,8 +48,10 @@ export const trackSchema = z.object({
   isLiked: z.boolean().optional(),
   album: albumSchema.pick({ id: true, title: true, slug: true, coverUrl: true }).nullable(),
   artists: z.array(artistSchema.pick({ id: true, name: true, slug: true, imageUrl: true })),
-  /** Where playback should request audio from. */
+  /** Where playback should request audio from (adaptive HLS). */
   streamUrl: z.string().nullable(),
+  /** Single-file audio URL for offline download (auth required); null when unavailable. */
+  downloadUrl: z.string().nullable().optional(),
   uploadedByUserId: z.string().nullable(),
 });
 export type TrackDto = z.infer<typeof trackSchema>;

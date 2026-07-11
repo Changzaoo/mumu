@@ -12,6 +12,7 @@ import { audioEngine } from '@/lib/audio/AudioEngine';
 import { api } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadManager';
 
 export interface PlayContext {
   source: PlaySource;
@@ -398,6 +399,10 @@ export function initPlayerEngine(): void {
   engineInitialized = true;
 
   const store = usePlayerStore;
+
+  // Prefer offline copies: the engine asks this resolver before the network.
+  audioEngine.setLocalSourceResolver((track) => localAudioUrl(track.id));
+  void hydrateDownloads();
 
   // Restore persisted volume / apply audio settings.
   audioEngine.setVolume(store.getState().volume);

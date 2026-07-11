@@ -96,6 +96,11 @@ export function streamUrlFor(trackId: string): string {
   return `${env.API_BASE_URL}/api/v1/stream/${trackId}/manifest.m3u8?token=${signStreamToken(trackId)}`;
 }
 
+/** Single-file download URL (auth-fetched) for offline caching. */
+export function downloadUrlFor(trackId: string): string {
+  return `${env.API_BASE_URL}/api/v1/tracks/${trackId}/download`;
+}
+
 const sumDurations = (rows: Array<{ durationMs: number }>): number =>
   rows.reduce((acc, r) => acc + r.durationMs, 0);
 
@@ -117,6 +122,8 @@ export function toTrackDto(row: TrackRow, opts: TrackMapOptions = {}): TrackDto 
     album: row.album,
     artists: row.artists.map((ta) => ta.artist),
     streamUrl: row.hlsKey !== null && row.hlsKey !== '' ? streamUrlFor(row.id) : null,
+    // Offline download needs a single-file source (the kept original).
+    downloadUrl: row.originalKey !== null && row.originalKey !== '' ? downloadUrlFor(row.id) : null,
     uploadedByUserId: row.uploadedByUserId,
   };
 }

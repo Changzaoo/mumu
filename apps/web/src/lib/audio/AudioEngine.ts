@@ -117,6 +117,8 @@ export class AudioEngine {
   private activeIndex: SlotIndex = 0;
 
   // ── State ──────────────────────────────────────────────────────
+  /** Resolves an offline/local source URL for a track, if one is cached. */
+  private localResolver: ((track: TrackDto) => string | null) | null = null;
   private playing = false;
   private volume = 1;
   private muted = false;
@@ -178,15 +180,29 @@ export class AudioEngine {
 
   // ── Public API ─────────────────────────────────────────────────
 
+  /**
+   * Register a resolver that returns a cached/offline source URL for a track
+   * (e.g. a blob: URL of a downloaded file). Used before the network stream.
+   */
+  setLocalSourceResolver(resolver: ((track: TrackDto) => string | null) | null): void {
+    this.localResolver = resolver;
+  }
+
+  /** Local (offline) source if available, else the network stream URL. */
+  private sourceFor(track: TrackDto): string | null {
+    return this.localResolver?.(track) ?? track.streamUrl ?? null;
+  }
+
   /** Load a track into the engine, optionally crossfading from the current one. */
   load(track: TrackDto, options: LoadOptions = {}): void {
     if (this.destroyed) return;
     const { autoplay = true, crossfadeSeconds = 0 } = options;
-    if (!track.streamUrl) {
+    const source = this.sourceFor(track);
+    if (!source) {
       this.emit('error', { message: 'Faixa indisponível para reprodução.', track });
       return;
     }
-    const url = resolveMediaUrl(track.streamUrl);
+    const url = resolveMediaUrl(source);
     this.ensureGraph();
     void this.ctx?.resume().catch(() => undefined);
 
@@ -330,9 +346,10 @@ export class AudioEngine {
       if (idle.track) this.resetSlot(idle);
       return;
     }
-    if (idle.track?.id === track.id || !track.streamUrl) return;
+    const source = this.sourceFor(track);
+    if (idle.track?.id === track.id || !source) return;
     this.resetSlot(idle);
-    this.prepareSlot(idle, track, resolveMediaUrl(track.streamUrl));
+    this.prepareSlot(idle, track, resolveMediaUrl(source));
   }
 
   /** 10-band EQ (dB gains aligned with EQ_BANDS_HZ). Disabled = flat, zero cost. */

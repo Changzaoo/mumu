@@ -1,5 +1,5 @@
 import { createReadStream, createWriteStream } from 'node:fs';
-import { access, mkdir, rm, unlink, writeFile } from 'node:fs/promises';
+import { access, mkdir, rm, stat, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import type { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -42,6 +42,14 @@ export class LocalDiskStorage implements StorageProvider {
       throw new NotFoundError(`Object ${key}`);
     }
     return createReadStream(full);
+  }
+
+  async size(key: string): Promise<number | null> {
+    try {
+      return (await stat(this.resolve(key))).size;
+    } catch {
+      return null;
+    }
   }
 
   async delete(key: string): Promise<void> {

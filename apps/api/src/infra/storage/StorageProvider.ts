@@ -7,6 +7,8 @@ import type { Readable } from 'node:stream';
 export interface StorageProvider {
   put(key: string, data: Buffer | Readable, contentType: string): Promise<void>;
   getStream(key: string): Promise<Readable>;
+  /** Object size in bytes, or null when unknown/missing (used for Content-Length). */
+  size(key: string): Promise<number | null>;
   delete(key: string): Promise<void>;
   /** Deletes every object under a prefix (HLS dirs, cover sets). */
   deletePrefix(prefix: string): Promise<void>;
