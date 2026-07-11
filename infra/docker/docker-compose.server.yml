@@ -1,0 +1,144 @@
+# ──────────────────────────────────────────────────────────────
+# Aurial — server stack tailored for the LAN box 192.168.0.100.
+#
+# Differences from docker-compose.prod.yml:
+#   • No nginx container — the host's system nginx is the reverse proxy
+#     (it also serves the built web SPA). See infra/nginx/aurial.site.conf.
+#   • Memory limits trimmed for a 2-core / 3.4 GB host.
+#   • api + worker SHARE a named volume for STORAGE_DRIVER=local, so tracks
+#     processed by the worker are readable by the api.
+#   • NODE_ENV=development so auth runs in demo mode until Firebase Admin
+#     credentials are provided (env.ts requires them when NODE_ENV=production).
+#
+# Docker data-root is /mnt/cartaosd/docker (SD card) — configured on the host.
+# Usage from /opt/aurial:
+#   docker compose -f infra/docker/docker-compose.server.yml build api
+#   docker compose -f infra/docker/docker-compose.server.yml --profile tools run --rm migrate
+#   docker compose -f infra/docker/docker-compose.server.yml --profile tools run --rm seed
+#   docker compose -f infra/docker/docker-compose.server.yml up -d
+# ──────────────────────────────────────────────────────────────
+name: aurial
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aurial
+      POSTGRES_PASSWORD: aurial
+      POSTGRES_DB: aurial
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aurial -d aurial']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 640m
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      ['redis-server', '--appendonly', 'yes', '--maxmemory', '192mb', '--maxmemory-policy', 'noeviction']
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          memory: 256m
+
+  api:
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+    image: aurial-api:latest
+    restart: unless-stopped
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: development
+      PORT: '4000'
+    ports:
+      - '127.0.0.1:4000:4000' # only the host (system nginx) reaches it
+    volumes:
+      - api-storage:/app/apps/api/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 25s
+    deploy:
+      resources:
+        limits:
+          memory: 768m
+
+  worker:
+    image: aurial-api:latest
+    pull_policy: never
+    restart: unless-stopped
+    command: ['node', 'dist/workers/index.js']
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: development
+    volumes:
+      - api-storage:/app/apps/api/storage
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          memory: 1g
+
+  migrate:
+    image: aurial-api:latest
+    pull_policy: never
+    profiles: ['tools']
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  seed:
+    image: aurial-api:latest
+    pull_policy: never
+    profiles: ['tools']
+    command: ['npx', 'prisma', 'db', 'seed']
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+volumes:
+  postgres-data:
+  redis-data:
+  api-storage:
