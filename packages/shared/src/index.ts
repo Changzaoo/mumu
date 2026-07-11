@@ -9,4 +9,5 @@ export * from './schemas/upload.js';
 export * from './schemas/social.js';
 export * from './schemas/home.js';
 export * from './schemas/admin.js';
+export * from './schemas/p2p.js';
 export * from './utils/format.js';

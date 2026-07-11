@@ -1,0 +1,23 @@
+# Aurial signaling server — runs directly on Node (no Docker, no DB).
+# Install:
+#   sudo cp infra/systemd/aurial-signaling.service /etc/systemd/system/
+#   sudo systemctl daemon-reload && sudo systemctl enable --now aurial-signaling
+[Unit]
+Description=Aurial P2P signaling server
+After=network.target
+
+[Service]
+Type=simple
+User=v
+WorkingDirectory=/opt/aurial/apps/signaling
+ExecStart=/usr/bin/node dist/server.js
+Restart=on-failure
+RestartSec=3
+Environment=PORT=4100
+Environment=MAX_CONNECTIONS=500
+# Tighten origins in production, e.g.:
+# Environment=ORIGIN=https://aurial.vercel.app,https://your-host.ts.net
+MemoryMax=128M
+
+[Install]
+WantedBy=multi-user.target
