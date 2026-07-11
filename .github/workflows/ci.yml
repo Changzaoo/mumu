@@ -1,0 +1,54 @@
+# Aurial — CI: install → build shared → prisma generate → lint → typecheck → test → build
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  ci:
+    name: Lint, typecheck, test, build
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      # Reads the pinned version from "packageManager" in package.json.
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22 (pnpm store cache)
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      # @aurial/shared must be built first — web and api import its dist.
+      - name: Build @aurial/shared
+        run: pnpm --filter @aurial/shared build
+
+      # Prisma client is required for the api typecheck/build (no DB needed).
+      - name: Generate Prisma client
+        run: pnpm --filter @aurial/api exec prisma generate
+
+      - name: Lint
+        run: pnpm lint
+
+      - name: Typecheck
+        run: pnpm -r typecheck
+
+      - name: Test
+        run: pnpm -r test
+
+      - name: Build
+        run: pnpm -r build

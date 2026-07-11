@@ -1,0 +1,264 @@
+@import 'tailwindcss';
+
+/* Dark theme is class-driven (.dark on <html>), set before paint by index.html. */
+@custom-variant dark (&:where(.dark, .dark *));
+
+/* ──────────────────────────────────────────────────────────────
+   Color tokens — HSL triplets per docs/DESIGN.md §2.
+   Components never use raw hex; always Tailwind classes mapped below.
+   ────────────────────────────────────────────────────────────── */
+:root {
+  /* light */
+  --bg: 0 0% 99%;
+  --bg-elevated: 0 0% 100%;
+  --bg-overlay: 240 5% 96%;
+  --fg: 240 6% 7%;
+  --fg-muted: 240 4% 42%;
+  --fg-subtle: 240 4% 62%;
+  --accent: 160 84% 36%;
+  --accent-fg: 0 0% 100%;
+  --info: 221 83% 53%;
+  --danger: 0 72% 46%;
+  --border: 240 5% 90%;
+  --ring: var(--accent);
+}
+
+.dark {
+  --bg: 240 6% 4%; /* #0A0A0C deep black */
+  --bg-elevated: 240 5% 7%;
+  --bg-overlay: 240 5% 10%;
+  --fg: 0 0% 98%;
+  --fg-muted: 240 4% 64%;
+  --fg-subtle: 240 4% 40%;
+  --accent: 158 84% 52%; /* #17E68C — Aurial Green */
+  --accent-fg: 160 90% 8%;
+  --info: 217 92% 65%;
+  --danger: 0 72% 58%;
+  --border: 240 5% 14%;
+  --ring: var(--accent);
+}
+
+/* High-contrast variant (settingsStore.highContrast → .hc on <html>). */
+.hc {
+  --fg-muted: 240 4% 78%;
+  --fg-subtle: 240 4% 62%;
+  --border: 240 5% 28%;
+}
+.hc:not(.dark) {
+  --fg-muted: 240 5% 26%;
+  --fg-subtle: 240 4% 42%;
+  --border: 240 5% 74%;
+}
+
+@theme inline {
+  /* Colors */
+  --color-*: initial;
+  --color-transparent: transparent;
+  --color-current: currentColor;
+  --color-white: #fff;
+  --color-black: #000;
+  --color-bg: hsl(var(--bg));
+  --color-bg-elevated: hsl(var(--bg-elevated));
+  --color-bg-overlay: hsl(var(--bg-overlay));
+  --color-fg: hsl(var(--fg));
+  --color-fg-muted: hsl(var(--fg-muted));
+  --color-fg-subtle: hsl(var(--fg-subtle));
+  --color-accent: hsl(var(--accent));
+  --color-accent-fg: hsl(var(--accent-fg));
+  --color-info: hsl(var(--info));
+  --color-danger: hsl(var(--danger));
+  --color-border: hsl(var(--border));
+  --color-ring: hsl(var(--ring));
+
+  /* Radius — cards 12, buttons/inputs 10, track artwork 8 (DESIGN §5) */
+  --radius-*: initial;
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 10px;
+  --radius-lg: 12px;
+  --radius-xl: 16px;
+  --radius-2xl: 20px;
+  --radius-full: 9999px;
+
+  /* Typography */
+  --font-sans: 'Inter Variable', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', sans-serif;
+  --font-mono: 'JetBrains Mono Variable', ui-monospace, 'SFMono-Regular', monospace;
+
+  /* Motion */
+  --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
+
+  /* Keyframed animations */
+  --animate-shimmer: shimmer 1.8s ease-in-out infinite;
+  --animate-fade-in: fade-in 200ms var(--ease-out-expo);
+  --animate-scale-in: scale-in 160ms var(--ease-out-expo);
+  --animate-slide-in-right: slide-in-right 240ms var(--ease-out-expo);
+  --animate-slide-in-left: slide-in-left 240ms var(--ease-out-expo);
+  --animate-slide-in-up: slide-in-up 240ms var(--ease-out-expo);
+  --animate-slide-in-down: slide-in-down 240ms var(--ease-out-expo);
+  --animate-eq-bar: eq-bar 0.9s ease-in-out infinite;
+
+  @keyframes shimmer {
+    from {
+      background-position: 200% 0;
+    }
+    to {
+      background-position: -200% 0;
+    }
+  }
+  @keyframes fade-in {
+    from {
+      opacity: 0;
+    }
+    to {
+      opacity: 1;
+    }
+  }
+  @keyframes scale-in {
+    from {
+      opacity: 0;
+      transform: scale(0.96);
+    }
+    to {
+      opacity: 1;
+      transform: scale(1);
+    }
+  }
+  @keyframes slide-in-right {
+    from {
+      opacity: 0;
+      transform: translateX(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-in-left {
+    from {
+      opacity: 0;
+      transform: translateX(-24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateX(0);
+    }
+  }
+  @keyframes slide-in-up {
+    from {
+      opacity: 0;
+      transform: translateY(24px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes slide-in-down {
+    from {
+      opacity: 0;
+      transform: translateY(-8px);
+    }
+    to {
+      opacity: 1;
+      transform: translateY(0);
+    }
+  }
+  @keyframes eq-bar {
+    0%,
+    100% {
+      transform: scaleY(0.35);
+    }
+    50% {
+      transform: scaleY(1);
+    }
+  }
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Glass — DESIGN.md §3, with solid fallback.
+   ────────────────────────────────────────────────────────────── */
+@utility glass {
+  background: hsl(var(--bg-elevated) / 0.55);
+  backdrop-filter: blur(24px) saturate(140%);
+  -webkit-backdrop-filter: blur(24px) saturate(140%);
+  border: 1px solid hsl(var(--fg) / 0.06);
+
+  @supports not (backdrop-filter: blur(1px)) {
+    background: hsl(var(--bg-overlay));
+  }
+}
+
+/* Hide scrollbar but keep scrollability (carousels). */
+@utility no-scrollbar {
+  scrollbar-width: none;
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+/* Skeleton shimmer sweep. */
+@utility skeleton {
+  background: linear-gradient(100deg, transparent 36%, hsl(var(--fg) / 0.07) 50%, transparent 64%)
+    hsl(var(--fg) / 0.06);
+  background-size: 200% 100%;
+  animation: var(--animate-shimmer);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   Base
+   ────────────────────────────────────────────────────────────── */
+@layer base {
+  html {
+    overscroll-behavior-y: none;
+    /* font scale setting multiplies the root size (0.875×–1.25×). */
+    font-size: calc(16px * var(--font-scale, 1));
+  }
+
+  body {
+    background-color: hsl(var(--bg));
+    color: hsl(var(--fg));
+    font-family: var(--font-sans);
+    font-feature-settings: 'cv02', 'cv03', 'cv04', 'cv11';
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+    overscroll-behavior: none;
+    text-rendering: optimizeLegibility;
+  }
+
+  ::selection {
+    background: hsl(var(--accent) / 0.3);
+    color: hsl(var(--fg));
+  }
+
+  /* Focus: 2px ring, offset 2 — visible via keyboard only (DESIGN §9). */
+  :focus-visible {
+    outline: 2px solid hsl(var(--ring));
+    outline-offset: 2px;
+    border-radius: 4px;
+  }
+
+  /* Thin scrollbars: fg-subtle thumb, transparent track. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: hsl(var(--fg-subtle) / 0.4) transparent;
+  }
+  ::-webkit-scrollbar {
+    width: 8px;
+    height: 8px;
+  }
+  ::-webkit-scrollbar-track {
+    background: transparent;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: hsl(var(--fg-subtle) / 0.35);
+    border-radius: 9999px;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: hsl(var(--fg-subtle) / 0.55);
+  }
+
+  img {
+    user-select: none;
+    -webkit-user-drag: none;
+  }
+}

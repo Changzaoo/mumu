@@ -1,0 +1,51 @@
+# ──────────────────────────────────────────────────────────────
+# Aurial — local development dependencies (Postgres + Redis only).
+# The api/web apps run on the host via `pnpm dev`.
+#
+#   docker compose -f infra/docker/docker-compose.dev.yml up -d
+#   docker compose -f infra/docker/docker-compose.dev.yml down      # keeps data
+#   docker compose -f infra/docker/docker-compose.dev.yml down -v   # wipes data
+#
+# Matches .env.example:
+#   DATABASE_URL=postgresql://aurial:aurial@localhost:5432/aurial?schema=public
+#   REDIS_URL=redis://localhost:6379
+# ──────────────────────────────────────────────────────────────
+name: aurial-dev
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: aurial-dev-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: aurial
+      POSTGRES_PASSWORD: aurial
+      POSTGRES_DB: aurial
+    ports:
+      - '5432:5432'
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aurial -d aurial']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: aurial-dev-redis
+    restart: unless-stopped
+    command: ['redis-server', '--appendonly', 'yes']
+    ports:
+      - '6379:6379'
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+volumes:
+  postgres-data:
+  redis-data:

@@ -1,0 +1,181 @@
+# ──────────────────────────────────────────────────────────────
+# Aurial — production stack (runs on the LAN server, e.g. 192.168.0.100).
+#
+# Expected layout on the server:
+#   /opt/aurial              → git checkout of this repo (DEPLOY_PATH)
+#   /opt/aurial/.env         → production env file (copied from .env.example)
+#
+# NOTE on relative paths: everything below is resolved relative to THIS
+# file's directory (infra/docker/), so `../../` = repo root (/opt/aurial).
+#
+# Usage (from /opt/aurial — or just run infra/scripts/deploy-api.sh):
+#   docker compose -f infra/docker/docker-compose.prod.yml build api worker
+#   docker compose -f infra/docker/docker-compose.prod.yml --profile tools run --rm migrate
+#   docker compose -f infra/docker/docker-compose.prod.yml up -d
+# ──────────────────────────────────────────────────────────────
+name: aurial
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      # Not published outside the docker network. If you ever expose it,
+      # change the password here AND in DATABASE_URL inside /opt/aurial/.env
+      # (prod DATABASE_URL host is `postgres`, not localhost):
+      #   postgresql://aurial:aurial@postgres:5432/aurial?schema=public
+      POSTGRES_USER: aurial
+      POSTGRES_PASSWORD: aurial
+      POSTGRES_DB: aurial
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U aurial -d aurial']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1g
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command:
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory',
+        '256mb',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ['CMD', 'redis-cli', 'ping']
+      interval: 10s
+      timeout: 5s
+      retries: 10
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 384m
+
+  api:
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+    image: aurial-api:latest
+    restart: unless-stopped
+    env_file:
+      - ../../.env # = /opt/aurial/.env
+    environment:
+      NODE_ENV: production
+      PORT: '4000'
+    ports:
+      # Published so LAN clients can reach the API directly on :4000
+      # (ufw restricts this port to the LAN subnet — see setup-server.sh).
+      # nginx also proxies it on :80/:443.
+      - '4000:4000'
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    healthcheck:
+      # node:22-slim has no curl/wget — use Node's global fetch instead.
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/healthz').then((r) => process.exit(r.ok ? 0 : 1)).catch(() => process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 20s
+    # If STORAGE_DRIVER=local in production (not recommended — prefer R2),
+    # persist the storage dir. Adjust the container path to the image's
+    # WORKDIR + STORAGE_LOCAL_PATH:
+    # volumes:
+    #   - api-storage:/app/apps/api/storage
+    deploy:
+      resources:
+        limits:
+          cpus: '1.5'
+          memory: 1g
+
+  worker:
+    # Same image as `api` — BullMQ processors (FFmpeg transcode, waveform,
+    # loudness, imports, notifications). Gets more memory/CPU for FFmpeg.
+    build:
+      context: ../../
+      dockerfile: apps/api/Dockerfile
+    image: aurial-api:latest
+    restart: unless-stopped
+    command: ['node', 'dist/workers/index.js'] # = pnpm start:worker
+    env_file:
+      - ../../.env
+    environment:
+      NODE_ENV: production
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2g
+
+  # One-shot: apply pending Prisma migrations. Not started by `up`;
+  # run explicitly (deploy-api.sh does this on every deploy):
+  #   docker compose -f infra/docker/docker-compose.prod.yml --profile tools run --rm migrate
+  migrate:
+    image: aurial-api:latest
+    pull_policy: never # only exists locally — build `api` first
+    profiles: ['tools']
+    command: ['npx', 'prisma', 'migrate', 'deploy']
+    env_file:
+      - ../../.env
+    depends_on:
+      postgres:
+        condition: service_healthy
+    restart: 'no'
+
+  nginx:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ../nginx/certs:/etc/nginx/certs:ro # certbot certs go here (see docs/DEPLOY.md)
+      - media-cache:/var/cache/nginx/media # HLS segment cache (proxy_cache)
+    depends_on:
+      api:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/healthz']
+      interval: 30s
+      timeout: 5s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+
+volumes:
+  postgres-data:
+  redis-data:
+  media-cache:
+  # api-storage:   # uncomment together with the api volume above

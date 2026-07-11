@@ -1,0 +1,55 @@
+# Aurial — deploy the API stack to the LAN server over SSH.
+#
+# Required repository secrets:
+#   SSH_HOST  → server address (e.g. 192.168.0.100, or its Tailscale/VPN name)
+#   SSH_USER  → deploy user (e.g. v)
+#   SSH_KEY   → PRIVATE key (PEM/OpenSSH) whose public half is in the server's
+#               ~/.ssh/authorized_keys (infra/scripts/setup-ssh-key.ps1 sets
+#               this up — generate a dedicated CI key, never reuse yours)
+#
+# ⚠ REACHABILITY: the server lives on a private LAN (192.168.0.100), which
+# GitHub-hosted runners CANNOT reach. Pick one:
+#   a) Self-hosted runner on the LAN (recommended for this setup):
+#      repo Settings > Actions > Runners > New self-hosted runner, then
+#      change `runs-on: ubuntu-latest` to `runs-on: [self-hosted, aurial]`.
+#   b) Tailscale/WireGuard: join the server to a tailnet, add the
+#      tailscale/github-action step before the SSH step, and set SSH_HOST
+#      to the tailnet address (e.g. aurial-server.tailnet-xyz.ts.net).
+#   c) Skip CI for deploys and run infra/scripts/deploy-from-windows.ps1
+#      from the dev machine — this workflow also supports manual runs
+#      (workflow_dispatch) for when connectivity exists.
+name: Deploy API (SSH)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/api/**'
+      - 'packages/shared/**'
+      - 'infra/**'
+      - '.github/workflows/deploy-api.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-api
+  cancel-in-progress: false # never cancel a deploy midway
+
+jobs:
+  deploy:
+    name: SSH deploy to the server
+    # LAN setup? Use your self-hosted runner instead:
+    # runs-on: [self-hosted, aurial]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - name: Run deploy script on the server
+        uses: appleboy/ssh-action@v1.2.0
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          command_timeout: 25m
+          script: |
+            set -euo pipefail
+            cd /opt/aurial
+            ./infra/scripts/deploy-api.sh

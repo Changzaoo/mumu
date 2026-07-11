@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32" fill="none">
+  <!-- Aurial mark: waveform arc forming an "A" -->
+  <path d="M6.5 26 L16 6.5 L25.5 26" stroke="#17E68C" stroke-width="3.4" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M12.8 21.4 v2.4 M16 19.2 v6.8 M19.2 21.4 v2.4" stroke="#17E68C" stroke-width="2.4" stroke-linecap="round"/>
+</svg>

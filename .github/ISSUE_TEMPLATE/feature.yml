@@ -1,0 +1,33 @@
+name: Feature request
+description: Sugerir uma melhoria ou nova funcionalidade
+title: '[feat] '
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problema / motivação
+      description: Que necessidade essa funcionalidade resolve?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposta
+      description: Como você imagina a solução (UX, API, comportamento).
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - web (SPA / player)
+        - api (REST / websocket)
+        - worker (pipeline de áudio)
+        - infra / deploy
+        - outra
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternativas consideradas

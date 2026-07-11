@@ -1,0 +1,62 @@
+# Aurial — deploy the web SPA to Vercel (prebuilt flow: build in CI, upload artifacts).
+#
+# Required repository secrets (Settings > Secrets and variables > Actions):
+#   VERCEL_TOKEN       → https://vercel.com/account/tokens
+#   VERCEL_ORG_ID      → .vercel/project.json after `vercel link`, or team settings
+#   VERCEL_PROJECT_ID  → same place
+#
+# The Vercel project must have Root Directory = apps/web (see docs/DEPLOY.md §6
+# for the full dashboard setup: env vars, install/build commands).
+name: Deploy Web (Vercel)
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/shared/**'
+      - '.github/workflows/deploy-web.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: deploy-web
+  cancel-in-progress: false # never cancel a deploy midway
+
+env:
+  VERCEL_ORG_ID: ${{ secrets.VERCEL_ORG_ID }}
+  VERCEL_PROJECT_ID: ${{ secrets.VERCEL_PROJECT_ID }}
+
+jobs:
+  deploy:
+    name: Build and deploy to Vercel
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup pnpm
+        uses: pnpm/action-setup@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - name: Install Vercel CLI
+        run: npm install -g vercel@latest
+
+      # Pulls the linked project settings (root directory apps/web,
+      # production env vars) into .vercel/ — no interactive `vercel link`
+      # needed because VERCEL_ORG_ID/VERCEL_PROJECT_ID are set.
+      - name: Pull Vercel project settings
+        run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
+
+      # Runs the project's installCommand + buildCommand (apps/web/vercel.json):
+      # pnpm install at the workspace root, build @aurial/shared, build the SPA.
+      - name: Build (vercel build)
+        run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
+
+      - name: Deploy (prebuilt)
+        run: vercel deploy --prebuilt --prod --token=${{ secrets.VERCEL_TOKEN }}

@@ -1,0 +1,44 @@
+name: Bug report
+description: Algo não funciona como deveria
+title: '[bug] '
+labels: [bug]
+body:
+  - type: textarea
+    id: description
+    attributes:
+      label: O que aconteceu
+      description: Descreva o problema e o que você esperava que acontecesse.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Passos para reproduzir
+      placeholder: |
+        1. Abrir /playlist/abc
+        2. Arrastar uma faixa para reordenar
+        3. Erro no console
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Área
+      options:
+        - web (SPA / player)
+        - api (REST / websocket)
+        - worker (pipeline de áudio)
+        - infra / deploy
+        - outra
+    validations:
+      required: true
+  - type: input
+    id: environment
+    attributes:
+      label: Ambiente
+      placeholder: 'ex.: Chrome 126 / Windows 11 · api em docker no servidor LAN'
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / stack trace
+      render: shell
