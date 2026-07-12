@@ -125,6 +125,8 @@ export async function probeHelper(): Promise<HelperHealth | null> {
 export interface HelperImport {
   blob: Blob;
   title: string;
+  /** Source thumbnail (e.g. the YouTube cover) — used until iTunes enriches. */
+  coverUrl: string | null;
 }
 
 /** Ask the helper to fetch + convert `url`; resolves with the MP3 blob + title. */
@@ -151,7 +153,9 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
   }
   const titleHeader = res.headers.get('X-Aurial-Title');
   const title = titleHeader ? decodeURIComponent(titleHeader) : 'faixa';
+  const coverHeader = res.headers.get('X-Aurial-Cover');
+  const coverUrl = coverHeader ? decodeURIComponent(coverHeader) : null;
   const blob = await res.blob();
   if (blob.size === 0) throw new Error('O importador devolveu um arquivo vazio.');
-  return { blob, title };
+  return { blob, title, coverUrl };
 }

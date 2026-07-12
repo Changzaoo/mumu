@@ -229,13 +229,15 @@ async function importToMp3(ytdlp, url) {
     throw new Error(`Sem áudio, ou vídeo maior que ${MAX_MINUTES} min.`);
   }
   let title = 'faixa';
+  let thumbnail = '';
   try {
     const info = JSON.parse(await readFile(path.join(dir, 'audio.info.json'), 'utf8'));
     if (typeof info.title === 'string' && info.title.trim()) title = info.title.trim();
+    if (typeof info.thumbnail === 'string' && info.thumbnail.trim()) thumbnail = info.thumbnail.trim();
   } catch {
     /* keep default */
   }
-  return { dir, file: path.join(dir, mp3), title };
+  return { dir, file: path.join(dir, mp3), title, thumbnail };
 }
 
 function interpret(stderr) {
@@ -265,7 +267,7 @@ function applyCors(req, res) {
     'Access-Control-Allow-Headers',
     'Content-Type, Authorization, X-Aurial-Token, ngrok-skip-browser-warning',
   );
-  res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title');
+  res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title, X-Aurial-Cover');
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])
     res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -357,6 +359,7 @@ async function main() {
             'Content-Type': 'audio/mpeg',
             'Content-Length': String(size),
             'X-Aurial-Title': encodeURIComponent(job.title),
+            ...(job.thumbnail ? { 'X-Aurial-Cover': encodeURIComponent(job.thumbnail) } : {}),
           });
           const { createReadStream } = await import('node:fs');
           await new Promise((resolve, reject) => {

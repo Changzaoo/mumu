@@ -250,7 +250,8 @@ function applyEnrichment(entry: LibraryEntry, meta: EnrichedMeta): LibraryEntry 
     meta.artist,
     entry.track.durationMs,
     meta.album,
-    meta.coverUrl,
+    // Keep the existing (thumbnail) cover if iTunes has none.
+    meta.coverUrl ?? entry.track.coverUrl,
   );
   return { ...entry, track };
 }
@@ -303,13 +304,15 @@ const AUDIO_EXT = /\.(mp3|m4a|aac|flac|wav|ogg|opus)$/i;
 /** Store an audio blob as a local track (shared path for imports + URLs). */
 async function saveBlobAsLocalTrack(
   blob: Blob,
-  opts: { title: string; sourceUrl?: string },
+  opts: { title: string; sourceUrl?: string; coverUrl?: string | null },
 ): Promise<TrackDto> {
   const id = `local:${crypto.randomUUID()}`;
   const { title, artist } = parseFileName(opts.title);
   const durationMs = await probeDurationMs(blob);
   const mimeType = blob.type || 'audio/mpeg';
-  const track = localTrackDto(id, title, artist, durationMs, null, null);
+  // Seed with the source thumbnail (e.g. YouTube cover) so it's never blank;
+  // iTunes enrichment may upgrade it to a clean album cover afterwards.
+  const track = localTrackDto(id, title, artist, durationMs, null, opts.coverUrl ?? null);
   await putBlob(id, blob).catch(() => undefined);
   addEntry({ track, addedAt: new Date().toISOString(), sizeBytes: blob.size, mimeType }, blob);
   return track;
@@ -339,10 +342,11 @@ export async function addByUrl(url: string): Promise<TrackDto> {
   // local importer helper (apps/importer), route the link through it — it fetches
   // + converts to MP3 on their own machine and we store it like any local track.
   if (importerHostLabel(host)) {
-    const { blob, title } = await importViaHelper(parsed.toString());
+    const { blob, title, coverUrl } = await importViaHelper(parsed.toString());
     const track = await saveBlobAsLocalTrack(blob, {
       title: `${title}.mp3`,
       sourceUrl: parsed.toString(),
+      coverUrl,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
     return track;
