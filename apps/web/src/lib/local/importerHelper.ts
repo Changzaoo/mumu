@@ -8,7 +8,12 @@
  * even from an https page (localhost is a secure context), and the helper sends
  * the Private-Network-Access header so the hosted PWA can reach it too.
  */
-const DEFAULT_HELPER_URL = 'http://127.0.0.1:8787';
+// Embedded defaults so the hosted app works out-of-the-box against the owner's
+// public importer (no manual ⚙ setup). Overridable via the ⚙ config (localStorage).
+// NOTE: the token here ships in the public bundle — it only gate-keeps casual
+// hits; treat the importer as effectively reachable by anyone who reads the URL.
+const DEFAULT_HELPER_URL = 'https://prance-mummified-subscript.ngrok-free.dev';
+const DEFAULT_HELPER_TOKEN = '828b478994bb94555ba7982a0635c7bc01b2a347fb417e06';
 const STORAGE_KEY = 'aurial:importerUrl';
 const TOKEN_KEY = 'aurial:importerToken';
 
@@ -45,9 +50,10 @@ export function setHelperUrl(url: string): void {
 /** Shared secret for a publicly-exposed helper (empty = none). */
 export function helperToken(): string {
   try {
-    return window.localStorage.getItem(TOKEN_KEY) ?? '';
+    // A stored value (even '') wins; unset falls back to the embedded default.
+    return window.localStorage.getItem(TOKEN_KEY) ?? DEFAULT_HELPER_TOKEN;
   } catch {
-    return '';
+    return DEFAULT_HELPER_TOKEN;
   }
 }
 
