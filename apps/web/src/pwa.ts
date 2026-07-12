@@ -11,6 +11,7 @@
  */
 import { registerSW } from 'virtual:pwa-register';
 import { usePlayerStore } from '@/stores/playerStore';
+import { pushNotification } from '@/stores/notificationsStore';
 
 export function initPwaUpdater(): void {
   let toastShown = false;
@@ -37,6 +38,11 @@ export function initPwaUpdater(): void {
       }
       if (toastShown) return;
       toastShown = true;
+      pushNotification({
+        type: 'update',
+        title: 'Nova versão disponível',
+        body: 'Será aplicada ao pausar ou reabrir o app.',
+      });
       void import('sonner').then(({ toast }) => {
         toast('Nova versão disponível', {
           duration: Infinity,

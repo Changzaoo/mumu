@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { IconButton } from '@/components/ui/icon-button';
+import { NotificationBell } from '@/app/layout/NotificationBell';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { logout } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
@@ -90,6 +91,7 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
+        <NotificationBell />
         <IconButton
           aria-label={resolved === 'dark' ? 'Tema claro' : 'Tema escuro'}
           onClick={() => setTheme(resolved === 'dark' ? 'light' : 'dark')}

@@ -12,6 +12,7 @@ import type { TrackDto } from '@aurial/shared';
 import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
+import { pushNotification } from '@/stores/notificationsStore';
 import {
   cacheSupported,
   deleteAudio,
@@ -120,6 +121,7 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
     prefetchLyrics(track); // cache synced lyrics for offline
     inFlight.delete(track.id);
     emit();
+    pushNotification({ type: 'download', title: 'Download concluído', body: track.title });
   } catch (err) {
     inFlight.delete(track.id);
     failed.add(track.id);

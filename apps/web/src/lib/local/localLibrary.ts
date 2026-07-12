@@ -14,6 +14,7 @@ import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import { cacheStorageSupported } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
+import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
 
@@ -211,6 +212,13 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
   }
   // Non-blocking: fetch real covers/metadata from iTunes for what we just added.
   void enrichSequentially(imported.map((t) => t.id));
+  if (imported.length > 0) {
+    pushNotification({
+      type: 'import',
+      title: imported.length === 1 ? 'Faixa importada' : `${imported.length} faixas importadas`,
+      body: imported.length === 1 ? imported[0]?.title : undefined,
+    });
+  }
   return imported;
 }
 
@@ -231,6 +239,7 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
     { track, addedAt: new Date().toISOString(), sizeBytes: blob.size, mimeType: meta.mimeType },
     blob,
   );
+  pushNotification({ type: 'shared', title: 'Faixa recebida de um amigo', body: track.title });
   return track;
 }
 
@@ -349,6 +358,7 @@ export async function addByUrl(url: string): Promise<TrackDto> {
       coverUrl,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
+    pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;
   }
 
