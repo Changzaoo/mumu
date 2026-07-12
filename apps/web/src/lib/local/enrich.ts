@@ -143,22 +143,32 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
     if (bestScore >= 6) break; // confident exact-ish match — stop searching
   }
 
-  // Last resort: let the LLM parse a clean artist/title and retry once.
-  if ((!best || bestScore < 2) && !q.aiTried) {
-    const cleaned = await aiCleanSongTitle(q.artist ? `${q.title} ${q.artist}` : q.title, q.artist);
-    if (cleaned && (cleaned.title !== q.title || cleaned.artist !== q.artist)) {
-      return enrichMeta({ title: cleaned.title, artist: cleaned.artist, aiTried: true });
+  // ACCURACY FIRST: only accept a match when BOTH the title AND the artist are
+  // confirmed. Renaming a song to a DIFFERENT artist (e.g. Matuê → Jeff Costa)
+  // must never happen — a same-title song by someone else is rejected.
+  if (best && wantArtist) {
+    const mt = norm(best.trackName);
+    const ma = norm(best.artistName);
+    const titleOk = mt === wantTitle || mt.includes(wantTitle) || wantTitle.includes(mt);
+    const artistOk = ma === wantArtist || ma.includes(wantArtist) || wantArtist.includes(ma);
+    if (titleOk && artistOk) {
+      return {
+        title: best.trackName,
+        artist: best.artistName,
+        album: best.collectionName || null,
+        coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
+      };
     }
   }
 
-  // Require a minimal match so we never overwrite a good thumbnail with the
-  // wrong album art. Below that, keep whatever cover the track already has.
-  if (!best || bestScore < 2) return null;
-
-  return {
-    title: best.trackName,
-    artist: best.artistName,
-    album: best.collectionName || null,
-    coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
-  };
+  // Couldn't confirm the artist. Ask the AI once for a clean artist/title, then
+  // re-verify against iTunes (the AI alone is never trusted — iTunes must
+  // corroborate the artist). Guarantees we never assert an unconfirmed artist.
+  if (!q.aiTried) {
+    const cleaned = await aiCleanSongTitle(q.artist ? `${q.title} ${q.artist}` : q.title, q.artist);
+    if (cleaned?.artist) {
+      return enrichMeta({ title: cleaned.title, artist: cleaned.artist, aiTried: true });
+    }
+  }
+  return null;
 }
