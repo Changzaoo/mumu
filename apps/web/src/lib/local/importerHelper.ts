@@ -209,6 +209,42 @@ export async function buildStreamUrl(sourceUrl: string): Promise<string | null> 
   return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}`;
 }
 
+/**
+ * Upload a local track's audio to the importer so the user's OTHER devices
+ * (which only sync metadata) can stream the exact file. Returns a stable
+ * capability URL (token in the query, since an <audio> element can't send
+ * headers) to store in the synced metadata, or null on failure / signed out.
+ */
+export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | null> {
+  try {
+    const headers = await baseHeaders();
+    if (!headers.Authorization) return null; // must be signed in to upload
+    const res = await fetch(`${helperUrl()}/blob`, {
+      method: 'POST',
+      headers: { ...headers, 'X-Blob-Id': id, 'Content-Type': blob.type || 'audio/mpeg' },
+      body: blob,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { id?: string; token?: string };
+    if (!data.token) return null;
+    return `${helperUrl()}/blob/${encodeURIComponent(id)}?k=${encodeURIComponent(data.token)}`;
+  } catch {
+    return null;
+  }
+}
+
+/** Best-effort delete of an uploaded library blob (on track removal). */
+export async function deleteTrackBlob(id: string): Promise<void> {
+  try {
+    await fetch(`${helperUrl()}/blob/${encodeURIComponent(id)}`, {
+      method: 'DELETE',
+      headers: await baseHeaders(),
+    });
+  } catch {
+    /* ignore */
+  }
+}
+
 /** Ask the helper to enumerate a playlist's entries (no download). */
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {
   let res: Response;

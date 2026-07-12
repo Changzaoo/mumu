@@ -21,8 +21,8 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat, chmod } from 'node:fs/promises';
-import { createWriteStream, existsSync } from 'node:fs';
+import { mkdtemp, readdir, readFile, rm, stat, chmod, writeFile, unlink, mkdir } from 'node:fs/promises';
+import { createWriteStream, createReadStream, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
@@ -285,6 +285,36 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH
     ? 'ffmpeg.exe'
     : 'ffmpeg';
 
+// ── Uploaded library blobs (cross-device playback of imported/uploaded audio) ──
+// A user's imported/uploaded audio is stored here so their OTHER devices (which
+// only sync metadata) can stream the exact file. Each blob has an unguessable
+// capability token; the play URL carries it in the query (an <audio> element
+// can't send headers). Kept on the eMMC root, never the flaky USB disk.
+const BLOB_DIR = process.env.BLOB_DIR ?? path.join(HERE, 'blobs');
+const MAX_BLOB = 140 * 1024 * 1024; // 140 MB per file (matches the client cap)
+const safeBlobId = (s) => typeof s === 'string' && /^[A-Za-z0-9:_-]{1,128}$/.test(s);
+const blobPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.bin`);
+const blobMetaPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.json`);
+
+/** Buffer a request body (binary-safe) up to `limit` bytes, else reject. */
+function readBinaryBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let size = 0;
+    req.on('data', (c) => {
+      size += c.length;
+      if (size > limit) {
+        reject(new Error('too large'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
+    req.on('error', reject);
+  });
+}
+
 /**
  * Authorize a bare token (from a query string) the same way as a Bearer header —
  * for the streaming endpoint, since an <audio> element can't send headers.
@@ -361,8 +391,8 @@ function applyCors(req, res) {
   } else if (allowAll) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
-  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token');
+  res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id');
   res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title, X-Aurial-Cover');
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])
@@ -410,6 +440,7 @@ async function authorize(req) {
 async function main() {
   const ytdlp = await resolveYtdlp();
   log(`yt-dlp: ${ytdlp}`);
+  await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -431,6 +462,135 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
           }),
         );
+        return;
+      }
+
+      // ── Library blob store: upload once, stream from any device ──────────
+      if (req.method === 'POST' && pathname === '/blob') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const id = req.headers['x-blob-id'];
+        if (!safeBlobId(id)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id inválido.' }));
+          return;
+        }
+        let buf;
+        try {
+          buf = await readBinaryBody(req, MAX_BLOB);
+        } catch {
+          res.writeHead(413, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Arquivo grande demais.' }));
+          return;
+        }
+        if (buf.length === 0) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Corpo vazio.' }));
+          return;
+        }
+        const token = crypto.randomBytes(16).toString('hex');
+        const contentType = req.headers['content-type'] || 'audio/mpeg';
+        try {
+          await writeFile(blobPath(id), buf);
+          await writeFile(blobMetaPath(id), JSON.stringify({ token, contentType, size: buf.length }));
+        } catch (err) {
+          log('blob write error:', err instanceof Error ? err.message : err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Falha ao salvar.' }));
+          return;
+        }
+        log('blob stored:', id, `${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ id, token }));
+        return;
+      }
+
+      if (req.method === 'GET' && pathname.startsWith('/blob/')) {
+        const id = decodeURIComponent(pathname.slice('/blob/'.length));
+        if (!safeBlobId(id)) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('bad id');
+          return;
+        }
+        let meta;
+        try {
+          meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('not found');
+          return;
+        }
+        const k = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('k');
+        if (!k || k !== meta.token) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('forbidden');
+          return;
+        }
+        let st;
+        try {
+          st = await stat(blobPath(id));
+        } catch {
+          res.writeHead(404, { 'Content-Type': 'text/plain' });
+          res.end('not found');
+          return;
+        }
+        const total = st.size;
+        const range = req.headers.range;
+        let start = 0;
+        let end = total - 1;
+        let status = 200;
+        if (range) {
+          const m = /bytes=(\d*)-(\d*)/.exec(range);
+          if (m) {
+            if (m[1]) start = parseInt(m[1], 10);
+            if (m[2]) end = parseInt(m[2], 10);
+            if (Number.isNaN(start) || start > end || start >= total) {
+              res.writeHead(416, { 'Content-Range': `bytes */${total}` });
+              res.end();
+              return;
+            }
+            status = 206;
+          }
+        }
+        const headers = {
+          'Content-Type': meta.contentType || 'audio/mpeg',
+          'Content-Length': String(end - start + 1),
+          'Accept-Ranges': 'bytes',
+          'Cache-Control': 'private, max-age=31536000',
+        };
+        if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+        res.writeHead(status, headers);
+        if (req.method === 'HEAD') {
+          res.end();
+          return;
+        }
+        const rs = createReadStream(blobPath(id), { start, end });
+        rs.on('error', () => {
+          if (!res.writableEnded) res.end();
+        });
+        rs.pipe(res);
+        return;
+      }
+
+      if (req.method === 'DELETE' && pathname.startsWith('/blob/')) {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const id = decodeURIComponent(pathname.slice('/blob/'.length));
+        if (!safeBlobId(id)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id inválido.' }));
+          return;
+        }
+        await unlink(blobPath(id)).catch(() => undefined);
+        await unlink(blobMetaPath(id)).catch(() => undefined);
+        res.writeHead(204);
+        res.end();
         return;
       }
 

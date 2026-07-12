@@ -19,9 +19,11 @@ import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import {
+  deleteTrackBlob,
   fetchPlaylistEntries,
   importerHostLabel,
   importViaHelper,
+  uploadTrackBlob,
 } from '@/lib/local/importerHelper';
 
 const CACHE_NAME = 'aurial-library-v1';
@@ -35,6 +37,8 @@ export interface LibraryEntry {
   mimeType: string;
   /** Original media link (YouTube/direct file) — lets any device re-import it. */
   sourceUrl?: string;
+  /** Importer capability URL for the uploaded audio — lets ANY device stream it. */
+  remoteUrl?: string;
 }
 
 // ── in-memory state ─────────────────────────────────────────────
@@ -174,6 +178,24 @@ function addEntry(entry: LibraryEntry, blob: Blob): void {
   cloud.push(entry.track.id, entry);
 }
 
+/**
+ * Upload a freshly-added track's audio to the importer and record the resulting
+ * stream URL on its entry (as `remoteUrl` + `track.streamUrl`) so the user's
+ * OTHER devices — which only sync metadata — can play it. Best-effort: silent on
+ * failure / when signed out (the track just stays local-only, as before).
+ */
+async function uploadAndLink(id: string, blob: Blob): Promise<void> {
+  const url = await uploadTrackBlob(id, blob);
+  if (!url) return;
+  const current = read().find((e) => e.track.id === id);
+  if (!current) return; // removed while uploading
+  patchEntry(id, {
+    ...current,
+    remoteUrl: url,
+    track: { ...current.track, streamUrl: url },
+  });
+}
+
 // ── cross-device sync (Firestore, metadata only) ────────────────
 // Only the registry (track + metadata) syncs. The audio bytes stay on the
 // device that has them; a synced-in entry simply isn't playable elsewhere until
@@ -223,6 +245,7 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
 
     await putBlob(id, file).catch(() => undefined);
     addEntry({ track, addedAt: new Date().toISOString(), sizeBytes: file.size, mimeType }, file);
+    void uploadAndLink(id, file); // make it playable on the user's other devices
     imported.push(track);
   }
   // Non-blocking: fetch real covers/metadata from iTunes for what we just added.
@@ -254,6 +277,7 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
     { track, addedAt: new Date().toISOString(), sizeBytes: blob.size, mimeType: meta.mimeType },
     blob,
   );
+  void uploadAndLink(id, blob);
   pushNotification({ type: 'shared', title: 'Faixa recebida de um amigo', body: track.title });
   return track;
 }
@@ -277,7 +301,8 @@ function applyEnrichment(entry: LibraryEntry, meta: EnrichedMeta): LibraryEntry 
     // Keep the existing (thumbnail) cover if iTunes has none.
     meta.coverUrl ?? entry.track.coverUrl,
   );
-  return { ...entry, track };
+  // Never let enrichment drop the cross-device stream URL set by uploadAndLink.
+  return { ...entry, track: { ...track, streamUrl: entry.remoteUrl ?? entry.track.streamUrl } };
 }
 
 /**
@@ -350,6 +375,7 @@ async function saveBlobAsLocalTrack(
     },
     blob,
   );
+  void uploadAndLink(id, blob);
   return track;
 }
 
@@ -593,6 +619,7 @@ export async function blobFor(id: string): Promise<Blob | null> {
 
 export async function remove(id: string): Promise<void> {
   await deleteBlob(id).catch(() => undefined);
+  void deleteTrackBlob(id); // best-effort remove the uploaded cross-device copy
   const url = blobUrls.get(id);
   if (url) {
     URL.revokeObjectURL(url);
@@ -640,4 +667,21 @@ export async function hydrate(): Promise<void> {
     if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
   }
   emit();
+  void backfillRemote();
+}
+
+/**
+ * One-time-ish backfill: upload any track that has local audio here but no
+ * `remoteUrl` yet, so tracks added before cross-device sync existed become
+ * playable on the user's other devices too. Sequential + best-effort; a track
+ * that already has a remoteUrl (or no local audio) is skipped, so after the
+ * first successful pass this does nothing.
+ */
+async function backfillRemote(): Promise<void> {
+  for (const entry of read()) {
+    if (entry.remoteUrl) continue;
+    const blob = await blobFor(entry.track.id).catch(() => null);
+    if (!blob) continue; // synced-in from another device — nothing to upload here
+    await uploadAndLink(entry.track.id, blob);
+  }
 }
