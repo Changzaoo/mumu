@@ -187,6 +187,9 @@ export default function HomePage() {
         {localGreeting()}
       </motion.h1>
 
+      {/* Featured: link-imported tracks shared by the community (first). */}
+      {genreId === null && <CommunityTracksRow limit={20} />}
+
       {/* Your downloaded / on-device tracks (only when you have some). */}
       {genreId === null && <DeviceTracksRow limit={12} />}
 
@@ -292,9 +295,6 @@ export default function HomePage() {
         As faixas em alta tocam em prévia de 30s (Apple). As faixas do acervo grátis tocam
         completas.
       </p>
-
-      {/* Link-imported tracks shared by other users. */}
-      {genreId === null && <CommunityTracksRow limit={20} />}
 
       {/* Community trending — powered by everyone's likes (Firestore). */}
       {trendingTracks.length > 0 && (

@@ -40,6 +40,7 @@ import {
 import { searchSongs } from '@/lib/catalog/itunes';
 import { appleSongToDto } from '@/lib/catalog/mapApple';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { isPlaylistUrl } from '@/lib/local/importerHelper';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { estimateStorage } from '@/lib/offline/audioCache';
 import { cn, formatBytes, formatDuration } from '@/lib/utils';
@@ -137,11 +138,19 @@ export default function DevicePage() {
   const addLink = async (): Promise<void> => {
     const url = linkUrl.trim();
     if (!url) return;
+    const playlist = isPlaylistUrl(url);
     setAddingLink(true);
-    const toastId = toast.loading('Baixando e convertendo…');
+    const toastId = toast.loading(playlist ? 'Lendo playlist…' : 'Baixando e convertendo…');
     try {
-      const track = await localLibrary.addByUrl(url);
-      toast.success(`“${track.title}” adicionada`, { id: toastId });
+      if (playlist) {
+        const { imported, total } = await localLibrary.addPlaylistByUrl(url, (done, tot) => {
+          toast.loading(`Baixando playlist… ${done}/${tot}`, { id: toastId });
+        });
+        toast.success(`Playlist importada — ${imported}/${total} faixas`, { id: toastId });
+      } else {
+        const track = await localLibrary.addByUrl(url);
+        toast.success(`“${track.title}” adicionada`, { id: toastId });
+      }
       setLinkUrl('');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Não foi possível adicionar esse link.', {
@@ -254,8 +263,8 @@ export default function DevicePage() {
               <Link2 className="size-4 text-fg-muted" /> Adicionar por link
             </p>
             <p className="text-[13px] text-fg-muted">
-              Cole o link de uma música do YouTube, SoundCloud, Vimeo, Bandcamp ou de um arquivo de
-              áudio. Baixamos e guardamos no aparelho.
+              Cole o link de uma música — ou de uma playlist do YouTube — do YouTube, SoundCloud,
+              Vimeo, Bandcamp ou de um arquivo de áudio. Baixamos e guardamos no aparelho.
             </p>
             <div className="flex gap-2">
               <Input

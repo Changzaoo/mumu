@@ -17,7 +17,11 @@ import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
-import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
+import {
+  fetchPlaylistEntries,
+  importerHostLabel,
+  importViaHelper,
+} from '@/lib/local/importerHelper';
 
 const CACHE_NAME = 'aurial-library-v1';
 const STORAGE_KEY = 'aurial:library';
@@ -347,7 +351,7 @@ async function saveBlobAsLocalTrack(
  * stores it locally and enriches its cover/metadata. Throws friendly pt-BR
  * errors the caller shows as a toast.
  */
-export async function addByUrl(url: string): Promise<TrackDto> {
+export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Promise<TrackDto> {
   let parsed: URL;
   try {
     parsed = new URL(url.trim());
@@ -373,7 +377,8 @@ export async function addByUrl(url: string): Promise<TrackDto> {
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
     publishSharedTrack(track, parsed.toString()); // share with the community
-    pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
+    if (!opts.silent)
+      pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;
   }
 
@@ -410,7 +415,41 @@ export async function addByUrl(url: string): Promise<TrackDto> {
   const track = await saveBlobAsLocalTrack(blob, { title: fileName, sourceUrl: parsed.toString() });
   void enrichLocalTrack(track.id).catch(() => undefined);
   publishSharedTrack(track, parsed.toString()); // share with the community
+  if (!opts.silent)
+    pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
   return track;
+}
+
+/**
+ * Import a whole playlist by link: enumerate its entries via the importer, then
+ * import each track through the normal path (covers, lyrics, community share).
+ * Reports progress; a single summary notification is pushed at the end.
+ */
+export async function addPlaylistByUrl(
+  url: string,
+  onProgress?: (done: number, total: number, title: string) => void,
+): Promise<{ imported: number; total: number }> {
+  const { entries } = await fetchPlaylistEntries(url);
+  if (entries.length === 0) throw new Error('Não encontramos faixas nessa playlist.');
+
+  let imported = 0;
+  for (let i = 0; i < entries.length; i++) {
+    const entry = entries[i];
+    if (!entry) continue;
+    onProgress?.(i, entries.length, entry.title);
+    try {
+      await addByUrl(entry.url, { silent: true });
+      imported += 1;
+    } catch {
+      /* skip a failed entry, keep going */
+    }
+  }
+  pushNotification({
+    type: 'import',
+    title: 'Playlist importada',
+    body: `${imported} de ${entries.length} faixas adicionadas`,
+  });
+  return { imported, total: entries.length };
 }
 
 export function list(): LibraryEntry[] {

@@ -8,7 +8,7 @@
  * Spotify-style. Every function degrades silently to `null` on no-match/failure
  * so enrichment can never block or break an import.
  */
-import { searchSongs } from '@/lib/catalog/itunes';
+import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
 
 export interface CleanQuery {
   title: string;
@@ -24,14 +24,17 @@ export interface EnrichedMeta {
 
 /** Junk fragments that filenames/streaming titles carry but iTunes does not. */
 const NOISE = [
+  /\[[^\]]*\]/g, // any [bracketed] segment — almost always noise on YouTube titles
   /\((?:official\s+)?(?:music\s+)?video\)/gi,
   /\((?:official\s+)?audio\)/gi,
   /\((?:official\s+)?lyric(?:s)?(?:\s+video)?\)/gi,
   /\(visualizer\)/gi,
-  /\[(?:official[^\]]*)\]/gi,
-  /\[[^\]]*(?:video|audio|lyric[^\]]*)\]/gi,
-  /\((?:hd|hq|4k|full\s+hd)\)/gi,
-  /\bofficial\s+(?:music\s+)?video\b/gi,
+  /\((?:hd|hq|4k|8k|full\s*hd|remaster(?:ed)?(?:\s*\d{2,4})?)\)/gi,
+  /\((?:clipe(?:\s+oficial)?|v[ií]deo\s*clipe|ao\s+vivo|live|letra(?:\s+e\s+tradu[cç][aã]o)?|legendado|tradu[cç][aã]o|sped\s*up|slowed(?:\s*\+?\s*reverb)?)\)/gi,
+  /\((?:feat\.?|ft\.?|prod\.?(?:\s+by)?|with)[^)]*\)/gi, // (feat X) hurts exact match
+  /\b(?:official\s+(?:music\s+)?video|lyric\s+video|v[ií]deo\s+oficial|clipe\s+oficial|audio\s+oficial)\b/gi,
+  /\s*[|·•]\s*.*$/, // trailing " | channel", " • ..."
+  /[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu, // emojis/symbols
 ];
 
 /** Upgrade Apple's 100×100 artwork URL to a 600×600 hi-res cover. */
@@ -77,44 +80,74 @@ export function cleanQuery(filename: string): CleanQuery {
  * title/artist/album + 600×600 cover, or `null` on no match / any failure —
  * never throws.
  */
+function scoreMatch(
+  songTitle: string,
+  songArtist: string,
+  wantTitle: string,
+  wantArtist: string,
+): number {
+  let score = 0;
+  if (songTitle === wantTitle) score += 4;
+  else if (songTitle.includes(wantTitle) || wantTitle.includes(songTitle)) score += 2;
+  if (wantArtist) {
+    if (songArtist === wantArtist) score += 3;
+    else if (songArtist.includes(wantArtist) || wantArtist.includes(songArtist)) score += 1;
+  }
+  return score;
+}
+
 export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
   const title = q.title.trim();
   if (!title) return null;
-  const term = q.artist ? `${title} ${q.artist}` : title;
 
-  try {
-    const results = await searchSongs(term, 'br', 8);
-    if (results.length === 0) return null;
+  // Title with any parentheticals stripped — a strong alternate query.
+  const bareTitle = title
+    .replace(/[([{][^)\]}]*[)\]}]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
 
-    const wantTitle = norm(title);
-    const wantArtist = q.artist ? norm(q.artist) : '';
+  // Try several searches (most specific first) and keep the best match overall.
+  const terms = Array.from(
+    new Set(
+      [
+        q.artist ? `${title} ${q.artist}` : title,
+        q.artist && bareTitle ? `${bareTitle} ${q.artist}` : null,
+        title,
+        bareTitle && bareTitle !== title ? bareTitle : null,
+      ].filter((t): t is string => Boolean(t && t.trim().length > 1)),
+    ),
+  );
 
-    let best = results[0];
-    let bestScore = -1;
+  const wantTitle = norm(title);
+  const wantArtist = q.artist ? norm(q.artist) : '';
+  let best: AppleSong | null = null;
+  let bestScore = -1;
+
+  for (const term of terms) {
+    let results: AppleSong[];
+    try {
+      results = await searchSongs(term, 'br', 15);
+    } catch {
+      continue;
+    }
     for (const song of results) {
-      const songTitle = norm(song.trackName);
-      const songArtist = norm(song.artistName);
-      let score = 0;
-      if (songTitle === wantTitle) score += 4;
-      else if (songTitle.includes(wantTitle) || wantTitle.includes(songTitle)) score += 2;
-      if (wantArtist) {
-        if (songArtist === wantArtist) score += 3;
-        else if (songArtist.includes(wantArtist) || wantArtist.includes(songArtist)) score += 1;
-      }
+      const score = scoreMatch(norm(song.trackName), norm(song.artistName), wantTitle, wantArtist);
       if (score > bestScore) {
         bestScore = score;
         best = song;
       }
     }
-    if (!best) return null;
-
-    return {
-      title: best.trackName,
-      artist: best.artistName,
-      album: best.collectionName || null,
-      coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
-    };
-  } catch {
-    return null;
+    if (bestScore >= 6) break; // confident exact-ish match — stop searching
   }
+
+  // Require a minimal match so we never overwrite a good thumbnail with the
+  // wrong album art. Below that, keep whatever cover the track already has.
+  if (!best || bestScore < 2) return null;
+
+  return {
+    title: best.trackName,
+    artist: best.artistName,
+    album: best.collectionName || null,
+    coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
+  };
 }

@@ -250,6 +250,53 @@ function interpret(stderr) {
   return 'Não foi possível baixar desse link.';
 }
 
+// Max playlist entries returned in one enumeration (keeps it snappy + sane).
+const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 200);
+
+/**
+ * Enumerate a playlist's entries WITHOUT downloading them (flat, fast). Returns
+ * `{ title, entries: [{ url, title }] }` — the web app then imports each entry
+ * through the normal /import path.
+ */
+async function listPlaylist(ytdlp, url) {
+  const args = [
+    '--flat-playlist',
+    '--no-warnings',
+    '--dump-single-json',
+    '--playlist-end',
+    String(MAX_PLAYLIST),
+    url,
+  ];
+  const stdout = await new Promise((resolve, reject) => {
+    let out = '';
+    let stderr = '';
+    const p = spawn(ytdlp, args, { windowsHide: true });
+    p.stdout.on('data', (c) => {
+      out += c;
+      if (out.length > 50_000_000) p.kill(); // runaway guard
+    });
+    p.stderr.on('data', (c) => {
+      stderr += c;
+      if (stderr.length > 8192) stderr = stderr.slice(-8192);
+    });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve(out) : reject(new Error(interpret(stderr)))));
+  });
+
+  const data = JSON.parse(stdout);
+  const isYouTube = /youtube/i.test(String(data.extractor_key || data.extractor || ''));
+  const raw = Array.isArray(data.entries) ? data.entries : [];
+  const entries = [];
+  for (const e of raw) {
+    if (!e) continue;
+    let u = typeof e.url === 'string' ? e.url : '';
+    if (u && !/^https?:\/\//.test(u)) u = ''; // flat url was just an id
+    if (!u && e.id && isYouTube) u = `https://www.youtube.com/watch?v=${e.id}`;
+    if (u) entries.push({ url: u, title: typeof e.title === 'string' ? e.title : '' });
+  }
+  return { title: typeof data.title === 'string' ? data.title : 'Playlist', entries };
+}
+
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 function applyCors(req, res) {
   const origin = req.headers.origin;
@@ -335,6 +382,32 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
           }),
         );
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/playlist') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado. Entre na sua conta para importar.' }));
+          return;
+        }
+        try {
+          const { url } = JSON.parse((await readBody(req)) || '{}');
+          if (typeof url !== 'string' || !hostSupported(url)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Link não suportado.' }));
+            return;
+          }
+          log('playlist:', url);
+          const result = await listPlaylist(ytdlp, url);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(result));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Falha ao ler a playlist.';
+          log('playlist error:', message);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: message }));
+        }
         return;
       }
 

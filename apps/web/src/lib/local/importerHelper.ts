@@ -129,6 +129,61 @@ export interface HelperImport {
   coverUrl: string | null;
 }
 
+export interface PlaylistEntry {
+  url: string;
+  title: string;
+}
+export interface PlaylistResult {
+  title: string;
+  entries: PlaylistEntry[];
+}
+
+/** True when the link points at a whole playlist/set (not a single track). */
+export function isPlaylistUrl(url: string): boolean {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (/(^|\.)youtube\.com$|(^|\.)youtu\.be$|(^|\.)music\.youtube\.com$/.test(host)) {
+      if (u.pathname.startsWith('/playlist')) return true;
+      // watch?v=…&list=… → a single video in a list; pure list → a playlist.
+      return u.searchParams.has('list') && !u.searchParams.has('v');
+    }
+    if (host.endsWith('soundcloud.com')) return /\/sets\//.test(u.pathname);
+    return false;
+  } catch {
+    return false;
+  }
+}
+
+/** Ask the helper to enumerate a playlist's entries (no download). */
+export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {
+  let res: Response;
+  try {
+    res = await fetch(`${helperUrl()}/playlist`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ url }),
+    });
+  } catch {
+    throw new Error('Não foi possível ler a playlist agora. Tente novamente em instantes.');
+  }
+  if (!res.ok) {
+    let message = `Falha ao ler a playlist (${res.status}).`;
+    try {
+      const body = (await res.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      /* keep default */
+    }
+    throw new Error(message);
+  }
+  const data = (await res.json()) as Partial<PlaylistResult>;
+  const entries = Array.isArray(data.entries)
+    ? data.entries.filter((e): e is PlaylistEntry => Boolean(e && typeof e.url === 'string'))
+    : [];
+  return { title: typeof data.title === 'string' ? data.title : 'Playlist', entries };
+}
+
 /** Ask the helper to fetch + convert `url`; resolves with the MP3 blob + title. */
 export async function importViaHelper(url: string): Promise<HelperImport> {
   let res: Response;
