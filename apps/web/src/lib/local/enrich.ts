@@ -9,10 +9,13 @@
  * so enrichment can never block or break an import.
  */
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
+import { aiCleanSongTitle } from '@/lib/ai/ai';
 
 export interface CleanQuery {
   title: string;
   artist?: string;
+  /** Internal: guards the one-shot AI retry from recursing. */
+  aiTried?: boolean;
 }
 
 export interface EnrichedMeta {
@@ -138,6 +141,14 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
       }
     }
     if (bestScore >= 6) break; // confident exact-ish match — stop searching
+  }
+
+  // Last resort: let the LLM parse a clean artist/title and retry once.
+  if ((!best || bestScore < 2) && !q.aiTried) {
+    const cleaned = await aiCleanSongTitle(q.artist ? `${q.title} ${q.artist}` : q.title, q.artist);
+    if (cleaned && (cleaned.title !== q.title || cleaned.artist !== q.artist)) {
+      return enrichMeta({ title: cleaned.title, artist: cleaned.artist, aiTried: true });
+    }
   }
 
   // Require a minimal match so we never overwrite a good thumbnail with the

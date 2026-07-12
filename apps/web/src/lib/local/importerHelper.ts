@@ -155,6 +155,38 @@ export function isPlaylistUrl(url: string): boolean {
   }
 }
 
+export interface AiMessage {
+  role: 'system' | 'user' | 'assistant';
+  content: string;
+}
+
+/**
+ * Server-side NVIDIA chat proxy — the API key stays on the importer, never in
+ * the browser. Returns the assistant text, or null on any failure.
+ */
+export async function aiChat(
+  messages: AiMessage[],
+  opts: { model?: string; maxTokens?: number; temperature?: number } = {},
+): Promise<string | null> {
+  try {
+    const res = await fetch(`${helperUrl()}/ai/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({
+        messages,
+        ...(opts.model ? { model: opts.model } : {}),
+        ...(opts.maxTokens ? { max_tokens: opts.maxTokens } : {}),
+        ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
+      }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { content?: string };
+    return typeof data.content === 'string' && data.content.trim() ? data.content : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Ask the helper to enumerate a playlist's entries (no download). */
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {
   let res: Response;

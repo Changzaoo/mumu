@@ -253,6 +253,14 @@ function interpret(stderr) {
 // Max playlist entries returned in one enumeration (keeps it snappy + sane).
 const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 200);
 
+// ── NVIDIA AI proxy (key stays server-side) ─────────────────────────────────
+const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY ?? '').trim();
+const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.com/v1').replace(
+  /\/$/,
+  '',
+);
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'meta/llama-3.1-8b-instruct';
+
 /**
  * Enumerate a playlist's entries WITHOUT downloading them (flat, fast). Returns
  * `{ title, entries: [{ url, title }] }` — the web app then imports each entry
@@ -407,6 +415,51 @@ async function main() {
           log('playlist error:', message);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: message }));
+        }
+        return;
+      }
+
+      if (req.method === 'POST' && pathname === '/ai/chat') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        if (!NVIDIA_API_KEY) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'IA não configurada no servidor.' }));
+          return;
+        }
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          const messages = Array.isArray(body.messages) ? body.messages : [];
+          if (messages.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'messages obrigatório.' }));
+            return;
+          }
+          const upstream = await fetch(`${NVIDIA_BASE}/chat/completions`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${NVIDIA_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: typeof body.model === 'string' ? body.model : NVIDIA_MODEL,
+              messages,
+              max_tokens: Math.min(Number(body.max_tokens) || 512, 4096),
+              temperature: typeof body.temperature === 'number' ? body.temperature : 0.2,
+              stream: false,
+            }),
+          });
+          const data = await upstream.json().catch(() => ({}));
+          const content = data?.choices?.[0]?.message?.content ?? '';
+          res.writeHead(upstream.ok ? 200 : 502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify(upstream.ok ? { content } : { error: 'Falha na IA.' }));
+        } catch (err) {
+          log('ai error:', err instanceof Error ? err.message : err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Falha na IA.' }));
         }
         return;
       }

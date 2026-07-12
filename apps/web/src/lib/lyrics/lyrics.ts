@@ -7,6 +7,7 @@
  * their duration won't match the full song.
  */
 import type { TrackDto } from '@aurial/shared';
+import { aiCleanSongTitle } from '@/lib/ai/ai';
 
 export interface LyricLine {
   timeMs: number;
@@ -124,7 +125,21 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
   if (cached) return cached;
   if (!track.title?.trim()) return null;
   try {
-    const lyrics = await lrclibGet(track);
+    let lyrics = await lrclibGet(track);
+    // Fallback: let the AI parse a clean artist/title and retry once.
+    if (!lyrics) {
+      const cleaned = await aiCleanSongTitle(track.title, track.artists[0]?.name);
+      if (cleaned && (cleaned.title !== track.title || cleaned.artist)) {
+        const a0 = track.artists[0];
+        lyrics = await lrclibGet({
+          ...track,
+          title: cleaned.title,
+          artists: cleaned.artist
+            ? [{ id: a0?.id ?? 'ai', name: cleaned.artist, slug: a0?.slug ?? '', imageUrl: null }]
+            : track.artists,
+        });
+      }
+    }
     if (lyrics) writeCache({ ...readCache(), [track.id]: lyrics });
     return lyrics;
   } catch {
