@@ -29,7 +29,7 @@ import { Label } from '@/components/ui/label';
 import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
-import { useCreatePlaylist, useLibrary } from '@/features/library/api';
+import { useCreatePlaylist, useLibrary, useLocalPlaylists } from '@/features/library/api';
 import { formatCompactNumber } from '@/lib/utils';
 
 function CreatePlaylistDialog({
@@ -144,19 +144,30 @@ function LikedTile({ count }: { count: number }) {
 
 export default function LibraryPage() {
   const { data, isLoading, isError, refetch } = useLibrary();
+  const localPlaylists = useLocalPlaylists();
   const [filter, setFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
 
   const term = filter.trim().toLowerCase();
   const filtered = useMemo(() => {
-    if (!data) return { playlists: [], albums: [], artists: [] };
-    if (!term) return data;
+    // On-device playlists first, then any server ones.
+    const playlists = [...localPlaylists, ...(data?.playlists ?? [])];
+    const byTitle = (list: typeof playlists) =>
+      term ? list.filter((p) => p.title.toLowerCase().includes(term)) : list;
     return {
-      playlists: data.playlists.filter((p) => p.title.toLowerCase().includes(term)),
-      albums: data.albums.filter((a) => a.title.toLowerCase().includes(term)),
-      artists: data.artists.filter((a) => a.name.toLowerCase().includes(term)),
+      playlists: byTitle(playlists),
+      albums: !data
+        ? []
+        : term
+          ? data.albums.filter((a) => a.title.toLowerCase().includes(term))
+          : data.albums,
+      artists: !data
+        ? []
+        : term
+          ? data.artists.filter((a) => a.name.toLowerCase().includes(term))
+          : data.artists,
     };
-  }, [data, term]);
+  }, [data, term, localPlaylists]);
 
   const grid = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
 

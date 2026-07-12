@@ -18,11 +18,21 @@ import type {
   UpdatePlaylistInput,
 } from '@aurial/shared';
 import { api } from '@/lib/api';
+import * as localPlaylists from '@/lib/local/localPlaylists';
 
 export function usePlaylist(id: string): UseQueryResult<PlaylistWithTracksDto> {
   return useQuery({
     queryKey: ['playlist', id],
-    queryFn: async () => (await api.get<PlaylistWithTracksDto>(`/playlists/${id}`)).data,
+    // Local playlists render straight from on-device storage — no network.
+    ...(localPlaylists.isLocalPlaylistId(id) ? { staleTime: 0 } : {}),
+    queryFn: async () => {
+      if (localPlaylists.isLocalPlaylistId(id)) {
+        const playlist = localPlaylists.get(id);
+        if (!playlist) throw new Error('Playlist não encontrada.');
+        return localPlaylists.toPlaylistWithTracksDto(playlist);
+      }
+      return (await api.get<PlaylistWithTracksDto>(`/playlists/${id}`)).data;
+    },
   });
 }
 

@@ -12,7 +12,7 @@
  * no audio library. When the user later imports the matching file, the local
  * track can be added and it upgrades to full offline playback.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
 const TRACKS_KEY = 'aurial:local-playlist-tracks';
@@ -133,10 +133,72 @@ export function remove(id: string): void {
   // referenced by other lists. They fall out of use harmlessly.
 }
 
+/** Remove a single track from a playlist (by track id). */
+export function removeTrack(id: string, trackId: string): void {
+  writePlaylists(
+    readPlaylists().map((p) =>
+      p.id === id ? { ...p, trackIds: p.trackIds.filter((tid) => tid !== trackId) } : p,
+    ),
+  );
+}
+
 /** Resolve a playlist's stored TrackDtos, in order (skips any missing). */
 export function resolveTracks(id: string): TrackDto[] {
   const playlist = get(id);
   if (!playlist) return [];
   const map = readTracks();
   return playlist.trackIds.map((tid) => map[tid]).filter((t): t is TrackDto => t !== undefined);
+}
+
+// ── adapters to the central PlaylistDto shapes ──────────────────
+// So local playlists render through the same Sidebar / LibraryPage / PlaylistPage
+// components as server playlists. The `local-list:` id prefix is the discriminator.
+
+/** True when an id belongs to a locally-stored playlist. */
+export function isLocalPlaylistId(id: string): boolean {
+  return id.startsWith('local-list:');
+}
+
+/** A stand-in "owner" so PlaylistDto is satisfied; id `local` never matches a
+ *  real Firebase uid, which keeps server-only edit/delete controls hidden. */
+const LOCAL_OWNER = { id: 'local', handle: 'voce', displayName: 'Você', avatarUrl: null } as const;
+
+/** Map a LocalPlaylist to the central PlaylistDto (cover/duration derived from tracks). */
+export function toPlaylistDto(playlist: LocalPlaylist): PlaylistDto {
+  const tracks = resolveTracks(playlist.id);
+  return {
+    id: playlist.id,
+    title: playlist.title,
+    description: null,
+    coverUrl: tracks.find((t) => t.coverUrl)?.coverUrl ?? null,
+    dominantColor: null,
+    isPublic: false,
+    isCollaborative: false,
+    trackCount: tracks.length,
+    durationMs: tracks.reduce((sum, t) => sum + (t.durationMs || 0), 0),
+    followersCount: 0,
+    owner: LOCAL_OWNER,
+    createdAt: playlist.createdAt,
+    updatedAt: playlist.createdAt,
+  };
+}
+
+/** Map a LocalPlaylist to the detail (with-tracks) DTO the PlaylistPage renders. */
+export function toPlaylistWithTracksDto(playlist: LocalPlaylist): PlaylistWithTracksDto {
+  const tracks = resolveTracks(playlist.id);
+  return {
+    ...toPlaylistDto(playlist),
+    tracks: tracks.map((track, position) => ({
+      entryId: track.id,
+      position,
+      addedAt: playlist.createdAt,
+      addedBy: null,
+      track,
+    })),
+  };
+}
+
+/** All local playlists as PlaylistDto (newest first). */
+export function listAsDto(): PlaylistDto[] {
+  return readPlaylists().map(toPlaylistDto);
 }

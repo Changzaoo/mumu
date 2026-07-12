@@ -15,7 +15,7 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import type {
@@ -32,6 +32,8 @@ import type {
 } from '@aurial/shared';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { api } from '@/lib/api';
+import * as localPlaylists from '@/lib/local/localPlaylists';
+import type { LocalPlaylist } from '@/lib/local/localPlaylists';
 
 const EMPTY_LIBRARY: LibraryDto = {
   playlists: [],
@@ -40,12 +42,26 @@ const EMPTY_LIBRARY: LibraryDto = {
   artists: [],
 };
 
+/** Stable empty snapshot for useSyncExternalStore (avoids re-render loops). */
+const NO_LOCAL_PLAYLISTS: LocalPlaylist[] = [];
+
+/** Reactive local playlists, mapped to the central PlaylistDto shape. */
+export function useLocalPlaylists(): PlaylistDto[] {
+  const raw = useSyncExternalStore(
+    localPlaylists.subscribe,
+    localPlaylists.list,
+    () => NO_LOCAL_PLAYLISTS,
+  );
+  return useMemo(() => raw.map(localPlaylists.toPlaylistDto), [raw]);
+}
+
 /**
  * User playlists for the Sidebar nav. Gracefully resolves to an empty list
  * when signed out / API unreachable (401 must never break the shell).
  */
 export function usePlaylistsNav(): { playlists: PlaylistDto[]; isLoading: boolean } {
   const { user, loading } = useAuthUser();
+  const local = useLocalPlaylists();
 
   const query = useQuery({
     queryKey: ['library'],
@@ -63,17 +79,28 @@ export function usePlaylistsNav(): { playlists: PlaylistDto[]; isLoading: boolea
   });
 
   return {
-    playlists: query.data?.playlists ?? [],
+    // Local (on-device) playlists first, then any server ones.
+    playlists: [...local, ...(query.data?.playlists ?? [])],
     isLoading: loading || (Boolean(user) && query.isLoading),
   };
 }
 
-/** Full library snapshot (LibraryPage). Throws on failure — page shows retry. */
+/**
+ * Full library snapshot (LibraryPage). Degrades to an empty library when the
+ * central API is unreachable (P2P topology) instead of throwing, so the page
+ * still renders local playlists and downloads rather than an error screen.
+ */
 export function useLibrary(): UseQueryResult<LibraryDto> {
   return useQuery({
     queryKey: ['library'],
     staleTime: 60_000,
-    queryFn: async () => (await api.get<LibraryDto>('/me/library')).data,
+    queryFn: async () => {
+      try {
+        return (await api.get<LibraryDto>('/me/library')).data;
+      } catch {
+        return EMPTY_LIBRARY;
+      }
+    },
   });
 }
 
@@ -118,19 +145,17 @@ export function useHistory(): HistoryResult {
 
 // ── Playlist creation ───────────────────────────────────────────
 
-/** Creates a playlist, then navigates straight to it (optimistic nav). */
+/**
+ * Creates an on-device playlist, then navigates straight to it. Stored locally
+ * (localStorage) — no central backend needed, so it works in the P2P topology.
+ */
 export function useCreatePlaylist(): UseMutationResult<PlaylistDto, Error, CreatePlaylistInput> {
-  const queryClient = useQueryClient();
   const navigate = useNavigate();
 
   return useMutation({
-    mutationFn: async (input: CreatePlaylistInput) =>
-      (await api.post<PlaylistDto>('/playlists', input)).data,
+    mutationFn: (input: CreatePlaylistInput) =>
+      Promise.resolve(localPlaylists.toPlaylistDto(localPlaylists.create(input.title))),
     onSuccess: (playlist) => {
-      queryClient.setQueryData<LibraryDto>(['library'], (old) =>
-        old ? { ...old, playlists: [playlist, ...old.playlists] } : old,
-      );
-      void queryClient.invalidateQueries({ queryKey: ['library'] });
       toast('Playlist criada');
       void navigate(`/playlist/${playlist.id}`);
     },

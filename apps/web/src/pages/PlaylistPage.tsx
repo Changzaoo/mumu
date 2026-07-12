@@ -6,6 +6,7 @@
  * artists only), so the actions row offers share instead.
  */
 import { useMemo, useState } from 'react';
+import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -28,6 +29,7 @@ import {
 import {
   updatePlaylistSchema,
   type PlaylistWithTracksDto,
+  type TrackDto,
   type UpdatePlaylistInput,
 } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
@@ -65,7 +67,9 @@ import {
   useUpdatePlaylist,
 } from '@/features/playlists/api';
 import { useTrackLikes } from '@/features/library/api';
+import { useAppleSearch } from '@/features/catalog/api';
 import { useSearch } from '@/features/search/api';
+import * as localPlaylists from '@/lib/local/localPlaylists';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useDebounce } from '@/hooks/useDebounce';
 import { formatDurationLong } from '@/lib/utils';
@@ -219,9 +223,106 @@ function AddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
   );
 }
 
+/** Add-tracks search for LOCAL playlists — catalog (iTunes) search, stored on
+ *  device with the full track so it renders and previews without a backend. */
+function LocalAddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
+  const [term, setTerm] = useState('');
+  const debounced = useDebounce(term, 300);
+  const { data: results, isFetching } = useAppleSearch(debounced);
+  const queryClient = useQueryClient();
+  const existing = useMemo(
+    () => new Set(playlist.tracks.map((entry) => entry.track.id)),
+    [playlist.tracks],
+  );
+
+  const add = (track: TrackDto): void => {
+    localPlaylists.addTracks(playlist.id, [track]);
+    void queryClient.invalidateQueries({ queryKey: ['playlist', playlist.id] });
+    toast('Adicionada à playlist');
+  };
+
+  return (
+    <section
+      aria-label="Adicionar faixas"
+      className="rounded-xl border border-border bg-bg-elevated p-4"
+    >
+      <h2 className="mb-3 text-lg font-semibold tracking-tight text-fg">Adicionar faixas</h2>
+      <div className="relative max-w-md">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+        <Input
+          value={term}
+          onChange={(event) => setTerm(event.target.value)}
+          placeholder="Buscar músicas para esta playlist"
+          aria-label="Buscar músicas para adicionar"
+          className="pl-9 pr-8"
+        />
+        {term && (
+          <button
+            type="button"
+            aria-label="Limpar"
+            onClick={() => setTerm('')}
+            className="absolute right-2 top-1/2 grid size-6 -translate-y-1/2 place-items-center rounded-full text-fg-muted hover:text-fg"
+          >
+            <X className="size-3.5" />
+          </button>
+        )}
+      </div>
+
+      {debounced.trim() && results && (
+        <ul className={isFetching ? 'mt-3 space-y-1 opacity-70' : 'mt-3 space-y-1'}>
+          {results.slice(0, 8).map((track) => {
+            const already = existing.has(track.id);
+            return (
+              <li
+                key={track.id}
+                className="flex items-center gap-3 rounded-lg px-2 py-1.5 transition-colors hover:bg-fg/5"
+              >
+                <span className="size-9 shrink-0 overflow-hidden rounded-sm bg-fg/6">
+                  {track.coverUrl && (
+                    <img
+                      src={track.coverUrl}
+                      alt=""
+                      loading="lazy"
+                      className="size-full object-cover"
+                    />
+                  )}
+                </span>
+                <span className="min-w-0 flex-1">
+                  <span className="line-clamp-1 text-sm text-fg">{track.title}</span>
+                  <span className="line-clamp-1 text-xs text-fg-muted">
+                    {track.artists.map((a) => a.name).join(', ')}
+                  </span>
+                </span>
+                <Button
+                  variant={already ? 'ghost' : 'outline'}
+                  size="sm"
+                  disabled={already}
+                  onClick={() => add(track)}
+                >
+                  {already ? (
+                    'Adicionada'
+                  ) : (
+                    <>
+                      <Plus /> Adicionar
+                    </>
+                  )}
+                </Button>
+              </li>
+            );
+          })}
+          {results.length === 0 && (
+            <li className="px-2 py-3 text-sm text-fg-muted">Nada encontrado para “{debounced}”.</li>
+          )}
+        </ul>
+      )}
+    </section>
+  );
+}
+
 export default function PlaylistPage() {
   const { id = '' } = useParams<{ id: string }>();
   const { data, isLoading, isError, refetch } = usePlaylist(id);
+  const queryClient = useQueryClient();
   const { profile } = useAuthUser();
   const likes = useTrackLikes();
   const update = useUpdatePlaylist(id);
@@ -247,8 +348,16 @@ export default function PlaylistPage() {
     );
   }
 
-  const isOwner = profile?.id === data.owner.id;
+  const isLocal = localPlaylists.isLocalPlaylistId(id);
+  const isOwner = !isLocal && profile?.id === data.owner.id;
+  // Local playlists are always editable by the viewer (they're on this device).
+  const canEdit = isOwner || isLocal;
   const tracks = data.tracks.map((entry) => entry.track);
+
+  const removeLocalTrack = (trackId: string): void => {
+    localPlaylists.removeTrack(id, trackId);
+    void queryClient.invalidateQueries({ queryKey: ['playlist', id] });
+  };
 
   const playAll = (index = 0): void => {
     if (tracks.length === 0) return;
@@ -352,7 +461,7 @@ export default function PlaylistPage() {
           icon={ListMusic}
           title="Playlist vazia"
           description={
-            isOwner
+            canEdit
               ? 'Use a busca abaixo para adicionar as primeiras faixas.'
               : 'Ainda não há faixas por aqui.'
           }
@@ -372,9 +481,9 @@ export default function PlaylistPage() {
                   liked={likes.isLiked(entry.track)}
                   onToggleLike={(liked) => likes.toggle(entry.track, liked)}
                   onPlay={() => playAll(index)}
-                  className={isOwner ? 'pr-10' : undefined}
+                  className={canEdit ? 'pr-10' : undefined}
                 />
-                {isOwner && (
+                {canEdit && (
                   <DropdownMenu>
                     <DropdownMenuTrigger asChild>
                       <button
@@ -386,26 +495,34 @@ export default function PlaylistPage() {
                       </button>
                     </DropdownMenuTrigger>
                     <DropdownMenuContent align="end">
-                      <DropdownMenuItem
-                        disabled={index === 0}
-                        onSelect={() =>
-                          reorder.mutate({ entryId: entry.entryId, toPosition: index - 1 })
-                        }
-                      >
-                        <ArrowUp /> Mover para cima
-                      </DropdownMenuItem>
-                      <DropdownMenuItem
-                        disabled={index === data.tracks.length - 1}
-                        onSelect={() =>
-                          reorder.mutate({ entryId: entry.entryId, toPosition: index + 1 })
-                        }
-                      >
-                        <ArrowDown /> Mover para baixo
-                      </DropdownMenuItem>
-                      <DropdownMenuSeparator />
+                      {isOwner && (
+                        <>
+                          <DropdownMenuItem
+                            disabled={index === 0}
+                            onSelect={() =>
+                              reorder.mutate({ entryId: entry.entryId, toPosition: index - 1 })
+                            }
+                          >
+                            <ArrowUp /> Mover para cima
+                          </DropdownMenuItem>
+                          <DropdownMenuItem
+                            disabled={index === data.tracks.length - 1}
+                            onSelect={() =>
+                              reorder.mutate({ entryId: entry.entryId, toPosition: index + 1 })
+                            }
+                          >
+                            <ArrowDown /> Mover para baixo
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                        </>
+                      )}
                       <DropdownMenuItem
                         className="text-danger focus:text-danger"
-                        onSelect={() => removeTrack.mutate(entry.entryId)}
+                        onSelect={() =>
+                          isLocal
+                            ? removeLocalTrack(entry.track.id)
+                            : removeTrack.mutate(entry.entryId)
+                        }
                       >
                         <Trash2 /> Remover da playlist
                       </DropdownMenuItem>
@@ -419,6 +536,7 @@ export default function PlaylistPage() {
       )}
 
       {isOwner && <AddTracksSection playlist={data} />}
+      {isLocal && <LocalAddTracksSection playlist={data} />}
 
       <EditDialog playlist={data} open={editOpen} onOpenChange={setEditOpen} />
 
