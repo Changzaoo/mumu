@@ -18,6 +18,7 @@
  *       AURIAL_MAX_MINUTES (default 90)
  */
 import http from 'node:http';
+import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
 import { mkdtemp, readdir, readFile, rm, stat, chmod } from 'node:fs/promises';
 import { createWriteStream, existsSync } from 'node:fs';
@@ -30,10 +31,60 @@ const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
 // other devices on your LAN / Tailscale (see README — mind the exposure).
 const HOST = process.env.HOST ?? '127.0.0.1';
-// Optional shared secret. When set, /import requires it (Authorization: Bearer
-// <token> or X-Aurial-Token). REQUIRED before exposing the helper publicly
-// (e.g. Tailscale Funnel) — otherwise anyone could run downloads on your box.
+// Optional shared secret (legacy fallback). Prefer Firebase gating below.
 const IMPORT_TOKEN = (process.env.IMPORT_TOKEN ?? '').trim();
+
+// ── Firebase auth gate ──────────────────────────────────────────────────────
+// When IMPORT_ALLOWED_EMAILS is set, /import ONLY accepts a valid Firebase ID
+// token whose (verified) email is on the list. Knowing the URL grants nothing;
+// only the owner, signed in to the app, can import. No shared token needed.
+const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID ?? 'mumu-2f54e').trim();
+const ALLOWED_EMAILS = (process.env.IMPORT_ALLOWED_EMAILS ?? '')
+  .split(',')
+  .map((s) => s.trim().toLowerCase())
+  .filter(Boolean);
+const FIREBASE_GATED = ALLOWED_EMAILS.length > 0;
+const GOOGLE_CERTS_URL =
+  'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
+
+let certCache = { certs: {}, exp: 0 };
+async function googleCerts() {
+  if (certCache.exp > Date.now()) return certCache.certs;
+  const res = await fetch(GOOGLE_CERTS_URL);
+  if (!res.ok) throw new Error('cert fetch failed');
+  const certs = await res.json();
+  const m = /max-age=(\d+)/.exec(res.headers.get('cache-control') || '');
+  certCache = { certs, exp: Date.now() + (m ? Number(m[1]) * 1000 : 3600_000) };
+  return certs;
+}
+
+const b64urlJson = (part) => JSON.parse(Buffer.from(part, 'base64url').toString('utf8'));
+
+/** Verify a Firebase ID token (RS256) and return its claims, or throw. */
+async function verifyFirebaseToken(idToken) {
+  const parts = idToken.split('.');
+  if (parts.length !== 3) throw new Error('malformed token');
+  const header = b64urlJson(parts[0]);
+  if (header.alg !== 'RS256' || !header.kid) throw new Error('bad alg/kid');
+  const pem = (await googleCerts())[header.kid];
+  if (!pem) throw new Error('unknown signing key');
+  const pub = new crypto.X509Certificate(pem).publicKey;
+  const ok = crypto.verify(
+    'RSA-SHA256',
+    Buffer.from(`${parts[0]}.${parts[1]}`),
+    pub,
+    Buffer.from(parts[2], 'base64url'),
+  );
+  if (!ok) throw new Error('bad signature');
+  const p = b64urlJson(parts[1]);
+  const now = Math.floor(Date.now() / 1000);
+  if (p.aud !== FIREBASE_PROJECT_ID) throw new Error('bad audience');
+  if (p.iss !== `https://securetoken.google.com/${FIREBASE_PROJECT_ID}`) throw new Error('bad iss');
+  if (typeof p.exp !== 'number' || p.exp <= now) throw new Error('expired');
+  if (typeof p.iat !== 'number' || p.iat > now + 60) throw new Error('bad iat');
+  if (!p.sub) throw new Error('no subject');
+  return p;
+}
 const MAX_MINUTES = Number(process.env.AURIAL_MAX_MINUTES ?? 90);
 const MAX_BYTES = 600 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -224,11 +275,25 @@ function readBody(req) {
 
 const log = (...a) => console.log('[aurial-importer]', ...a);
 
-/** True when the request carries the shared secret (or none is configured). */
-function authed(req) {
-  if (!IMPORT_TOKEN) return true;
+/**
+ * Authorize a request. Firebase-gated when IMPORT_ALLOWED_EMAILS is set (only
+ * the owner's signed-in account passes — the URL alone grants nothing); else
+ * falls back to the shared token; else open.
+ */
+async function authorize(req) {
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
-  return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
+  if (FIREBASE_GATED) {
+    if (!bearer) return false;
+    try {
+      const claims = await verifyFirebaseToken(bearer);
+      const email = String(claims.email || '').toLowerCase();
+      return Boolean(claims.email_verified) && ALLOWED_EMAILS.includes(email);
+    } catch {
+      return false;
+    }
+  }
+  if (IMPORT_TOKEN) return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
+  return true;
 }
 
 async function main() {
@@ -252,16 +317,16 @@ async function main() {
             ok: true,
             service: 'aurial-importer',
             hosts: HOSTS,
-            authRequired: Boolean(IMPORT_TOKEN),
+            authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
           }),
         );
         return;
       }
 
       if (req.method === 'POST' && pathname === '/import') {
-        if (!authed(req)) {
-          res.writeHead(401, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Token inválido ou ausente.' }));
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado. Entre na sua conta para importar.' }));
           return;
         }
         let job;

@@ -4,16 +4,15 @@
  * a browser cannot fetch itself (CORS + player-signature). The helper returns
  * an MP3 we store in the local library like any imported file.
  *
- * The helper listens on localhost; browsers permit http://127.0.0.1 requests
- * even from an https page (localhost is a secure context), and the helper sends
- * the Private-Network-Access header so the hosted PWA can reach it too.
+ * Auth: the server is gated on the owner's Firebase login — every request
+ * carries the signed-in user's Firebase ID token, and only the allow-listed
+ * owner passes. Knowing the URL grants nothing, so no secret ships in the
+ * bundle; the URL default below is just an endpoint, useless without the owner's
+ * token. Overridable via the ⚙ config (localStorage).
  */
-// Embedded defaults so the hosted app works out-of-the-box against the owner's
-// public importer (no manual ⚙ setup). Overridable via the ⚙ config (localStorage).
-// NOTE: the token here ships in the public bundle — it only gate-keeps casual
-// hits; treat the importer as effectively reachable by anyone who reads the URL.
+import { getIdToken } from '@/lib/firebase';
+
 const DEFAULT_HELPER_URL = 'https://prance-mummified-subscript.ngrok-free.dev';
-const DEFAULT_HELPER_TOKEN = '828b478994bb94555ba7982a0635c7bc01b2a347fb417e06';
 const STORAGE_KEY = 'aurial:importerUrl';
 const TOKEN_KEY = 'aurial:importerToken';
 
@@ -47,13 +46,12 @@ export function setHelperUrl(url: string): void {
   }
 }
 
-/** Shared secret for a publicly-exposed helper (empty = none). */
+/** Optional manual token (advanced/self-host fallback; normally unused). */
 export function helperToken(): string {
   try {
-    // A stored value (even '') wins; unset falls back to the embedded default.
-    return window.localStorage.getItem(TOKEN_KEY) ?? DEFAULT_HELPER_TOKEN;
+    return window.localStorage.getItem(TOKEN_KEY) ?? '';
   } catch {
-    return DEFAULT_HELPER_TOKEN;
+    return '';
   }
 }
 
@@ -66,16 +64,24 @@ export function setHelperToken(token: string): void {
 }
 
 /**
- * Base headers for every helper request: the auth token (when set) plus the
- * ngrok bypass header (harmless off-ngrok) so a public ngrok tunnel doesn't
- * serve its browser-warning interstitial instead of our response.
+ * Base headers for every helper request: the signed-in user's Firebase ID token
+ * (the server gates on the owner's account) plus the ngrok bypass header so a
+ * public ngrok tunnel doesn't serve its warning interstitial. Falls back to a
+ * manual token only if one was set in the ⚙ (self-host without login).
  */
-function baseHeaders(): Record<string, string> {
-  const token = helperToken();
-  return {
-    'ngrok-skip-browser-warning': '1',
-    ...(token ? { Authorization: `Bearer ${token}` } : {}),
-  };
+async function baseHeaders(): Promise<Record<string, string>> {
+  const headers: Record<string, string> = { 'ngrok-skip-browser-warning': '1' };
+  try {
+    const idToken = await getIdToken();
+    if (idToken) headers.Authorization = `Bearer ${idToken}`;
+  } catch {
+    /* not signed in — fall through to a manual token if configured */
+  }
+  if (!headers.Authorization) {
+    const manual = helperToken();
+    if (manual) headers.Authorization = `Bearer ${manual}`;
+  }
+  return headers;
 }
 
 export interface HelperHealth {
@@ -90,7 +96,7 @@ export async function probeHelper(): Promise<HelperHealth | null> {
   try {
     const res = await fetch(`${helperUrl()}/health`, {
       signal: controller.signal,
-      headers: baseHeaders(),
+      headers: await baseHeaders(),
     });
     if (!res.ok) return null;
     const body = (await res.json()) as Partial<HelperHealth>;
@@ -113,7 +119,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
   try {
     res = await fetch(`${helperUrl()}/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', ...baseHeaders() },
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
       body: JSON.stringify({ url }),
     });
   } catch {
