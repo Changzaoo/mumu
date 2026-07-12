@@ -105,14 +105,32 @@ const HOSTS = [
 ];
 
 // Default allowed browser origins: local dev + the hosted PWA (which may call
-// this localhost helper). Override with ALLOW_ORIGIN=csv.
+// this localhost helper). Override with ALLOW_ORIGIN=csv. Includes both the
+// radinho.online domain (current) and the older aurial.vercel.app URL.
 const ALLOW_ORIGINS = (
   process.env.ALLOW_ORIGIN ??
-  'http://localhost:5173,http://127.0.0.1:5173,https://aurial.vercel.app'
+  'http://localhost:5173,http://127.0.0.1:5173,https://radinho.online,https://*.radinho.online,https://aurial.vercel.app,https://*.vercel.app'
 )
   .split(',')
   .map((s) => s.trim())
   .filter(Boolean);
+
+/**
+ * True when `origin` is on the allow-list. Supports `*.domain` entries so
+ * Vercel preview deploys and any radinho.online subdomain match without listing
+ * each one. '*' (any) is handled separately in applyCors.
+ */
+function originAllowed(origin) {
+  return ALLOW_ORIGINS.some((entry) => {
+    if (entry === origin) return true;
+    const star = entry.indexOf('*.');
+    if (star === -1) return false;
+    // 'https://*.vercel.app' → scheme 'https://', suffix '.vercel.app'
+    const scheme = entry.slice(0, star);
+    const suffix = entry.slice(star + 1); // '.vercel.app'
+    return origin.startsWith(scheme) && origin.slice(scheme.length).endsWith(suffix);
+  });
+}
 
 function hostSupported(rawUrl) {
   try {
@@ -337,7 +355,7 @@ function applyCors(req, res) {
   // ALLOW_ORIGIN='*' opens the helper to any site/device (no secrets involved,
   // no cookies used). Otherwise only the explicit allow-list gets CORS headers.
   const allowAll = ALLOW_ORIGINS.includes('*');
-  if (origin && (allowAll || ALLOW_ORIGINS.includes(origin))) {
+  if (origin && (allowAll || originAllowed(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
   } else if (allowAll) {
