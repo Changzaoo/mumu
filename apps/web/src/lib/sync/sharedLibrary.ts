@@ -10,6 +10,7 @@
 import {
   collection,
   doc,
+  getDoc,
   limit as fsLimit,
   onSnapshot,
   orderBy,
@@ -36,21 +37,37 @@ function keyFor(sourceUrl: string): string {
   );
 }
 
-/** Publish (or refresh) a link-imported track to the community library. */
-export function publishSharedTrack(track: TrackDto, sourceUrl: string): void {
+/**
+ * Publish a link-imported track to the community library. The FIRST person to
+ * share a given link owns the entry: their title/artist/cover and its position
+ * (sharedAt) are canonical and everyone else sees exactly that. Re-importing the
+ * same link by anyone else does NOT relabel or reorder it. Only the original
+ * sharer may refresh their own entry (e.g. a better cover after enrichment),
+ * and even then the order (sharedAt) is preserved.
+ */
+export async function publishSharedTrack(track: TrackDto, sourceUrl: string): Promise<void> {
   const user = auth?.currentUser;
   if (!db || !user || !sourceUrl) return;
-  void setDoc(
-    doc(db, 'sharedTracks', keyFor(sourceUrl)),
-    {
+  const ref = doc(db, 'sharedTracks', keyFor(sourceUrl));
+  try {
+    const snap = await getDoc(ref);
+    if (snap.exists()) {
+      // Someone else owns it → never touch (no relabel, no reorder).
+      if (snap.data()?.sharedByUid !== user.uid) return;
+      // My own entry → refresh metadata but keep the original sharedAt/order.
+      await setDoc(ref, { track, sharedByName: user.displayName ?? null }, { merge: true });
+      return;
+    }
+    await setDoc(ref, {
       track,
       sourceUrl,
       sharedByName: user.displayName ?? null,
       sharedByUid: user.uid,
       sharedAt: Date.now(),
-    },
-    { merge: true },
-  ).catch(() => undefined);
+    });
+  } catch {
+    /* offline / rules — best-effort */
+  }
 }
 
 /** Realtime subscription to the newest shared tracks. Returns an unsubscribe. */

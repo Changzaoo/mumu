@@ -292,7 +292,7 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   patchEntry(id, enriched);
   prefetchLyrics(enriched.track); // fetch synced lyrics with the corrected name
   // Refresh the community entry with the corrected name + cover.
-  if (enriched.sourceUrl) publishSharedTrack(enriched.track, enriched.sourceUrl);
+  if (enriched.sourceUrl) void publishSharedTrack(enriched.track, enriched.sourceUrl);
   return true;
 }
 
@@ -376,7 +376,7 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
       coverUrl,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
-    publishSharedTrack(track, parsed.toString()); // share with the community
+    void publishSharedTrack(track, parsed.toString()); // share with the community
     if (!opts.silent)
       pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;
@@ -414,7 +414,7 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'faixa');
   const track = await saveBlobAsLocalTrack(blob, { title: fileName, sourceUrl: parsed.toString() });
   void enrichLocalTrack(track.id).catch(() => undefined);
-  publishSharedTrack(track, parsed.toString()); // share with the community
+  void publishSharedTrack(track, parsed.toString()); // share with the community
   if (!opts.silent)
     pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
   return track;
