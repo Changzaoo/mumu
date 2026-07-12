@@ -148,22 +148,32 @@ export function NowPlaying() {
           {/* Body */}
           <div
             className={cn(
-              'relative z-10 mx-auto grid w-full max-w-6xl min-h-0 flex-1 items-center gap-8 px-6 pb-6 md:px-10',
-              lyricsOpen ? 'lg:grid-cols-2' : 'grid-cols-1',
+              'relative z-10 mx-auto grid w-full max-w-xl min-h-0 flex-1 grid-cols-1 gap-6 px-6 pb-6 md:px-10',
+              lyricsOpen ? 'items-stretch' : 'items-center',
             )}
           >
             <div
               className={cn(
-                'mx-auto flex w-full max-w-xl flex-col items-center gap-6',
-                lyricsOpen && 'hidden lg:flex',
+                'mx-auto flex w-full flex-col items-center gap-6',
+                lyricsOpen && 'h-full min-h-0',
               )}
             >
-              {/* Artwork / visualizer */}
-              <div className="relative aspect-square w-[min(70vw,340px)] overflow-hidden rounded-xl bg-fg/6 shadow-2xl">
+              {/* Artwork / visualizer / lyrics (lyrics replaces the cover so the
+                  transport + the "Letra" toggle below stay reachable). */}
+              <div
+                className={cn(
+                  'relative overflow-hidden rounded-xl bg-fg/6 shadow-2xl',
+                  lyricsOpen && !visualizer
+                    ? 'min-h-0 w-full flex-1'
+                    : 'aspect-square w-[min(70vw,340px)]',
+                )}
+              >
                 {visualizer ? (
                   <div className="absolute inset-0 grid place-items-end bg-bg-elevated p-6">
                     <SpectrumVisualizer className="h-3/4" />
                   </div>
+                ) : lyricsOpen ? (
+                  <LyricsView track={track} className="h-full px-2" />
                 ) : track.coverUrl ? (
                   <img src={track.coverUrl} alt="" className="size-full object-cover" />
                 ) : (
@@ -226,14 +236,26 @@ export function NowPlaying() {
 
               {/* Utility row */}
               <div className="flex w-full items-center justify-center gap-1">
-                <IconButton aria-label="Letra" size="sm" active={lyricsOpen} onClick={toggleLyrics}>
+                <IconButton
+                  aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
+                  size="sm"
+                  active={lyricsOpen}
+                  onClick={() => {
+                    toggleLyrics();
+                    setVisualizer(false);
+                  }}
+                >
                   <MicVocal />
                 </IconButton>
                 <IconButton
                   aria-label="Visualizador de espectro"
                   size="sm"
                   active={visualizer}
-                  onClick={() => setVisualizer((v) => !v)}
+                  onClick={() => {
+                    const next = !visualizer;
+                    setVisualizer(next);
+                    if (next && lyricsOpen) toggleLyrics();
+                  }}
                 >
                   <AudioLines />
                 </IconButton>
@@ -308,13 +330,6 @@ export function NowPlaying() {
                 </div>
               </div>
             </div>
-
-            {/* Lyrics pane */}
-            {lyricsOpen && (
-              <div className="min-h-0 h-full overflow-hidden">
-                <LyricsView trackId={track.id} className="mx-auto max-w-lg" />
-              </div>
-            )}
           </div>
         </motion.section>
       )}

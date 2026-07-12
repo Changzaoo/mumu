@@ -178,13 +178,14 @@
    Glass — DESIGN.md §3, with solid fallback.
    ────────────────────────────────────────────────────────────── */
 @utility glass {
-  background: hsl(var(--bg-elevated) / 0.55);
+  /* Mostly opaque so menus/bars stay legible over busy content. */
+  background: hsl(var(--bg-elevated) / 0.92);
   backdrop-filter: blur(24px) saturate(140%);
   -webkit-backdrop-filter: blur(24px) saturate(140%);
   border: 1px solid hsl(var(--fg) / 0.06);
 
   @supports not (backdrop-filter: blur(1px)) {
-    background: hsl(var(--bg-overlay));
+    background: hsl(var(--bg-elevated));
   }
 }
 

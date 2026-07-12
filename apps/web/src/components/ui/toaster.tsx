@@ -8,10 +8,16 @@ export function Toaster() {
     <SonnerToaster
       theme={resolveTheme(theme)}
       position="bottom-right"
-      offset={104} /* keep clear of the PlayerBar */
+      offset={104} /* clear of the desktop PlayerBar */
+      mobileOffset={{
+        bottom: 150,
+        left: 12,
+        right: 12,
+      }} /* clear of the mobile nav + mini-player */
       toastOptions={{
         classNames: {
-          toast: 'glass !rounded-lg !text-fg',
+          // Solid (not glass) so notifications are always readable.
+          toast: '!bg-bg-elevated !border !border-border !rounded-xl !text-fg !shadow-2xl',
           description: '!text-fg-muted',
           actionButton: '!bg-accent !text-accent-fg',
         },

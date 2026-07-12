@@ -1,29 +1,29 @@
 import { useEffect, useMemo, useRef } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MicVocal } from 'lucide-react';
-import type { LyricsDto } from '@aurial/shared';
+import type { TrackDto } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
-import { api } from '@/lib/api';
+import { fetchLyrics } from '@/lib/lyrics/lyrics';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
 export interface LyricsViewProps {
-  trackId: string;
+  track: TrackDto;
   className?: string;
 }
 
 /**
- * Synced lyrics pane: active line highlighted + auto-scroll (DESIGN §8).
+ * Synced lyrics pane (LRCLIB): active line highlighted + auto-scroll.
  * Click a line to seek (synced lyrics only).
  */
-export function LyricsView({ trackId, className }: LyricsViewProps) {
+export function LyricsView({ track, className }: LyricsViewProps) {
   const progress = usePlayerStore((s) => s.progress);
   const seek = usePlayerStore((s) => s.seek);
 
   const { data: lyrics, isLoading } = useQuery({
-    queryKey: ['lyrics', trackId],
-    queryFn: async () => (await api.get<LyricsDto>(`/tracks/${trackId}/lyrics`)).data,
+    queryKey: ['lyrics', track.id],
+    queryFn: () => fetchLyrics(track),
     staleTime: Infinity,
     retry: false,
   });
@@ -59,7 +59,7 @@ export function LyricsView({ trackId, className }: LyricsViewProps) {
       <EmptyState
         icon={MicVocal}
         title="Sem letra disponível"
-        description="Esta faixa ainda não tem letra sincronizada."
+        description="Não encontramos a letra desta faixa."
         className={className}
       />
     );

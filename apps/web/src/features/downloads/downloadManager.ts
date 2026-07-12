@@ -11,6 +11,7 @@
 import type { TrackDto } from '@aurial/shared';
 import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
+import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import {
   cacheSupported,
   deleteAudio,
@@ -116,6 +117,7 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
     await putAudio(track.id, blob);
     addDownload(track, blob.size);
     blobUrls.set(track.id, URL.createObjectURL(blob));
+    prefetchLyrics(track); // cache synced lyrics for offline
     inFlight.delete(track.id);
     emit();
   } catch (err) {

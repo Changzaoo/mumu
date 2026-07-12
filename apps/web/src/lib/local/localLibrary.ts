@@ -13,6 +13,7 @@
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import { cacheStorageSupported } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
 
@@ -270,7 +271,9 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   // Re-read: the entry may have been removed while we awaited the network.
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
-  patchEntry(id, applyEnrichment(current, meta));
+  const enriched = applyEnrichment(current, meta);
+  patchEntry(id, enriched);
+  prefetchLyrics(enriched.track); // fetch synced lyrics with the corrected name
   return true;
 }
 

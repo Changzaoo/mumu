@@ -1,4 +1,4 @@
-import type { ComponentProps, ReactNode } from 'react';
+import type { ComponentProps, KeyboardEvent, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Music } from 'lucide-react';
 import { PlayButton } from '@/components/media/PlayButton';
@@ -35,6 +35,9 @@ export function MediaCard({
   ...props
 }: MediaCardProps) {
   const rounded = shape === 'round' ? 'rounded-full' : 'rounded-lg';
+  // A play-only card (no route) plays when tapped anywhere — no hunting for the
+  // little corner button.
+  const clickable = Boolean(onPlay) && !to;
 
   const art = (
     <div className={cn('relative aspect-square overflow-hidden bg-fg/6', rounded)}>
@@ -91,8 +94,23 @@ export function MediaCard({
     <div
       className={cn(
         'group w-40 shrink-0 snap-start rounded-xl p-3 transition-colors duration-200 hover:bg-fg/5 md:w-44',
+        clickable && 'cursor-pointer',
         className,
       )}
+      {...(clickable
+        ? {
+            role: 'button',
+            tabIndex: 0,
+            'aria-label': `Reproduzir ${title}`,
+            onClick: onPlay,
+            onKeyDown: (event: KeyboardEvent) => {
+              if (event.key === 'Enter' || event.key === ' ') {
+                event.preventDefault();
+                onPlay?.();
+              }
+            },
+          }
+        : {})}
       {...props}
     >
       {to ? (
