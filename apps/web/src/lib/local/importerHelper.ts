@@ -187,6 +187,18 @@ export async function aiChat(
   }
 }
 
+/**
+ * Live-stream URL for INSTANT playback of a media link (the importer pipes
+ * yt-dlp → ffmpeg → mp3, so playback starts in seconds, no full download). The
+ * Firebase token goes in the query because an <audio> element can't send
+ * headers. Returns null when signed out.
+ */
+export async function buildStreamUrl(sourceUrl: string): Promise<string | null> {
+  const token = await getIdToken().catch(() => null);
+  if (!token) return null;
+  return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}`;
+}
+
 /** Ask the helper to enumerate a playlist's entries (no download). */
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {
   let res: Response;

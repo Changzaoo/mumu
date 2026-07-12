@@ -261,6 +261,32 @@ const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.co
 );
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'meta/llama-3.1-8b-instruct';
 
+const FFMPEG_BIN = process.env.FFMPEG_PATH
+  ? path.join(process.env.FFMPEG_PATH, isWin ? 'ffmpeg.exe' : 'ffmpeg')
+  : isWin
+    ? 'ffmpeg.exe'
+    : 'ffmpeg';
+
+/**
+ * Authorize a bare token (from a query string) the same way as a Bearer header —
+ * for the streaming endpoint, since an <audio> element can't send headers.
+ */
+async function authorizeToken(token) {
+  if (FIREBASE_GATED) {
+    if (!token) return false;
+    try {
+      const claims = await verifyFirebaseToken(token);
+      if (!claims.email_verified) return false;
+      if (ALLOWED_EMAILS.length === 0) return true;
+      return ALLOWED_EMAILS.includes(String(claims.email || '').toLowerCase());
+    } catch {
+      return false;
+    }
+  }
+  if (IMPORT_TOKEN) return token === IMPORT_TOKEN;
+  return true;
+}
+
 /**
  * Enumerate a playlist's entries WITHOUT downloading them (flat, fast). Returns
  * `{ title, entries: [{ url, title }] }` — the web app then imports each entry
@@ -390,6 +416,66 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
           }),
         );
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/stream') {
+        const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const url = params.get('url');
+        if (!(await authorizeToken(params.get('token')))) {
+          res.writeHead(403, { 'Content-Type': 'text/plain' });
+          res.end('forbidden');
+          return;
+        }
+        if (typeof url !== 'string' || !hostSupported(url)) {
+          res.writeHead(400, { 'Content-Type': 'text/plain' });
+          res.end('bad url');
+          return;
+        }
+        log('stream:', url);
+        res.writeHead(200, {
+          'Content-Type': 'audio/mpeg',
+          'Cache-Control': 'no-store',
+          'Accept-Ranges': 'none',
+        });
+        // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Playback starts as
+        // soon as the first frames arrive — no full download needed.
+        const yt = spawn(ytdlp, ['-f', 'bestaudio/best', '--no-playlist', '--no-warnings', '-o', '-', url], {
+          windowsHide: true,
+        });
+        const ff = spawn(
+          FFMPEG_BIN,
+          ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', '192k', 'pipe:1'],
+          { windowsHide: true },
+        );
+        let done = false;
+        const cleanup = () => {
+          if (done) return;
+          done = true;
+          try {
+            yt.kill('SIGKILL');
+          } catch {
+            /* gone */
+          }
+          try {
+            ff.kill('SIGKILL');
+          } catch {
+            /* gone */
+          }
+        };
+        yt.on('error', cleanup);
+        ff.on('error', cleanup);
+        yt.stderr.on('data', () => {});
+        ff.stderr.on('data', () => {});
+        yt.stdout.on('error', () => {});
+        ff.stdin.on('error', () => {}); // client may disconnect mid-pipe
+        yt.stdout.pipe(ff.stdin);
+        ff.stdout.pipe(res);
+        ff.on('close', () => {
+          if (!res.writableEnded) res.end();
+          cleanup();
+        });
+        req.on('close', cleanup);
         return;
       }
 

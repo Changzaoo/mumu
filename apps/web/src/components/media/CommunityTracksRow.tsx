@@ -4,6 +4,7 @@ import type { SharedTrack } from '@/lib/sync/sharedLibrary';
 import { MediaCard } from '@/components/media/MediaCard';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { useSharedTracks } from '@/features/community/api';
+import { buildStreamUrl } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -21,6 +22,7 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
   const items = limit ? shared.slice(0, limit) : shared;
 
   const play = async (item: SharedTrack): Promise<void> => {
+    // Already on this device → play instantly.
     const existing = localLibrary.findBySource(item.sourceUrl);
     if (existing) {
       playQueue([existing], 0, { source: 'library', sourceId: 'community' });
@@ -28,13 +30,26 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
     }
     if (busy) return;
     setBusy(item.sourceUrl);
-    const toastId = toast.loading('Baixando da comunidade…');
     try {
-      const track = await localLibrary.addByUrl(item.sourceUrl);
-      toast.success(`“${track.title}” adicionada`, { id: toastId });
-      playQueue([track], 0, { source: 'library', sourceId: 'community' });
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Não foi possível baixar.', { id: toastId });
+      // Instant: stream now (yt-dlp→ffmpeg live) while the full copy downloads
+      // in the background so it's saved offline + in the library for next time.
+      const streamUrl = await buildStreamUrl(item.sourceUrl);
+      if (streamUrl) {
+        playQueue([{ ...item.track, streamUrl }], 0, { source: 'library', sourceId: 'community' });
+        void localLibrary.addByUrl(item.sourceUrl).catch(() => undefined);
+        return;
+      }
+      // Fallback (signed out / no importer): download then play.
+      const toastId = toast.loading('Baixando da comunidade…');
+      try {
+        const track = await localLibrary.addByUrl(item.sourceUrl);
+        toast.success(`“${track.title}” adicionada`, { id: toastId });
+        playQueue([track], 0, { source: 'library', sourceId: 'community' });
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Não foi possível tocar.', {
+          id: toastId,
+        });
+      }
     } finally {
       setBusy(null);
     }
