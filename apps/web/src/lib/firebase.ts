@@ -8,7 +8,6 @@
 import { initializeApp, type FirebaseApp } from 'firebase/app';
 import { getFirestore, type Firestore } from 'firebase/firestore';
 import {
-  GithubAuthProvider,
   GoogleAuthProvider,
   createUserWithEmailAndPassword,
   getAuth,
@@ -50,7 +49,6 @@ if (!authDisabled) {
 }
 
 export const googleProvider = new GoogleAuthProvider();
-export const githubProvider = new GithubAuthProvider();
 
 function requireAuth(): Auth {
   if (!auth) {
@@ -68,10 +66,6 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
 
 export function signInGoogle(): Promise<UserCredential> {
   return signInWithPopup(requireAuth(), googleProvider);
-}
-
-export function signInGithub(): Promise<UserCredential> {
-  return signInWithPopup(requireAuth(), githubProvider);
 }
 
 export function signInEmail(email: string, password: string): Promise<UserCredential> {
