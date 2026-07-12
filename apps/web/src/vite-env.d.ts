@@ -1,4 +1,5 @@
 /// <reference types="vite/client" />
+/// <reference types="vite-plugin-pwa/client" />
 
 interface ImportMetaEnv {
   /** API base, e.g. http://localhost:4000/api/v1 (defaults to /api/v1 when unset). */

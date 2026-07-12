@@ -9,7 +9,10 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      registerType: 'autoUpdate',
+      // 'prompt' + manual registration (src/pwa.ts) so we control WHEN a new
+      // build activates — apply immediately unless music is playing.
+      registerType: 'prompt',
+      injectRegister: false,
       includeAssets: ['favicon.svg', 'robots.txt'],
       manifest: {
         name: 'Aurial',

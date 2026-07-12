@@ -4,6 +4,10 @@ import '@fontsource-variable/inter';
 import '@fontsource-variable/jetbrains-mono';
 import '@/styles/globals.css';
 import App from '@/App';
+import { initPwaUpdater } from '@/pwa';
+
+// Register the service worker + auto-updater as early as possible.
+initPwaUpdater();
 
 const container = document.getElementById('root');
 if (!container) throw new Error('Missing #root element');
