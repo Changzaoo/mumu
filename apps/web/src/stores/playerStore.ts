@@ -9,6 +9,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@aurial/shared';
 import { audioEngine } from '@/lib/audio/AudioEngine';
+import { initMediaSession } from '@/lib/audio/mediaSession';
 import { api } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -411,6 +412,9 @@ export function initPlayerEngine(): void {
   );
   void hydrateLocalLibrary();
   void hydrateDownloads();
+
+  // OS lock-screen / notification controls + background-play signalling.
+  initMediaSession();
 
   // Restore persisted volume / apply audio settings.
   audioEngine.setVolume(store.getState().volume);

@@ -733,7 +733,12 @@ export class AudioEngine {
   }
 
   private handleVisibility = (): void => {
-    if (!document.hidden) this.syncTicker();
+    if (!document.hidden) {
+      // Some browsers suspend the AudioContext in the background — resume so
+      // playback (and lock-screen controls) recover on return.
+      if (this.playing) void this.ctx?.resume().catch(() => undefined);
+      this.syncTicker();
+    }
   };
 
   private handleEnded(): void {
