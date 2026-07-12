@@ -12,11 +12,14 @@
  */
 import { getIdToken } from '@/lib/firebase';
 
-// Same-origin path. The hosted site (Vercel) reverse-proxies `/importer/*` to the
-// Cloudflare tunnel that fronts the home importer, and Vite proxies it in dev — so
-// the browser only ever talks to its own origin: no CORS, no preflight, no tunnel
-// warning page. Overridable via the ⚙ config (localStorage) for self-hosting.
-const DEFAULT_HELPER_URL = '/importer';
+// The importer runs on the owner's home server, exposed via a Cloudflare Tunnel.
+// We call it directly: Cloudflare terminates TLS and passes the importer's
+// permissive CORS through, so a real browser reaches it with a clean preflight —
+// no warning page (unlike the retired ngrok tunnel). A same-origin `/importer/*`
+// proxy also exists (Vercel rewrite + Vite dev proxy) for a future zero-CORS
+// setup, but it's bypassed for now because Cloudflare Bot Fight Mode challenges
+// the server-side Vercel→tunnel hop. Overridable via the ⚙ config (localStorage).
+const DEFAULT_HELPER_URL = 'https://importer.nexusholding.xyz';
 const STORAGE_KEY = 'aurial:importerUrl';
 const TOKEN_KEY = 'aurial:importerToken';
 
