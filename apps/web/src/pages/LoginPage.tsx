@@ -109,7 +109,7 @@ export default function LoginPage() {
     void completeMagicLink()
       .then((cred) => {
         if (cred) {
-          toast.success('Acesso concluído. Bem-vindo ao Aurial.');
+          toast.success('Acesso concluído. Bem-vindo ao radinho.online.');
           void navigate('/', { replace: true });
         }
       })

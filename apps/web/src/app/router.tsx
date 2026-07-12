@@ -23,7 +23,7 @@ function Placeholder() {
     <EmptyState
       icon={Construction}
       title="Página em construção"
-      description="Esta área do Aurial chega em breve."
+      description="Esta área do radinho.online chega em breve."
       className="min-h-[60vh] justify-center"
     />
   );

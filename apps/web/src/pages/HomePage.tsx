@@ -300,7 +300,7 @@ export default function HomePage() {
       {trendingTracks.length > 0 && (
         <SectionCarousel
           title={genreLabel ? `Em alta na comunidade · ${genreLabel}` : 'Em alta na comunidade'}
-          subtitle="As mais curtidas pelos ouvintes do Aurial"
+          subtitle="As mais curtidas pelos ouvintes do radinho"
         >
           {trendingTracks.map((track, index) => (
             <MediaCard

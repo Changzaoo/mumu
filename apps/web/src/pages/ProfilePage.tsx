@@ -66,7 +66,9 @@ function EditProfileDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Editar perfil</DialogTitle>
-          <DialogDescription>Como você aparece para outras pessoas no Aurial.</DialogDescription>
+          <DialogDescription>
+            Como você aparece para outras pessoas no radinho.online.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={(e) => void onSubmit(e)} className="space-y-4" noValidate>
           <div className="space-y-1.5">

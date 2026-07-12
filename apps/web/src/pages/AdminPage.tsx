@@ -605,7 +605,7 @@ export default function AdminPage() {
           <p className="font-mono text-sm tabular-nums tracking-widest text-fg-subtle">403</p>
           <h1 className="text-3xl font-bold tracking-tight text-fg">Área restrita</h1>
           <p className="mx-auto max-w-sm text-sm text-fg-muted">
-            Este painel é exclusivo para a equipe de moderação do Aurial.
+            Este painel é exclusivo para a equipe de moderação do radinho.online.
           </p>
         </div>
         <Button variant="accent" onClick={() => void navigate('/')}>

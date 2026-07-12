@@ -452,7 +452,7 @@ export default function SettingsPage() {
               </Avatar>
               <div className="min-w-0">
                 <p className="line-clamp-1 text-sm font-medium text-fg">
-                  {profile?.displayName ?? user.displayName ?? 'Conta Aurial'}
+                  {profile?.displayName ?? user.displayName ?? 'Conta radinho'}
                   {profile?.isPremium && (
                     <Badge variant="accent" className="ml-2 align-middle">
                       Premium
@@ -510,7 +510,7 @@ export default function SettingsPage() {
         <div className="flex items-center gap-3">
           <AurialMark className="size-8" />
           <div>
-            <p className="text-sm font-medium text-fg">Aurial</p>
+            <p className="text-sm font-medium text-fg">radinho.online</p>
             <p className="font-mono text-xs tabular-nums text-fg-muted">versão {APP_VERSION}</p>
           </div>
         </div>

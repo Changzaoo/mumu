@@ -15,7 +15,7 @@
   --fg: 240 6% 7%;
   --fg-muted: 240 4% 42%;
   --fg-subtle: 240 4% 62%;
-  --accent: 160 84% 36%;
+  --accent: 240 6% 10%; /* near-black — B&W accent (light) */
   --accent-fg: 0 0% 100%;
   --info: 221 83% 53%;
   --danger: 0 72% 46%;
@@ -30,8 +30,8 @@
   --fg: 0 0% 98%;
   --fg-muted: 240 4% 64%;
   --fg-subtle: 240 4% 40%;
-  --accent: 158 84% 52%; /* #17E68C — Aurial Green */
-  --accent-fg: 160 90% 8%;
+  --accent: 0 0% 98%; /* white — B&W accent (dark) */
+  --accent-fg: 240 6% 7%;
   --info: 217 92% 65%;
   --danger: 0 72% 58%;
   --border: 240 5% 14%;
