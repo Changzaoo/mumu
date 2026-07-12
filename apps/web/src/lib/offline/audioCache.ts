@@ -1,19 +1,29 @@
 /**
- * Offline audio cache — persists downloaded tracks in the Cache Storage API so
- * they play without a network connection.
+ * Offline audio store — persists downloaded tracks so they play without a
+ * network connection.
  *
- * Cache Storage requires a secure context (HTTPS or localhost). Over plain
- * http:// on a LAN IP it is unavailable — callers must check `cacheSupported()`
- * and degrade gracefully (the download UI hides itself).
- *
- * Audio is stored as a reconstructed same-origin Response keyed by a synthetic
- * path, so cross-origin/opaque responses never leak into the cache.
+ * Backed by IndexedDB (not the Cache Storage API): IndexedDB is available in
+ * non-secure contexts too, so downloads work from anywhere — the HTTPS deploy,
+ * a plain http:// LAN address on a phone, any device. Blobs are keyed by
+ * trackId in a single object store.
  */
-const CACHE_NAME = 'aurial-audio-v1';
+const DB_NAME = 'aurial-offline';
+const DB_VERSION = 1;
+const STORE = 'audio';
 
-const keyFor = (trackId: string): string => `/__offline_audio__/${encodeURIComponent(trackId)}`;
+let dbPromise: Promise<IDBDatabase> | null = null;
 
+/** True when offline downloads are usable (IndexedDB present). */
 export function cacheSupported(): boolean {
+  return typeof indexedDB !== 'undefined';
+}
+
+/**
+ * True when the Cache Storage API is usable (secure context only). Used by the
+ * local-library store, which keeps its own Cache Storage backend — unlike
+ * downloads, which use IndexedDB so they work in non-secure contexts too.
+ */
+export function cacheStorageSupported(): boolean {
   return (
     typeof caches !== 'undefined' &&
     typeof window !== 'undefined' &&
@@ -21,36 +31,59 @@ export function cacheSupported(): boolean {
   );
 }
 
-export async function putAudio(trackId: string, blob: Blob): Promise<void> {
-  const cache = await caches.open(CACHE_NAME);
-  await cache.put(
-    keyFor(trackId),
-    new Response(blob, {
-      headers: {
-        'Content-Type': blob.type || 'audio/mpeg',
-        'Content-Length': String(blob.size),
-      },
-    }),
+function openDb(): Promise<IDBDatabase> {
+  if (dbPromise) return dbPromise;
+  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_NAME, DB_VERSION);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
+  });
+  return dbPromise;
+}
+
+function tx<T>(
+  mode: IDBTransactionMode,
+  run: (store: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
+  return openDb().then(
+    (db) =>
+      new Promise<T>((resolve, reject) => {
+        const transaction = db.transaction(STORE, mode);
+        const request = run(transaction.objectStore(STORE));
+        request.onsuccess = () => resolve(request.result);
+        transaction.onerror = () => reject(transaction.error ?? request.error);
+        transaction.onabort = () => reject(transaction.error ?? new Error('Transaction aborted'));
+      }),
   );
+}
+
+export async function putAudio(trackId: string, blob: Blob): Promise<void> {
+  await tx('readwrite', (store) => store.put(blob, trackId));
 }
 
 export async function getAudioBlob(trackId: string): Promise<Blob | null> {
   if (!cacheSupported()) return null;
-  const cache = await caches.open(CACHE_NAME);
-  const res = await cache.match(keyFor(trackId));
-  return res ? await res.blob() : null;
+  const blob = await tx<Blob | undefined>('readonly', (store) => store.get(trackId)).catch(
+    () => undefined,
+  );
+  return blob instanceof Blob ? blob : null;
 }
 
 export async function hasAudio(trackId: string): Promise<boolean> {
   if (!cacheSupported()) return false;
-  const cache = await caches.open(CACHE_NAME);
-  return (await cache.match(keyFor(trackId))) !== undefined;
+  const key = await tx<IDBValidKey | undefined>('readonly', (store) => store.getKey(trackId)).catch(
+    () => undefined,
+  );
+  return key !== undefined;
 }
 
 export async function deleteAudio(trackId: string): Promise<void> {
   if (!cacheSupported()) return;
-  const cache = await caches.open(CACHE_NAME);
-  await cache.delete(keyFor(trackId));
+  await tx('readwrite', (store) => store.delete(trackId)).catch(() => undefined);
 }
 
 export interface StorageEstimate {

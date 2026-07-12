@@ -1,13 +1,15 @@
 /**
  * Download manager — orchestrates offline downloads of full audio files.
  *
- * Flow: fetch `track.downloadUrl` (single-file audio, auth header) with byte
- * progress → store the blob in Cache Storage → index it in the registry →
+ * Flow: fetch `track.downloadUrl` (single-file audio, auth header only for our
+ * own API) with byte progress → store the blob in IndexedDB → index it in the
+ * registry →
  * keep an in-memory object URL the AudioEngine plays from (via playerStore's
  * local source resolver). Playback prefers the local copy whenever present,
  * so downloaded tracks work fully offline.
  */
 import type { TrackDto } from '@aurial/shared';
+import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
 import {
   cacheSupported,
@@ -47,7 +49,7 @@ export function subscribeDownloadManager(listener: () => void): () => void {
   };
 }
 
-/** True when offline downloads are usable (secure context + Cache Storage). */
+/** True when offline downloads are usable (IndexedDB present). */
 export function downloadsSupported(): boolean {
   return cacheSupported();
 }
@@ -80,9 +82,14 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
 
   try {
     void requestPersistentStorage();
+    // Only send the Firebase token to our own API. Catalog tracks download
+    // straight from the third-party Audius CDN — an Authorization header there
+    // leaks the token and trips a CORS preflight the CDN rejects.
     const headers: Record<string, string> = {};
-    const token = await getIdToken().catch(() => null);
-    if (token) headers.Authorization = `Bearer ${token}`;
+    if (isFirstPartyUrl(track.downloadUrl)) {
+      const token = await getIdToken().catch(() => null);
+      if (token) headers.Authorization = `Bearer ${token}`;
+    }
 
     const res = await fetch(track.downloadUrl, { headers });
     if (!res.ok || !res.body) throw new Error(`Falha no download (${res.status})`);
@@ -135,7 +142,7 @@ export async function removeDownloadedTrack(trackId: string): Promise<void> {
 let hydrated = false;
 
 /**
- * Rebuild the object-URL map from Cache Storage on boot so downloaded tracks
+ * Rebuild the object-URL map from IndexedDB on boot so downloaded tracks
  * are immediately playable (including offline). Drops registry entries whose
  * audio the browser has evicted.
  */

@@ -11,7 +11,7 @@
  * Works fully offline and, on secure origins, survives reloads via Cache Storage.
  */
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
-import { cacheSupported } from '@/lib/offline/audioCache';
+import { cacheStorageSupported } from '@/lib/offline/audioCache';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
 
@@ -67,7 +67,7 @@ function write(entries: LibraryEntry[]): void {
 
 // ── Cache Storage helpers ───────────────────────────────────────
 async function putBlob(id: string, blob: Blob): Promise<void> {
-  if (!cacheSupported()) return;
+  if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
   await store.put(
     keyFor(id),
@@ -81,14 +81,14 @@ async function putBlob(id: string, blob: Blob): Promise<void> {
 }
 
 async function getBlob(id: string): Promise<Blob | null> {
-  if (!cacheSupported()) return null;
+  if (!cacheStorageSupported()) return null;
   const store = await caches.open(CACHE_NAME);
   const res = await store.match(keyFor(id));
   return res ? await res.blob() : null;
 }
 
 async function deleteBlob(id: string): Promise<void> {
-  if (!cacheSupported()) return;
+  if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
   await store.delete(keyFor(id));
 }
@@ -411,7 +411,7 @@ let hydrated = false;
 export async function hydrate(): Promise<void> {
   if (hydrated) return;
   hydrated = true;
-  if (!cacheSupported()) return;
+  if (!cacheStorageSupported()) return;
   for (const entry of read()) {
     if (blobUrls.has(entry.track.id)) continue;
     const blob = await getBlob(entry.track.id).catch(() => null);

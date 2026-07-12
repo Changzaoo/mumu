@@ -32,7 +32,11 @@ const EMPTY: DownloadEntry[] = [];
 export default function DownloadsPage() {
   const downloads = useSyncExternalStore(subscribeDownloads, getDownloads, () => EMPTY);
   // Re-render when a download completes/removes (manager owns object URLs).
-  useSyncExternalStore(subscribeDownloadManager, () => downloads.length, () => 0);
+  useSyncExternalStore(
+    subscribeDownloadManager,
+    () => downloads.length,
+    () => 0,
+  );
   const likes = useTrackLikes();
   const online = useOnline();
   const playQueue = usePlayerStore((s) => s.playQueue);
@@ -90,8 +94,7 @@ export default function DownloadsPage() {
 
       {!supported && (
         <div className="rounded-xl border border-border bg-bg-elevated/60 px-4 py-3 text-sm text-fg-muted">
-          Downloads offline exigem uma conexão segura (HTTPS) ou o app instalado. Acesse o Aurial por
-          HTTPS para baixar faixas.
+          Este navegador não permite armazenamento offline — os downloads ficam indisponíveis aqui.
         </div>
       )}
 
@@ -102,7 +105,7 @@ export default function DownloadsPage() {
           description={
             supported
               ? 'Abra o menu de uma faixa e escolha “Baixar para ouvir offline”.'
-              : 'Disponível ao acessar o Aurial por HTTPS.'
+              : 'Armazenamento offline indisponível neste navegador.'
           }
         />
       ) : (

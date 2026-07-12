@@ -125,12 +125,33 @@ export const api = {
     request<T, M>('DELETE', path, options),
 };
 
+/** The origin the Aurial API is served from. */
+export function apiOrigin(): string {
+  try {
+    return new URL(BASE_URL, window.location.origin).origin;
+  } catch {
+    return window.location.origin;
+  }
+}
+
+/**
+ * True when `url` targets our own API origin — the only place the Firebase ID
+ * token may be sent. Third-party URLs (e.g. the Audius CDN) must never receive
+ * it: doing so leaks the token AND triggers a CORS preflight they reject.
+ */
+export function isFirstPartyUrl(url: string): boolean {
+  try {
+    return new URL(url, window.location.origin).origin === apiOrigin();
+  } catch {
+    return false;
+  }
+}
+
 /** Resolve a possibly-relative stream/media URL against the API origin. */
 export function resolveMediaUrl(url: string): string {
   if (/^https?:\/\//.test(url)) return url;
   try {
-    const origin = new URL(BASE_URL, window.location.origin).origin;
-    return new URL(url, origin).toString();
+    return new URL(url, apiOrigin()).toString();
   } catch {
     return url;
   }
