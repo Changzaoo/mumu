@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
 import {
@@ -211,7 +212,19 @@ export function NowPlaying() {
                 <h1 className="line-clamp-2 text-2xl font-bold tracking-tight text-fg">
                   {track.title}
                 </h1>
-                <p className="mt-1 line-clamp-1 text-sm text-fg-muted">{trackArtistNames(track)}</p>
+                <p className="mt-1 line-clamp-1 text-sm text-fg-muted">
+                  {track.id.startsWith('local:') && track.artists[0]?.name ? (
+                    <Link
+                      to={`/artista/${encodeURIComponent(track.artists[0].name)}`}
+                      onClick={() => setOpen(false)}
+                      className="transition-colors hover:text-fg hover:underline"
+                    >
+                      {trackArtistNames(track)}
+                    </Link>
+                  ) : (
+                    trackArtistNames(track)
+                  )}
+                </p>
                 {credits && !lyricsOpen && (
                   <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
                     {(() => {

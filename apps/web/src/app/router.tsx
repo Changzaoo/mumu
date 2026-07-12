@@ -73,6 +73,9 @@ export const router = createBrowserRouter([
           { path: '/playlist/:id', element: page('PlaylistPage', 'detail') },
           { path: '/album/:id', element: page('AlbumPage', 'detail') },
           { path: '/artist/:id', element: page('ArtistPage', 'detail') },
+          // Local library (Spotify-style) — grouped from on-device metadata.
+          { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
+          { path: '/disco/:key', element: page('AlbumLocalPage', 'detail') },
           { path: '/profile/:handle', element: page('ProfilePage', 'detail') },
           { path: '/settings', element: page('SettingsPage', 'list') },
           { path: '/admin/*', element: page('AdminPage', 'list') },

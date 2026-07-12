@@ -465,6 +465,106 @@ export function findBySource(sourceUrl: string): TrackDto | null {
   return read().find((e) => e.sourceUrl === sourceUrl)?.track ?? null;
 }
 
+// ── album / artist organization (Spotify-style, all from local metadata) ──
+function normName(value: string): string {
+  return value
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+export interface LocalAlbum {
+  key: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  tracks: TrackDto[];
+}
+
+const albumKey = (title: string, artist: string): string =>
+  `${normName(title)}|${normName(artist)}`;
+
+/**
+ * Group library tracks into real albums. A track counts as an album only when
+ * its album has 2+ tracks OR the album name differs from the track name (a
+ * genuine release, not an auto "Title - Single"). Everything else is a single.
+ */
+export function albumGroups(): LocalAlbum[] {
+  const byKey = new Map<string, LocalAlbum>();
+  for (const entry of read()) {
+    const t = entry.track;
+    const title = t.album?.title?.trim();
+    if (!title) continue;
+    const artist = t.artists[0]?.name?.trim() || 'Desconhecido';
+    const key = albumKey(title, artist);
+    let album = byKey.get(key);
+    if (!album) {
+      album = { key, title, artist, coverUrl: t.coverUrl ?? null, tracks: [] };
+      byKey.set(key, album);
+    }
+    album.tracks.push(t);
+    if (!album.coverUrl && t.coverUrl) album.coverUrl = t.coverUrl;
+  }
+  return [...byKey.values()].filter(
+    (a) => a.tracks.length >= 2 || normName(a.title) !== normName(a.tracks[0]?.title ?? ''),
+  );
+}
+
+export function albumByKey(key: string): LocalAlbum | null {
+  return albumGroups().find((a) => a.key === key) ?? null;
+}
+
+/** Tracks that aren't part of a real album (singles + album-less). */
+export function singles(): TrackDto[] {
+  const inAlbum = new Set<string>();
+  for (const album of albumGroups()) for (const t of album.tracks) inAlbum.add(t.id);
+  return read()
+    .map((e) => e.track)
+    .filter((t) => !inAlbum.has(t.id));
+}
+
+export interface LocalArtist {
+  name: string;
+  coverUrl: string | null;
+  trackCount: number;
+}
+
+/** Every distinct artist across the library, most tracks first. */
+export function artists(): LocalArtist[] {
+  const byName = new Map<string, LocalArtist>();
+  for (const entry of read()) {
+    for (const artist of entry.track.artists) {
+      const name = artist.name?.trim();
+      if (!name || name === 'Desconhecido') continue;
+      const key = normName(name);
+      let a = byName.get(key);
+      if (!a) {
+        a = { name, coverUrl: entry.track.coverUrl ?? null, trackCount: 0 };
+        byName.set(key, a);
+      }
+      a.trackCount += 1;
+      if (!a.coverUrl && entry.track.coverUrl) a.coverUrl = entry.track.coverUrl;
+    }
+  }
+  return [...byName.values()].sort((x, y) => y.trackCount - x.trackCount);
+}
+
+/** All tracks credited to an artist (by name). */
+export function artistTracks(name: string): TrackDto[] {
+  const key = normName(name);
+  return read()
+    .map((e) => e.track)
+    .filter((t) => t.artists.some((a) => normName(a.name) === key));
+}
+
+/** Real albums by a given artist. */
+export function artistAlbums(name: string): LocalAlbum[] {
+  const key = normName(name);
+  return albumGroups().filter((a) => normName(a.artist) === key);
+}
+
 /** Object URL for a local track, or null when its audio is not available. */
 export function localAudioUrl(id: string): string | null {
   return blobUrls.get(id) ?? null;

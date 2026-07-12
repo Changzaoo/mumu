@@ -2,13 +2,12 @@
  * /library — playlists / albums / artists tabs with filter and
  * create-playlist dialog (RHF + zod createPlaylistSchema).
  */
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { Disc3, Heart, Library, ListMusic, Loader2, MicVocal, Plus, Search } from 'lucide-react';
 import { createPlaylistSchema, type CreatePlaylistInput } from '@aurial/shared';
-import { ArtistCard } from '@/components/media/ArtistCard';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
@@ -30,7 +29,10 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useCreatePlaylist, useLibrary, useLocalPlaylists } from '@/features/library/api';
+import * as localLibrary from '@/lib/local/localLibrary';
 import { formatCompactNumber } from '@/lib/utils';
+
+const EMPTY_LIB: localLibrary.LibraryEntry[] = [];
 
 function CreatePlaylistDialog({
   open,
@@ -145,10 +147,24 @@ function LikedTile({ count }: { count: number }) {
 export default function LibraryPage() {
   const { data, isLoading, isError, refetch } = useLibrary();
   const localPlaylists = useLocalPlaylists();
+  const libEntries = useSyncExternalStore(
+    localLibrary.subscribe,
+    localLibrary.list,
+    () => EMPTY_LIB,
+  );
   const [filter, setFilter] = useState('');
   const [createOpen, setCreateOpen] = useState(false);
 
   const term = filter.trim().toLowerCase();
+
+  const localAlbums = useMemo(() => {
+    const all = localLibrary.albumGroups();
+    return term ? all.filter((a) => `${a.title} ${a.artist}`.toLowerCase().includes(term)) : all;
+  }, [libEntries, term]);
+  const localArtists = useMemo(() => {
+    const all = localLibrary.artists();
+    return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
+  }, [libEntries, term]);
   const filtered = useMemo(() => {
     // On-device playlists first, then any server ones.
     const playlists = [...localPlaylists, ...(data?.playlists ?? [])];
@@ -237,21 +253,23 @@ export default function LibraryPage() {
             </TabsContent>
 
             <TabsContent value="albums">
-              {filtered.albums.length === 0 ? (
+              {localAlbums.length === 0 ? (
                 <EmptyState
                   icon={Disc3}
-                  title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum salvo'}
-                  description={term ? undefined : 'Salve álbuns para encontrá-los aqui.'}
+                  title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum ainda'}
+                  description={
+                    term ? undefined : 'Baixe músicas de um álbum e elas se agrupam aqui.'
+                  }
                 />
               ) : (
                 <div className={grid}>
-                  {filtered.albums.map((album) => (
+                  {localAlbums.map((album) => (
                     <MediaCard
-                      key={album.id}
+                      key={album.key}
                       title={album.title}
-                      subtitle={album.artists.map((a) => a.name).join(', ')}
+                      subtitle={album.artist}
                       imageUrl={album.coverUrl}
-                      to={`/album/${album.id}`}
+                      to={`/disco/${encodeURIComponent(album.key)}`}
                     />
                   ))}
                 </div>
@@ -259,16 +277,23 @@ export default function LibraryPage() {
             </TabsContent>
 
             <TabsContent value="artists">
-              {filtered.artists.length === 0 ? (
+              {localArtists.length === 0 ? (
                 <EmptyState
                   icon={MicVocal}
-                  title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista seguido'}
-                  description={term ? undefined : 'Siga artistas para acompanhar seus lançamentos.'}
+                  title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista ainda'}
+                  description={term ? undefined : 'Baixe músicas e seus artistas aparecem aqui.'}
                 />
               ) : (
                 <div className={grid}>
-                  {filtered.artists.map((artist) => (
-                    <ArtistCard key={artist.id} artist={artist} />
+                  {localArtists.map((artist) => (
+                    <MediaCard
+                      key={artist.name}
+                      shape="round"
+                      title={artist.name}
+                      subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
+                      imageUrl={artist.coverUrl}
+                      to={`/artista/${encodeURIComponent(artist.name)}`}
+                    />
                   ))}
                 </div>
               )}

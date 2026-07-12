@@ -421,7 +421,16 @@ export default function DevicePage() {
                         {track.title}
                       </p>
                       <p className="line-clamp-1 text-[13px] text-fg-muted">
-                        {track.artists[0]?.name ?? 'Desconhecido'}
+                        {track.artists[0]?.name && track.artists[0].name !== 'Desconhecido' ? (
+                          <Link
+                            to={`/artista/${encodeURIComponent(track.artists[0].name)}`}
+                            className="transition-colors hover:text-fg hover:underline"
+                          >
+                            {track.artists[0].name}
+                          </Link>
+                        ) : (
+                          (track.artists[0]?.name ?? 'Desconhecido')
+                        )}
                       </p>
                     </div>
                   </div>
