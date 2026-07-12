@@ -30,6 +30,10 @@ const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
 // other devices on your LAN / Tailscale (see README — mind the exposure).
 const HOST = process.env.HOST ?? '127.0.0.1';
+// Optional shared secret. When set, /import requires it (Authorization: Bearer
+// <token> or X-Aurial-Token). REQUIRED before exposing the helper publicly
+// (e.g. Tailscale Funnel) — otherwise anyone could run downloads on your box.
+const IMPORT_TOKEN = (process.env.IMPORT_TOKEN ?? '').trim();
 const MAX_MINUTES = Number(process.env.AURIAL_MAX_MINUTES ?? 90);
 const MAX_BYTES = 600 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
@@ -196,7 +200,10 @@ function applyCors(req, res) {
     res.setHeader('Vary', 'Origin');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Aurial-Token, ngrok-skip-browser-warning',
+  );
   res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title');
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])
@@ -217,6 +224,13 @@ function readBody(req) {
 
 const log = (...a) => console.log('[aurial-importer]', ...a);
 
+/** True when the request carries the shared secret (or none is configured). */
+function authed(req) {
+  if (!IMPORT_TOKEN) return true;
+  const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
+}
+
 async function main() {
   const ytdlp = await resolveYtdlp();
   log(`yt-dlp: ${ytdlp}`);
@@ -233,11 +247,23 @@ async function main() {
 
       if (req.method === 'GET' && pathname === '/health') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
-        res.end(JSON.stringify({ ok: true, service: 'aurial-importer', hosts: HOSTS }));
+        res.end(
+          JSON.stringify({
+            ok: true,
+            service: 'aurial-importer',
+            hosts: HOSTS,
+            authRequired: Boolean(IMPORT_TOKEN),
+          }),
+        );
         return;
       }
 
       if (req.method === 'POST' && pathname === '/import') {
+        if (!authed(req)) {
+          res.writeHead(401, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Token inválido ou ausente.' }));
+          return;
+        }
         let job;
         try {
           const { url } = JSON.parse((await readBody(req)) || '{}');

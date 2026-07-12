@@ -40,7 +40,13 @@ import {
 import { searchSongs } from '@/lib/catalog/itunes';
 import { appleSongToDto } from '@/lib/catalog/mapApple';
 import * as localLibrary from '@/lib/local/localLibrary';
-import { helperUrl, probeHelper, setHelperUrl } from '@/lib/local/importerHelper';
+import {
+  helperToken,
+  helperUrl,
+  probeHelper,
+  setHelperToken,
+  setHelperUrl,
+} from '@/lib/local/importerHelper';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { estimateStorage } from '@/lib/offline/audioCache';
 import { cn, formatBytes, formatDuration } from '@/lib/utils';
@@ -100,6 +106,7 @@ export default function DevicePage() {
   const [helperOn, setHelperOn] = useState<boolean | null>(null);
   const [cfgOpen, setCfgOpen] = useState(false);
   const [helperInput, setHelperInput] = useState(() => helperUrl());
+  const [tokenInput, setTokenInput] = useState(() => helperToken());
   const [probing, setProbing] = useState(false);
 
   const [listOpen, setListOpen] = useState(false);
@@ -124,6 +131,7 @@ export default function DevicePage() {
 
   const saveHelper = async (): Promise<void> => {
     setHelperUrl(helperInput.trim());
+    setHelperToken(tokenInput.trim());
     setProbing(true);
     try {
       const h = await probeHelper();
@@ -331,14 +339,26 @@ export default function DevicePage() {
                   <code className="rounded bg-fg/10 px-1">http://127.0.0.1:8787</code> (no seu PC)
                   ou o seu endereço Tailscale HTTPS.
                 </p>
+                <Input
+                  value={helperInput}
+                  onChange={(e) => setHelperInput(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && void saveHelper()}
+                  placeholder="https://…ts.net:8443"
+                  inputMode="url"
+                  spellCheck={false}
+                />
+                <p className="text-[11px] text-fg-muted">
+                  Token de acesso (se o importador estiver exposto na internet):
+                </p>
                 <div className="flex gap-2">
                   <Input
-                    value={helperInput}
-                    onChange={(e) => setHelperInput(e.target.value)}
+                    type="password"
+                    value={tokenInput}
+                    onChange={(e) => setTokenInput(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && void saveHelper()}
-                    placeholder="https://…ts.net:8443"
-                    inputMode="url"
+                    placeholder="token (opcional)"
                     spellCheck={false}
+                    autoComplete="off"
                   />
                   <Button size="sm" disabled={probing} onClick={() => void saveHelper()}>
                     {probing ? <Loader2 className="animate-spin" /> : 'Salvar'}

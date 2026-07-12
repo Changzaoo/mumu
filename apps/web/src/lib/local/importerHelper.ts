@@ -10,6 +10,7 @@
  */
 const DEFAULT_HELPER_URL = 'http://127.0.0.1:8787';
 const STORAGE_KEY = 'aurial:importerUrl';
+const TOKEN_KEY = 'aurial:importerToken';
 
 /** Media hosts the helper can resolve — mirrors HOSTS in apps/importer/server.mjs. */
 export const IMPORTER_HOSTS: ReadonlyArray<{ match: RegExp; label: string }> = [
@@ -41,6 +42,36 @@ export function setHelperUrl(url: string): void {
   }
 }
 
+/** Shared secret for a publicly-exposed helper (empty = none). */
+export function helperToken(): string {
+  try {
+    return window.localStorage.getItem(TOKEN_KEY) ?? '';
+  } catch {
+    return '';
+  }
+}
+
+export function setHelperToken(token: string): void {
+  try {
+    window.localStorage.setItem(TOKEN_KEY, token.trim());
+  } catch {
+    /* private mode — ignore */
+  }
+}
+
+/**
+ * Base headers for every helper request: the auth token (when set) plus the
+ * ngrok bypass header (harmless off-ngrok) so a public ngrok tunnel doesn't
+ * serve its browser-warning interstitial instead of our response.
+ */
+function baseHeaders(): Record<string, string> {
+  const token = helperToken();
+  return {
+    'ngrok-skip-browser-warning': '1',
+    ...(token ? { Authorization: `Bearer ${token}` } : {}),
+  };
+}
+
 export interface HelperHealth {
   ok: boolean;
   hosts: string[];
@@ -51,7 +82,10 @@ export async function probeHelper(): Promise<HelperHealth | null> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 1500);
   try {
-    const res = await fetch(`${helperUrl()}/health`, { signal: controller.signal });
+    const res = await fetch(`${helperUrl()}/health`, {
+      signal: controller.signal,
+      headers: baseHeaders(),
+    });
     if (!res.ok) return null;
     const body = (await res.json()) as Partial<HelperHealth>;
     return body.ok ? { ok: true, hosts: body.hosts ?? [] } : null;
@@ -73,7 +107,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
   try {
     res = await fetch(`${helperUrl()}/import`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', ...baseHeaders() },
       body: JSON.stringify({ url }),
     });
   } catch {

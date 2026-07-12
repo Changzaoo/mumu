@@ -1,9 +1,10 @@
 /**
- * / — Catalog home. Two data sources, clearly separated:
+ * / — Catalog home, Spotify-shaped. Two data sources, clearly separated:
  *
  *  1. PRIMARY "Em alta" — the real mainstream hits from the Apple/iTunes charts
  *     (Drake, The Weeknd, Shakira…). These play as legal **30-second previews**
- *     (stream-only, never downloadable). Genre chips switch the chart.
+ *     (stream-only, never downloadable). Genre chips switch the chart, and a set
+ *     of per-genre rows fill the page with covers.
  *  2. SECONDARY "Grátis e completas" — the Audius public catalog: independent
  *     artists whose tracks play in **full length** and can be downloaded/offline.
  *
@@ -13,7 +14,7 @@
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { HardDriveDownload, Play, Share2 } from 'lucide-react';
+import { HardDriveDownload, Music, Play, Share2 } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
@@ -30,12 +31,88 @@ import {
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
+/** Genres shown as their own home rows (Spotify-style density). */
+const HOME_GENRE_ROWS = [1332, 1123, 14, 18, 7, 21] as const;
+
 function localGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 6) return 'Boa noite';
   if (hour < 12) return 'Bom dia';
   if (hour < 18) return 'Boa tarde';
   return 'Boa noite';
+}
+
+/** Compact 2-col grid of the top hits — the home "jump back in" tiles. */
+function QuickTiles({ tracks, onPlay }: { tracks: TrackDto[]; onPlay: (index: number) => void }) {
+  if (tracks.length === 0) return null;
+  return (
+    <div className="grid grid-cols-1 gap-2 px-3 sm:grid-cols-2 lg:grid-cols-3">
+      {tracks.slice(0, 6).map((track, index) => (
+        <button
+          key={track.id}
+          type="button"
+          onClick={() => onPlay(index)}
+          className="glass group flex items-center gap-3 overflow-hidden rounded-lg pr-3 text-left transition-colors duration-200 hover:bg-fg/10"
+        >
+          <span className="grid size-14 shrink-0 place-items-center overflow-hidden bg-fg/6 text-fg-subtle">
+            {track.coverUrl ? (
+              <img src={track.coverUrl} alt="" loading="lazy" className="size-full object-cover" />
+            ) : (
+              <Music className="size-5" />
+            )}
+          </span>
+          <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-semibold text-fg">
+            {track.title}
+          </span>
+          <span className="grid size-8 shrink-0 translate-x-1 place-items-center rounded-full bg-accent text-bg opacity-0 transition-[opacity,transform] duration-200 group-hover:translate-x-0 group-hover:opacity-100">
+            <Play className="size-4 fill-current" />
+          </span>
+        </button>
+      ))}
+    </div>
+  );
+}
+
+/** One per-genre carousel — each owns its query so rows load independently. */
+function GenreRow({ genreId, label }: { genreId: number; label: string }) {
+  const q = useTopSongsByGenre(genreId, 'br');
+  const playQueue = usePlayerStore((s) => s.playQueue);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
+  const tracks = q.data ?? [];
+
+  if (q.isLoading) {
+    return (
+      <section className="space-y-3">
+        <h2 className="px-3 text-xl font-semibold tracking-tight text-fg">{label}</h2>
+        <div className="no-scrollbar -mx-1 flex gap-1 overflow-x-hidden px-2">
+          {Array.from({ length: 6 }, (_, i) => (
+            <div key={i} className="w-40 shrink-0 p-3 md:w-44">
+              <div className="aspect-square animate-pulse rounded-lg bg-fg/6" />
+              <div className="mt-3 h-3 w-3/4 animate-pulse rounded bg-fg/6" />
+            </div>
+          ))}
+        </div>
+      </section>
+    );
+  }
+  if (tracks.length === 0) return null;
+
+  return (
+    <SectionCarousel title={label} subtitle="Em alta no gênero">
+      {tracks.map((track, index) => (
+        <MediaCard
+          key={track.id}
+          title={track.title}
+          subtitle={trackArtistNames(track)}
+          imageUrl={track.coverUrl}
+          previewOnly={track.previewOnly}
+          playing={currentTrack?.id === track.id && isPlaying}
+          onPlay={() => playQueue(tracks, index, { source: 'home' })}
+        />
+      ))}
+    </SectionCarousel>
+  );
 }
 
 function DeviceShortcut() {
@@ -104,6 +181,14 @@ export default function HomePage() {
       >
         {localGreeting()}
       </motion.h1>
+
+      {/* Jump-back-in quick tiles (overall top only). */}
+      {genreId === null && (
+        <QuickTiles
+          tracks={tracks}
+          onPlay={(index) => playQueue(tracks, index, { source: 'home' })}
+        />
+      )}
 
       {/* Genre chips (Apple charts) */}
       <div
@@ -199,6 +284,13 @@ export default function HomePage() {
         As faixas em alta tocam em prévia de 30s (Apple). As faixas do acervo grátis tocam
         completas.
       </p>
+
+      {/* Per-genre rows — only on the "Tudo" view, to keep the page alive. */}
+      {genreId === null &&
+        HOME_GENRE_ROWS.map((id) => {
+          const label = APPLE_GENRES.find((g) => g.id === id)?.label ?? '';
+          return <GenreRow key={id} genreId={id} label={label} />;
+        })}
 
       {/* SECONDARY: Audius full-length free catalog. */}
       {free.length > 0 && (

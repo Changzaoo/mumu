@@ -39,13 +39,15 @@ shows a green “Importador local” badge and accepts YouTube / SoundCloud / Vi
 
 ## Config (env vars)
 
-| Var                  | Default                           | Purpose                                   |
-| -------------------- | --------------------------------- | ----------------------------------------- |
-| `PORT`               | `8787`                            | Listen port (localhost only)              |
-| `YTDLP_PATH`         | auto                              | Path to the yt-dlp binary                 |
-| `FFMPEG_PATH`        | PATH                              | Path to ffmpeg                            |
-| `ALLOW_ORIGIN`       | dev + `https://aurial.vercel.app` | CSV of browser origins allowed to call it |
-| `AURIAL_MAX_MINUTES` | `90`                              | Reject sources longer than this           |
+| Var                  | Default                           | Purpose                                                            |
+| -------------------- | --------------------------------- | ------------------------------------------------------------------ |
+| `PORT`               | `8787`                            | Listen port                                                        |
+| `HOST`               | `127.0.0.1`                       | Bind address (`0.0.0.0`/tailnet IP to expose)                      |
+| `IMPORT_TOKEN`       | _(none)_                          | Shared secret required on `/import` — set before exposing publicly |
+| `YTDLP_PATH`         | auto                              | Path to the yt-dlp binary                                          |
+| `FFMPEG_PATH`        | PATH                              | Path to ffmpeg                                                     |
+| `ALLOW_ORIGIN`       | dev + `https://aurial.vercel.app` | CSV of browser origins allowed to call it                          |
+| `AURIAL_MAX_MINUTES` | `90`                              | Reject sources longer than this                                    |
 
 ## Endpoints
 
