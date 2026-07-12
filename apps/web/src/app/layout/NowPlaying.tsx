@@ -4,6 +4,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AudioLines,
   ChevronDown,
+  Film,
   Gauge,
   ListMusic,
   MicVocal,
@@ -86,6 +87,7 @@ export function NowPlaying() {
   const setSleepTimer = useSettingsStore((s) => s.setSleepTimer);
 
   const [visualizer, setVisualizer] = useState(false);
+  const [miniclip, setMiniclip] = useState(false);
   const isTouch = useMediaQuery('(pointer: coarse)');
   const dominant = useDominantColor(track?.coverUrl);
   const glow = track?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
@@ -131,6 +133,19 @@ export function NowPlaying() {
               background: `radial-gradient(55% 60% at 50% 35%, ${glow} 0%, transparent 70%)`,
             }}
           />
+
+          {/* Miniclip — a "living cover" ambient background (Spotify Canvas-like). */}
+          {miniclip && track.coverUrl && (
+            <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
+              <img
+                src={track.coverUrl}
+                alt=""
+                className="size-full object-cover opacity-40 blur-2xl"
+                style={{ animation: 'kenburns 22s ease-in-out infinite' }}
+              />
+              <div className="absolute inset-0 bg-bg/50" />
+            </div>
+          )}
 
           {/* Header */}
           <header className="relative z-10 flex h-16 shrink-0 items-center justify-between px-4 md:px-8">
@@ -258,6 +273,14 @@ export function NowPlaying() {
                   }}
                 >
                   <AudioLines />
+                </IconButton>
+                <IconButton
+                  aria-label="Miniclip"
+                  size="sm"
+                  active={miniclip}
+                  onClick={() => setMiniclip((v) => !v)}
+                >
+                  <Film />
                 </IconButton>
                 <IconButton
                   aria-label="Equalizador"
