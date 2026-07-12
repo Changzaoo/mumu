@@ -21,6 +21,7 @@ import {
   VolumeX,
 } from 'lucide-react';
 import type { WaveformDto } from '@aurial/shared';
+import { fetchCredits } from '@/lib/credits/credits';
 import { LyricsView } from '@/components/media/LyricsView';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
@@ -92,6 +93,13 @@ export function NowPlaying() {
   const dominant = useDominantColor(track?.coverUrl);
   const glow = track?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
   const { data: waveform } = useWaveform(open ? track?.id : undefined);
+  const { data: credits } = useQuery({
+    queryKey: ['credits', track?.id],
+    enabled: open && Boolean(track),
+    staleTime: Infinity,
+    retry: false,
+    queryFn: () => fetchCredits(track as NonNullable<typeof track>),
+  });
 
   const sourceLabels: Record<string, string> = {
     album: 'do álbum',
@@ -204,6 +212,22 @@ export function NowPlaying() {
                   {track.title}
                 </h1>
                 <p className="mt-1 line-clamp-1 text-sm text-fg-muted">{trackArtistNames(track)}</p>
+                {credits && !lyricsOpen && (
+                  <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
+                    {(() => {
+                      const primary = track.artists[0]?.name;
+                      const extra = credits.performers.filter((p) => p !== primary);
+                      return extra.length > 0 ? <p>Com {extra.join(', ')}</p> : null;
+                    })()}
+                    {credits.composers.length > 0 && (
+                      <p>Composição: {credits.composers.join(', ')}</p>
+                    )}
+                    {credits.lyricists.length > 0 && <p>Letra: {credits.lyricists.join(', ')}</p>}
+                    {credits.producers.length > 0 && (
+                      <p>Produção: {credits.producers.join(', ')}</p>
+                    )}
+                  </div>
+                )}
               </div>
 
               {/* Seek: waveform when peaks exist, slider otherwise */}
