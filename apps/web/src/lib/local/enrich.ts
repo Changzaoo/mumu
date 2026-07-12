@@ -9,7 +9,8 @@
  * so enrichment can never block or break an import.
  */
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
-import { aiCleanSongTitle } from '@/lib/ai/ai';
+import { aiCleanSongTitle, aiSplitArtists } from '@/lib/ai/ai';
+import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 
 export interface CleanQuery {
   title: string;
@@ -21,8 +22,24 @@ export interface CleanQuery {
 export interface EnrichedMeta {
   title: string;
   artist: string;
+  /** The credit split into distinct artists (never merged into one). */
+  artists: string[];
   album: string | null;
   coverUrl: string | null;
+}
+
+/**
+ * Resolve a combined artist credit into distinct names: heuristic first, then —
+ * only for ambiguous credits (comma/slash that might be part of a name) — the
+ * AI arbitrates. Guarantees a two-artist song is never attributed to one.
+ */
+async function resolveArtists(credit: string, title: string): Promise<string[]> {
+  const heuristic = splitArtistNames(credit);
+  if (creditIsAmbiguous(credit)) {
+    const ai = await aiSplitArtists(credit, title);
+    if (ai && ai.length > 0) return ai;
+  }
+  return heuristic;
 }
 
 /** Junk fragments that filenames/streaming titles carry but iTunes does not. */
@@ -155,6 +172,7 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
       return {
         title: best.trackName,
         artist: best.artistName,
+        artists: await resolveArtists(best.artistName, best.trackName),
         album: best.collectionName || null,
         coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
       };

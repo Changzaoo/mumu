@@ -18,6 +18,7 @@ import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
+import { splitArtistNames } from '@/lib/local/artists';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
@@ -141,14 +142,18 @@ function probeDurationMs(file: Blob): Promise<number> {
 function localTrackDto(
   id: string,
   title: string,
-  artist: string,
+  artist: string | string[],
   durationMs: number,
   album: string | null,
   coverUrl: string | null,
 ): TrackDto {
   // Sanitize every externally-derived string/URL that lands in a track.
   const safeTitle = sanitizeText(title) || 'Faixa';
-  const safeArtist = sanitizeText(artist, 120) || 'Desconhecido';
+  // A credit can name several artists ("A feat. B", "A & B"). Split it so the
+  // track is attributed to EACH artist — never merged into one.
+  const rawNames = Array.isArray(artist) ? artist : splitArtistNames(artist);
+  const names = rawNames.map((n) => sanitizeText(n, 120)).filter(Boolean);
+  const safeNames = names.length > 0 ? names : ['Desconhecido'];
   const safeAlbum = album ? sanitizeText(album, 200) || null : null;
   const cover = safeCoverUrl(coverUrl);
   return {
@@ -165,7 +170,12 @@ function localTrackDto(
     album: safeAlbum
       ? { id: `local-album:${id}`, title: safeAlbum, slug: '', coverUrl: cover }
       : null,
-    artists: [{ id: `local-artist:${id}`, name: safeArtist, slug: '', imageUrl: null }],
+    artists: safeNames.map((name, i) => ({
+      id: `local-artist:${id}:${i}`,
+      name,
+      slug: '',
+      imageUrl: null,
+    })),
     streamUrl: null,
     downloadUrl: null,
     uploadedByUserId: null,
@@ -295,7 +305,7 @@ function applyEnrichment(entry: LibraryEntry, meta: EnrichedMeta): LibraryEntry 
   const track = localTrackDto(
     entry.track.id,
     meta.title,
-    meta.artist,
+    meta.artists, // distinct artists (never merged into one)
     entry.track.durationMs,
     meta.album,
     // Keep the existing (thumbnail) cover if iTunes has none.
