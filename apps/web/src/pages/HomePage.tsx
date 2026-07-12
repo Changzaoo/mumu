@@ -16,6 +16,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import { HardDriveDownload, Music, Play, Share2 } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
+import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
@@ -181,6 +182,9 @@ export default function HomePage() {
       >
         {localGreeting()}
       </motion.h1>
+
+      {/* Your downloaded / on-device tracks (only when you have some). */}
+      {genreId === null && <DeviceTracksRow limit={12} />}
 
       {/* Jump-back-in quick tiles (overall top only). */}
       {genreId === null && (

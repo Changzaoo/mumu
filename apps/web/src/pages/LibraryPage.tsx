@@ -9,6 +9,7 @@ import { zodResolver } from '@hookform/resolvers/zod';
 import { Disc3, Heart, Library, ListMusic, Loader2, MicVocal, Plus, Search } from 'lucide-react';
 import { createPlaylistSchema, type CreatePlaylistInput } from '@aurial/shared';
 import { ArtistCard } from '@/components/media/ArtistCard';
+import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
@@ -157,16 +158,6 @@ export default function LibraryPage() {
     };
   }, [data, term]);
 
-  if (isLoading) return <PageSkeleton variant="home" />;
-  if (isError) {
-    return (
-      <div className="py-16">
-        <ErrorState onRetry={() => void refetch()} />
-      </div>
-    );
-  }
-  if (!data) return null;
-
   const grid = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
 
   return (
@@ -180,86 +171,100 @@ export default function LibraryPage() {
         </Button>
       </header>
 
-      <div className="relative max-w-xs">
-        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
-        <Input
-          value={filter}
-          onChange={(event) => setFilter(event.target.value)}
-          placeholder="Filtrar na biblioteca"
-          aria-label="Filtrar na biblioteca"
-          className="pl-9"
-        />
-      </div>
+      {/* Your downloaded / on-device tracks — always shown, independent of the
+          central library API (not deployed in the P2P topology). */}
+      <DeviceTracksRow />
 
-      <Tabs defaultValue="playlists">
-        <TabsList>
-          <TabsTrigger value="playlists">Playlists</TabsTrigger>
-          <TabsTrigger value="albums">Álbuns</TabsTrigger>
-          <TabsTrigger value="artists">Artistas</TabsTrigger>
-        </TabsList>
-
-        <TabsContent value="playlists">
-          {filtered.playlists.length === 0 && !(!term && data.likedTracksCount > 0) ? (
-            <EmptyState
-              icon={ListMusic}
-              title={term ? 'Nenhuma playlist com esse nome' : 'Nenhuma playlist ainda'}
-              description={term ? undefined : 'Crie a primeira e monte sua trilha sonora.'}
-              action={
-                term ? undefined : (
-                  <Button variant="accent" size="sm" onClick={() => setCreateOpen(true)}>
-                    <Plus /> Criar playlist
-                  </Button>
-                )
-              }
+      {isLoading ? (
+        <PageSkeleton variant="home" />
+      ) : isError ? (
+        <div className="py-16">
+          <ErrorState onRetry={() => void refetch()} />
+        </div>
+      ) : !data ? null : (
+        <>
+          <div className="relative max-w-xs">
+            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+            <Input
+              value={filter}
+              onChange={(event) => setFilter(event.target.value)}
+              placeholder="Filtrar na biblioteca"
+              aria-label="Filtrar na biblioteca"
+              className="pl-9"
             />
-          ) : (
-            <div className={grid}>
-              {!term && <LikedTile count={data.likedTracksCount} />}
-              {filtered.playlists.map((playlist) => (
-                <PlaylistCard key={playlist.id} playlist={playlist} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
+          </div>
 
-        <TabsContent value="albums">
-          {filtered.albums.length === 0 ? (
-            <EmptyState
-              icon={Disc3}
-              title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum salvo'}
-              description={term ? undefined : 'Salve álbuns para encontrá-los aqui.'}
-            />
-          ) : (
-            <div className={grid}>
-              {filtered.albums.map((album) => (
-                <MediaCard
-                  key={album.id}
-                  title={album.title}
-                  subtitle={album.artists.map((a) => a.name).join(', ')}
-                  imageUrl={album.coverUrl}
-                  to={`/album/${album.id}`}
+          <Tabs defaultValue="playlists">
+            <TabsList>
+              <TabsTrigger value="playlists">Playlists</TabsTrigger>
+              <TabsTrigger value="albums">Álbuns</TabsTrigger>
+              <TabsTrigger value="artists">Artistas</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="playlists">
+              {filtered.playlists.length === 0 && !(!term && data.likedTracksCount > 0) ? (
+                <EmptyState
+                  icon={ListMusic}
+                  title={term ? 'Nenhuma playlist com esse nome' : 'Nenhuma playlist ainda'}
+                  description={term ? undefined : 'Crie a primeira e monte sua trilha sonora.'}
+                  action={
+                    term ? undefined : (
+                      <Button variant="accent" size="sm" onClick={() => setCreateOpen(true)}>
+                        <Plus /> Criar playlist
+                      </Button>
+                    )
+                  }
                 />
-              ))}
-            </div>
-          )}
-        </TabsContent>
+              ) : (
+                <div className={grid}>
+                  {!term && <LikedTile count={data.likedTracksCount} />}
+                  {filtered.playlists.map((playlist) => (
+                    <PlaylistCard key={playlist.id} playlist={playlist} />
+                  ))}
+                </div>
+              )}
+            </TabsContent>
 
-        <TabsContent value="artists">
-          {filtered.artists.length === 0 ? (
-            <EmptyState
-              icon={MicVocal}
-              title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista seguido'}
-              description={term ? undefined : 'Siga artistas para acompanhar seus lançamentos.'}
-            />
-          ) : (
-            <div className={grid}>
-              {filtered.artists.map((artist) => (
-                <ArtistCard key={artist.id} artist={artist} />
-              ))}
-            </div>
-          )}
-        </TabsContent>
-      </Tabs>
+            <TabsContent value="albums">
+              {filtered.albums.length === 0 ? (
+                <EmptyState
+                  icon={Disc3}
+                  title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum salvo'}
+                  description={term ? undefined : 'Salve álbuns para encontrá-los aqui.'}
+                />
+              ) : (
+                <div className={grid}>
+                  {filtered.albums.map((album) => (
+                    <MediaCard
+                      key={album.id}
+                      title={album.title}
+                      subtitle={album.artists.map((a) => a.name).join(', ')}
+                      imageUrl={album.coverUrl}
+                      to={`/album/${album.id}`}
+                    />
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+
+            <TabsContent value="artists">
+              {filtered.artists.length === 0 ? (
+                <EmptyState
+                  icon={MicVocal}
+                  title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista seguido'}
+                  description={term ? undefined : 'Siga artistas para acompanhar seus lançamentos.'}
+                />
+              ) : (
+                <div className={grid}>
+                  {filtered.artists.map((artist) => (
+                    <ArtistCard key={artist.id} artist={artist} />
+                  ))}
+                </div>
+              )}
+            </TabsContent>
+          </Tabs>
+        </>
+      )}
 
       <CreatePlaylistDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
