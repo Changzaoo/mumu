@@ -1,0 +1,11 @@
+{
+  "name": "@aurial/importer",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Aurial local importer helper (yt-dlp → MP3) — personal self-host use only",
+  "scripts": {
+    "start": "node server.mjs",
+    "dev": "node server.mjs"
+  }
+}

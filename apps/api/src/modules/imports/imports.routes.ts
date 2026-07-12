@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createImportSchema, idParamSchema } from '@aurial/shared';
+import { createImportSchema, createLinkImportSchema, idParamSchema } from '@aurial/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { uploadRateLimit } from '../../middlewares/rateLimit.js';
 import { validate } from '../../middlewares/validate.js';
@@ -14,6 +14,19 @@ importsRoutes.post(
   validate({ body: createImportSchema }),
   importsController.create,
 );
+
+// Self-hosted link importer (yt-dlp). The service itself refuses when
+// LINK_IMPORT_ENABLED is false — this route is always mounted so the web can
+// read the capability from GET /imports/config.
+importsRoutes.get('/config', requireAuth, importsController.config);
+importsRoutes.post(
+  '/link',
+  requireAuth,
+  uploadRateLimit,
+  validate({ body: createLinkImportSchema }),
+  importsController.createLink,
+);
+
 importsRoutes.get(
   '/:id/status',
   requireAuth,

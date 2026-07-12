@@ -4,7 +4,7 @@
  * GET /uploads/:id/status (react-query refetchInterval).
  */
 import { useCallback, useRef, useState } from 'react';
-import { AudioLines, FileMusic, Loader2, Trash2, UploadCloud } from 'lucide-react';
+import { AudioLines, FileMusic, Link2, Loader2, Trash2, UploadCloud } from 'lucide-react';
 import { toast } from 'sonner';
 import {
   ACCEPTED_AUDIO_EXT,
@@ -17,6 +17,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { Badge, type BadgeProps } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   Dialog,
   DialogContent,
@@ -26,7 +27,13 @@ import {
   DialogTitle,
 } from '@/components/ui/dialog';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useDeleteUpload, useUploads, useUploadStatus } from '@/features/library/api';
+import {
+  useDeleteUpload,
+  useImportConfig,
+  useLinkImport,
+  useUploads,
+  useUploadStatus,
+} from '@/features/library/api';
 import { getIdToken } from '@/lib/firebase';
 import { cn, formatBytes } from '@/lib/utils';
 
@@ -156,6 +163,64 @@ function UploadRow({ upload, onDelete }: { upload: UploadDto; onDelete: (u: Uplo
   );
 }
 
+/**
+ * Self-hosted link importer (yt-dlp). Only rendered when the API reports the
+ * capability. Downloads run on the operator's own server and are meant for
+ * content you are authorized to download — that responsibility is the user's.
+ */
+function LinkImportCard() {
+  const { data: config } = useImportConfig();
+  const linkImport = useLinkImport();
+  const [url, setUrl] = useState('');
+
+  if (!config?.linkImportEnabled) return null;
+
+  const submit = (): void => {
+    const value = url.trim();
+    if (!value) return;
+    linkImport.mutate(value, { onSuccess: () => setUrl('') });
+  };
+
+  return (
+    <section className="space-y-3 rounded-xl border border-border bg-bg-elevated p-4">
+      <div className="flex items-center gap-2">
+        <Link2 className="size-4 text-fg-muted" />
+        <h2 className="text-sm font-semibold text-fg">Adicionar por link</h2>
+      </div>
+      <form
+        className="flex flex-col gap-2 sm:flex-row"
+        onSubmit={(event) => {
+          event.preventDefault();
+          submit();
+        }}
+      >
+        <Input
+          type="url"
+          inputMode="url"
+          value={url}
+          onChange={(event) => setUrl(event.target.value)}
+          placeholder="Cole o link (YouTube, SoundCloud…)"
+          aria-label="Link para importar"
+          disabled={linkImport.isPending}
+          className="sm:flex-1"
+        />
+        <Button type="submit" disabled={linkImport.isPending || url.trim() === ''}>
+          {linkImport.isPending && <Loader2 className="animate-spin" />}
+          Importar
+        </Button>
+      </form>
+      <p className="text-xs text-fg-muted">
+        Baixa o áudio no seu servidor e converte para MP3, entrando na biblioteca. Use apenas para
+        conteúdo que você tem direito de baixar (seus próprios vídeos, Creative Commons, domínio
+        público). Você é responsável pelo que importa.
+      </p>
+      {config.hosts.length > 0 && (
+        <p className="text-[11px] text-fg-subtle">Suporta: {config.hosts.join(', ')}.</p>
+      )}
+    </section>
+  );
+}
+
 export default function UploadsPage() {
   const { data: uploads, isLoading, isError, refetch } = useUploads();
   const deleteUpload = useDeleteUpload();
@@ -209,6 +274,8 @@ export default function UploadsPage() {
           entram na sua biblioteca.
         </p>
       </header>
+
+      <LinkImportCard />
 
       {/* Drop zone */}
       <div

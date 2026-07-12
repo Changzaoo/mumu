@@ -13,6 +13,7 @@
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import { cacheSupported } from '@/lib/offline/audioCache';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
+import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
 
 const CACHE_NAME = 'aurial-library-v1';
 const STORAGE_KEY = 'aurial:library';
@@ -294,10 +295,26 @@ export async function addByUrl(url: string): Promise<TrackDto> {
   }
 
   const host = parsed.hostname.toLowerCase();
+
+  // Media pages (YouTube, SoundCloud, Vimeo, Bandcamp…): a browser cannot fetch
+  // their audio directly (CORS + player signature). If the user is running the
+  // local importer helper (apps/importer), route the link through it — it fetches
+  // + converts to MP3 on their own machine and we store it like any local track.
+  if (importerHostLabel(host)) {
+    const { blob, title } = await importViaHelper(parsed.toString());
+    const track = await saveBlobAsLocalTrack(blob, {
+      title: `${title}.mp3`,
+      sourceUrl: parsed.toString(),
+    });
+    void enrichLocalTrack(track.id).catch(() => undefined);
+    return track;
+  }
+
+  // Other streaming platforms we can't (and won't) resolve.
   const streaming = STREAMING_HOSTS.find((s) => s.match.test(host));
   if (streaming) {
     throw new Error(
-      `Isso é uma página do ${streaming.label}, não um arquivo. Cole o link direto de um arquivo de áudio ou importe o arquivo.`,
+      `Não dá para importar do ${streaming.label} por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.`,
     );
   }
 

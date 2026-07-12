@@ -42,6 +42,37 @@ export const createImportSchema = z.object({
 });
 export type CreateImportInput = z.infer<typeof createImportSchema>;
 
+/**
+ * Media-page hosts the self-hosted link importer knows how to resolve via
+ * yt-dlp. This list is descriptive (shown in the UI); the server re-validates.
+ * NOTE: importing is gated behind LINK_IMPORT_ENABLED and is intended for
+ * content the operator is authorized to download (own uploads, Creative
+ * Commons, public domain). It is never enabled on the public deployment.
+ */
+export const LINK_IMPORT_HOSTS = [
+  'youtube.com',
+  'youtu.be',
+  'music.youtube.com',
+  'soundcloud.com',
+  'vimeo.com',
+  'bandcamp.com',
+] as const;
+
+/** Max source duration accepted by the link importer (guards runaway jobs). */
+export const LINK_IMPORT_MAX_DURATION_SECONDS = 90 * 60;
+
+export const createLinkImportSchema = z.object({
+  url: z.string().url('Cole uma URL válida (http:// ou https://).').max(2048),
+});
+export type CreateLinkImportInput = z.infer<typeof createLinkImportSchema>;
+
+/** Capability probe so the web only shows the importer when the server enables it. */
+export const importConfigSchema = z.object({
+  linkImportEnabled: z.boolean(),
+  hosts: z.array(z.string()),
+});
+export type ImportConfigDto = z.infer<typeof importConfigSchema>;
+
 export const importJobSchema = z.object({
   id: z.string(),
   provider: importProviderSchema,

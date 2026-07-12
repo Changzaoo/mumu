@@ -40,6 +40,21 @@ const envSchema = z
     FFMPEG_PATH: optionalString,
     FFPROBE_PATH: optionalString,
 
+    /**
+     * Self-hosted link importer (yt-dlp). OFF by default and intended for
+     * single-operator, self-hosted use with content you are authorized to
+     * download. Never enable this on a public deployment.
+     */
+    LINK_IMPORT_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('false')
+      .transform((v) => v === 'true'),
+    /** Path to the yt-dlp binary; falls back to `yt-dlp` on PATH. */
+    YTDLP_PATH: optionalString,
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {

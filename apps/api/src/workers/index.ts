@@ -2,9 +2,11 @@ import type { Worker } from 'bullmq';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { redis, createBullConnection } from '../infra/redis/redis.js';
+import { env } from '../config/index.js';
 import { closeQueues } from '../infra/queue/queues.js';
 import { createAudioProcessWorker } from './audioProcess.worker.js';
 import { createImportSyncWorker } from './importSync.worker.js';
+import { createLinkImportWorker } from './linkImport.worker.js';
 import { createNotificationsWorker } from './notifications.worker.js';
 
 const connection = createBullConnection();
@@ -13,6 +15,8 @@ const workers: Worker[] = [
   createAudioProcessWorker(connection),
   createImportSyncWorker(connection),
   createNotificationsWorker(connection),
+  // Only spin up the link-import consumer where the operator enabled it.
+  ...(env.LINK_IMPORT_ENABLED ? [createLinkImportWorker(connection)] : []),
 ];
 
 for (const worker of workers) {

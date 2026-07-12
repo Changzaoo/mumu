@@ -24,12 +24,17 @@ RUN pnpm --filter @aurial/shared build \
   && pnpm --filter @aurial/api db:generate \
   && pnpm --filter @aurial/api build
 
-# ── runtime: node + ffmpeg ──────────────────────────────────────────────
+# ── runtime: node + ffmpeg + yt-dlp ─────────────────────────────────────
 # Dev deps are kept on purpose: the compose `migrate` one-shot runs
 # `npx prisma migrate deploy` inside this same image and needs the prisma CLI.
+# yt-dlp is the standalone (self-contained) Linux binary — used ONLY by the
+# self-hosted link importer, which is gated behind LINK_IMPORT_ENABLED.
 FROM node:22-slim AS runtime
 RUN apt-get update \
-  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates \
+  && apt-get install -y --no-install-recommends ffmpeg openssl ca-certificates wget \
+  && wget -q https://github.com/yt-dlp/yt-dlp/releases/latest/download/yt-dlp_linux -O /usr/local/bin/yt-dlp \
+  && chmod a+rx /usr/local/bin/yt-dlp \
+  && apt-get purge -y wget && apt-get autoremove -y \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 COPY --from=build /app /app

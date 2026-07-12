@@ -24,6 +24,7 @@ import type {
   CreatePlaylistInput,
   CursorMeta,
   HistoryEntryDto,
+  ImportConfigDto,
   LibraryDto,
   PlaylistDto,
   TrackDto,
@@ -339,6 +340,41 @@ export function useUploadStatus(upload: UploadDto): UseQueryResult<UploadDto> {
     initialData: upload,
     refetchInterval: processing ? 2_000 : false,
     queryFn: async () => (await api.get<UploadDto>(`/uploads/${upload.id}/status`)).data,
+  });
+}
+
+// ── Link import (self-hosted yt-dlp) ────────────────────────────
+
+/** Whether this server exposes the link importer, and which hosts it accepts. */
+export function useImportConfig(): UseQueryResult<ImportConfigDto> {
+  return useQuery({
+    queryKey: ['import-config'],
+    staleTime: 5 * 60_000,
+    retry: false,
+    queryFn: async (): Promise<ImportConfigDto> => {
+      try {
+        return (await api.get<ImportConfigDto>('/imports/config')).data;
+      } catch {
+        // API offline / signed out / feature absent — just hide the importer.
+        return { linkImportEnabled: false, hosts: [] };
+      }
+    },
+  });
+}
+
+/** Queue a link import; the returned pending upload flows into the uploads list. */
+export function useLinkImport(): UseMutationResult<UploadDto, Error, string> {
+  const queryClient = useQueryClient();
+  return useMutation({
+    mutationFn: async (url: string) => (await api.post<UploadDto>('/imports/link', { url })).data,
+    onSuccess: (upload) => {
+      queryClient.setQueryData<UploadDto[]>(['uploads'], (old) =>
+        old ? [upload, ...old] : [upload],
+      );
+      void queryClient.invalidateQueries({ queryKey: ['uploads'] });
+      toast('Baixando do link — processando');
+    },
+    onError: (error) => toast.error(error.message),
   });
 }
 

@@ -5,6 +5,7 @@ import { createBullConnection } from '../redis/redis.js';
 export const QUEUE_NAMES = {
   audioProcess: 'audio-process',
   importSync: 'import-sync',
+  linkImport: 'link-import',
   notifications: 'notifications',
 } as const;
 
@@ -25,6 +26,15 @@ export interface ImportSyncJobData {
   folderPath?: string;
 }
 
+export interface LinkImportJobData {
+  /** Pre-created Upload row this download feeds into. */
+  uploadId: string;
+  userId: string;
+  /** Reserved storage key the downloaded audio will be written to. */
+  rawKey: string;
+  url: string;
+}
+
 export interface NotificationJobData {
   userId: string;
   type: string;
@@ -36,6 +46,7 @@ export interface NotificationJobData {
 interface QueueSet {
   audioProcess: Queue<AudioProcessJobData>;
   importSync: Queue<ImportSyncJobData>;
+  linkImport: Queue<LinkImportJobData>;
   notifications: Queue<NotificationJobData>;
 }
 
@@ -59,6 +70,15 @@ export function getQueues(): QueueSet {
         },
       }),
       importSync: new Queue(QUEUE_NAMES.importSync, { connection, defaultJobOptions }),
+      linkImport: new Queue(QUEUE_NAMES.linkImport, {
+        connection,
+        // Downloads can transiently fail (network / throttling) — retry once.
+        defaultJobOptions: {
+          ...defaultJobOptions,
+          attempts: 2,
+          backoff: { type: 'exponential', delay: 15_000 },
+        },
+      }),
       notifications: new Queue(QUEUE_NAMES.notifications, {
         connection,
         defaultJobOptions: {
@@ -80,6 +100,10 @@ export async function enqueueImportSync(data: ImportSyncJobData): Promise<void> 
   await getQueues().importSync.add('sync', data, { jobId: data.importJobId });
 }
 
+export async function enqueueLinkImport(data: LinkImportJobData): Promise<void> {
+  await getQueues().linkImport.add('download', data, { jobId: data.uploadId });
+}
+
 export async function enqueueNotification(data: NotificationJobData): Promise<void> {
   await getQueues().notifications.add('notify', data);
 }
@@ -89,6 +113,7 @@ export async function closeQueues(): Promise<void> {
   await Promise.allSettled([
     queues.audioProcess.close(),
     queues.importSync.close(),
+    queues.linkImport.close(),
     queues.notifications.close(),
   ]);
   queues = null;
