@@ -24,6 +24,7 @@ import {
   Upload,
 } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
+import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';
@@ -294,6 +295,9 @@ export default function DevicePage() {
           </button>
         </div>
       </div>
+
+      {/* Link-imported tracks shared by the community. */}
+      <CommunityTracksRow limit={20} />
 
       {/* My lists */}
       {lists.length > 0 && (

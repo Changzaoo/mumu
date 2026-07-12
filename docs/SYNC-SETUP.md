@@ -47,4 +47,9 @@ Firebase → **Authentication → Settings → Authorized domains** → ensure
   there until re-imported. (This was the "library-only" option you chose.)
 - **Trending:** liking a track increments a global, genre-bucketed counter
   (one vote per user). Home shows the top liked tracks overall and per genre.
+- **Community library:** when you import a track by link it's published to a
+  shared `sharedTracks` collection everyone can see ("Adicionadas pela
+  comunidade" on Home / No dispositivo). Tapping one re-imports it (via the
+  importer + the stored link) and plays it. Re-publish the rules after pulling
+  this change so `sharedTracks` is allowed.
 - **Offline / signed out:** everything keeps working locally; sync just pauses.

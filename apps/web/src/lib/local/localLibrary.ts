@@ -13,6 +13,7 @@
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import { cacheStorageSupported } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
@@ -27,6 +28,8 @@ export interface LibraryEntry {
   addedAt: string;
   sizeBytes: number;
   mimeType: string;
+  /** Original media link (YouTube/direct file) — lets any device re-import it. */
+  sourceUrl?: string;
 }
 
 // ── in-memory state ─────────────────────────────────────────────
@@ -284,6 +287,8 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   const enriched = applyEnrichment(current, meta);
   patchEntry(id, enriched);
   prefetchLyrics(enriched.track); // fetch synced lyrics with the corrected name
+  // Refresh the community entry with the corrected name + cover.
+  if (enriched.sourceUrl) publishSharedTrack(enriched.track, enriched.sourceUrl);
   return true;
 }
 
@@ -323,7 +328,16 @@ async function saveBlobAsLocalTrack(
   // iTunes enrichment may upgrade it to a clean album cover afterwards.
   const track = localTrackDto(id, title, artist, durationMs, null, opts.coverUrl ?? null);
   await putBlob(id, blob).catch(() => undefined);
-  addEntry({ track, addedAt: new Date().toISOString(), sizeBytes: blob.size, mimeType }, blob);
+  addEntry(
+    {
+      track,
+      addedAt: new Date().toISOString(),
+      sizeBytes: blob.size,
+      mimeType,
+      ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
+    },
+    blob,
+  );
   return track;
 }
 
@@ -358,6 +372,7 @@ export async function addByUrl(url: string): Promise<TrackDto> {
       coverUrl,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
+    publishSharedTrack(track, parsed.toString()); // share with the community
     pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;
   }
@@ -394,6 +409,7 @@ export async function addByUrl(url: string): Promise<TrackDto> {
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'faixa');
   const track = await saveBlobAsLocalTrack(blob, { title: fileName, sourceUrl: parsed.toString() });
   void enrichLocalTrack(track.id).catch(() => undefined);
+  publishSharedTrack(track, parsed.toString()); // share with the community
   return track;
 }
 
@@ -403,6 +419,11 @@ export function list(): LibraryEntry[] {
 
 export function has(id: string): boolean {
   return read().some((e) => e.track.id === id);
+}
+
+/** A locally-stored track imported from the same source URL, if any. */
+export function findBySource(sourceUrl: string): TrackDto | null {
+  return read().find((e) => e.sourceUrl === sourceUrl)?.track ?? null;
 }
 
 /** Object URL for a local track, or null when its audio is not available. */

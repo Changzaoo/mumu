@@ -16,6 +16,7 @@ import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import { HardDriveDownload, Music, Play, Share2 } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
+import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
@@ -291,6 +292,9 @@ export default function HomePage() {
         As faixas em alta tocam em prévia de 30s (Apple). As faixas do acervo grátis tocam
         completas.
       </p>
+
+      {/* Link-imported tracks shared by other users. */}
+      {genreId === null && <CommunityTracksRow limit={20} />}
 
       {/* Community trending — powered by everyone's likes (Firestore). */}
       {trendingTracks.length > 0 && (
