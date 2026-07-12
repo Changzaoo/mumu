@@ -48,9 +48,8 @@ import {
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
-import { useUpdateMe } from '@/features/profile/api';
 import { useAuthUser } from '@/hooks/useAuthUser';
-import { api } from '@/lib/api';
+import * as localHistory from '@/lib/local/localHistory';
 import { logout } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { useSettingsStore, type ThemeSetting } from '@/stores/settingsStore';
@@ -182,21 +181,10 @@ export default function SettingsPage() {
   const playbackRate = usePlayerStore((s) => s.playbackRate);
   const setActiveModal = useUiStore((s) => s.setActiveModal);
   const { user, profile } = useAuthUser();
-  const updateMe = useUpdateMe();
 
-  const [notifications, setNotifications] = useState(profile?.settings?.notifications ?? true);
-  const [privateSession, setPrivateSession] = useState(profile?.settings?.privateSession ?? false);
   const [deleteOpen, setDeleteOpen] = useState(false);
   const [clearHistoryOpen, setClearHistoryOpen] = useState(false);
   const [clearingHistory, setClearingHistory] = useState(false);
-
-  const patchAccountSetting = (partial: {
-    notifications?: boolean;
-    privateSession?: boolean;
-  }): void => {
-    if (!user) return;
-    updateMe.mutate({ settings: partial });
-  };
 
   const requestPush = async (): Promise<void> => {
     if (!('Notification' in window)) {
@@ -211,16 +199,12 @@ export default function SettingsPage() {
   const clearHistory = async (): Promise<void> => {
     setClearingHistory(true);
     try {
-      // Contract has no DELETE /me/history — try it, fall back to local cache clear.
-      await api.del('/me/history');
-      toast('Histórico apagado');
-    } catch {
+      localHistory.clear();
       queryClient.removeQueries({ queryKey: ['history'] });
-      toast('Histórico local limpo');
+      toast('Histórico apagado');
     } finally {
       setClearingHistory(false);
       setClearHistoryOpen(false);
-      void queryClient.invalidateQueries({ queryKey: ['history'] });
     }
   };
 
@@ -420,11 +404,10 @@ export default function SettingsPage() {
         >
           <Switch
             id="st-notifications"
-            checked={notifications}
-            disabled={!user}
+            checked={settings.notifications}
             onCheckedChange={(checked) => {
-              setNotifications(checked);
-              patchAccountSetting({ notifications: checked });
+              settings.setNotifications(checked);
+              saved();
             }}
           />
         </Row>
@@ -440,11 +423,10 @@ export default function SettingsPage() {
         <Row label="Sessão privada" hint="Não registra o que você ouve" htmlFor="st-private">
           <Switch
             id="st-private"
-            checked={privateSession}
-            disabled={!user}
+            checked={settings.privateSession}
             onCheckedChange={(checked) => {
-              setPrivateSession(checked);
-              patchAccountSetting({ privateSession: checked });
+              settings.setPrivateSession(checked);
+              saved();
             }}
           />
         </Row>

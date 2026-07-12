@@ -11,6 +11,7 @@ import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@aurial/
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { initMediaSession } from '@/lib/audio/mediaSession';
 import { api } from '@/lib/api';
+import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadManager';
@@ -458,6 +459,13 @@ export function initPlayerEngine(): void {
         sourceId: state.context?.sourceId,
         completed: false,
       };
+      // Record to on-device history unless a private session is active.
+      if (!useSettingsStore.getState().privateSession) {
+        localHistory.record(state.currentTrack, {
+          playedMs: input.playedMs,
+          source: input.source,
+        });
+      }
       void api.post('/me/history', input).catch(() => undefined);
       onPlayRecorded?.(input);
     }

@@ -6,10 +6,10 @@
  * treated as a user id for GET /users/:id (see features/profile/api.ts).
  */
 import { useState } from 'react';
-import { Link, useParams } from 'react-router';
+import { useParams } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Award, ExternalLink, ListMusic, Loader2, Pencil, UserMinus, UserPlus } from 'lucide-react';
+import { ExternalLink, ListMusic, Loader2, Pencil, UserMinus, UserPlus } from 'lucide-react';
 import { updateMeSchema, type MeDto, type UpdateMeInput } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
@@ -34,8 +34,8 @@ import {
   useProfileUser,
   useUpdateMe,
   useUserPlaylists,
-  useUserStats,
 } from '@/features/profile/api';
+import { useLocalPlaylists } from '@/features/library/api';
 import { formatCompactNumber } from '@/lib/utils';
 
 function EditProfileDialog({
@@ -105,89 +105,11 @@ function EditProfileDialog({
   );
 }
 
-function StatsSection() {
-  const stats = useUserStats(true);
-  if (stats.isLoading || stats.isError || !stats.data) return null;
-  const { totalListeningMs, topArtists, topTracks, badges } = stats.data;
-  const hours = Math.round(totalListeningMs / 3_600_000);
-
-  return (
-    <section aria-label="Estatísticas" className="space-y-4">
-      <h2 className="text-xl font-semibold tracking-tight text-fg">Sua escuta</h2>
-
-      {badges.length > 0 && (
-        <div className="flex flex-wrap gap-2" aria-label="Conquistas">
-          {badges.map((badge) => (
-            <Badge key={badge.id} variant="accent" className="gap-1.5 py-1">
-              <Award className="size-3.5" /> {badge.name}
-            </Badge>
-          ))}
-        </div>
-      )}
-
-      <div className="grid gap-4 sm:grid-cols-3">
-        <div className="rounded-xl border border-border bg-bg-elevated p-5">
-          <p className="font-mono text-3xl font-bold tabular-nums tracking-tight text-fg">
-            {hours}
-          </p>
-          <p className="mt-1 text-[13px] text-fg-muted">horas ouvidas</p>
-        </div>
-
-        <div className="rounded-xl border border-border bg-bg-elevated p-5">
-          <p className="mb-3 text-[13px] font-medium text-fg-muted">Artistas mais ouvidos</p>
-          <ul className="space-y-2">
-            {topArtists.slice(0, 3).map((artist) => (
-              <li key={artist.id}>
-                <Link
-                  to={`/artist/${artist.id}`}
-                  className="flex items-center gap-2.5 hover:underline"
-                >
-                  <Avatar className="size-7">
-                    {artist.imageUrl && <AvatarImage src={artist.imageUrl} alt="" />}
-                    <AvatarFallback>{artist.name.slice(0, 2)}</AvatarFallback>
-                  </Avatar>
-                  <span className="line-clamp-1 flex-1 text-sm text-fg">{artist.name}</span>
-                  <span className="font-mono text-xs tabular-nums text-fg-subtle">
-                    {formatCompactNumber(artist.plays)}
-                  </span>
-                </Link>
-              </li>
-            ))}
-          </ul>
-        </div>
-
-        <div className="rounded-xl border border-border bg-bg-elevated p-5">
-          <p className="mb-3 text-[13px] font-medium text-fg-muted">Faixas mais ouvidas</p>
-          <ul className="space-y-2">
-            {topTracks.slice(0, 3).map((track) => (
-              <li key={track.id} className="flex items-center gap-2.5">
-                <span className="size-7 shrink-0 overflow-hidden rounded-sm bg-fg/6">
-                  {track.coverUrl && (
-                    <img
-                      src={track.coverUrl}
-                      alt=""
-                      loading="lazy"
-                      className="size-full object-cover"
-                    />
-                  )}
-                </span>
-                <span className="line-clamp-1 flex-1 text-sm text-fg">{track.title}</span>
-                <span className="font-mono text-xs tabular-nums text-fg-subtle">
-                  {formatCompactNumber(track.plays)}
-                </span>
-              </li>
-            ))}
-          </ul>
-        </div>
-      </div>
-    </section>
-  );
-}
-
 export default function ProfilePage() {
   const { handle = '' } = useParams<{ handle: string }>();
   const { user, isOwn, isLoading, isError, refetch } = useProfileUser(handle);
-  const playlists = useUserPlaylists(user?.id);
+  const serverPlaylists = useUserPlaylists(user?.id);
+  const localPlaylists = useLocalPlaylists();
   const follow = useFollowUser(user?.id ?? '');
   const [editOpen, setEditOpen] = useState(false);
 
@@ -206,6 +128,8 @@ export default function ProfilePage() {
 
   const socialLinks = 'socialLinks' in user ? (user.socialLinks ?? {}) : {};
   const isFollowing = 'isFollowing' in user ? (user.isFollowing ?? false) : false;
+  // Own profile shows on-device playlists; other users' come from the server.
+  const shownPlaylists = isOwn ? localPlaylists : (serverPlaylists.data ?? []);
 
   return (
     <div className="space-y-8 py-4">
@@ -277,21 +201,17 @@ export default function ProfilePage() {
         </section>
       )}
 
-      {isOwn && <StatsSection />}
-
-      <section aria-label="Playlists públicas">
-        <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Playlists públicas</h2>
-        {playlists.isError && <ErrorState onRetry={() => void playlists.refetch()} />}
-        {playlists.data && playlists.data.length === 0 && (
+      <section aria-label="Playlists">
+        <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Playlists</h2>
+        {shownPlaylists.length === 0 ? (
           <EmptyState
             icon={ListMusic}
-            title="Nenhuma playlist pública"
-            description={isOwn ? 'Torne uma playlist pública para exibi-la aqui.' : undefined}
+            title="Nenhuma playlist"
+            description={isOwn ? 'Crie uma playlist para exibi-la aqui.' : undefined}
           />
-        )}
-        {playlists.data && playlists.data.length > 0 && (
+        ) : (
           <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6">
-            {playlists.data.map((playlist) => (
+            {shownPlaylists.map((playlist) => (
               <PlaylistCard key={playlist.id} playlist={playlist} />
             ))}
           </div>

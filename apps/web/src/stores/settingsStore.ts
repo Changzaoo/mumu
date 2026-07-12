@@ -35,6 +35,10 @@ export interface SettingsState {
   fontScale: number;
   highContrast: boolean;
   reducedMotion: ReducedMotionSetting;
+  /** Account-style prefs, kept on-device (no backend in the P2P topology). */
+  notifications: boolean;
+  /** When true, plays are not recorded to the local history. */
+  privateSession: boolean;
 
   setTheme: (theme: ThemeSetting) => void;
   setLanguage: (language: string) => void;
@@ -49,6 +53,8 @@ export interface SettingsState {
   setFontScale: (scale: number) => void;
   setHighContrast: (enabled: boolean) => void;
   setReducedMotion: (mode: ReducedMotionSetting) => void;
+  setNotifications: (enabled: boolean) => void;
+  setPrivateSession: (enabled: boolean) => void;
 }
 
 const FLAT_EQ: number[] = EQ_BANDS_HZ.map(() => 0);
@@ -98,6 +104,8 @@ export const useSettingsStore = create<SettingsState>()(
       fontScale: 1,
       highContrast: false,
       reducedMotion: 'system',
+      notifications: true,
+      privateSession: false,
 
       setTheme: (theme) => {
         set({ theme });
@@ -130,6 +138,8 @@ export const useSettingsStore = create<SettingsState>()(
         applyDomSettings(get());
       },
       setReducedMotion: (reducedMotion) => set({ reducedMotion }),
+      setNotifications: (notifications) => set({ notifications }),
+      setPrivateSession: (privateSession) => set({ privateSession }),
     }),
     {
       name: 'aurial:settings',

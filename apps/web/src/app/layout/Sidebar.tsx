@@ -10,8 +10,6 @@ import {
   Library,
   ListMusic,
   PanelLeft,
-  Podcast,
-  Radio,
   Search,
   Share2,
   Upload,
@@ -49,8 +47,6 @@ const LIBRARY_NAV: NavEntry[] = [
   { to: '/history', label: 'Histórico', icon: History },
   { to: '/downloads', label: 'Downloads', icon: Download },
   { to: '/uploads', label: 'Uploads', icon: Upload },
-  { to: '/radios', label: 'Rádios', icon: Radio },
-  { to: '/podcasts', label: 'Podcasts', icon: Podcast },
 ];
 
 function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {

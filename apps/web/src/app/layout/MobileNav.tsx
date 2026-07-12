@@ -10,8 +10,6 @@ import {
   Library,
   type LucideIcon,
   Menu,
-  Podcast,
-  Radio,
   Search,
   Share2,
   Upload,
@@ -55,8 +53,6 @@ const MENU: MenuGroup[] = [
       { to: '/history', label: 'Histórico', icon: History },
       { to: '/downloads', label: 'Downloads', icon: Download },
       { to: '/uploads', label: 'Uploads', icon: Upload },
-      { to: '/radios', label: 'Rádios', icon: Radio },
-      { to: '/podcasts', label: 'Podcasts', icon: Podcast },
     ],
   },
 ];

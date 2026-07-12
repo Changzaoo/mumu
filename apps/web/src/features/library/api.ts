@@ -22,7 +22,6 @@ import type {
   AlbumDto,
   ArtistDto,
   CreatePlaylistInput,
-  CursorMeta,
   HistoryEntryDto,
   ImportConfigDto,
   LibraryDto,
@@ -34,6 +33,8 @@ import { useAuthUser } from '@/hooks/useAuthUser';
 import { api } from '@/lib/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import type { LocalPlaylist } from '@/lib/local/localPlaylists';
+import * as localLikes from '@/lib/local/localLikes';
+import * as localHistory from '@/lib/local/localHistory';
 
 const EMPTY_LIBRARY: LibraryDto = {
   playlists: [],
@@ -111,23 +112,15 @@ interface CursorPage<T> {
   nextCursor: string | null;
 }
 
-async function fetchCursorPage<T>(
-  path: string,
-  cursor: string | undefined,
-): Promise<CursorPage<T>> {
-  const { data, meta } = await api.get<T[], CursorMeta>(path, {
-    query: { cursor, limit: 50 },
-  });
-  return { items: data, nextCursor: meta?.nextCursor ?? null };
-}
-
 export type LikedTracksResult = UseInfiniteQueryResult<InfiniteData<CursorPage<TrackDto>>>;
 
 export function useLikedTracks(): LikedTracksResult {
   return useInfiniteQuery({
     queryKey: ['liked-tracks'],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => fetchCursorPage<TrackDto>('/me/library/liked-tracks', pageParam),
+    // Likes live on-device — one local page, no network.
+    queryFn: (): Promise<CursorPage<TrackDto>> =>
+      Promise.resolve({ items: localLikes.list(), nextCursor: null }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
@@ -138,7 +131,9 @@ export function useHistory(): HistoryResult {
   return useInfiniteQuery({
     queryKey: ['history'],
     initialPageParam: undefined as string | undefined,
-    queryFn: ({ pageParam }) => fetchCursorPage<HistoryEntryDto>('/me/history', pageParam),
+    // History lives on-device — one local page, no network.
+    queryFn: (): Promise<CursorPage<HistoryEntryDto>> =>
+      Promise.resolve({ items: localHistory.list(), nextCursor: null }),
     getNextPageParam: (last) => last.nextCursor ?? undefined,
   });
 }
@@ -204,9 +199,9 @@ export function useToggleLikeTrack(): UseMutationResult<
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: async ({ track, liked }: ToggleLikeTrackInput) => {
-      if (liked) await api.put<void>(`/me/library/tracks/${track.id}`);
-      else await api.del(`/me/library/tracks/${track.id}`);
+    mutationFn: ({ track, liked }: ToggleLikeTrackInput) => {
+      localLikes.toggle(track, liked); // on-device, synchronous, never fails
+      return Promise.resolve();
     },
     onMutate: async (input) => {
       await queryClient.cancelQueries({ queryKey: ['liked-tracks'] });
@@ -332,9 +327,11 @@ export interface TrackLikes {
 export function useTrackLikes(): TrackLikes {
   const [overrides, setOverrides] = useState<Record<string, boolean>>({});
   const mutation = useToggleLikeTrack();
+  // Re-render when likes change anywhere (kept in sync across pages).
+  useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
 
   return {
-    isLiked: (track) => overrides[track.id] ?? track.isLiked ?? false,
+    isLiked: (track) => overrides[track.id] ?? localLikes.has(track.id),
     toggle: (track, liked) => {
       setOverrides((old) => ({ ...old, [track.id]: liked }));
       mutation.mutate(
