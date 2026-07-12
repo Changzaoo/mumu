@@ -190,6 +190,15 @@ export function TrackRow({
                 E
               </span>
             )}
+            {track.previewOnly && (
+              <span
+                aria-label="Prévia de 30 segundos"
+                title="Prévia de 30 segundos"
+                className="ml-1.5 inline-block -translate-y-px rounded-full bg-fg/10 px-1.5 align-middle text-[10px] font-medium text-fg-muted"
+              >
+                30s
+              </span>
+            )}
           </p>
           <p className="line-clamp-1 text-[13px] text-fg-muted">
             {track.artists.map((artist, i) => (

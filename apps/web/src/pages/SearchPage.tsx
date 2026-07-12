@@ -1,6 +1,9 @@
 /**
- * /search — instant search over the Audius catalog (tracks + artists), with a
- * 300ms debounce, top result, track list, recent searches and voice input.
+ * /search — instant search with a 300ms debounce, top result, recent searches
+ * and voice input. Two catalogs:
+ *  - PRIMARY: Apple/iTunes real songs (top result + main list, 30s previews).
+ *  - SECONDARY: Audius "Faixas completas (grátis)" full-length free tracks.
+ * Artist results come from Audius.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
@@ -13,7 +16,7 @@ import { PlayButton } from '@/components/media/PlayButton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
+import { useAppleSearch, useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useRecentSearches } from '@/features/search/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { cn, trackArtistNames } from '@/lib/utils';
@@ -130,6 +133,7 @@ export default function SearchPage() {
     );
   }, [debounced, setSearchParams]);
 
+  const appleQuery = useAppleSearch(debounced);
   const tracksQuery = useCatalogSearch(debounced);
   const artistsQuery = useCatalogSearchArtists(debounced);
   const hasQuery = debounced.trim().length > 0;
@@ -139,19 +143,31 @@ export default function SearchPage() {
     addRecent(term);
   };
 
-  const tracks = tracksQuery.data ?? [];
+  const appleTracks = appleQuery.data ?? [];
+  const freeTracks = tracksQuery.data ?? [];
   const artists = artistsQuery.data ?? [];
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
-  const topTrack = tab === 'all' ? tracks[0] : undefined;
+  const topTrack = tab === 'all' ? appleTracks[0] : undefined;
 
-  const isLoading = hasQuery && (tracksQuery.isLoading || artistsQuery.isLoading);
-  const isError = hasQuery && tracksQuery.isError && artistsQuery.isError;
-  const isEmpty = hasQuery && !isLoading && !isError && tracks.length === 0 && artists.length === 0;
+  const isLoading =
+    hasQuery && (appleQuery.isLoading || tracksQuery.isLoading || artistsQuery.isLoading);
+  const isError = hasQuery && appleQuery.isError && tracksQuery.isError && artistsQuery.isError;
+  const isEmpty =
+    hasQuery &&
+    !isLoading &&
+    !isError &&
+    appleTracks.length === 0 &&
+    freeTracks.length === 0 &&
+    artists.length === 0;
 
-  const playFromSearch = (index: number): void => {
+  const playApple = (index: number): void => {
     addRecent(debounced);
-    playQueue(tracks, index, { source: 'search', sourceId: debounced.trim() });
+    playQueue(appleTracks, index, { source: 'search', sourceId: debounced.trim() });
+  };
+  const playFree = (index: number): void => {
+    addRecent(debounced);
+    playQueue(freeTracks, index, { source: 'search', sourceId: debounced.trim() });
   };
 
   return (
@@ -290,7 +306,8 @@ export default function SearchPage() {
         <div
           className={cn(
             'space-y-8 transition-opacity',
-            (tracksQuery.isFetching || artistsQuery.isFetching) && 'opacity-70',
+            (appleQuery.isFetching || tracksQuery.isFetching || artistsQuery.isFetching) &&
+              'opacity-70',
           )}
         >
           {isEmpty ? (
@@ -318,23 +335,24 @@ export default function SearchPage() {
                       </p>
                       <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
                         Música · {trackArtistNames(topTrack)}
+                        {topTrack.previewOnly && ' · prévia 30s'}
                       </p>
                     </div>
                     <PlayButton
                       size="lg"
                       playing={currentTrack?.id === topTrack.id && isPlaying}
-                      onClick={() => playFromSearch(0)}
+                      onClick={() => playApple(0)}
                       className="absolute bottom-5 right-5"
                     />
                   </div>
                 </section>
               )}
 
-              {showTracks && tracks.length > 0 && (
+              {showTracks && appleTracks.length > 0 && (
                 <section aria-label="Músicas" className="min-w-0">
                   <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Músicas</h2>
                   <TrackList>
-                    {tracks.map((track, index) => (
+                    {appleTracks.map((track, index) => (
                       <TrackRow
                         key={`${track.id}:${index}`}
                         track={track}
@@ -342,7 +360,31 @@ export default function SearchPage() {
                         showAlbum={false}
                         active={track.id === currentTrack?.id}
                         playing={track.id === currentTrack?.id && isPlaying}
-                        onPlay={() => playFromSearch(index)}
+                        onPlay={() => playApple(index)}
+                      />
+                    ))}
+                  </TrackList>
+                </section>
+              )}
+
+              {showTracks && freeTracks.length > 0 && (
+                <section aria-label="Faixas completas (grátis)" className="min-w-0">
+                  <h2 className="text-xl font-semibold tracking-tight text-fg">
+                    Faixas completas (grátis)
+                  </h2>
+                  <p className="mb-3 mt-0.5 text-[13px] text-fg-muted">
+                    Acervo Audius — tocam por inteiro
+                  </p>
+                  <TrackList>
+                    {freeTracks.map((track, index) => (
+                      <TrackRow
+                        key={`${track.id}:${index}`}
+                        track={track}
+                        index={index}
+                        showAlbum={false}
+                        active={track.id === currentTrack?.id}
+                        playing={track.id === currentTrack?.id && isPlaying}
+                        onPlay={() => playFree(index)}
                       />
                     ))}
                   </TrackList>

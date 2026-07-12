@@ -52,6 +52,11 @@ export const trackSchema = z.object({
   streamUrl: z.string().nullable(),
   /** Single-file audio URL for offline download (auth required); null when unavailable. */
   downloadUrl: z.string().nullable().optional(),
+  /**
+   * True for stream-only 30s preview clips (e.g. Apple/iTunes): never
+   * downloadable, offline-cached or P2P-shareable. `downloadUrl` is always null.
+   */
+  previewOnly: z.boolean().optional(),
   uploadedByUserId: z.string().nullable(),
 });
 export type TrackDto = z.infer<typeof trackSchema>;

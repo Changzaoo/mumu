@@ -1,6 +1,7 @@
 /**
- * /discover — browse the Audius catalog by genre (grid → ?genre=x → trending by
- * genre) plus trending playlists. Everything directly playable.
+ * /discover — browse by genre. The grid uses the Apple/iTunes genres; picking
+ * one (?g={genreId}) shows that genre's real top songs (30s previews, PRIMARY)
+ * plus the Audius full-length free catalog for the same genre (SECONDARY).
  */
 import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
@@ -13,8 +14,8 @@ import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
 import { Skeleton } from '@/components/ui/skeleton';
-import { CATALOG_GENRES } from '@/lib/catalog/audius';
-import { useTrending, useTrendingPlaylists } from '@/features/catalog/api';
+import { APPLE_GENRES } from '@/lib/catalog/itunes';
+import { useTopSongsByGenre, useTrending, useTrendingPlaylists } from '@/features/catalog/api';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /** A stable-ish hue per genre for the tinted tiles. */
@@ -29,23 +30,25 @@ function GenreGrid() {
     <section aria-label="Gêneros">
       <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Explorar por gênero</h2>
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
-        {CATALOG_GENRES.map((genre, index) => {
-          const hue = hueFor(genre);
+        {APPLE_GENRES.map((genre, index) => {
+          const hue = hueFor(genre.label);
           return (
             <motion.div
-              key={genre}
+              key={genre.id}
               initial={{ opacity: 0, y: 8 }}
               animate={{ opacity: 1, y: 0 }}
               transition={{ delay: Math.min(index, 12) * 0.03, duration: 0.2 }}
             >
               <Link
-                to={`/discover?genre=${encodeURIComponent(genre)}`}
+                to={`/discover?g=${genre.id}`}
                 className="group relative block overflow-hidden rounded-xl border border-border bg-bg-elevated p-4 pt-12 transition-transform duration-200 hover:scale-[1.02] focus-visible:scale-[1.02]"
                 style={{
                   backgroundImage: `linear-gradient(135deg, hsl(${hue} 80% 50% / 0.28) 0%, hsl(${(hue + 40) % 360} 80% 45% / 0.10) 100%)`,
                 }}
               >
-                <span className="text-base font-semibold tracking-tight text-fg">{genre}</span>
+                <span className="text-base font-semibold tracking-tight text-fg">
+                  {genre.label}
+                </span>
                 <span
                   aria-hidden
                   className="pointer-events-none absolute -right-4 -top-4 size-16 rounded-full opacity-40 blur-2xl transition-opacity duration-200 group-hover:opacity-70"
@@ -60,16 +63,18 @@ function GenreGrid() {
   );
 }
 
-function GenreView({ genre }: { genre: string }) {
-  const { data, isLoading, isError, refetch, isFetching } = useTrending(genre);
+function GenreView({ genreId, label }: { genreId: number; label: string }) {
+  const top = useTopSongsByGenre(genreId);
+  const free = useTrending(label);
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const hue = hueFor(genre);
-  const tracks = data ?? [];
+  const hue = hueFor(label);
+  const tracks = top.data ?? [];
+  const freeTracks = free.data ?? [];
 
   return (
-    <div className="space-y-6 py-4">
+    <div className="space-y-8 py-4">
       <header className="relative">
         <div
           aria-hidden
@@ -85,12 +90,12 @@ function GenreView({ genre }: { genre: string }) {
           >
             <ArrowLeft className="size-4" /> Descobrir
           </Link>
-          <h1 className="text-4xl font-bold tracking-tight text-fg md:text-5xl">{genre}</h1>
+          <h1 className="text-4xl font-bold tracking-tight text-fg md:text-5xl">{label}</h1>
           <Button
             variant="accent"
             onClick={() =>
               tracks.length > 0 &&
-              playQueue(tracks, 0, { source: 'recommendation', sourceId: `genre:${genre}` })
+              playQueue(tracks, 0, { source: 'recommendation', sourceId: `genre:${label}` })
             }
             disabled={tracks.length === 0}
           >
@@ -99,9 +104,9 @@ function GenreView({ genre }: { genre: string }) {
         </div>
       </header>
 
-      {isLoading && <PageSkeleton variant="list" />}
-      {isError && <ErrorState onRetry={() => void refetch()} />}
-      {data && tracks.length === 0 && (
+      {top.isLoading && <PageSkeleton variant="list" />}
+      {top.isError && <ErrorState onRetry={() => void top.refetch()} />}
+      {top.data && tracks.length === 0 && (
         <EmptyState
           icon={Sparkles}
           title="Nada neste gênero ainda"
@@ -109,21 +114,54 @@ function GenreView({ genre }: { genre: string }) {
         />
       )}
       {tracks.length > 0 && (
-        <TrackList aria-label={`Faixas de ${genre}`} className={isFetching ? 'opacity-70' : ''}>
-          {tracks.map((track, index) => (
-            <TrackRow
-              key={`${track.id}:${index}`}
-              track={track}
-              index={index}
-              showAlbum={false}
-              active={track.id === currentTrack?.id}
-              playing={track.id === currentTrack?.id && isPlaying}
-              onPlay={() =>
-                playQueue(tracks, index, { source: 'recommendation', sourceId: `genre:${genre}` })
-              }
-            />
-          ))}
-        </TrackList>
+        <section aria-label={`Em alta · ${label}`} className="space-y-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-fg">Em alta</h2>
+            <p className="mt-0.5 text-[13px] text-fg-muted">Sucessos do momento · prévia de 30s</p>
+          </div>
+          <TrackList className={top.isFetching ? 'opacity-70' : ''}>
+            {tracks.map((track, index) => (
+              <TrackRow
+                key={`${track.id}:${index}`}
+                track={track}
+                index={index}
+                showAlbum={false}
+                active={track.id === currentTrack?.id}
+                playing={track.id === currentTrack?.id && isPlaying}
+                onPlay={() =>
+                  playQueue(tracks, index, { source: 'recommendation', sourceId: `genre:${label}` })
+                }
+              />
+            ))}
+          </TrackList>
+        </section>
+      )}
+
+      {freeTracks.length > 0 && (
+        <section aria-label={`Grátis e completas · ${label}`} className="space-y-3">
+          <div>
+            <h2 className="text-xl font-semibold tracking-tight text-fg">Grátis e completas</h2>
+            <p className="mt-0.5 text-[13px] text-fg-muted">Acervo Audius — tocam por inteiro</p>
+          </div>
+          <TrackList className={free.isFetching ? 'opacity-70' : ''}>
+            {freeTracks.map((track, index) => (
+              <TrackRow
+                key={`${track.id}:${index}`}
+                track={track}
+                index={index}
+                showAlbum={false}
+                active={track.id === currentTrack?.id}
+                playing={track.id === currentTrack?.id && isPlaying}
+                onPlay={() =>
+                  playQueue(freeTracks, index, {
+                    source: 'recommendation',
+                    sourceId: `genre-free:${label}`,
+                  })
+                }
+              />
+            ))}
+          </TrackList>
+        </section>
       )}
     </div>
   );
@@ -131,14 +169,12 @@ function GenreView({ genre }: { genre: string }) {
 
 export default function DiscoverPage() {
   const [searchParams] = useSearchParams();
-  const genreParam = searchParams.get('genre');
-  const genre = (CATALOG_GENRES as readonly string[]).includes(genreParam ?? '')
-    ? (genreParam as string)
-    : null;
+  const genreParam = Number(searchParams.get('g'));
+  const genre = APPLE_GENRES.find((g) => g.id === genreParam) ?? null;
 
   const playlists = useTrendingPlaylists();
 
-  if (genre) return <GenreView genre={genre} />;
+  if (genre) return <GenreView genreId={genre.id} label={genre.label} />;
 
   return (
     <div className="space-y-8 py-4">

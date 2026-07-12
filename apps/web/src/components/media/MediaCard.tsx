@@ -14,6 +14,8 @@ export interface MediaCardProps extends ComponentProps<'div'> {
   to?: string;
   onPlay?: () => void;
   playing?: boolean;
+  /** Show a "30s" corner badge (stream-only Apple preview tracks). */
+  previewOnly?: boolean;
 }
 
 /**
@@ -28,6 +30,7 @@ export function MediaCard({
   to,
   onPlay,
   playing = false,
+  previewOnly = false,
   className,
   ...props
 }: MediaCardProps) {
@@ -35,6 +38,15 @@ export function MediaCard({
 
   const art = (
     <div className={cn('relative aspect-square overflow-hidden bg-fg/6', rounded)}>
+      {previewOnly && (
+        <span
+          aria-label="Prévia de 30 segundos"
+          title="Prévia de 30 segundos"
+          className="glass absolute left-2 top-2 z-10 rounded-full px-1.5 py-0.5 text-[10px] font-medium text-fg-muted"
+        >
+          30s
+        </span>
+      )}
       {imageUrl ? (
         <img
           src={imageUrl}
