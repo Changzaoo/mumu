@@ -15,6 +15,7 @@ import {
   Upload,
 } from 'lucide-react';
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useIsAuthorized } from '@/lib/auth/roles';
 import { cn } from '@/lib/utils';
 
 const TABS: Array<{ to: string; label: string; icon: LucideIcon }> = [
@@ -57,9 +58,18 @@ const MENU: MenuGroup[] = [
   },
 ];
 
+/** Device/management entries restricted to authorized users. */
+const ADMIN_ONLY = new Set(['/dispositivo', '/downloads', '/uploads']);
+
 /** Bottom tabs (<768px), glass, safe-area aware, with a "Mais" sheet (DESIGN §7). */
 export function MobileNav() {
   const [open, setOpen] = useState(false);
+  const authorized = useIsAuthorized();
+  const menu = authorized
+    ? MENU
+    : MENU.map((g) => ({ ...g, items: g.items.filter((i) => !ADMIN_ONLY.has(i.to)) })).filter(
+        (g) => g.items.length > 0,
+      );
 
   const tabClass = (isActive: boolean): string =>
     cn(
@@ -102,7 +112,7 @@ export function MobileNav() {
             <SheetTitle>Menu</SheetTitle>
           </SheetHeader>
           <div className="space-y-5 pb-2">
-            {MENU.map((group) => (
+            {menu.map((group) => (
               <div key={group.heading}>
                 <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-subtle">
                   {group.heading}

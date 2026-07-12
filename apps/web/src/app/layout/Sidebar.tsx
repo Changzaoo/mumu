@@ -21,6 +21,7 @@ import { ScrollArea } from '@/components/ui/scroll-area';
 import { Skeleton } from '@/components/ui/skeleton';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { usePlaylistsNav } from '@/features/library/api';
+import { useIsAuthorized } from '@/lib/auth/roles';
 import { cn } from '@/lib/utils';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -35,6 +36,9 @@ const MAIN_NAV: NavEntry[] = [
   { to: '/search', label: 'Buscar', icon: Search },
   { to: '/discover', label: 'Descobrir', icon: Compass },
 ];
+
+/** Device/management entries restricted to authorized users. */
+const ADMIN_ONLY = new Set(['/dispositivo', '/downloads', '/uploads']);
 
 const DEVICE_NAV: NavEntry[] = [
   { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
@@ -94,6 +98,9 @@ export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
   const { playlists, isLoading } = usePlaylistsNav();
+  const authorized = useIsAuthorized();
+  const deviceNav = authorized ? DEVICE_NAV : DEVICE_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
+  const libraryNav = authorized ? LIBRARY_NAV : LIBRARY_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
 
   return (
     <aside
@@ -125,14 +132,14 @@ export function Sidebar() {
 
         <SectionLabel collapsed={collapsed}>Meu espaço</SectionLabel>
         <div className="space-y-0.5">
-          {DEVICE_NAV.map((entry) => (
+          {deviceNav.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
         </div>
 
         <SectionLabel collapsed={collapsed}>Biblioteca</SectionLabel>
         <div className="space-y-0.5">
-          {LIBRARY_NAV.map((entry) => (
+          {libraryNav.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
         </div>

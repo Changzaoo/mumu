@@ -13,6 +13,7 @@ import { Construction } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { PageSkeleton, type PageSkeletonProps } from '@/components/media/PageSkeleton';
 import { AppShell } from '@/app/layout/AppShell';
+import { AuthorizedRoute } from '@/components/AuthorizedRoute';
 import { ErrorBoundary, RouteErrorBoundary } from '@/app/RouteErrorBoundary';
 import { RootLayout } from '@/app/RootLayout';
 
@@ -60,10 +61,19 @@ export const router = createBrowserRouter([
           { path: '/library', element: page('LibraryPage', 'list') },
           { path: '/liked', element: page('LikedPage', 'list') },
           { path: '/history', element: page('HistoryPage', 'list') },
-          { path: '/downloads', element: page('DownloadsPage', 'list') },
-          { path: '/uploads', element: page('UploadsPage', 'list') },
+          {
+            path: '/downloads',
+            element: <AuthorizedRoute>{page('DownloadsPage', 'list')}</AuthorizedRoute>,
+          },
+          {
+            path: '/uploads',
+            element: <AuthorizedRoute>{page('UploadsPage', 'list')}</AuthorizedRoute>,
+          },
           { path: '/discover', element: page('DiscoverPage', 'home') },
-          { path: '/dispositivo', element: page('DevicePage', 'list') },
+          {
+            path: '/dispositivo',
+            element: <AuthorizedRoute>{page('DevicePage', 'list')}</AuthorizedRoute>,
+          },
           { path: '/compartilhar', element: page('SharePage', 'list') },
           { path: '/catalogo/playlist/:id', element: page('CatalogPlaylistPage', 'detail') },
           { path: '/catalogo/artista/:id', element: page('CatalogArtistPage', 'detail') },

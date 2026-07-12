@@ -5,6 +5,7 @@ import {
   ChevronRight,
   LogOut,
   Moon,
+  Plus,
   Search,
   Settings,
   Shield,
@@ -23,6 +24,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { IconButton } from '@/components/ui/icon-button';
+import { AddMusicDialog } from '@/components/media/AddMusicDialog';
 import { NotificationBell } from '@/app/layout/NotificationBell';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { logout } from '@/lib/firebase';
@@ -41,6 +43,7 @@ export function TopBar() {
   const navigate = useNavigate();
   const scroller = useScrollContainer();
   const [scrolled, setScrolled] = useState(false);
+  const [addOpen, setAddOpen] = useState(false);
   const setCommandOpen = useUiStore((s) => s.setCommandOpen);
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
@@ -91,6 +94,12 @@ export function TopBar() {
       </button>
 
       <div className="ml-auto flex items-center gap-1">
+        {user && (
+          <IconButton aria-label="Adicionar música" onClick={() => setAddOpen(true)}>
+            <Plus />
+          </IconButton>
+        )}
+        <AddMusicDialog open={addOpen} onOpenChange={setAddOpen} />
         <NotificationBell />
         <IconButton
           aria-label={resolved === 'dark' ? 'Tema claro' : 'Tema escuro'}

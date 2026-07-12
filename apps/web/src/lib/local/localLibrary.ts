@@ -17,6 +17,7 @@ import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
+import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import {
   fetchPlaylistEntries,
   importerHostLabel,
@@ -141,19 +142,26 @@ function localTrackDto(
   album: string | null,
   coverUrl: string | null,
 ): TrackDto {
+  // Sanitize every externally-derived string/URL that lands in a track.
+  const safeTitle = sanitizeText(title) || 'Faixa';
+  const safeArtist = sanitizeText(artist, 120) || 'Desconhecido';
+  const safeAlbum = album ? sanitizeText(album, 200) || null : null;
+  const cover = safeCoverUrl(coverUrl);
   return {
     id,
-    title,
+    title: safeTitle,
     durationMs,
     trackNumber: null,
     discNumber: null,
     explicit: false,
     playsCount: 0,
-    coverUrl,
+    coverUrl: cover,
     dominantColor: null,
     loudnessLufs: null,
-    album: album ? { id: `local-album:${id}`, title: album, slug: '', coverUrl } : null,
-    artists: [{ id: `local-artist:${id}`, name: artist, slug: '', imageUrl: null }],
+    album: safeAlbum
+      ? { id: `local-album:${id}`, title: safeAlbum, slug: '', coverUrl: cover }
+      : null,
+    artists: [{ id: `local-artist:${id}`, name: safeArtist, slug: '', imageUrl: null }],
     streamUrl: null,
     downloadUrl: null,
     uploadedByUserId: null,
@@ -204,9 +212,9 @@ function applyRemoteDelete(id: string): void {
 export async function importFiles(files: File[]): Promise<TrackDto[]> {
   const imported: TrackDto[] = [];
   for (const file of files) {
-    if (!file.type.startsWith('audio/') && !/\.(mp3|flac|wav|aac|m4a|ogg|opus)$/i.test(file.name)) {
-      continue;
-    }
+    // Reject anything that isn't genuinely audio (magic-byte sniff + size cap).
+    const check = await validateAudioFile(file);
+    if (!check.ok) continue;
     const id = `local:${crypto.randomUUID()}`;
     const { title, artist } = parseFileName(file.name);
     const durationMs = await probeDurationMs(file);
