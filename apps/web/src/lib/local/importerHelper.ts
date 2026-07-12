@@ -30,9 +30,23 @@ export function importerHostLabel(host: string): string | null {
   return IMPORTER_HOSTS.find((h) => h.match.test(host))?.label ?? null;
 }
 
+/**
+ * Addresses that only work on the machine/network that saved them — old
+ * localhost defaults, LAN IPs, Tailscale/tailnet names. A device carrying one
+ * of these from an earlier build can never reach the importer, so we drop it
+ * and fall back to the hosted default (zero-config for every device).
+ */
+const UNREACHABLE_OVERRIDE =
+  /\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|[^/]*\.ts\.net)/i;
+
 export function helperUrl(): string {
   try {
-    return window.localStorage.getItem(STORAGE_KEY)?.replace(/\/$/, '') || DEFAULT_HELPER_URL;
+    const stored = window.localStorage.getItem(STORAGE_KEY)?.replace(/\/$/, '');
+    if (stored && UNREACHABLE_OVERRIDE.test(stored)) {
+      window.localStorage.removeItem(STORAGE_KEY); // self-heal stale local address
+      return DEFAULT_HELPER_URL;
+    }
+    return stored || DEFAULT_HELPER_URL;
   } catch {
     return DEFAULT_HELPER_URL;
   }
@@ -123,9 +137,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
       body: JSON.stringify({ url }),
     });
   } catch {
-    throw new Error(
-      'O importador local não respondeu. Ele está rodando? (node apps/importer/server.mjs)',
-    );
+    throw new Error('Não foi possível baixar esse link agora. Tente novamente em instantes.');
   }
   if (!res.ok) {
     let message = `Falha na importação (${res.status}).`;

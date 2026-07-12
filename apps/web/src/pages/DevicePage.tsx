@@ -19,7 +19,6 @@ import {
   Music,
   Pause,
   Play,
-  Settings2,
   Share2,
   Trash2,
   Upload,
@@ -40,13 +39,6 @@ import {
 import { searchSongs } from '@/lib/catalog/itunes';
 import { appleSongToDto } from '@/lib/catalog/mapApple';
 import * as localLibrary from '@/lib/local/localLibrary';
-import {
-  helperToken,
-  helperUrl,
-  probeHelper,
-  setHelperToken,
-  setHelperUrl,
-} from '@/lib/local/importerHelper';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { estimateStorage } from '@/lib/offline/audioCache';
 import { cn, formatBytes, formatDuration } from '@/lib/utils';
@@ -103,11 +95,6 @@ export default function DevicePage() {
 
   const [linkUrl, setLinkUrl] = useState('');
   const [addingLink, setAddingLink] = useState(false);
-  const [helperOn, setHelperOn] = useState<boolean | null>(null);
-  const [cfgOpen, setCfgOpen] = useState(false);
-  const [helperInput, setHelperInput] = useState(() => helperUrl());
-  const [tokenInput, setTokenInput] = useState(() => helperToken());
-  const [probing, setProbing] = useState(false);
 
   const [listOpen, setListOpen] = useState(false);
   const [listTitle, setListTitle] = useState('Músicas Curtidas');
@@ -122,28 +109,6 @@ export default function DevicePage() {
   useEffect(() => {
     void estimateStorage().then(setQuota);
   }, [entries.length]);
-
-  // Detect the optional importer helper (apps/importer) so we can hint that
-  // YouTube & friends are importable while it's reachable.
-  useEffect(() => {
-    void probeHelper().then((h) => setHelperOn(Boolean(h)));
-  }, []);
-
-  const saveHelper = async (): Promise<void> => {
-    setHelperUrl(helperInput.trim());
-    setHelperToken(tokenInput.trim());
-    setProbing(true);
-    try {
-      const h = await probeHelper();
-      setHelperOn(Boolean(h));
-      toast[h ? 'success' : 'error'](
-        h ? 'Importador conectado.' : 'Importador não respondeu nesse endereço.',
-      );
-      if (h) setCfgOpen(false);
-    } finally {
-      setProbing(false);
-    }
-  };
 
   const tracks = entries.map((e) => e.track);
 
@@ -284,40 +249,19 @@ export default function DevicePage() {
         {/* Link + list */}
         <div className="flex flex-col gap-4">
           <div className="glass space-y-2 rounded-xl border border-border p-4">
-            <div className="flex items-center gap-2">
-              <p className="flex items-center gap-2 text-sm font-medium text-fg">
-                <Link2 className="size-4 text-fg-muted" /> Adicionar por link
-              </p>
-              <div className="ml-auto flex items-center gap-2">
-                {helperOn === true && (
-                  <span className="inline-flex items-center gap-1 text-[11px] text-emerald-500">
-                    <span className="size-1.5 rounded-full bg-emerald-500" /> Importador
-                  </span>
-                )}
-                <button
-                  type="button"
-                  aria-label="Configurar importador"
-                  aria-expanded={cfgOpen}
-                  onClick={() => setCfgOpen((o) => !o)}
-                  className="grid size-6 place-items-center rounded text-fg-subtle transition-colors hover:bg-fg/5 hover:text-fg"
-                >
-                  <Settings2 className="size-3.5" />
-                </button>
-              </div>
-            </div>
+            <p className="flex items-center gap-2 text-sm font-medium text-fg">
+              <Link2 className="size-4 text-fg-muted" /> Adicionar por link
+            </p>
             <p className="text-[13px] text-fg-muted">
-              {helperOn
-                ? 'Link direto de áudio (.mp3, .m4a…) — ou YouTube, SoundCloud, Vimeo e Bandcamp.'
-                : 'Cole o link direto de um arquivo de áudio (.mp3, .m4a, .flac…).'}
+              Cole o link de uma música do YouTube, SoundCloud, Vimeo, Bandcamp ou de um arquivo de
+              áudio. Baixamos e guardamos no aparelho.
             </p>
             <div className="flex gap-2">
               <Input
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
                 onKeyDown={(e) => e.key === 'Enter' && void addLink()}
-                placeholder={
-                  helperOn ? 'https://youtu.be/… ou …/musica.mp3' : 'https://…/musica.mp3'
-                }
+                placeholder="Cole o link aqui"
                 inputMode="url"
               />
               <Button
@@ -329,51 +273,6 @@ export default function DevicePage() {
                 {addingLink ? <Loader2 className="animate-spin" /> : 'Adicionar'}
               </Button>
             </div>
-
-            {/* Importer helper config (yt-dlp service on your own machine/server). */}
-            {cfgOpen && (
-              <div className="space-y-2 rounded-lg border border-border bg-fg/5 p-3">
-                <p className="text-[12px] font-medium text-fg">Servidor do importador</p>
-                <p className="text-[11px] leading-relaxed text-fg-muted">
-                  Endereço do importador (yt-dlp) que você roda. Ex.:{' '}
-                  <code className="rounded bg-fg/10 px-1">http://127.0.0.1:8787</code> (no seu PC)
-                  ou o seu endereço Tailscale HTTPS.
-                </p>
-                <Input
-                  value={helperInput}
-                  onChange={(e) => setHelperInput(e.target.value)}
-                  onKeyDown={(e) => e.key === 'Enter' && void saveHelper()}
-                  placeholder="https://…ts.net:8443"
-                  inputMode="url"
-                  spellCheck={false}
-                />
-                <p className="text-[11px] text-fg-muted">
-                  Token de acesso (se o importador estiver exposto na internet):
-                </p>
-                <div className="flex gap-2">
-                  <Input
-                    type="password"
-                    value={tokenInput}
-                    onChange={(e) => setTokenInput(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && void saveHelper()}
-                    placeholder="token (opcional)"
-                    spellCheck={false}
-                    autoComplete="off"
-                  />
-                  <Button size="sm" disabled={probing} onClick={() => void saveHelper()}>
-                    {probing ? <Loader2 className="animate-spin" /> : 'Salvar'}
-                  </Button>
-                </div>
-              </div>
-            )}
-
-            {helperOn === false && !cfgOpen && (
-              <p className="text-[11px] leading-relaxed text-fg-subtle">
-                Para importar de YouTube, SoundCloud, Vimeo e Bandcamp, rode o importador (
-                <code className="rounded bg-fg/10 px-1">node apps/importer/server.mjs</code>) e
-                ajuste o endereço na engrenagem ⚙.
-              </p>
-            )}
           </div>
 
           <button
