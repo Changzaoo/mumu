@@ -29,6 +29,7 @@ import {
   useTrending,
   useTrendingPlaylists,
 } from '@/features/catalog/api';
+import { useCommunityTrending } from '@/features/trending/api';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -164,6 +165,7 @@ export default function HomePage() {
 
   const freeTracks = useTrending();
   const playlists = useTrendingPlaylists();
+  const community = useCommunityTrending(genreId);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -171,6 +173,7 @@ export default function HomePage() {
 
   const tracks: TrackDto[] = top.data ?? [];
   const free: TrackDto[] = freeTracks.data ?? [];
+  const trendingTracks: TrackDto[] = community.data ?? [];
 
   return (
     <div className="space-y-8 py-4">
@@ -288,6 +291,26 @@ export default function HomePage() {
         As faixas em alta tocam em prévia de 30s (Apple). As faixas do acervo grátis tocam
         completas.
       </p>
+
+      {/* Community trending — powered by everyone's likes (Firestore). */}
+      {trendingTracks.length > 0 && (
+        <SectionCarousel
+          title={genreLabel ? `Em alta na comunidade · ${genreLabel}` : 'Em alta na comunidade'}
+          subtitle="As mais curtidas pelos ouvintes do Aurial"
+        >
+          {trendingTracks.map((track, index) => (
+            <MediaCard
+              key={track.id}
+              title={track.title}
+              subtitle={trackArtistNames(track)}
+              imageUrl={track.coverUrl}
+              previewOnly={track.previewOnly}
+              playing={currentTrack?.id === track.id && isPlaying}
+              onPlay={() => playQueue(trendingTracks, index, { source: 'home' })}
+            />
+          ))}
+        </SectionCarousel>
+      )}
 
       {/* Per-genre rows — only on the "Tudo" view, to keep the page alive. */}
       {genreId === null &&

@@ -52,6 +52,7 @@ export function appleSongToDto(song: AppleSong): TrackDto {
     // Stream-only 30s preview: never downloadable / offline / P2P-shareable.
     downloadUrl: null,
     previewOnly: true,
+    genre: song.primaryGenreName ?? null,
     uploadedByUserId: null,
   };
 }

@@ -1,0 +1,28 @@
+rules_version = '2';
+
+// Aurial — Firestore security rules (cross-device sync + community trending).
+// Paste these into Firebase console → Firestore Database → Rules → Publish.
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Per-user private data (likes, playlists, library). Only the owner may
+    // read or write their own space.
+    match /users/{uid}/{document=**} {
+      allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // Community trending: public to read (the "em alta" feed); any signed-in
+    // user may contribute a like. Note: the like counter is client-incremented,
+    // which is fine for a personal app — move to a Cloud Function to fully
+    // prevent tampering.
+    match /trending/{trackId} {
+      allow read: if true;
+      allow write: if request.auth != null;
+
+      // One vote doc per user guards double-counting; only its owner touches it.
+      match /voters/{uid} {
+        allow read, write: if request.auth != null && request.auth.uid == uid;
+      }
+    }
+  }
+}

@@ -4,9 +4,15 @@
  * Record<id, TrackDto> so the Curtidas page renders and plays without a backend.
  */
 import type { TrackDto } from '@aurial/shared';
+import { cloudCollection } from '@/lib/sync/cloudCollection';
 
 const LIKES_KEY = 'aurial:local-likes'; // string[] of track ids, newest-first
 const TRACKS_KEY = 'aurial:local-liked-tracks'; // Record<trackId, TrackDto>
+
+interface LikeDoc {
+  track: TrackDto;
+  likedAt: string;
+}
 
 let idsCache: string[] | null = null;
 let tracksCache: Record<string, TrackDto> | null = null;
@@ -78,18 +84,47 @@ export function list(): TrackDto[] {
     .filter((t): t is TrackDto => t !== undefined);
 }
 
-export function add(track: TrackDto): void {
+// Local-only appliers (used by the cloud sync — must not re-push).
+function applyAdd(track: TrackDto): void {
   const ids = readIds();
   if (ids.includes(track.id)) return;
   writeTracks({ ...readTracks(), [track.id]: track });
   writeIds([track.id, ...ids]);
 }
 
-export function remove(id: string): void {
+function applyRemove(id: string): void {
   const ids = readIds();
   if (!ids.includes(id)) return;
   writeIds(ids.filter((tid) => tid !== id));
   // The companion DTO is left in the map; it's tiny and harmless.
+}
+
+const cloud = cloudCollection<LikeDoc>({
+  name: 'likes',
+  localItems: () => {
+    const map = readTracks();
+    return readIds()
+      .filter((id) => map[id])
+      .map((id): [string, LikeDoc] => [
+        id,
+        { track: map[id] as TrackDto, likedAt: new Date().toISOString() },
+      ]);
+  },
+  onRemoteUpsert: (_id, data) => applyAdd(data.track),
+  onRemoteDelete: (id) => applyRemove(id),
+});
+
+/** Start/stop cross-device sync (called on auth change). */
+export const setUser = cloud.setUser;
+
+export function add(track: TrackDto): void {
+  applyAdd(track);
+  cloud.push(track.id, { track, likedAt: new Date().toISOString() });
+}
+
+export function remove(id: string): void {
+  applyRemove(id);
+  cloud.remove(id);
 }
 
 export function toggle(track: TrackDto, liked: boolean): void {

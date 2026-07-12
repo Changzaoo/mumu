@@ -13,9 +13,17 @@
  * track can be added and it upgrades to full offline playback.
  */
 import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
+import { cloudCollection } from '@/lib/sync/cloudCollection';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
 const TRACKS_KEY = 'aurial:local-playlist-tracks';
+
+/** Firestore doc shape: a self-contained playlist (its tracks embedded). */
+interface PlaylistDocData {
+  title: string;
+  createdAt: string;
+  tracks: TrackDto[];
+}
 
 export interface LocalPlaylist {
   id: string;
@@ -111,6 +119,7 @@ export function create(title: string, tracks: TrackDto[] = []): LocalPlaylist {
     createdAt: new Date().toISOString(),
   };
   writePlaylists([playlist, ...readPlaylists()]);
+  pushPlaylist(playlist.id);
   return playlist;
 }
 
@@ -125,10 +134,12 @@ export function addTracks(id: string, tracks: TrackDto[]): void {
       return { ...p, trackIds: [...p.trackIds, ...added] };
     }),
   );
+  pushPlaylist(id);
 }
 
 export function remove(id: string): void {
   writePlaylists(readPlaylists().filter((p) => p.id !== id));
+  cloud.remove(id);
   // Companion track entries are intentionally left; they're tiny and may be
   // referenced by other lists. They fall out of use harmlessly.
 }
@@ -140,6 +151,54 @@ export function removeTrack(id: string, trackId: string): void {
       p.id === id ? { ...p, trackIds: p.trackIds.filter((tid) => tid !== trackId) } : p,
     ),
   );
+  pushPlaylist(id);
+}
+
+// ── cross-device sync (Firestore) ───────────────────────────────
+const cloud = cloudCollection<PlaylistDocData>({
+  name: 'playlists',
+  localItems: () =>
+    readPlaylists().map((p): [string, PlaylistDocData] => [
+      p.id,
+      { title: p.title, createdAt: p.createdAt, tracks: resolveTracks(p.id) },
+    ]),
+  onRemoteUpsert: (id, data) => applyRemoteUpsert(id, data),
+  onRemoteDelete: (id) => applyRemoteDelete(id),
+});
+
+/** Start/stop cross-device sync (called on auth change). */
+export const setUser = cloud.setUser;
+
+function pushPlaylist(id: string): void {
+  const playlist = get(id);
+  if (playlist) {
+    cloud.push(id, {
+      title: playlist.title,
+      createdAt: playlist.createdAt,
+      tracks: resolveTracks(id),
+    });
+  }
+}
+
+/** Apply a remote playlist (add or update) to local storage — no re-push. */
+function applyRemoteUpsert(id: string, data: PlaylistDocData): void {
+  rememberTracks(data.tracks);
+  const playlist: LocalPlaylist = {
+    id,
+    title: data.title,
+    trackIds: data.tracks.map((t) => t.id),
+    createdAt: data.createdAt,
+  };
+  const existing = readPlaylists();
+  writePlaylists(
+    existing.some((p) => p.id === id)
+      ? existing.map((p) => (p.id === id ? playlist : p))
+      : [playlist, ...existing],
+  );
+}
+
+function applyRemoteDelete(id: string): void {
+  writePlaylists(readPlaylists().filter((p) => p.id !== id));
 }
 
 /** Resolve a playlist's stored TrackDtos, in order (skips any missing). */

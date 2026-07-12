@@ -57,6 +57,8 @@ export const trackSchema = z.object({
    * downloadable, offline-cached or P2P-shareable. `downloadUrl` is always null.
    */
   previewOnly: z.boolean().optional(),
+  /** Primary genre from the catalog source — used for community trending buckets. */
+  genre: z.string().nullable().optional(),
   uploadedByUserId: z.string().nullable(),
 });
 export type TrackDto = z.infer<typeof trackSchema>;

@@ -6,6 +6,7 @@
  * still boots and plays audio without an account.
  */
 import { initializeApp, type FirebaseApp } from 'firebase/app';
+import { getFirestore, type Firestore } from 'firebase/firestore';
 import {
   GithubAuthProvider,
   GoogleAuthProvider,
@@ -38,11 +39,14 @@ export const authDisabled: boolean = !config.apiKey;
 
 let app: FirebaseApp | null = null;
 export let auth: Auth | null = null;
+/** Firestore handle for cross-device sync + trending; null in demo mode. */
+export let db: Firestore | null = null;
 
 if (!authDisabled) {
   app = initializeApp(config);
   auth = getAuth(app);
   auth.languageCode = 'pt-BR';
+  db = getFirestore(app);
 }
 
 export const googleProvider = new GoogleAuthProvider();

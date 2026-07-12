@@ -15,7 +15,7 @@ import {
   type UseMutationResult,
   type UseQueryResult,
 } from '@tanstack/react-query';
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import type {
@@ -35,6 +35,7 @@ import * as localPlaylists from '@/lib/local/localPlaylists';
 import type { LocalPlaylist } from '@/lib/local/localPlaylists';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localHistory from '@/lib/local/localHistory';
+import { recordLike } from '@/lib/trending/trending';
 
 const EMPTY_LIBRARY: LibraryDto = {
   playlists: [],
@@ -115,6 +116,15 @@ interface CursorPage<T> {
 export type LikedTracksResult = UseInfiniteQueryResult<InfiniteData<CursorPage<TrackDto>>>;
 
 export function useLikedTracks(): LikedTracksResult {
+  const queryClient = useQueryClient();
+  // Refresh when likes change locally OR sync in from another device.
+  useEffect(
+    () =>
+      localLikes.subscribe(
+        () => void queryClient.invalidateQueries({ queryKey: ['liked-tracks'] }),
+      ),
+    [queryClient],
+  );
   return useInfiniteQuery({
     queryKey: ['liked-tracks'],
     initialPageParam: undefined as string | undefined,
@@ -128,6 +138,12 @@ export function useLikedTracks(): LikedTracksResult {
 export type HistoryResult = UseInfiniteQueryResult<InfiniteData<CursorPage<HistoryEntryDto>>>;
 
 export function useHistory(): HistoryResult {
+  const queryClient = useQueryClient();
+  useEffect(
+    () =>
+      localHistory.subscribe(() => void queryClient.invalidateQueries({ queryKey: ['history'] })),
+    [queryClient],
+  );
   return useInfiniteQuery({
     queryKey: ['history'],
     initialPageParam: undefined as string | undefined,
@@ -201,6 +217,7 @@ export function useToggleLikeTrack(): UseMutationResult<
   return useMutation({
     mutationFn: ({ track, liked }: ToggleLikeTrackInput) => {
       localLikes.toggle(track, liked); // on-device, synchronous, never fails
+      void recordLike(track, liked); // feed the community trending (best-effort)
       return Promise.resolve();
     },
     onMutate: async (input) => {

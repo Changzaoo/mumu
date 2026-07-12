@@ -12,6 +12,7 @@
  */
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import { cacheStorageSupported } from '@/lib/offline/audioCache';
+import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { importerHostLabel, importViaHelper } from '@/lib/local/importerHelper';
 
@@ -153,6 +154,39 @@ function localTrackDto(
 function addEntry(entry: LibraryEntry, blob: Blob): void {
   blobUrls.set(entry.track.id, URL.createObjectURL(blob));
   write([entry, ...read().filter((e) => e.track.id !== entry.track.id)]);
+  cloud.push(entry.track.id, entry);
+}
+
+// ── cross-device sync (Firestore, metadata only) ────────────────
+// Only the registry (track + metadata) syncs. The audio bytes stay on the
+// device that has them; a synced-in entry simply isn't playable elsewhere until
+// its file is re-imported/received (the user opted for library-only sync).
+const cloud = cloudCollection<LibraryEntry>({
+  name: 'library',
+  localItems: () => read().map((e): [string, LibraryEntry] => [e.track.id, e]),
+  onRemoteUpsert: (id, entry) => applyRemoteUpsert(id, entry),
+  onRemoteDelete: (id) => applyRemoteDelete(id),
+});
+
+/** Start/stop cross-device sync (called on auth change). */
+export const setUser = cloud.setUser;
+
+function applyRemoteUpsert(id: string, entry: LibraryEntry): void {
+  const existing = read();
+  write(
+    existing.some((e) => e.track.id === id)
+      ? existing.map((e) => (e.track.id === id ? entry : e))
+      : [entry, ...existing],
+  );
+}
+
+function applyRemoteDelete(id: string): void {
+  const url = blobUrls.get(id);
+  if (url) {
+    URL.revokeObjectURL(url);
+    blobUrls.delete(id);
+  }
+  write(read().filter((e) => e.track.id !== id));
 }
 
 // ── public API ──────────────────────────────────────────────────
@@ -204,6 +238,7 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
 /** Replace a registry entry in place, preserving its list position. */
 function patchEntry(id: string, next: LibraryEntry): void {
   write(read().map((e) => (e.track.id === id ? next : e)));
+  cloud.push(id, next);
 }
 
 /** Apply an iTunes match to a local entry (cover, album, corrected name). */
@@ -379,6 +414,7 @@ export async function remove(id: string): Promise<void> {
     blobUrls.delete(id);
   }
   write(read().filter((e) => e.track.id !== id));
+  cloud.remove(id);
 }
 
 export function totalBytes(): number {
@@ -406,7 +442,8 @@ let hydrated = false;
 
 /**
  * Rebuild the object-URL map from Cache Storage on boot so local tracks are
- * immediately playable. Drops registry entries whose audio was evicted / lost.
+ * immediately playable. Entries without local audio are kept (they may be
+ * synced from another device) — they simply aren't playable here.
  */
 export async function hydrate(): Promise<void> {
   if (hydrated) return;
@@ -416,7 +453,6 @@ export async function hydrate(): Promise<void> {
     if (blobUrls.has(entry.track.id)) continue;
     const blob = await getBlob(entry.track.id).catch(() => null);
     if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
-    else write(read().filter((e) => e.track.id !== entry.track.id));
   }
   emit();
 }

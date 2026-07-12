@@ -93,6 +93,7 @@ export function audiusTrackToDto(t: AudiusTrack): TrackDto {
     streamUrl: stream,
     // Catalog tracks are downloadable → cached offline → re-shareable over P2P.
     downloadUrl: stream,
+    genre: t.genre ?? null,
     uploadedByUserId: null,
   };
 }

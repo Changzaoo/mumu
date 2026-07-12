@@ -7,6 +7,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
+import { initCloudSync } from '@/lib/sync/syncManager';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -30,6 +31,7 @@ export default function App() {
 
   useEffect(() => {
     initPlayerEngine();
+    initCloudSync();
     return initSettings();
   }, []);
 
