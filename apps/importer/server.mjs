@@ -14,8 +14,9 @@
  * helper listens on localhost only and is never part of the hosted site.
  *
  * Run:  node apps/importer/server.mjs
- * Env:  PORT (default 8787) · YTDLP_PATH · FFMPEG_PATH · ALLOW_ORIGIN (csv)
- *       AURIAL_MAX_MINUTES (default 90)
+ * Env:  PORT (default 8787) · YTDLP_PATH · FFMPEG_PATH · ALLOW_ORIGIN (csv, '*' = any)
+ *       AURIAL_MAX_MINUTES (default 90) · IMPORT_ALLOWED_EMAILS (csv allow-list)
+ *       IMPORT_REQUIRE_LOGIN (1 = any signed-in Firebase user) · IMPORT_TOKEN
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -35,15 +36,19 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 const IMPORT_TOKEN = (process.env.IMPORT_TOKEN ?? '').trim();
 
 // ── Firebase auth gate ──────────────────────────────────────────────────────
-// When IMPORT_ALLOWED_EMAILS is set, /import ONLY accepts a valid Firebase ID
-// token whose (verified) email is on the list. Knowing the URL grants nothing;
-// only the owner, signed in to the app, can import. No shared token needed.
+// Two Firebase-gated modes, both requiring a valid Firebase ID token (knowing
+// the URL grants nothing, and no shared secret ships in the browser bundle):
+//   • IMPORT_ALLOWED_EMAILS set → only those (verified) emails may import.
+//   • IMPORT_REQUIRE_LOGIN=1    → ANY signed-in user with a verified email may
+//     import (open to every logged-in user, but anonymous callers are blocked).
+// If neither is set, falls back to the shared token, else fully open.
 const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID ?? 'mumu-2f54e').trim();
 const ALLOWED_EMAILS = (process.env.IMPORT_ALLOWED_EMAILS ?? '')
   .split(',')
   .map((s) => s.trim().toLowerCase())
   .filter(Boolean);
-const FIREBASE_GATED = ALLOWED_EMAILS.length > 0;
+const REQUIRE_LOGIN = /^(1|true|yes|on)$/i.test((process.env.IMPORT_REQUIRE_LOGIN ?? '').trim());
+const FIREBASE_GATED = ALLOWED_EMAILS.length > 0 || REQUIRE_LOGIN;
 const GOOGLE_CERTS_URL =
   'https://www.googleapis.com/robot/v1/metadata/x509/securetoken@system.gserviceaccount.com';
 
@@ -246,9 +251,14 @@ function interpret(stderr) {
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
 function applyCors(req, res) {
   const origin = req.headers.origin;
-  if (origin && ALLOW_ORIGINS.includes(origin)) {
+  // ALLOW_ORIGIN='*' opens the helper to any site/device (no secrets involved,
+  // no cookies used). Otherwise only the explicit allow-list gets CORS headers.
+  const allowAll = ALLOW_ORIGINS.includes('*');
+  if (origin && (allowAll || ALLOW_ORIGINS.includes(origin))) {
     res.setHeader('Access-Control-Allow-Origin', origin);
     res.setHeader('Vary', 'Origin');
+  } else if (allowAll) {
+    res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
   res.setHeader(
@@ -276,9 +286,11 @@ function readBody(req) {
 const log = (...a) => console.log('[aurial-importer]', ...a);
 
 /**
- * Authorize a request. Firebase-gated when IMPORT_ALLOWED_EMAILS is set (only
- * the owner's signed-in account passes — the URL alone grants nothing); else
- * falls back to the shared token; else open.
+ * Authorize a request. Firebase-gated when IMPORT_ALLOWED_EMAILS or
+ * IMPORT_REQUIRE_LOGIN is set: a valid Firebase ID token with a verified email
+ * is required (the URL alone grants nothing, no shared secret in the bundle).
+ * With an allow-list only those emails pass; otherwise any signed-in user does.
+ * Else falls back to the shared token; else open.
  */
 async function authorize(req) {
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
@@ -286,8 +298,9 @@ async function authorize(req) {
     if (!bearer) return false;
     try {
       const claims = await verifyFirebaseToken(bearer);
-      const email = String(claims.email || '').toLowerCase();
-      return Boolean(claims.email_verified) && ALLOWED_EMAILS.includes(email);
+      if (!claims.email_verified) return false;
+      if (ALLOWED_EMAILS.length === 0) return true; // any signed-in user
+      return ALLOWED_EMAILS.includes(String(claims.email || '').toLowerCase());
     } catch {
       return false;
     }
