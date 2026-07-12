@@ -362,10 +362,7 @@ function applyCors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS');
-  res.setHeader(
-    'Access-Control-Allow-Headers',
-    'Content-Type, Authorization, X-Aurial-Token, ngrok-skip-browser-warning',
-  );
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token');
   res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title, X-Aurial-Cover');
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])

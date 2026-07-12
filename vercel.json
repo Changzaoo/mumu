@@ -6,6 +6,10 @@
   "outputDirectory": "apps/web/dist",
   "rewrites": [
     {
+      "source": "/importer/:path*",
+      "destination": "https://importer.nexusholding.xyz/:path*"
+    },
+    {
       "source": "/((?!assets/).*)",
       "destination": "/index.html"
     }

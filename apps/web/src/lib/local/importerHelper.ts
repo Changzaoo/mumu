@@ -12,7 +12,11 @@
  */
 import { getIdToken } from '@/lib/firebase';
 
-const DEFAULT_HELPER_URL = 'https://prance-mummified-subscript.ngrok-free.dev';
+// Same-origin path. The hosted site (Vercel) reverse-proxies `/importer/*` to the
+// Cloudflare tunnel that fronts the home importer, and Vite proxies it in dev — so
+// the browser only ever talks to its own origin: no CORS, no preflight, no tunnel
+// warning page. Overridable via the ⚙ config (localStorage) for self-hosting.
+const DEFAULT_HELPER_URL = '/importer';
 const STORAGE_KEY = 'aurial:importerUrl';
 const TOKEN_KEY = 'aurial:importerToken';
 
@@ -39,11 +43,15 @@ export function importerHostLabel(host: string): string | null {
 const UNREACHABLE_OVERRIDE =
   /\/\/(localhost|127\.|0\.0\.0\.0|10\.|192\.168\.|172\.(1[6-9]|2\d|3[01])\.|100\.|[^/]*\.ts\.net)/i;
 
+// Retired public endpoints a device may still carry from an older build. We drop
+// them so the device self-heals onto the current same-origin default.
+const STALE_OVERRIDE = /ngrok|prance-mummified-subscript/i;
+
 export function helperUrl(): string {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY)?.replace(/\/$/, '');
-    if (stored && UNREACHABLE_OVERRIDE.test(stored)) {
-      window.localStorage.removeItem(STORAGE_KEY); // self-heal stale local address
+    if (stored && (UNREACHABLE_OVERRIDE.test(stored) || STALE_OVERRIDE.test(stored))) {
+      window.localStorage.removeItem(STORAGE_KEY); // self-heal stale/unreachable address
       return DEFAULT_HELPER_URL;
     }
     return stored || DEFAULT_HELPER_URL;
@@ -79,12 +87,11 @@ export function setHelperToken(token: string): void {
 
 /**
  * Base headers for every helper request: the signed-in user's Firebase ID token
- * (the server gates on the owner's account) plus the ngrok bypass header so a
- * public ngrok tunnel doesn't serve its warning interstitial. Falls back to a
- * manual token only if one was set in the ⚙ (self-host without login).
+ * (the server gates on the owner's account). Falls back to a manual token only if
+ * one was set in the ⚙ (self-host without login).
  */
 async function baseHeaders(): Promise<Record<string, string>> {
-  const headers: Record<string, string> = { 'ngrok-skip-browser-warning': '1' };
+  const headers: Record<string, string> = {};
   try {
     const idToken = await getIdToken();
     if (idToken) headers.Authorization = `Bearer ${idToken}`;

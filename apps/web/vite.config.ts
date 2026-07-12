@@ -30,8 +30,8 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // Never serve the SPA shell for API calls.
-        navigateFallbackDenylist: [/^\/api/],
+        // Never serve the SPA shell for API / importer-proxy calls.
+        navigateFallbackDenylist: [/^\/api/, /^\/importer/],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.destination === 'image',
@@ -66,6 +66,14 @@ export default defineConfig({
   server: {
     proxy: {
       '/api': 'http://localhost:4000',
+      // Dev mirror of the Vercel rewrite: /importer/* → Cloudflare tunnel → home
+      // importer. Keeps the app same-origin in dev too (no CORS locally).
+      '/importer': {
+        target: 'https://importer.nexusholding.xyz',
+        changeOrigin: true,
+        secure: true,
+        rewrite: (p) => p.replace(/^\/importer/, ''),
+      },
     },
   },
 });
