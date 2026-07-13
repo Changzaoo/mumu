@@ -39,7 +39,9 @@ import {
 } from '@/components/ui/dialog';
 import { searchTracks } from '@/lib/catalog/audius';
 import * as localLibrary from '@/lib/local/localLibrary';
+import * as importQueue from '@/lib/local/importQueue';
 import { isPlaylistUrl } from '@/lib/local/importerHelper';
+import { ImportQueuePanel } from '@/components/media/ImportQueuePanel';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { estimateStorage } from '@/lib/offline/audioCache';
 import { cn, formatBytes, formatDuration } from '@/lib/utils';
@@ -95,7 +97,6 @@ export default function DevicePage() {
   const [quota, setQuota] = useState<{ usage: number; quota: number } | null>(null);
 
   const [linkUrl, setLinkUrl] = useState('');
-  const [addingLink, setAddingLink] = useState(false);
 
   const [listOpen, setListOpen] = useState(false);
   const [listTitle, setListTitle] = useState('Músicas Curtidas');
@@ -157,30 +158,14 @@ export default function DevicePage() {
     }
   };
 
-  const addLink = async (): Promise<void> => {
+  // Add to the background queue and clear the field so more links can be pasted
+  // right away — they download a few at a time (see ImportQueuePanel below).
+  const addLink = (): void => {
     const url = linkUrl.trim();
     if (!url) return;
-    const playlist = isPlaylistUrl(url);
-    setAddingLink(true);
-    const toastId = toast.loading(playlist ? 'Lendo playlist…' : 'Baixando e convertendo…');
-    try {
-      if (playlist) {
-        const { imported, total } = await localLibrary.addPlaylistByUrl(url, (done, tot) => {
-          toast.loading(`Baixando playlist… ${done}/${tot}`, { id: toastId });
-        });
-        toast.success(`Playlist importada — ${imported}/${total} faixas`, { id: toastId });
-      } else {
-        const track = await localLibrary.addByUrl(url);
-        toast.success(`“${track.title}” adicionada`, { id: toastId });
-      }
-      setLinkUrl('');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Não foi possível adicionar esse link.', {
-        id: toastId,
-      });
-    } finally {
-      setAddingLink(false);
-    }
+    importQueue.enqueue(url);
+    setLinkUrl('');
+    toast(isPlaylistUrl(url) ? 'Playlist adicionada à fila' : 'Adicionada à fila de download');
   };
 
   const createList = async (): Promise<void> => {
@@ -286,25 +271,22 @@ export default function DevicePage() {
             </p>
             <p className="text-[13px] text-fg-muted">
               Cole o link de uma música — ou de uma playlist do YouTube — do YouTube, SoundCloud,
-              Vimeo, Bandcamp ou de um arquivo de áudio. Baixamos e guardamos no aparelho.
+              Vimeo, Bandcamp ou de um arquivo de áudio. Vão para a fila e baixam algumas por vez —
+              pode continuar colando mais links.
             </p>
             <div className="flex gap-2">
               <Input
                 value={linkUrl}
                 onChange={(e) => setLinkUrl(e.target.value)}
-                onKeyDown={(e) => e.key === 'Enter' && void addLink()}
+                onKeyDown={(e) => e.key === 'Enter' && addLink()}
                 placeholder="Cole o link aqui"
                 inputMode="url"
               />
-              <Button
-                variant="accent"
-                size="sm"
-                disabled={addingLink || !linkUrl.trim()}
-                onClick={() => void addLink()}
-              >
-                {addingLink ? <Loader2 className="animate-spin" /> : 'Adicionar'}
+              <Button variant="accent" size="sm" disabled={!linkUrl.trim()} onClick={addLink}>
+                Adicionar
               </Button>
             </div>
+            <ImportQueuePanel />
           </div>
 
           <button
