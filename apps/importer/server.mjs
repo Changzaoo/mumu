@@ -207,7 +207,8 @@ async function importToMp3(ytdlp, url) {
     '--no-playlist',
     '--no-progress',
     '--no-warnings',
-    // Resilience against YouTube's transient 403s / throttling under load.
+    // Resilience against YouTube's transient 403s / throttling / bot-checks
+    // under load: retry, and pace requests + downloads so we look less botty.
     '--retries',
     '5',
     '--fragment-retries',
@@ -216,6 +217,13 @@ async function importToMp3(ytdlp, url) {
     '3',
     '--sleep-requests',
     '1',
+    '--sleep-interval',
+    '2',
+    '--max-sleep-interval',
+    '6',
+    // Optional YouTube cookies (Netscape cookies.txt) to pass the "not a bot"
+    // gate on large batches — set YTDLP_COOKIES to the file path.
+    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
     '-f',
     'bestaudio/best',
     '-x',
@@ -269,6 +277,8 @@ async function importToMp3(ytdlp, url) {
 
 function interpret(stderr) {
   const s = stderr.toLowerCase();
+  if (s.includes('not a bot') || s.includes('confirm you'))
+    return 'O YouTube pediu verificação (muitos downloads seguidos). Aguarde alguns minutos ou configure cookies.';
   if (s.includes('private video') || s.includes('sign in') || s.includes('login'))
     return 'Conteúdo privado ou exige login.';
   if (s.includes('video unavailable') || s.includes('removed')) return 'Conteúdo indisponível.';
@@ -356,6 +366,7 @@ async function listPlaylist(ytdlp, url) {
     '--dump-single-json',
     '--playlist-end',
     String(MAX_PLAYLIST),
+    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
     url,
   ];
   const stdout = await new Promise((resolve, reject) => {
@@ -624,8 +635,20 @@ async function main() {
         });
         // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Playback starts as
         // soon as the first frames arrive — no full download needed.
-        const yt = spawn(ytdlp, ['-f', 'bestaudio/best', '--no-playlist', '--no-warnings', '-o', '-', url], {
-          windowsHide: true,
+        const yt = spawn(
+          ytdlp,
+          [
+            '-f',
+            'bestaudio/best',
+            '--no-playlist',
+            '--no-warnings',
+            ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+            '-o',
+            '-',
+            url,
+          ],
+          {
+            windowsHide: true,
         });
         const ff = spawn(
           FFMPEG_BIN,
