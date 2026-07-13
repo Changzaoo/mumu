@@ -64,6 +64,20 @@ function isPlayable(song: Partial<AppleSong>): song is AppleSong {
 
 async function fetchJson<T>(url: string): Promise<T> {
   let res: Response;
+  // Apple's CDN echoes the request Origin into Access-Control-Allow-Origin but
+  // caches WITHOUT `Vary: Origin`, so a response cached for another origin (e.g.
+  // the old aurial.vercel.app) gets served to us with a mismatched ACAO → CORS
+  // block. Partition the cache by our own origin so we always get a response
+  // whose ACAO matches us. (iTunes ignores unknown query params.)
+  try {
+    const u = new URL(url);
+    if (typeof window !== 'undefined' && window.location?.hostname) {
+      u.searchParams.set('_o', window.location.hostname);
+    }
+    url = u.toString();
+  } catch {
+    /* leave url as-is */
+  }
   try {
     res = await fetch(url);
   } catch (cause) {

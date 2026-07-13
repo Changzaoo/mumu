@@ -18,7 +18,37 @@ import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadMa
 import {
   hydrate as hydrateLocalLibrary,
   localAudioUrl as localLibraryAudioUrl,
+  remoteUrlFor,
+  sourceUrlFor,
 } from '@/lib/local/localLibrary';
+import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
+
+/**
+ * Ensure a track has a playable source. Local-library tracks store their audio
+ * only on the device that imported them; on any OTHER device (metadata synced,
+ * audio absent) we resolve a stream: the uploaded copy on the importer if it
+ * exists, else a live stream from the original link (YouTube/SoundCloud/…) or
+ * the direct file URL. Returns the track augmented with a `streamUrl`, or the
+ * track unchanged when nothing can be resolved (genuinely unavailable).
+ */
+async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
+  if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id) || track.streamUrl) return track;
+  if (!track.id.startsWith('local:')) return track;
+  const remote = remoteUrlFor(track.id);
+  if (remote) return { ...track, streamUrl: remote };
+  const sourceUrl = sourceUrlFor(track.id);
+  if (!sourceUrl) return track;
+  try {
+    const host = new URL(sourceUrl).hostname;
+    if (importerHostLabel(host)) {
+      const streamUrl = await buildStreamUrl(sourceUrl);
+      return streamUrl ? { ...track, streamUrl } : track;
+    }
+    return { ...track, streamUrl: sourceUrl }; // direct-file import
+  } catch {
+    return track;
+  }
+}
 
 export interface PlayContext {
   source: PlaySource;
@@ -112,6 +142,12 @@ function toArray(tracks: TrackDto | TrackDto[]): TrackDto[] {
 export const usePlayerStore = create<PlayerState>()(
   persist(
     (set, get) => {
+      function applyEngineSettings(): void {
+        audioEngine.setVolume(get().volume);
+        audioEngine.setMuted(get().muted);
+        audioEngine.setRate(get().playbackRate);
+      }
+
       /** Load queue[index] into the engine and sync state. */
       function loadIndex(index: number, autoplay: boolean, crossfadeSeconds = 0): void {
         const track = get().queue[index];
@@ -120,10 +156,6 @@ export const usePlayerStore = create<PlayerState>()(
         preloadRequested = false;
         crossfadeTriggered = false;
         lastProgressCommit = 0;
-        audioEngine.load(track, { autoplay, crossfadeSeconds });
-        audioEngine.setVolume(get().volume);
-        audioEngine.setMuted(get().muted);
-        audioEngine.setRate(get().playbackRate);
         set({
           currentTrack: track,
           queueIndex: index,
@@ -131,6 +163,35 @@ export const usePlayerStore = create<PlayerState>()(
           progress: 0,
           buffered: 0,
           duration: track.durationMs / 1000,
+        });
+
+        // A source we can play right now (local audio, an existing stream URL, or
+        // a catalog track) → load instantly.
+        const hasSource =
+          Boolean(localLibraryAudioUrl(track.id)) ||
+          Boolean(localAudioUrl(track.id)) ||
+          Boolean(track.streamUrl) ||
+          !track.id.startsWith('local:');
+        if (hasSource) {
+          audioEngine.load(track, { autoplay, crossfadeSeconds });
+          applyEngineSettings();
+          return;
+        }
+
+        // Imported track with no audio on THIS device — resolve a stream first
+        // (uploaded copy or live from the source), then load. Guard against the
+        // user skipping to another track while we resolve.
+        set({ isBuffering: true });
+        void ensurePlayableSource(track).then((resolved) => {
+          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+          if (resolved !== track && resolved.streamUrl) {
+            set((s) => ({
+              queue: s.queue.map((t, i) => (i === index ? resolved : t)),
+              currentTrack: resolved,
+            }));
+          }
+          audioEngine.load(resolved, { autoplay, crossfadeSeconds });
+          applyEngineSettings();
         });
       }
 

@@ -509,6 +509,16 @@ export function findBySource(sourceUrl: string): TrackDto | null {
   return read().find((e) => e.sourceUrl === sourceUrl)?.track ?? null;
 }
 
+/** The original import link for a local track (for streaming on a device without the audio). */
+export function sourceUrlFor(id: string): string | null {
+  return read().find((e) => e.track.id === id)?.sourceUrl ?? null;
+}
+
+/** The uploaded-audio stream URL for a local track, if it was uploaded. */
+export function remoteUrlFor(id: string): string | null {
+  return read().find((e) => e.track.id === id)?.remoteUrl ?? null;
+}
+
 // ── album / artist organization (Spotify-style, all from local metadata) ──
 function normName(value: string): string {
   return value
