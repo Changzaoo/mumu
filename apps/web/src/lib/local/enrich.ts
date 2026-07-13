@@ -26,6 +26,7 @@ export interface EnrichedMeta {
   artists: string[];
   album: string | null;
   coverUrl: string | null;
+  genre: string | null;
 }
 
 /**
@@ -175,6 +176,7 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
         artists: await resolveArtists(best.artistName, best.trackName),
         album: best.collectionName || null,
         coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
+        genre: best.primaryGenreName || null,
       };
     }
   }
@@ -189,4 +191,83 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
     }
   }
   return null;
+}
+
+const titleClose = (a: string, b: string): boolean => {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  return na === nb || na.includes(nb) || nb.includes(na);
+};
+
+const artistClose = (name: string, wantNorm: string): boolean => {
+  if (!wantNorm) return false;
+  const n = norm(name);
+  return n === wantNorm || n.includes(wantNorm) || wantNorm.includes(n);
+};
+
+/**
+ * MINUTELY verify a track's real identity against iTunes and return AUTHORITATIVE
+ * metadata — the artist and genre come from iTunes, never from a guess. Returns
+ * null when iTunes can't confidently confirm an artist (title has no match, or
+ * many different artists share the title so it's ambiguous). Callers must then
+ * LEAVE the track un-reattributed rather than crediting the wrong artist/genre.
+ */
+export async function verifyIdentity(
+  title: string,
+  artistHint?: string,
+): Promise<EnrichedMeta | null> {
+  const t = title.trim();
+  if (!t) return null;
+  const bare = t
+    .replace(/[([{][^)\]}]*[)\]}]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // Gather candidates from a few queries (most specific first).
+  const byId = new Map<number, AppleSong>();
+  const terms = Array.from(
+    new Set([artistHint ? `${t} ${artistHint}` : t, t, bare].filter((s) => s.length > 1)),
+  );
+  for (const term of terms) {
+    try {
+      for (const s of await searchSongs(term, 'br', 20)) byId.set(s.trackId, s);
+    } catch {
+      /* skip this query */
+    }
+  }
+  const titleMatches = [...byId.values()].filter(
+    (s) => titleClose(s.trackName, t) || titleClose(s.trackName, bare),
+  );
+  if (titleMatches.length === 0) return null;
+
+  // 1) Prefer a candidate whose artist matches the hint → confirms the hint.
+  const hintNorm = artistHint ? norm(artistHint) : '';
+  let chosen = hintNorm ? titleMatches.find((s) => artistClose(s.artistName, hintNorm)) : undefined;
+
+  // 2) No hint confirmation → require a DOMINANT artist among the title matches;
+  //    a tie means the title is ambiguous and we must NOT guess.
+  if (!chosen) {
+    const byArtist = new Map<string, { count: number; song: AppleSong }>();
+    for (const s of titleMatches) {
+      const key = norm(s.artistName);
+      const e = byArtist.get(key);
+      if (e) e.count += 1;
+      else byArtist.set(key, { count: 1, song: s });
+    }
+    const ranked = [...byArtist.values()].sort((a, b) => b.count - a.count);
+    const top = ranked[0];
+    if (!top) return null;
+    if (ranked.length > 1 && (ranked[1]?.count ?? 0) >= top.count) return null; // ambiguous
+    chosen = top.song;
+  }
+
+  return {
+    title: chosen.trackName,
+    artist: chosen.artistName,
+    artists: await resolveArtists(chosen.artistName, chosen.trackName),
+    album: chosen.collectionName || null,
+    coverUrl: chosen.artworkUrl100 ? hiRes(chosen.artworkUrl100) : null,
+    genre: chosen.primaryGenreName || null,
+  };
 }

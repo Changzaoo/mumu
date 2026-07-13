@@ -16,7 +16,7 @@ import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
-import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
+import { verifyIdentity } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
@@ -329,25 +329,14 @@ function patchEntry(id: string, next: LibraryEntry): void {
   cloud.push(id, next);
 }
 
-/** Apply an iTunes match to a local entry (cover, album, corrected name). */
-function applyEnrichment(entry: LibraryEntry, meta: EnrichedMeta): LibraryEntry {
-  const track = localTrackDto(
-    entry.track.id,
-    meta.title,
-    meta.artists, // distinct artists (never merged into one)
-    entry.track.durationMs,
-    meta.album,
-    // Keep the existing (thumbnail) cover if iTunes has none.
-    meta.coverUrl ?? entry.track.coverUrl,
-  );
-  // Never let enrichment drop the cross-device stream URL set by uploadAndLink.
-  return { ...entry, track: { ...track, streamUrl: entry.remoteUrl ?? entry.track.streamUrl } };
-}
-
 /**
- * Look up real cover/metadata for one local track and update its registry entry
- * (also the manual "buscar capa" retry). Degrades silently: returns false on no
- * match / failure, never throws, keeps the audio + id unchanged.
+ * Look up + verify a track's real metadata and update its entry. ACCURACY FIRST:
+ * the AI only proposes a cleaner title + an artist HINT — iTunes is the authority
+ * that must CONFIRM the artist (and genre) before we attribute it. If iTunes
+ * can't confirm (no title match, or the title is shared by several artists), we
+ * leave the track exactly as-is rather than crediting the wrong artist/genre.
+ * Returns true only when a verified match was applied. Also the manual
+ * "buscar capa" retry. Never throws; keeps the audio + id unchanged.
  */
 export async function enrichLocalTrack(id: string): Promise<boolean> {
   const entry = read().find((e) => e.track.id === id);
@@ -357,44 +346,34 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
     .filter((n) => n && n !== 'Desconhecido')
     .join(', ');
 
-  // AI "identity agent": the authority on the real title + all creators + genre.
-  const identity = await aiIdentifyTrack(entry.track.title, currentArtist || undefined);
+  // The AI only suggests a clean title + a possible artist HINT — never final.
+  const ai = await aiIdentifyTrack(entry.track.title, currentArtist || undefined);
+  const titleGuess = ai?.title || entry.track.title;
+  const artistHint = ai?.artists[0] || currentArtist || undefined;
 
-  if (identity) {
-    const title = identity.title || entry.track.title;
-    const artists = identity.artists.length
-      ? identity.artists
-      : currentArtist
-        ? [currentArtist]
-        : ['Desconhecido'];
-    // Confirm a hi-res cover from iTunes against the AI-resolved title + artist.
-    const meta = await enrichMeta({ title, artist: artists[0] });
-    const cover = meta?.coverUrl ?? entry.track.coverUrl;
-
-    const current = read().find((e) => e.track.id === id);
-    if (!current) return false;
-    const base = localTrackDto(id, title, artists, current.track.durationMs, identity.album, cover);
-    const track: TrackDto = {
-      ...base,
-      genre: identity.genre ?? current.track.genre ?? null,
-      streamUrl: current.remoteUrl ?? current.track.streamUrl,
-    };
-    patchEntry(id, { ...current, track });
-    prefetchLyrics(track); // fetch synced lyrics with the corrected name
-    if (current.sourceUrl) void publishSharedTrack(track, current.sourceUrl);
-    return true;
-  }
-
-  // Fallback (AI unavailable): iTunes-only match with strict verification.
-  const raw = currentArtist ? `${currentArtist} - ${entry.track.title}` : entry.track.title;
-  const meta = await enrichMeta(cleanQuery(raw));
-  if (!meta) return false;
+  // iTunes is the authority: it must confirm the artist before we attribute it.
+  const verified = await verifyIdentity(titleGuess, artistHint);
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
-  const enriched = applyEnrichment(current, meta);
-  patchEntry(id, enriched);
-  prefetchLyrics(enriched.track);
-  if (enriched.sourceUrl) void publishSharedTrack(enriched.track, enriched.sourceUrl);
+
+  if (!verified) return false; // couldn't confirm → NEVER guess; leave as-is
+
+  const base = localTrackDto(
+    id,
+    verified.title,
+    verified.artists, // iTunes-authoritative, split into distinct artists
+    current.track.durationMs,
+    verified.album,
+    verified.coverUrl ?? current.track.coverUrl,
+  );
+  const track: TrackDto = {
+    ...base,
+    genre: verified.genre ?? current.track.genre ?? null, // iTunes genre only
+    streamUrl: current.remoteUrl ?? current.track.streamUrl,
+  };
+  patchEntry(id, { ...current, track });
+  prefetchLyrics(track); // fetch synced lyrics with the corrected name
+  if (current.sourceUrl) void publishSharedTrack(track, current.sourceUrl);
   return true;
 }
 
@@ -886,7 +865,7 @@ async function backfillRemote(): Promise<void> {
 // a wrong name, or two collaborating artists merged into one (which also breaks
 // lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
 const REPROCESS_KEY = 'aurial:reprocessVersion';
-const REPROCESS_VERSION = 1;
+const REPROCESS_VERSION = 2; // v2: re-verify artist/genre against iTunes (no AI guessing)
 
 /** Split a single merged artist credit on an existing track (when enrichment couldn't). */
 async function resplitArtistsInPlace(id: string): Promise<void> {
