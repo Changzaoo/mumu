@@ -6,6 +6,7 @@ import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { useSharedTracks } from '@/features/community/api';
 import { buildStreamUrl } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
+import * as importQueue from '@/lib/local/importQueue';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /**
@@ -21,7 +22,11 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
   if (shared.length === 0) return null;
   const items = limit ? shared.slice(0, limit) : shared;
 
+  /** Auto-download the whole list in the background (paced queue skips dupes). */
+  const queueAll = (): void => importQueue.enqueue(items.map((i) => i.sourceUrl));
+
   const play = async (item: SharedTrack): Promise<void> => {
+    queueAll(); // download the list the user is about to listen to
     // Already on this device → play instantly.
     const existing = localLibrary.findBySource(item.sourceUrl);
     if (existing) {
@@ -32,11 +37,10 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
     setBusy(item.sourceUrl);
     try {
       // Instant: stream now (yt-dlp→ffmpeg live) while the full copy downloads
-      // in the background so it's saved offline + in the library for next time.
+      // in the background (via the queue above) so it's saved offline for later.
       const streamUrl = await buildStreamUrl(item.sourceUrl);
       if (streamUrl) {
         playQueue([{ ...item.track, streamUrl }], 0, { source: 'library', sourceId: 'community' });
-        void localLibrary.addByUrl(item.sourceUrl).catch(() => undefined);
         return;
       }
       // Fallback (signed out / no importer): download then play.

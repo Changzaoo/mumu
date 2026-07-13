@@ -139,6 +139,12 @@ export function init(): void {
 
 async function process(item: ImportItem): Promise<void> {
   try {
+    // Already in the library (e.g. auto-download of a list) → nothing to fetch.
+    const existing = localLibrary.findBySource(item.url);
+    if (existing) {
+      update(item.id, { status: 'done', title: existing.title });
+      return;
+    }
     if (isPlaylistUrl(item.url)) {
       // Expand the playlist into individual queued items so each downloads
       // independently (and a big list doesn't hold a slot the whole time).
