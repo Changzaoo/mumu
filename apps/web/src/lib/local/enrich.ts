@@ -205,10 +205,16 @@ const titleExact = (a: string, b: string): boolean => {
   return long.startsWith(`${short} `) && long.length - short.length <= 18;
 };
 
+// Confirm an artist: normalized equality, or one is a WORD-prefix of the other
+// ("charlie brown" ⊂ "charlie brown jr"). NOT a loose substring test — that let
+// "MC Kevin" confirm as "MC Kevin o Chris" (a different artist).
 const artistClose = (name: string, wantNorm: string): boolean => {
   if (!wantNorm) return false;
   const n = norm(name);
-  return n === wantNorm || n.includes(wantNorm) || wantNorm.includes(n);
+  if (!n) return false;
+  if (n === wantNorm) return true;
+  const [short, long] = n.length <= wantNorm.length ? [n, wantNorm] : [wantNorm, n];
+  return long.startsWith(`${short} `);
 };
 
 /**
@@ -246,26 +252,15 @@ export async function verifyIdentity(
   );
   if (titleMatches.length === 0) return null;
 
-  // 1) Prefer a candidate whose artist matches the hint → confirms the hint.
+  // Attribute ONLY when the artist hint (from the filename / YouTube metadata)
+  // is CONFIRMED by an exact-title iTunes match. No hint, or no confirmation →
+  // return null; the caller then keeps the current artist rather than guessing.
+  // (The old "dominant artist by title" fallback credited random artists to
+  //  common titles — that's what produced the stupidly-wrong names.)
   const hintNorm = artistHint ? norm(artistHint) : '';
-  let chosen = hintNorm ? titleMatches.find((s) => artistClose(s.artistName, hintNorm)) : undefined;
-
-  // 2) No hint confirmation → require a DOMINANT artist among the title matches;
-  //    a tie means the title is ambiguous and we must NOT guess.
-  if (!chosen) {
-    const byArtist = new Map<string, { count: number; song: AppleSong }>();
-    for (const s of titleMatches) {
-      const key = norm(s.artistName);
-      const e = byArtist.get(key);
-      if (e) e.count += 1;
-      else byArtist.set(key, { count: 1, song: s });
-    }
-    const ranked = [...byArtist.values()].sort((a, b) => b.count - a.count);
-    const top = ranked[0];
-    if (!top) return null;
-    if (ranked.length > 1 && (ranked[1]?.count ?? 0) >= top.count) return null; // ambiguous
-    chosen = top.song;
-  }
+  if (!hintNorm) return null;
+  const chosen = titleMatches.find((s) => artistClose(s.artistName, hintNorm));
+  if (!chosen) return null;
 
   return {
     title: chosen.trackName,

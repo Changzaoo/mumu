@@ -877,7 +877,9 @@ async function backfillRemote(): Promise<void> {
 // a wrong name, or two collaborating artists merged into one (which also breaks
 // lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
 const REPROCESS_KEY = 'aurial:reprocessVersion';
-const REPROCESS_VERSION = 3; // v3: iTunes-authoritative (strict title), no AI generation
+// v4: purge the bad credits produced by the removed dominant-artist fallback —
+// re-audit EVERY track (AI flags wrong credits; unconfirmable ones are cleared).
+const REPROCESS_VERSION = 4;
 
 // ── periodic AI audit of attributions ───────────────────────────
 // iTunes has the final word on who a song is by; the AI just periodically
@@ -905,8 +907,22 @@ function markAudited(ids: string[]): void {
   }
 }
 
+/** Strip a credit we KNOW is wrong: better "Desconhecido" than the wrong name
+ *  (the wrong artist photo disappears with it — photos are looked up by name). */
+function clearWrongCredit(id: string): void {
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur) return;
+  const track: TrackDto = {
+    ...cur.track,
+    artists: [{ id: `local-artist:${id}:0`, name: 'Desconhecido', slug: '', imageUrl: null }],
+    genre: null, // the genre came from the same wrong match
+  };
+  patchEntry(id, { ...cur, track });
+}
+
 /** Audit up to `limit` not-yet-checked attributed tracks per run (spreads the
- *  cost over sessions). On a clear AI "NÃO", re-verify against iTunes. */
+ *  cost over sessions). On a clear AI "NÃO": re-verify against iTunes, and if
+ *  nothing confirms, DROP the wrong credit instead of keeping it. */
 async function auditAttributions(limit = 12): Promise<void> {
   const audited = readAudited();
   const todo = read()
@@ -921,7 +937,10 @@ async function auditAttributions(limit = 12): Promise<void> {
       e.track.title,
       e.track.artists.map((a) => a.name).join(', '),
     ).catch(() => null);
-    if (verdict === false) await enrichLocalTrack(e.track.id).catch(() => undefined);
+    if (verdict === false) {
+      const fixed = await enrichLocalTrack(e.track.id).catch(() => false);
+      if (!fixed) clearWrongCredit(e.track.id);
+    }
     done.push(e.track.id);
   }
   if (done.length > 0) markAudited(done);
@@ -966,6 +985,14 @@ async function reprocessExisting(): Promise<void> {
     const applied = await enrichLocalTrack(entry.track.id).catch(() => false);
     if (!applied) await resplitArtistsInPlace(entry.track.id).catch(() => undefined);
   }
+  // v4: previous versions could have written bogus credits — re-audit everything
+  // (clear the audited set, then check every track, not just a per-boot batch).
+  try {
+    window.localStorage.removeItem(AUDITED_KEY);
+  } catch {
+    /* ignore */
+  }
+  await auditAttributions(Number.POSITIVE_INFINITY).catch(() => undefined);
   try {
     window.localStorage.setItem(REPROCESS_KEY, String(REPROCESS_VERSION));
   } catch {
