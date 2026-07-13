@@ -1,20 +1,13 @@
 /**
- * / — Catalog home, Spotify-shaped. Two data sources, clearly separated:
- *
- *  1. PRIMARY "Em alta" — the real mainstream hits from the Apple/iTunes charts
- *     (Drake, The Weeknd, Shakira…). These play as legal **30-second previews**
- *     (stream-only, never downloadable). Genre chips switch the chart, and a set
- *     of per-genre rows fill the page with covers.
- *  2. SECONDARY "Grátis e completas" — the Audius public catalog: independent
- *     artists whose tracks play in **full length** and can be downloaded/offline.
- *
- * The central Aurial backend is not deployed in the P2P topology, so both feeds
- * are read directly from their public APIs on the client.
+ * / — Home, Spotify-shaped. Everything here is REAL, full-length playable music
+ * (no 30s previews): the tracks people add to the app, your own device library,
+ * and the Audius public catalog of independent artists (plays in full, can be
+ * downloaded/offline). Organized into clean rows and per-genre carousels.
  */
 import { useState } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { HardDriveDownload, Music, Play, Share2 } from 'lucide-react';
+import { Clock, HardDriveDownload, Heart, Library, Play } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
 import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
@@ -23,19 +16,16 @@ import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
-import { APPLE_GENRES } from '@/lib/catalog/itunes';
-import {
-  useTopSongs,
-  useTopSongsByGenre,
-  useTrending,
-  useTrendingPlaylists,
-} from '@/features/catalog/api';
-import { useCommunityTrending } from '@/features/trending/api';
+import { CATALOG_GENRES } from '@/lib/catalog/audius';
+import { useTrending, useTrendingPlaylists } from '@/features/catalog/api';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /** Genres shown as their own home rows (Spotify-style density). */
-const HOME_GENRE_ROWS = [1332, 1123, 14, 18, 7, 21] as const;
+const HOME_GENRE_ROWS = ['Hip-Hop/Rap', 'Pop', 'Electronic', 'Rock', 'R&B/Soul', 'Lo-Fi'] as const;
+
+/** Chips offered on the home genre filter. */
+const GENRE_CHIPS = CATALOG_GENRES.slice(0, 10);
 
 function localGreeting(): string {
   const hour = new Date().getHours();
@@ -45,40 +35,37 @@ function localGreeting(): string {
   return 'Boa noite';
 }
 
-/** Compact 2-col grid of the top hits — the home "jump back in" tiles. */
-function QuickTiles({ tracks, onPlay }: { tracks: TrackDto[]; onPlay: (index: number) => void }) {
-  if (tracks.length === 0) return null;
+/** Spotify-style quick-access shortcut tiles to the user's own spaces. */
+function QuickAccess() {
+  const items = [
+    { to: '/liked', label: 'Curtidas', icon: Heart },
+    { to: '/history', label: 'Histórico', icon: Clock },
+    { to: '/library', label: 'Biblioteca', icon: Library },
+    { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
+  ];
   return (
-    <div className="grid grid-cols-1 gap-2 px-3 sm:grid-cols-2 lg:grid-cols-3">
-      {tracks.slice(0, 6).map((track, index) => (
-        <button
-          key={track.id}
-          type="button"
-          onClick={() => onPlay(index)}
-          className="glass group flex items-center gap-3 overflow-hidden rounded-lg pr-3 text-left transition-colors duration-200 hover:bg-fg/10"
+    <div className="grid grid-cols-2 gap-2 px-3 lg:grid-cols-4">
+      {items.map(({ to, label, icon: Icon }) => (
+        <Link
+          key={to}
+          to={to}
+          className="glass group flex items-center gap-3 overflow-hidden rounded-lg py-2 pr-3 transition-colors duration-200 hover:bg-fg/10"
         >
-          <span className="grid size-14 shrink-0 place-items-center overflow-hidden bg-fg/6 text-fg-subtle">
-            {track.coverUrl ? (
-              <img src={track.coverUrl} alt="" loading="lazy" className="size-full object-cover" />
-            ) : (
-              <Music className="size-5" />
-            )}
+          <span className="grid size-11 shrink-0 place-items-center bg-accent/12 text-accent">
+            <Icon className="size-5" />
           </span>
           <span className="line-clamp-2 min-w-0 flex-1 text-[13px] font-semibold text-fg">
-            {track.title}
+            {label}
           </span>
-          <span className="grid size-8 shrink-0 translate-x-1 place-items-center rounded-full bg-accent text-bg opacity-0 transition-[opacity,transform] duration-200 group-hover:translate-x-0 group-hover:opacity-100">
-            <Play className="size-4 fill-current" />
-          </span>
-        </button>
+        </Link>
       ))}
     </div>
   );
 }
 
-/** One per-genre carousel — each owns its query so rows load independently. */
-function GenreRow({ genreId, label }: { genreId: number; label: string }) {
-  const q = useTopSongsByGenre(genreId, 'br');
+/** One per-genre carousel (Audius full tracks) — each owns its query. */
+function GenreRow({ genre }: { genre: string }) {
+  const q = useTrending(genre);
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
@@ -87,7 +74,7 @@ function GenreRow({ genreId, label }: { genreId: number; label: string }) {
   if (q.isLoading) {
     return (
       <section className="space-y-3">
-        <h2 className="px-3 text-xl font-semibold tracking-tight text-fg">{label}</h2>
+        <h2 className="px-3 text-xl font-semibold tracking-tight text-fg">{genre}</h2>
         <div className="no-scrollbar -mx-1 flex gap-1 overflow-x-hidden px-2">
           {Array.from({ length: 6 }, (_, i) => (
             <div key={i} className="w-40 shrink-0 p-3 md:w-44">
@@ -102,14 +89,13 @@ function GenreRow({ genreId, label }: { genreId: number; label: string }) {
   if (tracks.length === 0) return null;
 
   return (
-    <SectionCarousel title={label} subtitle="Em alta no gênero">
+    <SectionCarousel title={genre}>
       {tracks.map((track, index) => (
         <MediaCard
           key={track.id}
           title={track.title}
           subtitle={trackArtistNames(track)}
           imageUrl={track.coverUrl}
-          previewOnly={track.previewOnly}
           playing={currentTrack?.id === track.id && isPlaying}
           onPlay={() => playQueue(tracks, index, { source: 'home' })}
         />
@@ -118,63 +104,18 @@ function GenreRow({ genreId, label }: { genreId: number; label: string }) {
   );
 }
 
-function DeviceShortcut() {
-  return (
-    <section aria-label="No seu dispositivo" className="px-3">
-      <div className="grid gap-3 sm:grid-cols-2">
-        <Link
-          to="/dispositivo"
-          className="glass group flex items-center gap-4 rounded-xl p-4 transition-colors duration-200 hover:bg-fg/5"
-        >
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
-            <HardDriveDownload className="size-6" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-fg">No seu dispositivo</span>
-            <span className="block text-[13px] text-fg-muted">
-              Importe seus arquivos e ouça offline
-            </span>
-          </span>
-        </Link>
-        <Link
-          to="/compartilhar"
-          className="glass group flex items-center gap-4 rounded-xl p-4 transition-colors duration-200 hover:bg-fg/5"
-        >
-          <span className="grid size-12 shrink-0 place-items-center rounded-lg bg-accent/12 text-accent">
-            <Share2 className="size-6" />
-          </span>
-          <span className="min-w-0">
-            <span className="block text-sm font-semibold text-fg">Compartilhar</span>
-            <span className="block text-[13px] text-fg-muted">
-              Envie músicas direto para amigos (P2P)
-            </span>
-          </span>
-        </Link>
-      </div>
-    </section>
-  );
-}
-
 export default function HomePage() {
-  // null = overall top songs; otherwise an Apple genre id.
-  const [genreId, setGenreId] = useState<number | null>(null);
-  const genreLabel = APPLE_GENRES.find((g) => g.id === genreId)?.label ?? null;
+  // null = all genres; otherwise an Audius genre label.
+  const [genre, setGenre] = useState<string | null>(null);
 
-  const overall = useTopSongs('br');
-  const byGenre = useTopSongsByGenre(genreId ?? 0, 'br');
-  const top = genreId === null ? overall : byGenre;
-
-  const freeTracks = useTrending();
+  const top = useTrending(genre ?? undefined);
   const playlists = useTrendingPlaylists();
-  const community = useCommunityTrending(genreId);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
   const tracks: TrackDto[] = top.data ?? [];
-  const free: TrackDto[] = freeTracks.data ?? [];
-  const trendingTracks: TrackDto[] = community.data ?? [];
 
   return (
     <div className="space-y-8 py-4">
@@ -187,21 +128,13 @@ export default function HomePage() {
         {localGreeting()}
       </motion.h1>
 
-      {/* Featured: link-imported tracks shared by the community (first). */}
-      {genreId === null && <CommunityTracksRow limit={20} />}
+      {genre === null && <QuickAccess />}
 
-      {/* Your downloaded / on-device tracks (only when you have some). */}
-      {genreId === null && <DeviceTracksRow limit={12} />}
+      {/* Recently added to the app + your own device tracks. */}
+      {genre === null && <CommunityTracksRow limit={20} />}
+      {genre === null && <DeviceTracksRow limit={12} />}
 
-      {/* Jump-back-in quick tiles (overall top only). */}
-      {genreId === null && (
-        <QuickTiles
-          tracks={tracks}
-          onPlay={(index) => playQueue(tracks, index, { source: 'home' })}
-        />
-      )}
-
-      {/* Genre chips (Apple charts) */}
+      {/* Genre filter chips (Audius). */}
       <div
         role="tablist"
         aria-label="Filtrar por gênero"
@@ -210,32 +143,28 @@ export default function HomePage() {
         <button
           type="button"
           role="tab"
-          aria-selected={genreId === null}
-          onClick={() => setGenreId(null)}
+          aria-selected={genre === null}
+          onClick={() => setGenre(null)}
           className={cn(
             'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-            genreId === null
-              ? 'bg-fg text-bg'
-              : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
+            genre === null ? 'bg-fg text-bg' : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
           )}
         >
           Tudo
         </button>
-        {APPLE_GENRES.map((g) => (
+        {GENRE_CHIPS.map((g) => (
           <button
-            key={g.id}
+            key={g}
             type="button"
             role="tab"
-            aria-selected={genreId === g.id}
-            onClick={() => setGenreId(g.id)}
+            aria-selected={genre === g}
+            onClick={() => setGenre(g)}
             className={cn(
               'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-              genreId === g.id
-                ? 'bg-fg text-bg'
-                : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
+              genre === g ? 'bg-fg text-bg' : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
             )}
           >
-            {g.label}
+            {g}
           </button>
         ))}
       </div>
@@ -253,7 +182,7 @@ export default function HomePage() {
             <section className={cn(top.isFetching && 'opacity-70 transition-opacity')}>
               <div className="mb-3 flex items-center justify-between px-3">
                 <h2 className="text-xl font-semibold tracking-tight text-fg">
-                  {genreLabel ? `Em alta · ${genreLabel}` : 'Em alta'}
+                  {genre ? `Em alta · ${genre}` : 'Em alta'}
                 </h2>
                 <button
                   type="button"
@@ -273,7 +202,6 @@ export default function HomePage() {
                     title={track.title}
                     subtitle={trackArtistNames(track)}
                     imageUrl={track.coverUrl}
-                    previewOnly={track.previewOnly}
                     playing={currentTrack?.id === track.id && isPlaying}
                     onPlay={() => playQueue(tracks, index, { source: 'home' })}
                   />
@@ -290,74 +218,8 @@ export default function HomePage() {
         </>
       )}
 
-      {/* One-line disclosure on preview vs full-track playback. */}
-      <p className="px-3 text-[12px] text-fg-subtle">
-        As faixas em alta tocam em prévia de 30s (Apple). As faixas do acervo grátis tocam
-        completas.
-      </p>
-
-      {/* Community trending — powered by everyone's likes (Firestore). */}
-      {trendingTracks.length > 0 && (
-        <SectionCarousel
-          title={genreLabel ? `Em alta na comunidade · ${genreLabel}` : 'Em alta na comunidade'}
-          subtitle="As mais curtidas pelos ouvintes do radinho"
-        >
-          {trendingTracks.map((track, index) => (
-            <MediaCard
-              key={track.id}
-              title={track.title}
-              subtitle={trackArtistNames(track)}
-              imageUrl={track.coverUrl}
-              previewOnly={track.previewOnly}
-              playing={currentTrack?.id === track.id && isPlaying}
-              onPlay={() => playQueue(trendingTracks, index, { source: 'home' })}
-            />
-          ))}
-        </SectionCarousel>
-      )}
-
       {/* Per-genre rows — only on the "Tudo" view, to keep the page alive. */}
-      {genreId === null &&
-        HOME_GENRE_ROWS.map((id) => {
-          const label = APPLE_GENRES.find((g) => g.id === id)?.label ?? '';
-          return <GenreRow key={id} genreId={id} label={label} />;
-        })}
-
-      {/* SECONDARY: Audius full-length free catalog. */}
-      {free.length > 0 && (
-        <section className={cn(freeTracks.isFetching && 'opacity-70 transition-opacity')}>
-          <div className="mb-3 flex items-center justify-between px-3">
-            <div>
-              <h2 className="text-xl font-semibold tracking-tight text-fg">Grátis e completas</h2>
-              <p className="mt-0.5 text-[13px] text-fg-muted">
-                Artistas independentes no Audius — tocam por inteiro
-              </p>
-            </div>
-            <button
-              type="button"
-              onClick={() => playQueue(free, 0, { source: 'home' })}
-              className="inline-flex shrink-0 items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
-            >
-              <Play className="size-3.5 fill-current" /> Tocar tudo
-            </button>
-          </div>
-          <div
-            aria-label="Faixas grátis e completas"
-            className="no-scrollbar -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto px-2 pb-1"
-          >
-            {free.map((track, index) => (
-              <MediaCard
-                key={track.id}
-                title={track.title}
-                subtitle={trackArtistNames(track)}
-                imageUrl={track.coverUrl}
-                playing={currentTrack?.id === track.id && isPlaying}
-                onPlay={() => playQueue(free, index, { source: 'home' })}
-              />
-            ))}
-          </div>
-        </section>
-      )}
+      {genre === null && HOME_GENRE_ROWS.map((g) => <GenreRow key={g} genre={g} />)}
 
       {playlists.data && playlists.data.length > 0 && (
         <SectionCarousel title="Playlists em alta">
@@ -372,8 +234,6 @@ export default function HomePage() {
           ))}
         </SectionCarousel>
       )}
-
-      <DeviceShortcut />
     </div>
   );
 }

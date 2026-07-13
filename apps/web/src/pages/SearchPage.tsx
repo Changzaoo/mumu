@@ -16,7 +16,7 @@ import { PlayButton } from '@/components/media/PlayButton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';
-import { useAppleSearch, useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
+import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useRecentSearches } from '@/features/search/api';
 import { useDebounce } from '@/hooks/useDebounce';
 import { cn, trackArtistNames } from '@/lib/utils';
@@ -133,7 +133,6 @@ export default function SearchPage() {
     );
   }, [debounced, setSearchParams]);
 
-  const appleQuery = useAppleSearch(debounced);
   const tracksQuery = useCatalogSearch(debounced);
   const artistsQuery = useCatalogSearchArtists(debounced);
   const hasQuery = debounced.trim().length > 0;
@@ -143,28 +142,17 @@ export default function SearchPage() {
     addRecent(term);
   };
 
-  const appleTracks = appleQuery.data ?? [];
   const freeTracks = tracksQuery.data ?? [];
   const artists = artistsQuery.data ?? [];
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
-  const topTrack = tab === 'all' ? appleTracks[0] : undefined;
+  const topTrack = tab === 'all' ? freeTracks[0] : undefined;
 
-  const isLoading =
-    hasQuery && (appleQuery.isLoading || tracksQuery.isLoading || artistsQuery.isLoading);
-  const isError = hasQuery && appleQuery.isError && tracksQuery.isError && artistsQuery.isError;
+  const isLoading = hasQuery && (tracksQuery.isLoading || artistsQuery.isLoading);
+  const isError = hasQuery && tracksQuery.isError && artistsQuery.isError;
   const isEmpty =
-    hasQuery &&
-    !isLoading &&
-    !isError &&
-    appleTracks.length === 0 &&
-    freeTracks.length === 0 &&
-    artists.length === 0;
+    hasQuery && !isLoading && !isError && freeTracks.length === 0 && artists.length === 0;
 
-  const playApple = (index: number): void => {
-    addRecent(debounced);
-    playQueue(appleTracks, index, { source: 'search', sourceId: debounced.trim() });
-  };
   const playFree = (index: number): void => {
     addRecent(debounced);
     playQueue(freeTracks, index, { source: 'search', sourceId: debounced.trim() });
@@ -306,8 +294,7 @@ export default function SearchPage() {
         <div
           className={cn(
             'space-y-8 transition-opacity',
-            (appleQuery.isFetching || tracksQuery.isFetching || artistsQuery.isFetching) &&
-              'opacity-70',
+            (tracksQuery.isFetching || artistsQuery.isFetching) && 'opacity-70',
           )}
         >
           {isEmpty ? (
@@ -335,46 +322,21 @@ export default function SearchPage() {
                       </p>
                       <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
                         Música · {trackArtistNames(topTrack)}
-                        {topTrack.previewOnly && ' · prévia 30s'}
                       </p>
                     </div>
                     <PlayButton
                       size="lg"
                       playing={currentTrack?.id === topTrack.id && isPlaying}
-                      onClick={() => playApple(0)}
+                      onClick={() => playFree(0)}
                       className="absolute bottom-5 right-5"
                     />
                   </div>
                 </section>
               )}
 
-              {showTracks && appleTracks.length > 0 && (
+              {showTracks && freeTracks.length > 0 && (
                 <section aria-label="Músicas" className="min-w-0">
                   <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Músicas</h2>
-                  <TrackList>
-                    {appleTracks.map((track, index) => (
-                      <TrackRow
-                        key={`${track.id}:${index}`}
-                        track={track}
-                        index={index}
-                        showAlbum={false}
-                        active={track.id === currentTrack?.id}
-                        playing={track.id === currentTrack?.id && isPlaying}
-                        onPlay={() => playApple(index)}
-                      />
-                    ))}
-                  </TrackList>
-                </section>
-              )}
-
-              {showTracks && freeTracks.length > 0 && (
-                <section aria-label="Faixas completas (grátis)" className="min-w-0">
-                  <h2 className="text-xl font-semibold tracking-tight text-fg">
-                    Faixas completas (grátis)
-                  </h2>
-                  <p className="mb-3 mt-0.5 text-[13px] text-fg-muted">
-                    Acervo Audius — tocam por inteiro
-                  </p>
                   <TrackList>
                     {freeTracks.map((track, index) => (
                       <TrackRow

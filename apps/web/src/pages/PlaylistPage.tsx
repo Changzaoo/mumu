@@ -67,7 +67,7 @@ import {
   useUpdatePlaylist,
 } from '@/features/playlists/api';
 import { useTrackLikes } from '@/features/library/api';
-import { useAppleSearch } from '@/features/catalog/api';
+import { useCatalogSearch } from '@/features/catalog/api';
 import { useSearch } from '@/features/search/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { useAuthUser } from '@/hooks/useAuthUser';
@@ -223,12 +223,12 @@ function AddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
   );
 }
 
-/** Add-tracks search for LOCAL playlists — catalog (iTunes) search, stored on
- *  device with the full track so it renders and previews without a backend. */
+/** Add-tracks search for LOCAL playlists — full-length Audius catalog, stored on
+ *  device with the full track so it renders and plays without a backend. */
 function LocalAddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
   const [term, setTerm] = useState('');
   const debounced = useDebounce(term, 300);
-  const { data: results, isFetching } = useAppleSearch(debounced);
+  const { data: results, isFetching } = useCatalogSearch(debounced);
   const queryClient = useQueryClient();
   const existing = useMemo(
     () => new Set(playlist.tracks.map((entry) => entry.track.id)),

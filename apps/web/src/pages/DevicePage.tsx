@@ -37,8 +37,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { searchSongs } from '@/lib/catalog/itunes';
-import { appleSongToDto } from '@/lib/catalog/mapApple';
+import { searchTracks } from '@/lib/catalog/audius';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { isPlaylistUrl } from '@/lib/local/importerHelper';
 import * as localPlaylists from '@/lib/local/localPlaylists';
@@ -68,8 +67,8 @@ async function tracksFromList(
     const results = await Promise.all(
       batch.map(async (line) => {
         try {
-          const songs = await searchSongs(line, 'br', 1);
-          return songs[0] ? appleSongToDto(songs[0]) : null;
+          const songs = await searchTracks(line);
+          return songs[0] ?? null; // full-length Audius track (no 30s previews)
         } catch {
           return null;
         } finally {
