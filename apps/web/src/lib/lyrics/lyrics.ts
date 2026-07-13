@@ -86,12 +86,33 @@ export function cachedLyrics(trackId: string): Lyrics | null {
 }
 
 // ── fetch ───────────────────────────────────────────────────────
+
+/** Strip parentheticals / feat / live-remaster noise that hurts LRCLIB matching. */
+function cleanTitleForLyrics(title: string): string {
+  return title
+    .replace(/[([{][^)\]}]*[)\]}]/g, ' ') // (feat …), [Official Video]
+    .replace(/\s*[-–—]\s*(?:ao\s+vivo|live|remaster(?:ed)?.*|slowed.*|sped\s*up.*)$/i, ' ')
+    .replace(/\bfeat\.?\b.*$|\bft\.?\b.*$/i, ' ') // trailing "feat X" without parens
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
 async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
-  const title = track.title.trim();
-  const artist = track.artists[0]?.name?.trim();
+  const rawTitle = track.title.trim();
+  const cleanTitle = cleanTitleForLyrics(rawTitle) || rawTitle;
   const durationSec = track.previewOnly ? 0 : Math.round((track.durationMs || 0) / 1000);
 
-  const get = async (): Promise<Lyrics | null> => {
+  // Try every distinct artist on the track (a two-artist song matches on either),
+  // then no-artist. Distinct, order-preserving, non-empty.
+  const names = Array.from(
+    new Set(track.artists.map((a) => a.name?.trim()).filter((a): a is string => Boolean(a))),
+  )
+    .filter((a) => a !== 'Desconhecido')
+    .slice(0, 2); // cap tries so we stay polite to LRCLIB
+  const artistCandidates: Array<string | undefined> = [...names, undefined];
+  const titleCandidates = Array.from(new Set([cleanTitle, rawTitle].filter(Boolean)));
+
+  const get = async (title: string, artist: string | undefined): Promise<Lyrics | null> => {
     if (!durationSec) return null;
     const url = new URL('https://lrclib.net/api/get');
     url.searchParams.set('track_name', title);
@@ -102,18 +123,38 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     return res.ok ? toLyrics((await res.json()) as LrclibRow) : null;
   };
 
-  const search = async (): Promise<Lyrics | null> => {
+  // Exact get() across title × artist candidates — prefer a synced hit.
+  let plainFallback: Lyrics | null = null;
+  for (const title of titleCandidates) {
+    for (const artist of artistCandidates) {
+      const found = await get(title, artist).catch(() => null);
+      if (found?.synced) return found;
+      if (found && !plainFallback) plainFallback = found;
+    }
+  }
+
+  // Fuzzy search — pick the best SYNCED row (compare title + any artist).
+  const search = async (title: string, artist: string | undefined): Promise<LrclibRow[] | null> => {
     const url = new URL('https://lrclib.net/api/search');
     url.searchParams.set('track_name', title);
     if (artist) url.searchParams.set('artist_name', artist);
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const rows = (await res.json()) as LrclibRow[];
-    if (!Array.isArray(rows) || rows.length === 0) return null;
-    return toLyrics(rows.find((r) => r.syncedLyrics) ?? rows[0]);
+    return Array.isArray(rows) ? rows : null;
   };
 
-  return (await get()) ?? (await search());
+  for (const title of titleCandidates) {
+    for (const artist of artistCandidates) {
+      const rows = await search(title, artist).catch(() => null);
+      if (!rows || rows.length === 0) continue;
+      const synced = rows.find((r) => r.syncedLyrics);
+      if (synced) return toLyrics(synced);
+      if (!plainFallback) plainFallback = toLyrics(rows[0]);
+    }
+  }
+
+  return plainFallback;
 }
 
 /**
