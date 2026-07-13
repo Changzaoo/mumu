@@ -102,6 +102,9 @@ export default function DevicePage() {
   const [listText, setListText] = useState('');
   const [listBusy, setListBusy] = useState<{ done: number; total: number } | null>(null);
 
+  const [selecting, setSelecting] = useState(false);
+  const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
@@ -112,6 +115,26 @@ export default function DevicePage() {
   }, [entries.length]);
 
   const tracks = entries.map((e) => e.track);
+
+  const toggleSelected = (id: string): void => {
+    setSelected((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  };
+  const exitSelection = (): void => {
+    setSelecting(false);
+    setSelected(new Set());
+  };
+  const deleteSelected = (): void => {
+    const ids = [...selected];
+    if (ids.length === 0) return;
+    void localLibrary.removeMany(ids);
+    toast(`${ids.length} ${ids.length === 1 ? 'faixa removida' : 'faixas removidas'}`);
+    exitSelection();
+  };
 
   const importFiles = async (files: File[]): Promise<void> => {
     if (files.length === 0) return;
@@ -367,7 +390,55 @@ export default function DevicePage() {
       {/* Device tracks */}
       <section className="space-y-3">
         {entries.length > 0 && (
-          <h2 className="text-lg font-semibold tracking-tight text-fg">Faixas no dispositivo</h2>
+          <div className="flex items-center justify-between gap-2">
+            <h2 className="text-lg font-semibold tracking-tight text-fg">Faixas no dispositivo</h2>
+            <div className="flex items-center gap-1.5">
+              {selecting ? (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() => setSelected(new Set(entries.map((e) => e.track.id)))}
+                  >
+                    Tudo
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={exitSelection}>
+                    Cancelar
+                  </Button>
+                  <Button
+                    variant="destructive"
+                    size="sm"
+                    disabled={selected.size === 0}
+                    onClick={deleteSelected}
+                  >
+                    Excluir ({selected.size})
+                  </Button>
+                </>
+              ) : (
+                <>
+                  <Button
+                    variant="ghost"
+                    size="sm"
+                    onClick={() =>
+                      void toast.promise(localLibrary.dedupeLibrary(), {
+                        loading: 'Procurando duplicadas…',
+                        success: (n) =>
+                          n > 0
+                            ? `${n} ${n === 1 ? 'duplicada removida' : 'duplicadas removidas'}`
+                            : 'Nenhuma duplicada',
+                        error: 'Falha ao limpar',
+                      })
+                    }
+                  >
+                    Remover duplicadas
+                  </Button>
+                  <Button variant="ghost" size="sm" onClick={() => setSelecting(true)}>
+                    Selecionar
+                  </Button>
+                </>
+              )}
+            </div>
+          </div>
         )}
         {entries.length === 0 ? (
           <EmptyState
@@ -380,28 +451,46 @@ export default function DevicePage() {
             {entries.map((entry, index) => {
               const track = entry.track;
               const active = track.id === currentTrack?.id;
+              const isSel = selected.has(track.id);
               return (
                 <div
                   key={track.id}
                   role="listitem"
-                  className="group grid h-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200 hover:bg-fg/5"
+                  onClick={selecting ? () => toggleSelected(track.id) : undefined}
+                  className={cn(
+                    'group grid h-14 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200',
+                    selecting && 'cursor-pointer',
+                    isSel ? 'bg-accent/10' : 'hover:bg-fg/5',
+                  )}
                 >
-                  <button
-                    type="button"
-                    aria-label={active && isPlaying ? 'Pausar' : `Reproduzir ${track.title}`}
-                    onClick={() =>
-                      active
-                        ? toggle()
-                        : playQueue(tracks, index, { source: 'library', sourceId: 'device' })
-                    }
-                    className="grid size-8 place-items-center justify-self-center rounded-full text-fg transition-colors hover:text-accent"
-                  >
-                    {active && isPlaying ? (
-                      <Pause className="size-4 fill-current text-accent" />
-                    ) : (
-                      <Play className="ml-0.5 size-4 fill-current" />
-                    )}
-                  </button>
+                  {selecting ? (
+                    <span className="grid size-8 place-items-center justify-self-center">
+                      <input
+                        type="checkbox"
+                        checked={isSel}
+                        readOnly
+                        aria-label={`Selecionar ${track.title}`}
+                        className="size-4 accent-accent"
+                      />
+                    </span>
+                  ) : (
+                    <button
+                      type="button"
+                      aria-label={active && isPlaying ? 'Pausar' : `Reproduzir ${track.title}`}
+                      onClick={() =>
+                        active
+                          ? toggle()
+                          : playQueue(tracks, index, { source: 'library', sourceId: 'device' })
+                      }
+                      className="grid size-8 place-items-center justify-self-center rounded-full text-fg transition-colors hover:text-accent"
+                    >
+                      {active && isPlaying ? (
+                        <Pause className="size-4 fill-current text-accent" />
+                      ) : (
+                        <Play className="ml-0.5 size-4 fill-current" />
+                      )}
+                    </button>
+                  )}
                   <div className="flex min-w-0 items-center gap-3">
                     <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-sm bg-fg/6 text-fg-subtle">
                       {track.coverUrl ? (
@@ -434,7 +523,7 @@ export default function DevicePage() {
                     </div>
                   </div>
                   <div className="flex items-center gap-1">
-                    {!track.coverUrl && (
+                    {!selecting && !track.coverUrl && (
                       <IconButton
                         aria-label={`Buscar capa de ${track.title}`}
                         title="Buscar capa"
@@ -454,17 +543,19 @@ export default function DevicePage() {
                     <span className="font-mono text-[13px] tabular-nums text-fg-muted">
                       {track.durationMs > 0 ? formatDuration(track.durationMs) : '—'}
                     </span>
-                    <IconButton
-                      aria-label={`Remover ${track.title}`}
-                      size="sm"
-                      className="opacity-0 transition-opacity group-hover:opacity-100"
-                      onClick={() => {
-                        void localLibrary.remove(track.id);
-                        toast('Faixa removida');
-                      }}
-                    >
-                      <Trash2 />
-                    </IconButton>
+                    {!selecting && (
+                      <IconButton
+                        aria-label={`Remover ${track.title}`}
+                        size="sm"
+                        className="opacity-0 transition-opacity group-hover:opacity-100"
+                        onClick={() => {
+                          void localLibrary.remove(track.id);
+                          toast('Faixa removida');
+                        }}
+                      >
+                        <Trash2 />
+                      </IconButton>
+                    )}
                   </div>
                 </div>
               );
