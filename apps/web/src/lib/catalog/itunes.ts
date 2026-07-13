@@ -62,6 +62,74 @@ function isPlayable(song: Partial<AppleSong>): song is AppleSong {
   );
 }
 
+/** iTunes album (collection) row — the fields we show in the discography. */
+export interface AppleAlbum {
+  collectionId: number;
+  collectionName: string;
+  artistName: string;
+  artworkUrl100: string;
+  releaseDate: string | null;
+  trackCount: number | null;
+}
+
+const nrm = (s: string): string =>
+  s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+/** Resolve an artist NAME to its iTunes artistId (closest name match). */
+export async function searchArtistId(name: string): Promise<number | null> {
+  const term = name.trim();
+  if (!term) return null;
+  const url = new URL('https://itunes.apple.com/search');
+  url.searchParams.set('term', term);
+  url.searchParams.set('entity', 'musicArtist');
+  url.searchParams.set('limit', '8');
+  url.searchParams.set('country', DEFAULT_COUNTRY);
+  const body = await fetchJson<{ results?: Array<{ artistId?: number; artistName?: string }> }>(
+    url.toString(),
+  );
+  const results = body.results ?? [];
+  const want = nrm(term);
+  const exact = results.find((r) => r.artistName && nrm(r.artistName) === want);
+  return (exact ?? results[0])?.artistId ?? null;
+}
+
+/** All albums released by an iTunes artist id (newest first, singles dropped). */
+export async function artistAlbums(artistId: number): Promise<AppleAlbum[]> {
+  const url = new URL('https://itunes.apple.com/lookup');
+  url.searchParams.set('id', String(artistId));
+  url.searchParams.set('entity', 'album');
+  url.searchParams.set('limit', '120');
+  url.searchParams.set('country', DEFAULT_COUNTRY);
+  const body = await fetchJson<{ results?: Array<Record<string, unknown>> }>(url.toString());
+  const rows = (body.results ?? []).filter(
+    (r) => r.wrapperType === 'collection' && typeof r.collectionId === 'number',
+  );
+  return rows.map((r) => ({
+    collectionId: r.collectionId as number,
+    collectionName: String(r.collectionName ?? 'Álbum'),
+    artistName: String(r.artistName ?? ''),
+    artworkUrl100: String(r.artworkUrl100 ?? ''),
+    releaseDate: typeof r.releaseDate === 'string' ? r.releaseDate : null,
+    trackCount: typeof r.trackCount === 'number' ? r.trackCount : null,
+  }));
+}
+
+/** The song rows of an iTunes album (collectionId), in track order. */
+export async function albumTracks(collectionId: number): Promise<AppleSong[]> {
+  const url = new URL('https://itunes.apple.com/lookup');
+  url.searchParams.set('id', String(collectionId));
+  url.searchParams.set('entity', 'song');
+  url.searchParams.set('country', DEFAULT_COUNTRY);
+  const body = await fetchJson<{ results?: Array<Partial<AppleSong>> }>(url.toString());
+  // The first row is the album header (wrapperType=collection) — keep only songs.
+  return (body.results ?? []).filter(isPlayable);
+}
+
 async function fetchJson<T>(url: string): Promise<T> {
   let res: Response;
   // Apple's CDN echoes the request Origin into Access-Control-Allow-Origin but

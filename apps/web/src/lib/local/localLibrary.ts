@@ -560,6 +560,20 @@ export function findByHash(hash: string): TrackDto | null {
   return read().find((e) => e.contentHash === hash)?.track ?? null;
 }
 
+/** A library track matching this title (+ artist), if you own it — for showing
+ *  which album tracks are already in your library. */
+export function findOwnedTrack(title: string, artist?: string): TrackDto | null {
+  const t = normName(title);
+  if (!t) return null;
+  const a = artist ? normName(artist) : '';
+  for (const e of read()) {
+    if (normName(e.track.title) !== t) continue;
+    if (a && !e.track.artists.some((x) => normName(x.name) === a)) continue;
+    return e.track;
+  }
+  return null;
+}
+
 /** The original import link for a local track (for streaming on a device without the audio). */
 export function sourceUrlFor(id: string): string | null {
   return read().find((e) => e.track.id === id)?.sourceUrl ?? null;

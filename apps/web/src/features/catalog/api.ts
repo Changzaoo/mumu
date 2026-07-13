@@ -79,6 +79,46 @@ export function useArtistTracks(id: string): UseQueryResult<TrackDto[]> {
   });
 }
 
+// ── Apple / iTunes: artist discographies (albums) ───────────────────────────
+
+/** Every album by the given library artists (iTunes), deduped, newest first. */
+export function useLibraryArtistAlbums(artistNames: string[]): UseQueryResult<itunes.AppleAlbum[]> {
+  const key = [...artistNames].sort().join('|');
+  return useQuery({
+    queryKey: ['library', 'artist-albums', key],
+    enabled: artistNames.length > 0,
+    staleTime: 30 * 60_000,
+    queryFn: async () => {
+      const all: itunes.AppleAlbum[] = [];
+      const seen = new Set<number>();
+      for (const name of artistNames.slice(0, 20)) {
+        const id = await itunes.searchArtistId(name).catch(() => null);
+        if (!id) continue;
+        for (const album of await itunes.artistAlbums(id).catch(() => [])) {
+          if (seen.has(album.collectionId)) continue;
+          seen.add(album.collectionId);
+          all.push(album);
+        }
+      }
+      return all.sort((a, b) => (b.releaseDate ?? '').localeCompare(a.releaseDate ?? ''));
+    },
+  });
+}
+
+/** The tracks of an iTunes album (collectionId), with REAL durations. */
+export function useAppleAlbumTracks(collectionId: number): UseQueryResult<TrackDto[]> {
+  return useQuery({
+    queryKey: ['catalog', 'apple', 'album', collectionId],
+    enabled: collectionId > 0,
+    staleTime: 30 * 60_000,
+    queryFn: async () =>
+      (await itunes.albumTracks(collectionId)).map((s): TrackDto => ({
+        ...appleSongToDto(s),
+        durationMs: s.trackTimeMillis || 30000,
+      })),
+  });
+}
+
 // ── Apple / iTunes: mainstream real-hits catalog (30s previews) ──────────────
 
 /** Real "top songs" chart for a country (Home primary carousel). */

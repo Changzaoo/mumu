@@ -88,6 +88,7 @@ export const router = createBrowserRouter([
           { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
           { path: '/disco/:key', element: page('AlbumLocalPage', 'detail') },
+          { path: '/album-apple/:id', element: page('AppleAlbumPage', 'detail') },
           { path: '/profile/:handle', element: page('ProfilePage', 'detail') },
           { path: '/settings', element: page('SettingsPage', 'list') },
           { path: '/admin/*', element: page('AdminPage', 'list') },
