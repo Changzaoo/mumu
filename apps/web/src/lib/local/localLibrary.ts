@@ -694,6 +694,38 @@ export function artistAlbums(name: string): LocalAlbum[] {
   return albumGroups().filter((a) => normName(a.artist) === key);
 }
 
+export interface LocalGenre {
+  genre: string;
+  coverUrl: string | null;
+  tracks: TrackDto[];
+}
+
+/** Library tracks grouped by their (AI-assigned) genre, biggest first. */
+export function genreGroups(): LocalGenre[] {
+  const byKey = new Map<string, LocalGenre>();
+  for (const entry of read()) {
+    const g = entry.track.genre?.trim();
+    if (!g) continue;
+    const key = g.toLowerCase();
+    let group = byKey.get(key);
+    if (!group) {
+      group = { genre: g, coverUrl: entry.track.coverUrl ?? null, tracks: [] };
+      byKey.set(key, group);
+    }
+    group.tracks.push(entry.track);
+    if (!group.coverUrl && entry.track.coverUrl) group.coverUrl = entry.track.coverUrl;
+  }
+  return [...byKey.values()].sort((a, b) => b.tracks.length - a.tracks.length);
+}
+
+/** All library tracks of a given genre (by name, case-insensitive). */
+export function genreTracks(genre: string): TrackDto[] {
+  const key = genre.trim().toLowerCase();
+  return read()
+    .map((e) => e.track)
+    .filter((t) => (t.genre ?? '').trim().toLowerCase() === key);
+}
+
 /** Object URL for a local track, or null when its audio is not available. */
 export function localAudioUrl(id: string): string | null {
   return blobUrls.get(id) ?? null;

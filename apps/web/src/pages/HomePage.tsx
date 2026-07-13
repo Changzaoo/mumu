@@ -1,31 +1,22 @@
 /**
- * / — Home, Spotify-shaped. Everything here is REAL, full-length playable music
- * (no 30s previews): the tracks people add to the app, your own device library,
- * and the Audius public catalog of independent artists (plays in full, can be
- * downloaded/offline). Organized into clean rows and per-genre carousels.
+ * / — Home, focused on the music people actually ADD to the app: recently-added
+ * tracks, your on-device library, and everything organized by genre and artist.
+ * No external 30s-preview catalog — only real, user-added songs.
  */
-import { useState } from 'react';
+import { useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { Clock, HardDriveDownload, Heart, Library, Play } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import { Clock, Heart, Library, Music, Users } from 'lucide-react';
 import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
-import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
-import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
-import { CATALOG_GENRES } from '@/lib/catalog/audius';
-import { useTrending, useTrendingPlaylists } from '@/features/catalog/api';
-import { cn, trackArtistNames } from '@/lib/utils';
+import * as localLibrary from '@/lib/local/localLibrary';
+import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
-/** Genres shown as their own home rows (Spotify-style density). */
-const HOME_GENRE_ROWS = ['Hip-Hop/Rap', 'Pop', 'Electronic', 'Rock', 'R&B/Soul', 'Lo-Fi'] as const;
-
-/** Chips offered on the home genre filter. */
-const GENRE_CHIPS = CATALOG_GENRES.slice(0, 10);
+const EMPTY: localLibrary.LibraryEntry[] = [];
 
 function localGreeting(): string {
   const hour = new Date().getHours();
@@ -40,8 +31,8 @@ function QuickAccess() {
   const items = [
     { to: '/liked', label: 'Curtidas', icon: Heart },
     { to: '/history', label: 'Histórico', icon: Clock },
+    { to: '/artistas', label: 'Artistas', icon: Users },
     { to: '/library', label: 'Biblioteca', icon: Library },
-    { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
   ];
   return (
     <div className="grid grid-cols-2 gap-2 px-3 lg:grid-cols-4">
@@ -63,59 +54,14 @@ function QuickAccess() {
   );
 }
 
-/** One per-genre carousel (Audius full tracks) — each owns its query. */
-function GenreRow({ genre }: { genre: string }) {
-  const q = useTrending(genre);
-  const playQueue = usePlayerStore((s) => s.playQueue);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const tracks = q.data ?? [];
-
-  if (q.isLoading) {
-    return (
-      <section className="space-y-3">
-        <h2 className="px-3 text-xl font-semibold tracking-tight text-fg">{genre}</h2>
-        <div className="no-scrollbar -mx-1 flex gap-1 overflow-x-hidden px-2">
-          {Array.from({ length: 6 }, (_, i) => (
-            <div key={i} className="w-40 shrink-0 p-3 md:w-44">
-              <div className="aspect-square animate-pulse rounded-lg bg-fg/6" />
-              <div className="mt-3 h-3 w-3/4 animate-pulse rounded bg-fg/6" />
-            </div>
-          ))}
-        </div>
-      </section>
-    );
-  }
-  if (tracks.length === 0) return null;
-
-  return (
-    <SectionCarousel title={genre}>
-      {tracks.map((track, index) => (
-        <MediaCard
-          key={track.id}
-          title={track.title}
-          subtitle={trackArtistNames(track)}
-          imageUrl={track.coverUrl}
-          playing={currentTrack?.id === track.id && isPlaying}
-          onPlay={() => playQueue(tracks, index, { source: 'home' })}
-        />
-      ))}
-    </SectionCarousel>
-  );
-}
-
 export default function HomePage() {
-  // null = all genres; otherwise an Audius genre label.
-  const [genre, setGenre] = useState<string | null>(null);
-
-  const top = useTrending(genre ?? undefined);
-  const playlists = useTrendingPlaylists();
+  const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
+  const genres = localLibrary.genreGroups();
+  const artists = localLibrary.artists();
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
-
-  const tracks: TrackDto[] = top.data ?? [];
 
   return (
     <div className="space-y-8 py-4">
@@ -128,111 +74,54 @@ export default function HomePage() {
         {localGreeting()}
       </motion.h1>
 
-      {genre === null && <QuickAccess />}
+      <QuickAccess />
 
-      {/* Recently added to the app + your own device tracks. */}
-      {genre === null && <CommunityTracksRow limit={20} />}
-      {genre === null && <DeviceTracksRow limit={12} />}
+      {/* Recently added — by the community and on this device. */}
+      <CommunityTracksRow limit={20} />
+      <DeviceTracksRow limit={16} />
 
-      {/* Genre filter chips (Audius). */}
-      <div
-        role="tablist"
-        aria-label="Filtrar por gênero"
-        className="no-scrollbar flex gap-2 overflow-x-auto px-3"
-      >
-        <button
-          type="button"
-          role="tab"
-          aria-selected={genre === null}
-          onClick={() => setGenre(null)}
-          className={cn(
-            'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-            genre === null ? 'bg-fg text-bg' : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
-          )}
-        >
-          Tudo
-        </button>
-        {GENRE_CHIPS.map((g) => (
-          <button
-            key={g}
-            type="button"
-            role="tab"
-            aria-selected={genre === g}
-            onClick={() => setGenre(g)}
-            className={cn(
-              'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-              genre === g ? 'bg-fg text-bg' : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
-            )}
-          >
-            {g}
-          </button>
-        ))}
-      </div>
-
-      {top.isLoading && <PageSkeleton variant="home" />}
-      {top.isError && (
-        <div className="px-3">
-          <ErrorState onRetry={() => void top.refetch()} />
-        </div>
-      )}
-
-      {top.data && (
-        <>
-          {tracks.length > 0 ? (
-            <section className={cn(top.isFetching && 'opacity-70 transition-opacity')}>
-              <div className="mb-3 flex items-center justify-between px-3">
-                <h2 className="text-xl font-semibold tracking-tight text-fg">
-                  {genre ? `Em alta · ${genre}` : 'Em alta'}
-                </h2>
-                <button
-                  type="button"
-                  onClick={() => playQueue(tracks, 0, { source: 'home' })}
-                  className="inline-flex items-center gap-1.5 text-[13px] font-medium text-accent hover:underline"
-                >
-                  <Play className="size-3.5 fill-current" /> Tocar tudo
-                </button>
-              </div>
-              <div
-                aria-label="Faixas em alta"
-                className="no-scrollbar -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto px-2 pb-1"
-              >
-                {tracks.map((track, index) => (
-                  <MediaCard
-                    key={track.id}
-                    title={track.title}
-                    subtitle={trackArtistNames(track)}
-                    imageUrl={track.coverUrl}
-                    playing={currentTrack?.id === track.id && isPlaying}
-                    onPlay={() => playQueue(tracks, index, { source: 'home' })}
-                  />
-                ))}
-              </div>
-            </section>
-          ) : (
-            <EmptyState
-              icon={Play}
-              title="Nada em alta por aqui"
-              description="Tente outro gênero ou volte mais tarde."
-            />
-          )}
-        </>
-      )}
-
-      {/* Per-genre rows — only on the "Tudo" view, to keep the page alive. */}
-      {genre === null && HOME_GENRE_ROWS.map((g) => <GenreRow key={g} genre={g} />)}
-
-      {playlists.data && playlists.data.length > 0 && (
-        <SectionCarousel title="Playlists em alta">
-          {playlists.data.map((playlist) => (
+      {/* Everything organized by genre (AI-assigned). */}
+      {genres.map((g) => (
+        <SectionCarousel key={g.genre} title={g.genre}>
+          {g.tracks.map((track, index) => (
             <MediaCard
-              key={playlist.id}
-              title={playlist.title}
-              subtitle={playlist.userName}
-              imageUrl={playlist.coverUrl}
-              to={`/catalogo/playlist/${playlist.id}`}
+              key={track.id}
+              title={track.title}
+              subtitle={trackArtistNames(track)}
+              imageUrl={track.coverUrl}
+              playing={currentTrack?.id === track.id && isPlaying}
+              onPlay={() =>
+                playQueue(g.tracks, index, { source: 'library', sourceId: `genre:${g.genre}` })
+              }
             />
           ))}
         </SectionCarousel>
+      ))}
+
+      {/* Your artists. */}
+      {artists.length > 0 && (
+        <SectionCarousel title="Seus artistas">
+          {artists.map((artist) => (
+            <MediaCard
+              key={artist.name}
+              title={artist.name}
+              subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
+              shape="round"
+              imageUrl={artist.coverUrl}
+              to={`/artista/${encodeURIComponent(artist.name)}`}
+            />
+          ))}
+        </SectionCarousel>
+      )}
+
+      {entries.length === 0 && (
+        <div className="px-3">
+          <EmptyState
+            icon={Music}
+            title="Sua biblioteca está vazia"
+            description="Adicione músicas por link ou importe seus arquivos — elas aparecem aqui, organizadas por gênero e artista."
+          />
+        </div>
       )}
     </div>
   );

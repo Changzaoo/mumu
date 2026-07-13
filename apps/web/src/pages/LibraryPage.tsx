@@ -6,13 +6,21 @@ import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
-import { Disc3, Heart, Library, ListMusic, Loader2, MicVocal, Plus, Search } from 'lucide-react';
+import {
+  Disc3,
+  Heart,
+  Library,
+  ListMusic,
+  Loader2,
+  MicVocal,
+  Plus,
+  Search,
+  Tag,
+} from 'lucide-react';
 import { createPlaylistSchema, type CreatePlaylistInput } from '@aurial/shared';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
-import { ErrorState } from '@/components/media/ErrorState';
 import { MediaCard } from '@/components/media/MediaCard';
-import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { PlaylistCard } from '@/components/media/PlaylistCard';
 import { Button } from '@/components/ui/button';
 import {
@@ -30,6 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useCreatePlaylist, useLibrary, useLocalPlaylists } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
+import * as localLikes from '@/lib/local/localLikes';
 import { formatCompactNumber } from '@/lib/utils';
 
 const EMPTY_LIB: localLibrary.LibraryEntry[] = [];
@@ -145,7 +154,7 @@ function LikedTile({ count }: { count: number }) {
 }
 
 export default function LibraryPage() {
-  const { data, isLoading, isError, refetch } = useLibrary();
+  const { data } = useLibrary();
   const localPlaylists = useLocalPlaylists();
   const libEntries = useSyncExternalStore(
     localLibrary.subscribe,
@@ -164,6 +173,10 @@ export default function LibraryPage() {
   const localArtists = useMemo(() => {
     const all = localLibrary.artists();
     return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
+  }, [libEntries, term]);
+  const localGenres = useMemo(() => {
+    const all = localLibrary.genreGroups();
+    return term ? all.filter((g) => g.genre.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
   const filtered = useMemo(() => {
     // On-device playlists first, then any server ones.
@@ -202,105 +215,122 @@ export default function LibraryPage() {
           central library API (not deployed in the P2P topology). */}
       <DeviceTracksRow />
 
-      {isLoading ? (
-        <PageSkeleton variant="home" />
-      ) : isError ? (
-        <div className="py-16">
-          <ErrorState onRetry={() => void refetch()} />
-        </div>
-      ) : !data ? null : (
-        <>
-          <div className="relative max-w-xs">
-            <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
-            <Input
-              value={filter}
-              onChange={(event) => setFilter(event.target.value)}
-              placeholder="Filtrar na biblioteca"
-              aria-label="Filtrar na biblioteca"
-              className="pl-9"
+      {/* Local-first: the library (genres/artists/albums/playlists) is built from
+          the songs you added — always shown, no backend required. */}
+      <div className="relative max-w-xs">
+        <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+        <Input
+          value={filter}
+          onChange={(event) => setFilter(event.target.value)}
+          placeholder="Filtrar na biblioteca"
+          aria-label="Filtrar na biblioteca"
+          className="pl-9"
+        />
+      </div>
+
+      <Tabs defaultValue="genres">
+        <TabsList>
+          <TabsTrigger value="genres">Gêneros</TabsTrigger>
+          <TabsTrigger value="artists">Artistas</TabsTrigger>
+          <TabsTrigger value="albums">Álbuns</TabsTrigger>
+          <TabsTrigger value="playlists">Playlists</TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="genres">
+          {localGenres.length === 0 ? (
+            <EmptyState
+              icon={Tag}
+              title={term ? 'Nenhum gênero com esse nome' : 'Sem gêneros ainda'}
+              description={
+                term ? undefined : 'Adicione músicas — a IA classifica cada uma por gênero.'
+              }
             />
-          </div>
-
-          <Tabs defaultValue="playlists">
-            <TabsList>
-              <TabsTrigger value="playlists">Playlists</TabsTrigger>
-              <TabsTrigger value="albums">Álbuns</TabsTrigger>
-              <TabsTrigger value="artists">Artistas</TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="playlists">
-              {filtered.playlists.length === 0 && !(!term && data.likedTracksCount > 0) ? (
-                <EmptyState
-                  icon={ListMusic}
-                  title={term ? 'Nenhuma playlist com esse nome' : 'Nenhuma playlist ainda'}
-                  description={term ? undefined : 'Crie a primeira e monte sua trilha sonora.'}
-                  action={
-                    term ? undefined : (
-                      <Button variant="accent" size="sm" onClick={() => setCreateOpen(true)}>
-                        <Plus /> Criar playlist
-                      </Button>
-                    )
-                  }
+          ) : (
+            <div className={grid}>
+              {localGenres.map((g) => (
+                <MediaCard
+                  key={g.genre}
+                  title={g.genre}
+                  subtitle={`${g.tracks.length} ${g.tracks.length === 1 ? 'música' : 'músicas'}`}
+                  imageUrl={g.coverUrl}
+                  to={`/genero/${encodeURIComponent(g.genre)}`}
                 />
-              ) : (
-                <div className={grid}>
-                  {!term && <LikedTile count={data.likedTracksCount} />}
-                  {filtered.playlists.map((playlist) => (
-                    <PlaylistCard key={playlist.id} playlist={playlist} />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
+              ))}
+            </div>
+          )}
+        </TabsContent>
 
-            <TabsContent value="albums">
-              {localAlbums.length === 0 ? (
-                <EmptyState
-                  icon={Disc3}
-                  title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum ainda'}
-                  description={
-                    term ? undefined : 'Baixe músicas de um álbum e elas se agrupam aqui.'
-                  }
+        <TabsContent value="artists">
+          {localArtists.length === 0 ? (
+            <EmptyState
+              icon={MicVocal}
+              title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista ainda'}
+              description={term ? undefined : 'Adicione músicas e seus artistas aparecem aqui.'}
+            />
+          ) : (
+            <div className={grid}>
+              {localArtists.map((artist) => (
+                <MediaCard
+                  key={artist.name}
+                  shape="round"
+                  title={artist.name}
+                  subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
+                  imageUrl={artist.coverUrl}
+                  to={`/artista/${encodeURIComponent(artist.name)}`}
                 />
-              ) : (
-                <div className={grid}>
-                  {localAlbums.map((album) => (
-                    <MediaCard
-                      key={album.key}
-                      title={album.title}
-                      subtitle={album.artist}
-                      imageUrl={album.coverUrl}
-                      to={`/disco/${encodeURIComponent(album.key)}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
+              ))}
+            </div>
+          )}
+        </TabsContent>
 
-            <TabsContent value="artists">
-              {localArtists.length === 0 ? (
-                <EmptyState
-                  icon={MicVocal}
-                  title={term ? 'Nenhum artista com esse nome' : 'Nenhum artista ainda'}
-                  description={term ? undefined : 'Baixe músicas e seus artistas aparecem aqui.'}
+        <TabsContent value="albums">
+          {localAlbums.length === 0 ? (
+            <EmptyState
+              icon={Disc3}
+              title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum ainda'}
+              description={
+                term ? undefined : 'Adicione músicas de um álbum e elas se agrupam aqui.'
+              }
+            />
+          ) : (
+            <div className={grid}>
+              {localAlbums.map((album) => (
+                <MediaCard
+                  key={album.key}
+                  title={album.title}
+                  subtitle={album.artist}
+                  imageUrl={album.coverUrl}
+                  to={`/disco/${encodeURIComponent(album.key)}`}
                 />
-              ) : (
-                <div className={grid}>
-                  {localArtists.map((artist) => (
-                    <MediaCard
-                      key={artist.name}
-                      shape="round"
-                      title={artist.name}
-                      subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
-                      imageUrl={artist.coverUrl}
-                      to={`/artista/${encodeURIComponent(artist.name)}`}
-                    />
-                  ))}
-                </div>
-              )}
-            </TabsContent>
-          </Tabs>
-        </>
-      )}
+              ))}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="playlists">
+          {filtered.playlists.length === 0 && !(!term && localLikes.count() > 0) ? (
+            <EmptyState
+              icon={ListMusic}
+              title={term ? 'Nenhuma playlist com esse nome' : 'Nenhuma playlist ainda'}
+              description={term ? undefined : 'Crie a primeira e monte sua trilha sonora.'}
+              action={
+                term ? undefined : (
+                  <Button variant="accent" size="sm" onClick={() => setCreateOpen(true)}>
+                    <Plus /> Criar playlist
+                  </Button>
+                )
+              }
+            />
+          ) : (
+            <div className={grid}>
+              {!term && <LikedTile count={localLikes.count()} />}
+              {filtered.playlists.map((playlist) => (
+                <PlaylistCard key={playlist.id} playlist={playlist} />
+              ))}
+            </div>
+          )}
+        </TabsContent>
+      </Tabs>
 
       <CreatePlaylistDialog open={createOpen} onOpenChange={setCreateOpen} />
     </div>
