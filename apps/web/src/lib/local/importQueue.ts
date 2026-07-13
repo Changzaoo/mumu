@@ -18,9 +18,10 @@ export interface ImportItem {
   error?: string;
 }
 
-/** How many links download at once. The importer runs yt-dlp per item, so keep
- *  this small to be gentle on the home server. */
-const CONCURRENCY = 2;
+/** How many links download at once. One at a time: each runs yt-dlp on the home
+ *  server AND hits YouTube, and bursts trigger YouTube's "confirm you're not a
+ *  bot" gate — serial + the importer's per-download sleeps stay under the radar. */
+const CONCURRENCY = 1;
 
 let items: ImportItem[] = [];
 let active = 0;

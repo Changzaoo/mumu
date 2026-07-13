@@ -31,10 +31,11 @@ export function initPwaUpdater(): void {
       });
     },
     onNeedRefresh() {
-      // A new version is downloaded and waiting to activate. Only auto-apply
-      // (which reloads the page) when NO track is loaded — a paused song mid-way
-      // is still "the music" and must never be interrupted by an update.
-      if (!usePlayerStore.getState().currentTrack) {
+      // A new version is downloaded and waiting to activate. Auto-apply (which
+      // reloads) whenever music isn't actively PLAYING — this keeps mobile
+      // up to date on launch (a persisted, paused track would otherwise block
+      // updates forever) while never cutting off audio that's playing.
+      if (!usePlayerStore.getState().isPlaying) {
         void updateSW(true); // activate the new worker and reload — safe when idle
         return;
       }
