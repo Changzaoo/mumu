@@ -56,10 +56,7 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
   };
 
   return (
-    <SectionCarousel
-      title="Adicionadas pela comunidade"
-      subtitle="Faixas que outros usuários trouxeram por link"
-    >
+    <SectionCarousel title="Adicionadas pela comunidade">
       {items.map((item) => (
         <MediaCard
           key={item.sourceUrl}
