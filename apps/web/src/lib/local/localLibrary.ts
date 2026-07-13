@@ -41,6 +41,8 @@ export interface LibraryEntry {
   sourceUrl?: string;
   /** Importer capability URL for the uploaded audio — lets ANY device stream it. */
   remoteUrl?: string;
+  /** SHA-256 of the audio bytes — catches identical files imported twice. */
+  contentHash?: string;
 }
 
 // ── in-memory state ─────────────────────────────────────────────
@@ -108,6 +110,16 @@ async function deleteBlob(id: string): Promise<void> {
   if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
   await store.delete(keyFor(id));
+}
+
+/** SHA-256 of the audio bytes (hex) — identifies identical files. */
+async function hashBlob(blob: Blob): Promise<string | null> {
+  try {
+    const digest = await crypto.subtle.digest('SHA-256', await blob.arrayBuffer());
+    return [...new Uint8Array(digest)].map((b) => b.toString(16).padStart(2, '0')).join('');
+  } catch {
+    return null;
+  }
 }
 
 // ── filename / duration probing ─────────────────────────────────
@@ -248,6 +260,13 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
     // Reject anything that isn't genuinely audio (magic-byte sniff + size cap).
     const check = await validateAudioFile(file);
     if (!check.ok) continue;
+    // Skip an identical file already in the library (same audio bytes).
+    const hash = await hashBlob(file);
+    const dup = hash ? findByHash(hash) : null;
+    if (dup) {
+      imported.push(dup);
+      continue;
+    }
     const id = `local:${crypto.randomUUID()}`;
     const { title, artist } = parseFileName(file.name);
     const durationMs = await probeDurationMs(file);
@@ -255,7 +274,16 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
     const track = localTrackDto(id, title, artist, durationMs, null, null);
 
     await putBlob(id, file).catch(() => undefined);
-    addEntry({ track, addedAt: new Date().toISOString(), sizeBytes: file.size, mimeType }, file);
+    addEntry(
+      {
+        track,
+        addedAt: new Date().toISOString(),
+        sizeBytes: file.size,
+        mimeType,
+        ...(hash ? { contentHash: hash } : {}),
+      },
+      file,
+    );
     void uploadAndLink(id, file); // make it playable on the user's other devices
     imported.push(track);
   }
@@ -368,6 +396,16 @@ async function saveBlobAsLocalTrack(
   blob: Blob,
   opts: { title: string; sourceUrl?: string; coverUrl?: string | null },
 ): Promise<TrackDto> {
+  // Dedup: same source link, or byte-identical audio already in the library.
+  if (opts.sourceUrl) {
+    const bySource = findBySource(opts.sourceUrl);
+    if (bySource) return bySource;
+  }
+  const hash = await hashBlob(blob);
+  if (hash) {
+    const byHash = findByHash(hash);
+    if (byHash) return byHash;
+  }
   const id = `local:${crypto.randomUUID()}`;
   const { title, artist } = parseFileName(opts.title);
   const durationMs = await probeDurationMs(blob);
@@ -383,6 +421,7 @@ async function saveBlobAsLocalTrack(
       sizeBytes: blob.size,
       mimeType,
       ...(opts.sourceUrl ? { sourceUrl: opts.sourceUrl } : {}),
+      ...(hash ? { contentHash: hash } : {}),
     },
     blob,
   );
@@ -508,6 +547,11 @@ export function has(id: string): boolean {
 /** A locally-stored track imported from the same source URL, if any. */
 export function findBySource(sourceUrl: string): TrackDto | null {
   return read().find((e) => e.sourceUrl === sourceUrl)?.track ?? null;
+}
+
+/** A locally-stored track with byte-identical audio, if any. */
+export function findByHash(hash: string): TrackDto | null {
+  return read().find((e) => e.contentHash === hash)?.track ?? null;
 }
 
 /** The original import link for a local track (for streaming on a device without the audio). */
@@ -650,6 +694,68 @@ export async function remove(id: string): Promise<void> {
   cloud.remove(id);
 }
 
+/** Remove several tracks at once (multi-select delete). */
+export async function removeMany(ids: Iterable<string>): Promise<void> {
+  for (const id of ids) await remove(id);
+}
+
+// ── de-duplication ──────────────────────────────────────────────
+/** Normalized identity: the same song collapses to one key even under a
+ *  slightly different title (title + primary artist + 3s duration bucket). */
+function dedupeKey(track: TrackDto): string | null {
+  const title = normName(track.title);
+  if (!title || title === 'faixa') return null; // too generic to dedup safely
+  const artist = normName(track.artists[0]?.name ?? '');
+  const durBucket = Math.round((track.durationMs || 0) / 3000);
+  return `${title}|${artist}|${durBucket}`;
+}
+
+/** Which duplicate to keep: local audio > uploaded copy > has cover > older. */
+function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
+  const score = (e: LibraryEntry): number =>
+    (blobUrls.has(e.track.id) ? 4 : 0) + (e.remoteUrl ? 2 : 0) + (e.track.coverUrl ? 1 : 0);
+  const sa = score(a);
+  const sb = score(b);
+  if (sa !== sb) return sa > sb ? a : b;
+  return (a.addedAt || '') <= (b.addedAt || '') ? a : b; // older wins ties
+}
+
+/**
+ * Collapse duplicate tracks (same song even under different titles) down to a
+ * single copy — keeping the most complete one and deleting the rest (audio +
+ * uploaded copy + synced entry). Returns how many were removed.
+ */
+export async function dedupeLibrary(): Promise<number> {
+  const winners = new Map<string, LibraryEntry>();
+  const losers: string[] = [];
+  for (const e of read()) {
+    const key = dedupeKey(e.track);
+    if (!key) continue;
+    const prev = winners.get(key);
+    if (!prev) {
+      winners.set(key, e);
+      continue;
+    }
+    const keep = preferredEntry(prev, e);
+    winners.set(key, keep);
+    losers.push((keep === prev ? e : prev).track.id);
+  }
+  if (losers.length === 0) return 0;
+  const drop = new Set(losers);
+  write(read().filter((e) => !drop.has(e.track.id)));
+  for (const id of losers) {
+    const url = blobUrls.get(id);
+    if (url) {
+      URL.revokeObjectURL(url);
+      blobUrls.delete(id);
+    }
+    void deleteBlob(id).catch(() => undefined);
+    void deleteTrackBlob(id);
+    cloud.remove(id);
+  }
+  return losers.length;
+}
+
 export function totalBytes(): number {
   return read().reduce((sum, e) => sum + (e.sizeBytes || 0), 0);
 }
@@ -693,6 +799,7 @@ export async function hydrate(): Promise<void> {
   void (async () => {
     await backfillRemote();
     await reprocessExisting();
+    await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
   })();
 }
 
