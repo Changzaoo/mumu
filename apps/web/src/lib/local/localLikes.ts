@@ -135,3 +135,18 @@ export function toggle(track: TrackDto, liked: boolean): void {
 export function count(): number {
   return readIds().length;
 }
+
+/** Drop any 30s-preview (iTunes) tracks saved before — not real playable songs. */
+export function purgePreviews(): number {
+  const map = readTracks();
+  const bad = readIds().filter((id) => map[id]?.previewOnly);
+  if (bad.length === 0) return 0;
+  const badSet = new Set(bad);
+  writeIds(readIds().filter((id) => !badSet.has(id)));
+  const nextMap = { ...map };
+  for (const id of bad) delete nextMap[id];
+  writeTracks(nextMap);
+  for (const id of bad) cloud.remove(id);
+  emit();
+  return bad.length;
+}

@@ -201,6 +201,25 @@ function applyRemoteDelete(id: string): void {
   writePlaylists(readPlaylists().filter((p) => p.id !== id));
 }
 
+/** Drop 30s-preview (iTunes) tracks from every playlist + the companion map. */
+export function purgePreviews(): number {
+  const map = readTracks();
+  const badIds = new Set(Object.keys(map).filter((id) => map[id]?.previewOnly));
+  if (badIds.size === 0) return 0;
+  const changed: string[] = [];
+  const nextPlaylists = readPlaylists().map((p) => {
+    if (!p.trackIds.some((id) => badIds.has(id))) return p;
+    changed.push(p.id);
+    return { ...p, trackIds: p.trackIds.filter((id) => !badIds.has(id)) };
+  });
+  writePlaylists(nextPlaylists);
+  const nextMap = { ...map };
+  for (const id of badIds) delete nextMap[id];
+  writeTracks(nextMap);
+  for (const id of changed) pushPlaylist(id);
+  return badIds.size;
+}
+
 /** Resolve a playlist's stored TrackDtos, in order (skips any missing). */
 export function resolveTracks(id: string): TrackDto[] {
   const playlist = get(id);

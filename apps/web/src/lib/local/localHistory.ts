@@ -75,3 +75,12 @@ export function record(track: TrackDto, meta?: { playedMs?: number; source?: Pla
 export function clear(): void {
   write([]);
 }
+
+/** Drop history entries for 30s-preview (iTunes) tracks saved before. */
+export function purgePreviews(): number {
+  const current = read();
+  const kept = current.filter((e) => !e.track.previewOnly);
+  if (kept.length === current.length) return 0;
+  write(kept);
+  return current.length - kept.length;
+}
