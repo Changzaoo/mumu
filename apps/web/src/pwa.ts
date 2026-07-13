@@ -31,8 +31,10 @@ export function initPwaUpdater(): void {
       });
     },
     onNeedRefresh() {
-      // A new version is downloaded and waiting to activate.
-      if (!usePlayerStore.getState().isPlaying) {
+      // A new version is downloaded and waiting to activate. Only auto-apply
+      // (which reloads the page) when NO track is loaded — a paused song mid-way
+      // is still "the music" and must never be interrupted by an update.
+      if (!usePlayerStore.getState().currentTrack) {
         void updateSW(true); // activate the new worker and reload — safe when idle
         return;
       }

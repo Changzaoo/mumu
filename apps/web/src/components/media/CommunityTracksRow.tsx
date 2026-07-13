@@ -56,12 +56,12 @@ export function CommunityTracksRow({ limit }: { limit?: number }) {
   };
 
   return (
-    <SectionCarousel title="Adicionadas pela comunidade">
+    <SectionCarousel title="Adicionadas recentemente">
       {items.map((item) => (
         <MediaCard
           key={item.sourceUrl}
           title={item.track.title}
-          subtitle={item.track.artists[0]?.name ?? item.sharedByName ?? 'Comunidade'}
+          subtitle={item.track.artists[0]?.name ?? 'Música'}
           imageUrl={item.track.coverUrl}
           onPlay={() => void play(item)}
         />
