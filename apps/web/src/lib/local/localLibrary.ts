@@ -19,7 +19,7 @@ import { pushNotification } from '@/stores/notificationsStore';
 import { verifyIdentity } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
-import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
+import { aiSplitArtists, aiVerifyArtist } from '@/lib/ai/ai';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
@@ -341,18 +341,15 @@ function patchEntry(id: string, next: LibraryEntry): void {
 export async function enrichLocalTrack(id: string): Promise<boolean> {
   const entry = read().find((e) => e.track.id === id);
   if (!entry) return false;
+  // Hint = the artist we already have (from the filename / a prior confirmed
+  // match) — NEVER an AI guess (that hallucinated, e.g. Charlie Brown → Geraldo
+  // Azevedo). iTunes is the authority and must confirm the artist (strict title
+  // match) before we attribute it. The AI's role is a separate periodic audit.
   const currentArtist = entry.track.artists
     .map((a) => a.name)
-    .filter((n) => n && n !== 'Desconhecido')
-    .join(', ');
+    .filter((n) => n && n !== 'Desconhecido')[0];
 
-  // The AI only suggests a clean title + a possible artist HINT — never final.
-  const ai = await aiIdentifyTrack(entry.track.title, currentArtist || undefined);
-  const titleGuess = ai?.title || entry.track.title;
-  const artistHint = ai?.artists[0] || currentArtist || undefined;
-
-  // iTunes is the authority: it must confirm the artist before we attribute it.
-  const verified = await verifyIdentity(titleGuess, artistHint);
+  const verified = await verifyIdentity(entry.track.title, currentArtist);
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
 
@@ -841,6 +838,7 @@ export async function hydrate(): Promise<void> {
     await backfillRemote();
     await reprocessExisting();
     await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
+    await auditAttributions().catch(() => undefined); // AI spot-checks a few
   })();
 }
 
@@ -865,7 +863,55 @@ async function backfillRemote(): Promise<void> {
 // a wrong name, or two collaborating artists merged into one (which also breaks
 // lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
 const REPROCESS_KEY = 'aurial:reprocessVersion';
-const REPROCESS_VERSION = 2; // v2: re-verify artist/genre against iTunes (no AI guessing)
+const REPROCESS_VERSION = 3; // v3: iTunes-authoritative (strict title), no AI generation
+
+// ── periodic AI audit of attributions ───────────────────────────
+// iTunes has the final word on who a song is by; the AI just periodically
+// checks a few tracks and, if it flags a likely mismatch, we re-run the iTunes
+// verification (which decides). Audited ids live in a local set (not synced).
+const AUDITED_KEY = 'aurial:auditedArtists';
+
+function readAudited(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(AUDITED_KEY);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? (arr as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markAudited(ids: string[]): void {
+  try {
+    const s = readAudited();
+    for (const id of ids) s.add(id);
+    window.localStorage.setItem(AUDITED_KEY, JSON.stringify([...s]));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** Audit up to `limit` not-yet-checked attributed tracks per run (spreads the
+ *  cost over sessions). On a clear AI "NÃO", re-verify against iTunes. */
+async function auditAttributions(limit = 12): Promise<void> {
+  const audited = readAudited();
+  const todo = read()
+    .filter((e) => {
+      const a = e.track.artists[0]?.name;
+      return a && a !== 'Desconhecido' && !audited.has(e.track.id);
+    })
+    .slice(0, limit);
+  const done: string[] = [];
+  for (const e of todo) {
+    const verdict = await aiVerifyArtist(
+      e.track.title,
+      e.track.artists.map((a) => a.name).join(', '),
+    ).catch(() => null);
+    if (verdict === false) await enrichLocalTrack(e.track.id).catch(() => undefined);
+    done.push(e.track.id);
+  }
+  if (done.length > 0) markAudited(done);
+}
 
 /** Split a single merged artist credit on an existing track (when enrichment couldn't). */
 async function resplitArtistsInPlace(id: string): Promise<void> {

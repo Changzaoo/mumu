@@ -193,11 +193,16 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
   return null;
 }
 
-const titleClose = (a: string, b: string): boolean => {
+// STRICT title match: normalized equality, or one is the other plus a short
+// live/remaster-style suffix ("song" vs "song ao vivo"). Deliberately NOT a
+// loose substring test — that let a different song by another artist "match".
+const titleExact = (a: string, b: string): boolean => {
   const na = norm(a);
   const nb = norm(b);
   if (!na || !nb) return false;
-  return na === nb || na.includes(nb) || nb.includes(na);
+  if (na === nb) return true;
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return long.startsWith(`${short} `) && long.length - short.length <= 18;
 };
 
 const artistClose = (name: string, wantNorm: string): boolean => {
@@ -237,7 +242,7 @@ export async function verifyIdentity(
     }
   }
   const titleMatches = [...byId.values()].filter(
-    (s) => titleClose(s.trackName, t) || titleClose(s.trackName, bare),
+    (s) => titleExact(s.trackName, t) || titleExact(s.trackName, bare),
   );
   if (titleMatches.length === 0) return null;
 

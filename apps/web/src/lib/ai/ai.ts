@@ -100,6 +100,33 @@ export async function aiClassifyGenre(title: string, artist?: string): Promise<s
   return GENRE_TAXONOMY.find((g) => g.toLowerCase() === answer) ?? null;
 }
 
+/**
+ * Periodic AUDITOR: ask the AI whether a track's attribution matches reality.
+ * The AI never decides the artist (iTunes does) — it only flags a likely
+ * mismatch so we can re-check. Returns true (SIM), false (clearly NÃO), or null
+ * (uncertain / unavailable — treat as "leave it alone").
+ */
+export async function aiVerifyArtist(title: string, artist: string): Promise<boolean | null> {
+  const content = await aiChat(
+    [
+      {
+        role: 'system',
+        content:
+          'Você confere se a atribuição de uma música está correta na vida real. ' +
+          'Responda com UMA palavra apenas: SIM (a música é realmente desse(s) artista(s)), ' +
+          'NAO (claramente NÃO é), ou INCERTO (sem certeza). Sem nada além da palavra.',
+      },
+      { role: 'user', content: `A música "${title}" é de "${artist}"?` },
+    ],
+    { maxTokens: 5, temperature: 0 },
+  );
+  if (!content) return null;
+  const a = content.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  if (a.startsWith('sim')) return true;
+  if (a.startsWith('nao')) return false;
+  return null;
+}
+
 export interface AiTrackIdentity {
   title: string;
   /** All distinct artists (primary first, then features) — never merged. */
