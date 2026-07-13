@@ -13,6 +13,7 @@ import {
   Search,
   Share2,
   Upload,
+  Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { AurialLogo, AurialMark } from '@/components/brand/AurialMark';
@@ -47,6 +48,7 @@ const DEVICE_NAV: NavEntry[] = [
 
 const LIBRARY_NAV: NavEntry[] = [
   { to: '/library', label: 'Biblioteca', icon: Library },
+  { to: '/artistas', label: 'Artistas', icon: Users },
   { to: '/liked', label: 'Curtidas', icon: Heart },
   { to: '/history', label: 'Histórico', icon: History },
   { to: '/downloads', label: 'Downloads', icon: Download },

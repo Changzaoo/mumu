@@ -13,6 +13,7 @@ import {
   Search,
   Share2,
   Upload,
+  Users,
 } from 'lucide-react';
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useIsAuthorized } from '@/lib/auth/roles';
@@ -50,6 +51,7 @@ const MENU: MenuGroup[] = [
     heading: 'Biblioteca',
     items: [
       { to: '/library', label: 'Biblioteca', icon: Library },
+      { to: '/artistas', label: 'Artistas', icon: Users },
       { to: '/liked', label: 'Curtidas', icon: Heart },
       { to: '/history', label: 'Histórico', icon: History },
       { to: '/downloads', label: 'Downloads', icon: Download },

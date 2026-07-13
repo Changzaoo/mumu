@@ -59,6 +59,7 @@ export const router = createBrowserRouter([
           { path: '/', element: page('HomePage', 'home') },
           { path: '/search', element: page('SearchPage', 'list') },
           { path: '/library', element: page('LibraryPage', 'list') },
+          { path: '/artistas', element: page('ArtistsPage', 'home') },
           { path: '/liked', element: page('LikedPage', 'list') },
           { path: '/history', element: page('HistoryPage', 'list') },
           {
