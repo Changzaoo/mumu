@@ -19,7 +19,7 @@ import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
-import { aiSplitArtists } from '@/lib/ai/ai';
+import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
@@ -352,18 +352,48 @@ function applyEnrichment(entry: LibraryEntry, meta: EnrichedMeta): LibraryEntry 
 export async function enrichLocalTrack(id: string): Promise<boolean> {
   const entry = read().find((e) => e.track.id === id);
   if (!entry) return false;
-  const artist = entry.track.artists[0]?.name;
-  const raw =
-    artist && artist !== 'Desconhecido' ? `${artist} - ${entry.track.title}` : entry.track.title;
+  const currentArtist = entry.track.artists
+    .map((a) => a.name)
+    .filter((n) => n && n !== 'Desconhecido')
+    .join(', ');
+
+  // AI "identity agent": the authority on the real title + all creators + genre.
+  const identity = await aiIdentifyTrack(entry.track.title, currentArtist || undefined);
+
+  if (identity) {
+    const title = identity.title || entry.track.title;
+    const artists = identity.artists.length
+      ? identity.artists
+      : currentArtist
+        ? [currentArtist]
+        : ['Desconhecido'];
+    // Confirm a hi-res cover from iTunes against the AI-resolved title + artist.
+    const meta = await enrichMeta({ title, artist: artists[0] });
+    const cover = meta?.coverUrl ?? entry.track.coverUrl;
+
+    const current = read().find((e) => e.track.id === id);
+    if (!current) return false;
+    const base = localTrackDto(id, title, artists, current.track.durationMs, identity.album, cover);
+    const track: TrackDto = {
+      ...base,
+      genre: identity.genre ?? current.track.genre ?? null,
+      streamUrl: current.remoteUrl ?? current.track.streamUrl,
+    };
+    patchEntry(id, { ...current, track });
+    prefetchLyrics(track); // fetch synced lyrics with the corrected name
+    if (current.sourceUrl) void publishSharedTrack(track, current.sourceUrl);
+    return true;
+  }
+
+  // Fallback (AI unavailable): iTunes-only match with strict verification.
+  const raw = currentArtist ? `${currentArtist} - ${entry.track.title}` : entry.track.title;
   const meta = await enrichMeta(cleanQuery(raw));
   if (!meta) return false;
-  // Re-read: the entry may have been removed while we awaited the network.
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
   const enriched = applyEnrichment(current, meta);
   patchEntry(id, enriched);
-  prefetchLyrics(enriched.track); // fetch synced lyrics with the corrected name
-  // Refresh the community entry with the corrected name + cover.
+  prefetchLyrics(enriched.track);
   if (enriched.sourceUrl) void publishSharedTrack(enriched.track, enriched.sourceUrl);
   return true;
 }

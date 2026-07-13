@@ -50,6 +50,122 @@ export async function aiCleanSongTitle(
   return null;
 }
 
+/** Fixed genre taxonomy the AI must classify into (pt-BR labels). */
+export const GENRE_TAXONOMY = [
+  'Pop',
+  'Hip-Hop/Rap',
+  'Trap',
+  'Funk',
+  'Sertanejo',
+  'MPB',
+  'Pagode',
+  'Forró',
+  'Gospel',
+  'Rock',
+  'R&B/Soul',
+  'Eletrônica',
+  'Dance',
+  'Reggae',
+  'Reggaeton',
+  'Country',
+  'Jazz',
+  'Blues',
+  'Clássica',
+  'Metal',
+  'Indie',
+  'Lo-Fi',
+  'Latina',
+] as const;
+
+/**
+ * Classify a track into ONE genre from GENRE_TAXONOMY using the AI. Used to
+ * categorize imported tracks the catalog couldn't tag. Returns null if unsure.
+ */
+export async function aiClassifyGenre(title: string, artist?: string): Promise<string | null> {
+  const content = await aiChat(
+    [
+      {
+        role: 'system',
+        content:
+          'Você classifica uma música em UM gênero musical desta lista EXATA: ' +
+          `${GENRE_TAXONOMY.join(', ')}. ` +
+          'Responda SOMENTE com o nome do gênero, exatamente como está na lista — sem texto extra.',
+      },
+      { role: 'user', content: `Música: "${title}"${artist ? ` — Artista: ${artist}` : ''}` },
+    ],
+    { maxTokens: 12, temperature: 0 },
+  );
+  if (!content) return null;
+  const answer = content.trim().replace(/["'.]/g, '').toLowerCase();
+  return GENRE_TAXONOMY.find((g) => g.toLowerCase() === answer) ?? null;
+}
+
+export interface AiTrackIdentity {
+  title: string;
+  /** All distinct artists (primary first, then features) — never merged. */
+  artists: string[];
+  album: string | null;
+  genre: string | null;
+}
+
+/**
+ * The metadata "identity agent" (NVIDIA LLM via the importer proxy). Given a
+ * possibly-messy title and the current (maybe wrong) artist, it identifies the
+ * REAL song: canonical title, EVERY distinct creator in order, album and genre.
+ * This is the authority for who a song belongs to; the caller then confirms the
+ * cover (iTunes) and lyrics (LRCLIB) against this result. Returns null if unsure.
+ */
+export async function aiIdentifyTrack(
+  rawTitle: string,
+  currentArtist?: string,
+): Promise<AiTrackIdentity | null> {
+  const content = await aiChat(
+    [
+      {
+        role: 'system',
+        content:
+          'Você é um especialista em identificar músicas com precisão. Dado um título (às vezes ' +
+          'bagunçado, de vídeo do YouTube) e possivelmente um artista (que pode estar errado), ' +
+          'identifique a MÚSICA REAL e responda SOMENTE com JSON: ' +
+          '{"title":"...","artists":["principal","participação",...],"album":null,"genre":null}. ' +
+          'REGRAS OBRIGATÓRIAS: (1) liste TODOS os artistas distintos como itens SEPARADOS do array, ' +
+          'na ordem correta (principal primeiro, depois feats/participações); NUNCA junte dois ' +
+          'artistas num nome só. (2) Mantenha grupos/duplas reais como UM item ("AC/DC", ' +
+          '"Tyler, The Creator", "Simon & Garfunkel"). (3) "title" limpo, sem "(Official Video)" etc. ' +
+          `(4) "genre" deve ser um destes ou null: ${GENRE_TAXONOMY.join(', ')}. ` +
+          '(5) Se não tiver certeza do álbum ou gênero, use null. Sem markdown, sem texto extra.',
+      },
+      {
+        role: 'user',
+        content: `Título: "${rawTitle}"${currentArtist ? `\nArtista atual (pode estar errado): ${currentArtist}` : ''}`,
+      },
+    ],
+    { maxTokens: 220, temperature: 0 },
+  );
+  if (!content) return null;
+  try {
+    const json = JSON.parse(content.replace(/```json|```/gi, '').trim()) as {
+      title?: unknown;
+      artists?: unknown;
+      album?: unknown;
+      genre?: unknown;
+    };
+    const title = typeof json.title === 'string' ? json.title.trim() : '';
+    if (!title) return null;
+    const artists = Array.isArray(json.artists)
+      ? json.artists
+          .filter((a): a is string => typeof a === 'string' && a.trim().length > 0)
+          .map((a) => a.trim())
+      : [];
+    const album = typeof json.album === 'string' && json.album.trim() ? json.album.trim() : null;
+    const genreRaw = typeof json.genre === 'string' ? json.genre.trim().toLowerCase() : '';
+    const genre = GENRE_TAXONOMY.find((g) => g.toLowerCase() === genreRaw) ?? null;
+    return { title, artists, album, genre };
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Split a combined artist credit into DISTINCT artists using the AI — for the
  * ambiguous cases a heuristic can't safely resolve (a comma or "/" may separate
