@@ -8,6 +8,7 @@ import { TooltipProvider } from '@/components/ui/tooltip';
 import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
 import { initCloudSync } from '@/lib/sync/syncManager';
+import { init as initImportQueue } from '@/lib/local/importQueue';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -32,6 +33,7 @@ export default function App() {
   useEffect(() => {
     initPlayerEngine();
     initCloudSync();
+    initImportQueue(); // resume any downloads queued before a reload
     return initSettings();
   }, []);
 

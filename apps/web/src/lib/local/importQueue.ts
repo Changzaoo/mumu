@@ -23,12 +23,43 @@ export interface ImportItem {
  *  bot" gate — serial + the importer's per-download sleeps stay under the radar. */
 const CONCURRENCY = 1;
 
+const STORAGE_KEY = 'aurial:import-queue';
+
 let items: ImportItem[] = [];
 let active = 0;
 let seq = 0;
 const listeners = new Set<() => void>();
 
+/** Persist unfinished work so links survive a reload and keep downloading. */
+function persist(): void {
+  try {
+    const keep = items.filter((i) => i.status !== 'done'); // done items don't need to linger
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(keep));
+  } catch {
+    /* quota / private mode */
+  }
+}
+
+function restore(): void {
+  try {
+    const raw = window.localStorage.getItem(STORAGE_KEY);
+    const parsed: unknown = raw ? JSON.parse(raw) : [];
+    if (!Array.isArray(parsed)) return;
+    items = parsed
+      .filter((i): i is ImportItem => Boolean(i && typeof (i as ImportItem).url === 'string'))
+      // Anything mid-download when we closed goes back to the queue.
+      .map((i) => (i.status === 'downloading' ? { ...i, status: 'pending' } : i));
+    for (const i of items) {
+      const n = Number(String(i.id).replace(/^q/, ''));
+      if (Number.isFinite(n) && n > seq) seq = n;
+    }
+  } catch {
+    /* ignore */
+  }
+}
+
 function emit(): void {
+  persist();
   for (const listener of listeners) listener();
 }
 
@@ -96,6 +127,14 @@ function pump(): void {
       pump();
     });
   }
+}
+
+// Load any queue saved from a previous session as soon as this module is used.
+restore();
+
+/** Resume the persisted queue on app boot (call once). */
+export function init(): void {
+  if (items.some((i) => i.status === 'pending')) pump();
 }
 
 async function process(item: ImportItem): Promise<void> {
