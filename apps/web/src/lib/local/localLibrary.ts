@@ -18,7 +18,8 @@ import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
 import { cleanQuery, enrichMeta, type EnrichedMeta } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
-import { splitArtistNames } from '@/lib/local/artists';
+import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
+import { aiSplitArtists } from '@/lib/ai/ai';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
@@ -687,7 +688,12 @@ export async function hydrate(): Promise<void> {
     if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
   }
   emit();
-  void backfillRemote();
+  // Background, sequential (gentle on the network): upload audio for other
+  // devices, then fix covers/names/artist-splits on pre-existing tracks.
+  void (async () => {
+    await backfillRemote();
+    await reprocessExisting();
+  })();
 }
 
 /**
@@ -703,5 +709,58 @@ async function backfillRemote(): Promise<void> {
     const blob = await blobFor(entry.track.id).catch(() => null);
     if (!blob) continue; // synced-in from another device — nothing to upload here
     await uploadAndLink(entry.track.id, blob);
+  }
+}
+
+// ── one-time reprocess of pre-existing tracks ───────────────────
+// Tracks added before the accuracy/multi-artist work can have a wrong cover,
+// a wrong name, or two collaborating artists merged into one (which also breaks
+// lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
+const REPROCESS_KEY = 'aurial:reprocessVersion';
+const REPROCESS_VERSION = 1;
+
+/** Split a single merged artist credit on an existing track (when enrichment couldn't). */
+async function resplitArtistsInPlace(id: string): Promise<void> {
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur || cur.track.artists.length > 1) return; // already split
+  const combined = cur.track.artists[0]?.name?.trim();
+  if (!combined || combined === 'Desconhecido') return;
+  let names = splitArtistNames(combined);
+  if (names.length <= 1 && creditIsAmbiguous(combined)) {
+    const ai = await aiSplitArtists(combined, cur.track.title);
+    if (ai && ai.length > 1) names = ai;
+  }
+  if (names.length <= 1) return; // genuinely a single artist
+  const track = localTrackDto(
+    id,
+    cur.track.title,
+    names,
+    cur.track.durationMs,
+    cur.track.album?.title ?? null,
+    cur.track.coverUrl,
+  );
+  patchEntry(id, { ...cur, track: { ...track, streamUrl: cur.remoteUrl ?? cur.track.streamUrl } });
+}
+
+/**
+ * Re-run enrichment (correct cover/name + split artists) once over every local
+ * track. Enrichment only applies a confident match, so it never worsens good
+ * data; when it can't confirm, we still split a merged artist credit in place.
+ */
+async function reprocessExisting(): Promise<void> {
+  try {
+    if (Number(window.localStorage.getItem(REPROCESS_KEY) || '0') >= REPROCESS_VERSION) return;
+  } catch {
+    return;
+  }
+  for (const entry of read()) {
+    if (!entry.track.id.startsWith('local:')) continue;
+    const applied = await enrichLocalTrack(entry.track.id).catch(() => false);
+    if (!applied) await resplitArtistsInPlace(entry.track.id).catch(() => undefined);
+  }
+  try {
+    window.localStorage.setItem(REPROCESS_KEY, String(REPROCESS_VERSION));
+  } catch {
+    /* ignore */
   }
 }
