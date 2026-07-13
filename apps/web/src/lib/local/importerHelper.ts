@@ -233,6 +233,20 @@ export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | 
   }
 }
 
+/** Fetch a real artist photo (Deezer, via the importer to dodge CORS). */
+export async function fetchArtistImage(name: string): Promise<string | null> {
+  try {
+    const res = await fetch(`${helperUrl()}/artist-image?name=${encodeURIComponent(name)}`, {
+      headers: await baseHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { imageUrl?: string | null };
+    return typeof data.imageUrl === 'string' && data.imageUrl ? data.imageUrl : null;
+  } catch {
+    return null;
+  }
+}
+
 /** Best-effort delete of an uploaded library blob (on track removal). */
 export async function deleteTrackBlob(id: string): Promise<void> {
   try {

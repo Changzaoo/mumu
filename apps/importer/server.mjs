@@ -485,6 +485,38 @@ async function main() {
         return;
       }
 
+      // ── Real artist photo lookup (Deezer, server-side to dodge CORS) ─────
+      if (req.method === 'GET' && pathname === '/artist-image') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const name = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('name');
+        let imageUrl = null;
+        let matched = null;
+        if (name && name.trim()) {
+          try {
+            const r = await fetch(
+              `https://api.deezer.com/search/artist?limit=1&q=${encodeURIComponent(name.trim())}`,
+            );
+            const d = await r.json().catch(() => ({}));
+            const a = Array.isArray(d?.data) ? d.data[0] : null;
+            if (a) {
+              matched = a.name ?? null;
+              imageUrl = a.picture_xl || a.picture_big || a.picture_medium || null;
+              // Deezer returns a generic placeholder when it has no real photo.
+              if (imageUrl && /\/artist\/?$|\/images\/artist\/\/?/.test(imageUrl)) imageUrl = null;
+            }
+          } catch {
+            /* leave null */
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(JSON.stringify({ imageUrl, name: matched }));
+        return;
+      }
+
       // ── Library blob store: upload once, stream from any device ──────────
       if (req.method === 'POST' && pathname === '/blob') {
         if (!(await authorize(req))) {

@@ -20,6 +20,7 @@ import {
 import { createPlaylistSchema, type CreatePlaylistInput } from '@aurial/shared';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
+import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PlaylistCard } from '@/components/media/PlaylistCard';
 import { Button } from '@/components/ui/button';
@@ -270,13 +271,11 @@ export default function LibraryPage() {
           ) : (
             <div className={grid}>
               {localArtists.map((artist) => (
-                <MediaCard
+                <LocalArtistCard
                   key={artist.name}
-                  shape="round"
-                  title={artist.name}
-                  subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
-                  imageUrl={artist.coverUrl}
-                  to={`/artista/${encodeURIComponent(artist.name)}`}
+                  name={artist.name}
+                  trackCount={artist.trackCount}
+                  fallbackImage={artist.coverUrl}
                 />
               ))}
             </div>

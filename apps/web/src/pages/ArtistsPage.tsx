@@ -5,7 +5,7 @@
 import { useSyncExternalStore } from 'react';
 import { Users } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
-import { MediaCard } from '@/components/media/MediaCard';
+import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import * as localLibrary from '@/lib/local/localLibrary';
 
 const EMPTY: ReturnType<typeof localLibrary.list> = [];
@@ -30,13 +30,11 @@ export default function ArtistsPage() {
       ) : (
         <div className="grid grid-cols-3 gap-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6">
           {artists.map((artist) => (
-            <MediaCard
+            <LocalArtistCard
               key={artist.name}
-              title={artist.name}
-              subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
-              shape="round"
-              imageUrl={artist.coverUrl}
-              to={`/artista/${encodeURIComponent(artist.name)}`}
+              name={artist.name}
+              trackCount={artist.trackCount}
+              fallbackImage={artist.coverUrl}
             />
           ))}
         </div>

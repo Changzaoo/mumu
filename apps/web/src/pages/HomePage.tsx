@@ -10,6 +10,7 @@ import { Clock, Heart, Library, Music, Users } from 'lucide-react';
 import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
+import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -102,13 +103,11 @@ export default function HomePage() {
       {artists.length > 0 && (
         <SectionCarousel title="Seus artistas">
           {artists.map((artist) => (
-            <MediaCard
+            <LocalArtistCard
               key={artist.name}
-              title={artist.name}
-              subtitle={`${artist.trackCount} ${artist.trackCount === 1 ? 'música' : 'músicas'}`}
-              shape="round"
-              imageUrl={artist.coverUrl}
-              to={`/artista/${encodeURIComponent(artist.name)}`}
+              name={artist.name}
+              trackCount={artist.trackCount}
+              fallbackImage={artist.coverUrl}
             />
           ))}
         </SectionCarousel>

@@ -9,6 +9,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { useTrackLikes } from '@/features/library/api';
+import { useArtistImage } from '@/lib/artistImage';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -27,7 +28,8 @@ export default function ArtistLocalPage() {
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const likes = useTrackLikes();
 
-  const cover = tracks.find((t) => t.coverUrl)?.coverUrl ?? null;
+  const photo = useArtistImage(artist);
+  const cover = photo ?? tracks.find((t) => t.coverUrl)?.coverUrl ?? null;
   const play = (index = 0): void =>
     tracks.length > 0
       ? playQueue(tracks, index, { source: 'artist', sourceId: artist })
