@@ -49,7 +49,7 @@ export function ImportQueuePanel() {
               className="line-clamp-1 min-w-0 flex-1 text-fg-muted"
               title={item.error ?? item.title ?? item.url}
             >
-              {item.title ?? item.url}
+              {item.status === 'pending' && item.error ? item.error : (item.title ?? item.url)}
             </span>
             {item.status === 'error' && (
               <button

@@ -16,18 +16,25 @@ export interface ImportItem {
   status: ImportStatus;
   title?: string;
   error?: string;
+  /** Failed attempts so far (for automatic retry with backoff). */
+  attempts?: number;
+  /** Don't retry this pending item before this epoch-ms (backoff window). */
+  notBefore?: number;
 }
 
 /** How many links download at once. One at a time: each runs yt-dlp on the home
  *  server AND hits YouTube, and bursts trigger YouTube's "confirm you're not a
  *  bot" gate — serial + the importer's per-download sleeps stay under the radar. */
 const CONCURRENCY = 1;
+/** Auto-retry a failed download this many times (with backoff) before giving up. */
+const MAX_ATTEMPTS = 5;
 
 const STORAGE_KEY = 'aurial:import-queue';
 
 let items: ImportItem[] = [];
 let active = 0;
 let seq = 0;
+let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
 
 /** Persist unfinished work so links survive a reload and keep downloading. */
@@ -108,17 +115,35 @@ export function enqueue(urls: string | string[]): void {
   pump();
 }
 
-/** Retry a failed item. */
+/** Manually retry a failed item now (fresh set of attempts). */
 export function retry(id: string): void {
   const item = items.find((i) => i.id === id);
   if (!item || item.status !== 'error') return;
-  update(id, { status: 'pending', error: undefined });
+  update(id, { status: 'pending', attempts: 0, notBefore: undefined, error: undefined });
   pump();
+}
+
+/** The next item ready to download (pending and past any backoff window). */
+function nextReady(): ImportItem | undefined {
+  const now = Date.now();
+  return items.find((i) => i.status === 'pending' && (!i.notBefore || i.notBefore <= now));
+}
+
+/** Wake up pump() when the soonest backing-off item becomes eligible. */
+function scheduleWake(): void {
+  const now = Date.now();
+  const waiting = items
+    .filter((i) => i.status === 'pending' && i.notBefore && i.notBefore > now)
+    .map((i) => i.notBefore as number);
+  if (waiting.length === 0) return;
+  const soonest = Math.min(...waiting);
+  if (wakeTimer) clearTimeout(wakeTimer);
+  wakeTimer = setTimeout(pump, Math.max(0, soonest - now) + 50);
 }
 
 function pump(): void {
   while (active < CONCURRENCY) {
-    const next = items.find((i) => i.status === 'pending');
+    const next = nextReady();
     if (!next) break;
     active += 1;
     update(next.id, { status: 'downloading' });
@@ -127,6 +152,7 @@ function pump(): void {
       pump();
     });
   }
+  scheduleWake(); // in case everything left is still backing off
 }
 
 // Load any queue saved from a previous session as soon as this module is used.
@@ -156,9 +182,19 @@ async function process(item: ImportItem): Promise<void> {
     const track = await localLibrary.addByUrl(item.url, { silent: true });
     update(item.id, { status: 'done', title: track.title });
   } catch (err) {
-    update(item.id, {
-      status: 'error',
-      error: err instanceof Error ? err.message : 'Falha ao baixar',
-    });
+    const attempts = (item.attempts ?? 0) + 1;
+    const message = err instanceof Error ? err.message : 'Falha ao baixar';
+    if (attempts < MAX_ATTEMPTS) {
+      // Auto-retry with backoff (10s, 20s, … capped) so a transient failure
+      // (YouTube 403/throttle) fixes itself without the user tapping retry.
+      update(item.id, {
+        status: 'pending',
+        attempts,
+        notBefore: Date.now() + Math.min(120_000, 10_000 * attempts),
+        error: `${message} — tentando de novo (${attempts}/${MAX_ATTEMPTS})`,
+      });
+    } else {
+      update(item.id, { status: 'error', attempts, error: message });
+    }
   }
 }
