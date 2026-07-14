@@ -19,6 +19,7 @@ import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localPlaylists from '@/lib/local/localPlaylists';
+import { buildRecommendations, daySeed, seededShuffle } from '@/lib/reco/recommend';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -30,28 +31,6 @@ function localGreeting(): string {
   if (hour < 12) return 'Bom dia';
   if (hour < 18) return 'Boa tarde';
   return 'Boa noite';
-}
-
-/** Distinct primary-artist names across a track list — mix-card subtitles. */
-function artistSample(tracks: TrackDto[], max = 3): string {
-  const names: string[] = [];
-  for (const t of tracks) {
-    const name = t.artists[0]?.name;
-    if (name && name !== 'Desconhecido' && !names.includes(name)) names.push(name);
-    if (names.length >= max) break;
-  }
-  if (names.length === 0) return 'Várias faixas';
-  return `Com ${names.join(', ')}${tracks.length > names.length ? ' e mais' : ''}`;
-}
-
-/** Deterministic-enough shuffle for a mix queue. */
-function shuffled<T>(items: T[]): T[] {
-  const out = [...items];
-  for (let i = out.length - 1; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
-    [out[i], out[j]] = [out[j]!, out[i]!];
-  }
-  return out;
 }
 
 interface QuickTile {
@@ -182,29 +161,14 @@ export default function HomePage() {
     return out;
   }, [history]);
 
-  // Auto mixes (Spotify-style): one per genre + one per top artist.
-  const mixes = useMemo(() => {
-    const out: Array<{ key: string; title: string; cover: string | null; tracks: TrackDto[] }> = [];
-    for (const g of genres.slice(0, 4)) {
-      if (g.tracks.length < 3) continue;
-      out.push({
-        key: `genre:${g.genre}`,
-        title: `Mix ${g.genre}`,
-        cover: g.coverUrl,
-        tracks: g.tracks,
-      });
-    }
-    for (const a of artists.slice(0, 6)) {
-      if (a.trackCount < 2) continue;
-      out.push({
-        key: `artist:${a.name}`,
-        title: `Mix de ${a.name}`,
-        cover: a.coverUrl,
-        tracks: localLibrary.artistTracks(a.name),
-      });
-    }
-    return out.slice(0, 10);
-  }, [genres, artists]);
+  // Motor de recomendação local (lib/reco): afinidade com decaimento temporal,
+  // mixes diários por cluster, nostalgia, descobertas e hora-consciente —
+  // memoizado no módulo, muda quando a biblioteca/histórico/dia mudam.
+  const recos = useMemo(
+    () => buildRecommendations(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+    [entries, history],
+  );
 
   const playlistCover = (trackIds: string[]): string | null => {
     for (const id of trackIds) {
@@ -256,18 +220,21 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {/* Auto mixes by genre + artist (shuffled on play). */}
-      {mixes.length > 0 && (
-        <SectionCarousel title="Feito para você" subtitle="Mixes com o que você adicionou">
-          {mixes.map((mix) => (
+      {/* Recomendações do motor local — renovam a cada dia, estáveis no dia. */}
+      {recos.length > 0 && (
+        <SectionCarousel title="Feito para você" subtitle="Do seu jeito de ouvir">
+          {recos.map((rec) => (
             <MediaCard
-              key={mix.key}
-              title={mix.title}
-              subtitle={artistSample(mix.tracks)}
-              imageUrl={mix.cover}
-              to={`/mix/${encodeURIComponent(mix.key)}`}
+              key={rec.key}
+              title={rec.title}
+              subtitle={rec.subtitle}
+              imageUrl={rec.coverUrl}
+              to={rec.key.startsWith('reco:') ? undefined : `/mix/${encodeURIComponent(rec.key)}`}
               onPlay={() =>
-                playQueue(shuffled(mix.tracks), 0, { source: 'library', sourceId: mix.key })
+                playQueue(seededShuffle(rec.tracks, daySeed()), 0, {
+                  source: 'library',
+                  sourceId: rec.key,
+                })
               }
             />
           ))}

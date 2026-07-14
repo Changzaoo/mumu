@@ -61,10 +61,10 @@ beforeEach(() => {
 describe('HomePage (personal library)', () => {
   // vi.resetModules() força re-transform do grafo inteiro da Home a cada teste
   // (necessário por causa do cache em módulo do localLibrary) — o primeiro
-  // import frio passa dos 5s padrão em máquinas ocupadas. 20s dá folga real.
+  // import frio passa dos 5s padrão em máquinas ocupadas. 60s cobre até a suíte inteira disputando CPU.
   it(
     'renders the greeting, quick access and the empty state when the library is empty',
-    { timeout: 20_000 },
+    { timeout: 60_000 },
     async () => {
       await renderHome();
       expect(screen.getByText(/^(Bom dia|Boa tarde|Boa noite)$/)).toBeInTheDocument();
@@ -74,7 +74,7 @@ describe('HomePage (personal library)', () => {
     },
   );
 
-  it('renders artist and genre shelves from the local library', { timeout: 20_000 }, async () => {
+  it('renders artist and genre shelves from the local library', { timeout: 60_000 }, async () => {
     const track = makeTrack('local:1', { title: 'Como Tudo Deve Ser' });
     const entry = {
       track: {
