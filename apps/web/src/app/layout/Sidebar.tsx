@@ -18,6 +18,7 @@ import {
   IoMusicalNotesOutline,
   IoPeopleOutline,
   IoPhonePortraitOutline,
+  IoPulseOutline,
   IoSearch,
   IoSearchOutline,
   IoTimeOutline,
@@ -49,10 +50,11 @@ const MAIN_NAV: NavEntry[] = [
 ];
 
 /** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo']);
+const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
 
 const TOOLS_NAV: NavEntry[] = [
   { to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline },
+  { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
 ];
 
 type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
@@ -183,19 +185,23 @@ export function Sidebar() {
         collapsed ? 'w-18' : 'w-75',
       )}
     >
-      <div
-        className={cn(
-          'flex h-16 items-center px-4',
-          collapsed ? 'justify-center px-0' : 'justify-between',
-        )}
-      >
-        {collapsed ? <AurialMark /> : <AurialLogo />}
-        {!collapsed && (
+      {collapsed ? (
+        // Collapsed rail header: mark + expand toggle stacked and centered —
+        // everything on the rail shares one visual axis.
+        <div className="flex flex-col items-center gap-1.5 py-4">
+          <AurialMark />
+          <IconButton aria-label="Expandir menu" size="sm" onClick={toggleSidebar}>
+            <PanelLeft />
+          </IconButton>
+        </div>
+      ) : (
+        <div className="flex h-16 items-center justify-between px-4">
+          <AurialLogo />
           <IconButton aria-label="Recolher menu" size="sm" onClick={toggleSidebar}>
             <PanelLeft />
           </IconButton>
-        )}
-      </div>
+        </div>
+      )}
 
       <nav aria-label="Menu principal" className="flex min-h-0 flex-1 flex-col px-3 pb-3">
         <div className="space-y-0.5">
@@ -306,14 +312,6 @@ export function Sidebar() {
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
         </div>
-
-        {collapsed && (
-          <div className="mt-auto flex justify-center pt-3">
-            <IconButton aria-label="Expandir menu" size="sm" onClick={toggleSidebar}>
-              <PanelLeft />
-            </IconButton>
-          </div>
-        )}
       </nav>
     </aside>
   );

@@ -5,7 +5,7 @@
  * card so the admin can watch downloads progress while pasting more links.
  */
 import { useSyncExternalStore } from 'react';
-import { CheckCircle2, Clock, Loader2, RotateCw, XCircle } from 'lucide-react';
+import { CheckCircle2, Clock, Loader2, RotateCw, X, XCircle } from 'lucide-react';
 import * as importQueue from '@/lib/local/importQueue';
 
 const EMPTY: importQueue.ImportItem[] = [];
@@ -33,13 +33,22 @@ export function ImportQueuePanel() {
             ? `Fila · ${s.downloading} baixando, ${s.pending} na espera`
             : `Fila concluída · ${s.done} baixada(s)${s.error ? `, ${s.error} com erro` : ''}`}
         </p>
-        <button
-          type="button"
-          onClick={importQueue.clearFinished}
-          className="text-[12px] text-fg-muted transition-colors hover:text-fg"
-        >
-          Limpar concluídos
-        </button>
+        <span className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={importQueue.clearFinished}
+            className="text-[12px] text-fg-muted transition-colors hover:text-fg"
+          >
+            Limpar concluídos
+          </button>
+          <button
+            type="button"
+            onClick={importQueue.cancelAll}
+            className="text-[12px] font-medium text-danger transition-opacity hover:opacity-80"
+          >
+            Cancelar tudo
+          </button>
+        </span>
       </div>
       <ul className="max-h-56 space-y-1 overflow-y-auto">
         {items.map((item) => (
@@ -59,6 +68,16 @@ export function ImportQueuePanel() {
                 className="grid size-6 shrink-0 place-items-center rounded-full text-fg-muted hover:bg-fg/8 hover:text-fg"
               >
                 <RotateCw className="size-3.5" />
+              </button>
+            )}
+            {item.status !== 'downloading' && (
+              <button
+                type="button"
+                aria-label="Remover da fila"
+                onClick={() => importQueue.remove(item.id)}
+                className="grid size-6 shrink-0 place-items-center rounded-full text-fg-subtle hover:bg-fg/8 hover:text-fg"
+              >
+                <X className="size-3.5" />
               </button>
             )}
           </li>

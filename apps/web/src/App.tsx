@@ -9,6 +9,7 @@ import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
 import { initCloudSync } from '@/lib/sync/syncManager';
 import { init as initImportQueue } from '@/lib/local/importQueue';
+import { initTelemetry } from '@/lib/telemetry/telemetry';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -34,6 +35,7 @@ export default function App() {
     initPlayerEngine();
     initCloudSync();
     initImportQueue(); // resume any downloads queued before a reload
+    initTelemetry(); // usage metrics for the admin /telemetria page
     return initSettings();
   }, []);
 

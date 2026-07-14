@@ -94,6 +94,34 @@ export function clearFinished(): void {
   emit();
 }
 
+// Bumped by cancelAll(); in-flight work from an older generation discards its
+// result instead of re-inserting items into a queue the user just emptied.
+let generation = 0;
+
+/**
+ * Cancel EVERYTHING (restart-the-queue button): pending, backing-off, failed
+ * and finished items all go away. A download already in flight can't be
+ * aborted mid-transfer, but its result is discarded — the queue is empty
+ * immediately and stays empty.
+ */
+export function cancelAll(): void {
+  generation += 1;
+  items = [];
+  if (wakeTimer) {
+    clearTimeout(wakeTimer);
+    wakeTimer = null;
+  }
+  emit();
+}
+
+/** Remove a single queued/failed item (not one actively downloading). */
+export function remove(id: string): void {
+  const item = items.find((i) => i.id === id);
+  if (!item || item.status === 'downloading') return;
+  items = items.filter((i) => i.id !== id);
+  emit();
+}
+
 function update(id: string, patch: Partial<ImportItem>): void {
   items = items.map((it) => (it.id === id ? { ...it, ...patch } : it));
   emit();
@@ -164,6 +192,7 @@ export function init(): void {
 }
 
 async function process(item: ImportItem): Promise<void> {
+  const gen = generation;
   try {
     // Already in the library (e.g. auto-download of a list) → nothing to fetch.
     const existing = localLibrary.findBySource(item.url);
@@ -175,13 +204,16 @@ async function process(item: ImportItem): Promise<void> {
       // Expand the playlist into individual queued items so each downloads
       // independently (and a big list doesn't hold a slot the whole time).
       const { entries } = await fetchPlaylistEntries(item.url);
+      if (gen !== generation) return; // fila cancelada no meio — descarta
       enqueue(entries.map((e) => e.url));
       update(item.id, { status: 'done', title: `Playlist · ${entries.length} faixas` });
       return;
     }
     const track = await localLibrary.addByUrl(item.url, { silent: true });
+    if (gen !== generation) return; // fila cancelada — não re-insere estado
     update(item.id, { status: 'done', title: track.title });
   } catch (err) {
+    if (gen !== generation) return; // fila cancelada — sem retry fantasma
     const attempts = (item.attempts ?? 0) + 1;
     const message = err instanceof Error ? err.message : 'Falha ao baixar';
     if (attempts < MAX_ATTEMPTS) {

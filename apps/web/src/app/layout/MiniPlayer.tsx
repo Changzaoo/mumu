@@ -28,7 +28,7 @@ export function MiniPlayer() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-          className="glass fixed inset-x-2 bottom-[calc(4rem+env(safe-area-inset-bottom)+0.5rem)] z-40 h-16 overflow-hidden rounded-xl md:hidden"
+          className="glass fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 h-16 overflow-hidden rounded-xl md:hidden"
         >
           <div className="flex h-full items-center gap-3 px-3">
             <button

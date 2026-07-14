@@ -87,6 +87,10 @@ export const router = createBrowserRouter([
             path: '/dispositivo',
             element: <AuthorizedRoute>{page('DevicePage', 'list')}</AuthorizedRoute>,
           },
+          {
+            path: '/telemetria',
+            element: <AuthorizedRoute>{page('TelemetryPage', 'list')}</AuthorizedRoute>,
+          },
           { path: '/compartilhar', element: page('SharePage', 'list') },
           { path: '/catalogo/playlist/:id', element: page('CatalogPlaylistPage', 'detail') },
           { path: '/catalogo/artista/:id', element: page('CatalogArtistPage', 'detail') },
@@ -99,6 +103,7 @@ export const router = createBrowserRouter([
           // Local library (Spotify-style) — grouped from on-device metadata.
           { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
+          { path: '/mix/:key', element: page('MixPage', 'detail') },
           { path: '/disco/:key', element: page('AlbumLocalPage', 'detail') },
           { path: '/album-apple/:id', element: page('AppleAlbumPage', 'detail') },
           { path: '/profile/:handle', element: page('ProfilePage', 'detail') },

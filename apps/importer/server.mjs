@@ -657,6 +657,54 @@ async function main() {
         return;
       }
 
+      // ── Network speed probe (admin telemetry) ────────────────────────────
+      // GET  /speed?bytes=N → N random bytes (timed by the client = download).
+      // POST /speed         → swallow the body, ack its size (= upload).
+      if (pathname === '/speed' && (req.method === 'GET' || req.method === 'POST')) {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        if (req.method === 'POST') {
+          let received = 0;
+          try {
+            received = (await readBinaryBody(req, 8_000_000)).length;
+          } catch {
+            res.writeHead(413, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Grande demais.' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ receivedBytes: received }));
+          return;
+        }
+        const sp = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const total = Math.min(Math.max(Number(sp.get('bytes')) || 2_000_000, 65_536), 8_000_000);
+        res.writeHead(200, {
+          'Content-Type': 'application/octet-stream',
+          'Content-Length': String(total),
+          'Cache-Control': 'no-store',
+        });
+        // Random payload so nothing along the way compresses it into a lie.
+        const chunk = crypto.randomBytes(64 * 1024);
+        let sent = 0;
+        const write = () => {
+          while (sent < total) {
+            const remaining = total - sent;
+            const buf = remaining >= chunk.length ? chunk : chunk.subarray(0, remaining);
+            sent += buf.length;
+            if (!res.write(buf)) {
+              res.once('drain', write);
+              return;
+            }
+          }
+          res.end();
+        };
+        write();
+        return;
+      }
+
       // ── Library blob store: upload once, stream from any device ──────────
       if (req.method === 'POST' && pathname === '/blob') {
         if (!(await authorize(req))) {

@@ -267,6 +267,7 @@ export default function HomePage() {
               title={mix.title}
               subtitle={artistSample(mix.tracks)}
               imageUrl={mix.cover}
+              to={`/mix/${encodeURIComponent(mix.key)}`}
               onPlay={() =>
                 playQueue(shuffled(mix.tracks), 0, { source: 'library', sourceId: mix.key })
               }

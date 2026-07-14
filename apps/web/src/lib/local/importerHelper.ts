@@ -325,6 +325,55 @@ export async function fetchAlbumInfo(title: string, artist?: string): Promise<Al
   }
 }
 
+export interface NetworkSpeed {
+  downMbps: number | null;
+  upMbps: number | null;
+}
+
+/**
+ * Measure the user's REAL network speed against the importer (`/speed`):
+ * timed 3MB download + 1.5MB upload. Returns nulls when the importer is
+ * unreachable / signed out — telemetry then falls back to the browser's
+ * connection estimate.
+ */
+export async function measureNetworkSpeed(): Promise<NetworkSpeed> {
+  const result: NetworkSpeed = { downMbps: null, upMbps: null };
+  try {
+    const headers = await baseHeaders();
+    if (!headers.Authorization) return result;
+
+    const t0 = performance.now();
+    const res = await fetch(`${helperUrl()}/speed?bytes=3000000`, { headers, cache: 'no-store' });
+    if (res.ok) {
+      const buf = await res.arrayBuffer();
+      const seconds = (performance.now() - t0) / 1000;
+      if (seconds > 0 && buf.byteLength > 0) {
+        result.downMbps = Math.round(((buf.byteLength * 8) / seconds / 1e6) * 10) / 10;
+      }
+    }
+
+    const payload = new Uint8Array(1_500_000);
+    for (let i = 0; i < payload.length; i += 65_536) {
+      crypto.getRandomValues(payload.subarray(i, Math.min(i + 65_536, payload.length)));
+    }
+    const t1 = performance.now();
+    const up = await fetch(`${helperUrl()}/speed`, {
+      method: 'POST',
+      headers: { ...headers, 'Content-Type': 'application/octet-stream' },
+      body: payload,
+    });
+    if (up.ok) {
+      const seconds = (performance.now() - t1) / 1000;
+      if (seconds > 0) {
+        result.upMbps = Math.round(((payload.byteLength * 8) / seconds / 1e6) * 10) / 10;
+      }
+    }
+  } catch {
+    /* offline / helper down — keep nulls */
+  }
+  return result;
+}
+
 /** Fetch a real artist photo (Deezer, via the importer to dodge CORS). */
 export async function fetchArtistImage(name: string): Promise<string | null> {
   try {

@@ -16,6 +16,7 @@ import {
   IoLibraryOutline,
   IoPeopleOutline,
   IoPhonePortraitOutline,
+  IoPulseOutline,
   IoSearch,
   IoSearchOutline,
   IoTimeOutline,
@@ -50,7 +51,10 @@ const MENU: MenuGroup[] = [
   },
   {
     heading: 'Meu espaço',
-    items: [{ to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline }],
+    items: [
+      { to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline },
+      { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
+    ],
   },
   {
     heading: 'Biblioteca',
@@ -63,7 +67,7 @@ const MENU: MenuGroup[] = [
 ];
 
 /** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo']);
+const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -80,17 +84,19 @@ export function MobileNav() {
         aria-label="Navegação"
         className="fixed inset-x-0 bottom-0 z-40 bg-linear-to-t from-bg via-bg/92 to-bg/0 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
       >
-        <div className="flex h-14 items-stretch justify-around">
+        {/* 64px-tall targets with 28px glyphs — comfortably above Apple's 44pt
+            minimum touch size; labels readable at arm's length. */}
+        <div className="flex h-16 items-stretch justify-around">
           {TABS.map(({ to, label, icon: Icon, iconActive: IconActive }) => (
             <NavLink key={to} to={to} end={to === '/'} className="flex-1">
               {({ isActive }) => (
                 <span
                   className={cn(
-                    'flex h-full flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors duration-200',
+                    'flex h-full flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200',
                     isActive ? 'text-fg' : 'text-fg-muted',
                   )}
                 >
-                  {isActive ? <IconActive className="size-6" /> : <Icon className="size-6" />}
+                  {isActive ? <IconActive className="size-7" /> : <Icon className="size-7" />}
                   {label}
                 </span>
               )}
@@ -101,9 +107,9 @@ export function MobileNav() {
             aria-label="Mais"
             aria-haspopup="dialog"
             onClick={() => setOpen(true)}
-            className="flex flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium text-fg-muted transition-colors duration-200"
+            className="flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium text-fg-muted transition-colors duration-200"
           >
-            <IoEllipsisHorizontal className="size-6" />
+            <IoEllipsisHorizontal className="size-7" />
             Mais
           </button>
         </div>
@@ -135,7 +141,7 @@ export function MobileNav() {
                           )
                         }
                       >
-                        <Icon className="size-[18px] shrink-0" />
+                        <Icon className="size-4.5 shrink-0" />
                         <span className="truncate">{label}</span>
                       </NavLink>
                     </SheetClose>

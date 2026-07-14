@@ -69,8 +69,8 @@ export function AppShell() {
                 'mx-auto w-full max-w-[1600px]',
                 // Clear the bottom chrome: mobile tabs (+ mini player) / desktop PlayerBar.
                 hasTrack
-                  ? 'pb-[calc(10rem+env(safe-area-inset-bottom))] md:pb-[calc(88px+2rem)]'
-                  : 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-8',
+                  ? 'pb-[calc(10.5rem+env(safe-area-inset-bottom))] md:pb-[calc(88px+2rem)]'
+                  : 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8',
               )}
             >
               {/* Instant-feel navigation (Spotify-like): no exit animation, no

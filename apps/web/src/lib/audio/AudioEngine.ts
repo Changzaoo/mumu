@@ -71,6 +71,18 @@ interface HowlerInternals {
 /** createMediaElementSource is once-per-element; Howler pools elements. */
 const mediaSourceCache = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 
+/**
+ * iOS suspends the AudioContext when the screen locks or the PWA leaves the
+ * foreground — ANY audio routed through Web Audio goes silent. On iPhone/iPad
+ * we skip the graph entirely (no EQ/visualizer there) so playback stays on the
+ * bare <audio> element, which iOS keeps playing in the background with
+ * Media Session lock-screen controls.
+ */
+const IS_IOS =
+  typeof navigator !== 'undefined' &&
+  (/iP(hone|od|ad)/.test(navigator.userAgent) ||
+    (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
 const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 
 function createSlot(): Slot {
@@ -385,6 +397,11 @@ export class AudioEngine {
 
   private ensureGraph(): void {
     if (this.ctx || this.webAudioFailed || typeof window === 'undefined') return;
+    if (IS_IOS) {
+      // Bare <audio> path — background/lock-screen playback beats EQ on iOS.
+      this.webAudioFailed = true;
+      return;
+    }
     try {
       const ctx = new AudioContext();
       this.ctx = ctx;

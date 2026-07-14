@@ -1,16 +1,16 @@
 /**
- * /search — instant search with a 300ms debounce, top result, recent searches
- * and voice input. Two catalogs:
- *  - PRIMARY: Apple/iTunes real songs (top result + main list, 30s previews).
- *  - SECONDARY: Audius "Faixas completas (grátis)" full-length free tracks.
- * Artist results come from Audius.
+ * /search — results render INLINE on this page while you type in the TopBar
+ * search field (Spotify behaviour: one search box, same screen, no modal).
+ * Sections: your OWN library first (músicas / artistas / álbuns), then the
+ * free catalog (Audius). Recent searches + voice input when the query is empty.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { Link, useSearchParams } from 'react-router';
+import { useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { Mic, Search, SearchX, X } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
+import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
@@ -18,19 +18,28 @@ import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useRecentSearches } from '@/features/search/api';
-import { useDebounce } from '@/hooks/useDebounce';
+import * as localLibrary from '@/lib/local/localLibrary';
+import { useSyncExternalStore } from 'react';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
-type Tab = 'all' | 'track' | 'artist';
+type Tab = 'all' | 'track' | 'artist' | 'album';
 
 const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'all', label: 'Tudo' },
   { value: 'track', label: 'Músicas' },
   { value: 'artist', label: 'Artistas' },
+  { value: 'album', label: 'Álbuns' },
 ];
 
 const artistPath = (id: string): string => `/catalogo/artista/${id.replace(/^audius-user:/, '')}`;
+
+const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
+function norm(value: string): string {
+  return value.toLowerCase().normalize('NFD').replace(DIACRITICS, '').trim();
+}
+
+const EMPTY_ENTRIES: localLibrary.LibraryEntry[] = [];
 
 // ── Voice search (webkitSpeechRecognition; hidden when unsupported) ──
 
@@ -86,7 +95,6 @@ function VoiceButton({ onResult }: { onResult: (text: string) => void }) {
     <button
       type="button"
       aria-label={listening ? 'Parar busca por voz' : 'Buscar por voz'}
-      aria-pressed={listening}
       onClick={toggle}
       className={cn(
         'grid size-9 shrink-0 place-items-center rounded-full transition-colors duration-200',
@@ -110,119 +118,112 @@ function ResultsSkeleton() {
 
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
-  const urlQuery = searchParams.get('q') ?? '';
+  const query = (searchParams.get('q') ?? '').trim();
   const [tab, setTab] = useState<Tab>('all');
-  const [input, setInput] = useState(urlQuery);
-  const inputRef = useRef<HTMLInputElement>(null);
-  const debounced = useDebounce(input, 300);
   const { recent, addRecent, removeRecent, clearRecent } = useRecentSearches();
+
+  const entries = useSyncExternalStore(
+    localLibrary.subscribe,
+    localLibrary.list,
+    () => EMPTY_ENTRIES,
+  );
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
-  // URL ← debounced input (replace to keep history clean while typing).
-  useEffect(() => {
-    setSearchParams(
-      (params) => {
-        if (debounced.trim()) params.set('q', debounced.trim());
-        else params.delete('q');
-        return params;
-      },
-      { replace: true },
-    );
-  }, [debounced, setSearchParams]);
+  const tracksQuery = useCatalogSearch(query);
+  const artistsQuery = useCatalogSearchArtists(query);
+  const hasQuery = query.length > 0;
 
-  const tracksQuery = useCatalogSearch(debounced);
-  const artistsQuery = useCatalogSearchArtists(debounced);
-  const hasQuery = debounced.trim().length > 0;
+  // Record a search once the user commits to a result set (small delay).
+  useEffect(() => {
+    if (!hasQuery) return;
+    const timer = setTimeout(() => addRecent(query), 2500);
+    return () => clearTimeout(timer);
+  }, [query, hasQuery, addRecent]);
 
   const commitSearch = (term: string): void => {
-    setInput(term);
+    setSearchParams(term.trim() ? { q: term.trim() } : {}, { replace: true });
     addRecent(term);
   };
+
+  // ── your OWN library, searched locally (instant) ──
+  const local = useMemo(() => {
+    const nq = norm(query);
+    if (!nq) return { tracks: [], artists: [], albums: [] };
+    const tracks = entries
+      .map((e) => e.track)
+      .filter((t) => norm(t.title).includes(nq) || t.artists.some((a) => norm(a.name).includes(nq)))
+      .slice(0, 10);
+    const artists = localLibrary
+      .artists()
+      .filter((a) => norm(a.name).includes(nq))
+      .slice(0, 10);
+    const albums = localLibrary
+      .albumGroups()
+      .filter((al) => norm(al.title).includes(nq) || norm(al.artist).includes(nq))
+      .slice(0, 10);
+    return { tracks, artists, albums };
+  }, [entries, query]);
 
   const freeTracks = tracksQuery.data ?? [];
   const artists = artistsQuery.data ?? [];
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
-  const topTrack = tab === 'all' ? freeTracks[0] : undefined;
+  const showAlbums = tab === 'all' || tab === 'album';
+  const topLocal = showTracks ? local.tracks[0] : undefined;
 
-  const isLoading = hasQuery && (tracksQuery.isLoading || artistsQuery.isLoading);
+  const isLoading =
+    hasQuery && local.tracks.length === 0 && (tracksQuery.isLoading || artistsQuery.isLoading);
   const isError = hasQuery && tracksQuery.isError && artistsQuery.isError;
   const isEmpty =
-    hasQuery && !isLoading && !isError && freeTracks.length === 0 && artists.length === 0;
+    hasQuery &&
+    !isLoading &&
+    !isError &&
+    freeTracks.length === 0 &&
+    artists.length === 0 &&
+    local.tracks.length === 0 &&
+    local.artists.length === 0 &&
+    local.albums.length === 0;
 
+  const playLocal = (index: number): void => {
+    addRecent(query);
+    playQueue(local.tracks, index, { source: 'search', sourceId: query });
+  };
   const playFree = (index: number): void => {
-    addRecent(debounced);
-    playQueue(freeTracks, index, { source: 'search', sourceId: debounced.trim() });
+    addRecent(query);
+    playQueue(freeTracks, index, { source: 'search', sourceId: query });
   };
 
   return (
     <div className="space-y-6 py-4">
-      {/* Search input */}
-      <div className="mx-auto flex w-full max-w-2xl items-center gap-2">
-        <div className="relative flex-1">
-          <Search className="pointer-events-none absolute left-4 top-1/2 size-5 -translate-y-1/2 text-fg-subtle" />
-          <input
-            ref={inputRef}
-            autoFocus
-            type="search"
-            role="searchbox"
-            value={input}
-            onChange={(event) => setInput(event.target.value)}
-            onKeyDown={(event) => {
-              if (event.key === 'Enter' && input.trim()) addRecent(input);
-              if (event.key === 'Escape') setInput('');
-            }}
-            placeholder="O que você quer ouvir?"
-            aria-label="Buscar"
-            className={cn(
-              'h-12 w-full rounded-full border border-border bg-bg-elevated pl-12 pr-10 text-base text-fg',
-              'placeholder:text-fg-subtle transition-colors duration-200',
-              'hover:border-fg/20 focus:border-accent focus:outline-none',
-            )}
-          />
-          {input && (
+      {/* Type pills + voice — the search FIELD lives in the TopBar. */}
+      <div className="flex items-center gap-2">
+        <div
+          role="tablist"
+          aria-label="Filtrar por tipo"
+          className="no-scrollbar flex flex-1 gap-2 overflow-x-auto"
+        >
+          {TABS.map((pill) => (
             <button
+              key={pill.value}
               type="button"
-              aria-label="Limpar busca"
-              onClick={() => {
-                setInput('');
-                inputRef.current?.focus();
-              }}
-              className="absolute right-3 top-1/2 grid size-7 -translate-y-1/2 place-items-center rounded-full text-fg-muted hover:bg-fg/8 hover:text-fg"
+              role="tab"
+              aria-selected={tab === pill.value}
+              onClick={() => setTab(pill.value)}
+              className={cn(
+                'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                tab === pill.value
+                  ? 'bg-fg text-bg'
+                  : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
+              )}
             >
-              <X className="size-4" />
+              {pill.label}
             </button>
-          )}
+          ))}
         </div>
         <VoiceButton onResult={commitSearch} />
-      </div>
-
-      {/* Type pills */}
-      <div
-        role="tablist"
-        aria-label="Filtrar por tipo"
-        className="no-scrollbar flex gap-2 overflow-x-auto"
-      >
-        {TABS.map((pill) => (
-          <button
-            key={pill.value}
-            type="button"
-            role="tab"
-            aria-selected={tab === pill.value}
-            onClick={() => setTab(pill.value)}
-            className={cn(
-              'shrink-0 rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
-              tab === pill.value
-                ? 'bg-fg text-bg'
-                : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
-            )}
-          >
-            {pill.label}
-          </button>
-        ))}
       </div>
 
       {/* Recent searches (empty input) */}
@@ -270,8 +271,8 @@ export default function SearchPage() {
           ) : (
             <EmptyState
               icon={Search}
-              title="Busque por músicas e artistas"
-              description="Digite acima ou use a busca por voz para encontrar músicas livres no catálogo Audius."
+              title="Busque por músicas, artistas e álbuns"
+              description="Digite na barra de busca lá em cima — os resultados aparecem aqui na mesma tela."
             />
           )}
         </section>
@@ -300,43 +301,99 @@ export default function SearchPage() {
           {isEmpty ? (
             <EmptyState
               icon={SearchX}
-              title={`Nada encontrado para "${debounced.trim()}"`}
+              title={`Nada encontrado para "${query}"`}
               description="Confira a grafia ou tente termos mais gerais."
             />
           ) : (
             <>
-              {showTracks && topTrack && (
+              {topLocal && (
                 <section aria-label="Melhor resultado" className="min-w-0">
                   <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
                     Melhor resultado
                   </h2>
                   <div className="group relative flex max-w-md flex-col justify-between rounded-xl border border-border bg-bg-elevated p-5">
                     <div className="size-24 overflow-hidden rounded-lg bg-fg/6 shadow-lg">
-                      {topTrack.coverUrl && (
-                        <img src={topTrack.coverUrl} alt="" className="size-full object-cover" />
+                      {topLocal.coverUrl && (
+                        <img src={topLocal.coverUrl} alt="" className="size-full object-cover" />
                       )}
                     </div>
                     <div className="mt-4 min-w-0">
                       <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
-                        {topTrack.title}
+                        {topLocal.title}
                       </p>
                       <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
-                        Música · {trackArtistNames(topTrack)}
+                        Música · {trackArtistNames(topLocal)}
                       </p>
                     </div>
                     <PlayButton
                       size="lg"
-                      playing={currentTrack?.id === topTrack.id && isPlaying}
-                      onClick={() => playFree(0)}
+                      playing={currentTrack?.id === topLocal.id && isPlaying}
+                      onClick={() => playLocal(0)}
                       className="absolute bottom-5 right-5"
                     />
                   </div>
                 </section>
               )}
 
+              {showTracks && local.tracks.length > 0 && (
+                <section aria-label="Suas músicas" className="min-w-0">
+                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
+                    Suas músicas
+                  </h2>
+                  <TrackList>
+                    {local.tracks.map((track, index) => (
+                      <TrackRow
+                        key={track.id}
+                        track={track}
+                        index={index}
+                        showAlbum={false}
+                        active={track.id === currentTrack?.id}
+                        playing={track.id === currentTrack?.id && isPlaying}
+                        onPlay={() => playLocal(index)}
+                      />
+                    ))}
+                  </TrackList>
+                </section>
+              )}
+
+              {showArtists && local.artists.length > 0 && (
+                <SectionCarousel title="Seus artistas">
+                  {local.artists.map((artist) => (
+                    <LocalArtistCard
+                      key={artist.name}
+                      name={artist.name}
+                      trackCount={artist.trackCount}
+                      fallbackImage={artist.coverUrl}
+                    />
+                  ))}
+                </SectionCarousel>
+              )}
+
+              {showAlbums && local.albums.length > 0 && (
+                <SectionCarousel title="Seus álbuns">
+                  {local.albums.map((album) => (
+                    <MediaCard
+                      key={album.key}
+                      title={album.title}
+                      subtitle={album.artist}
+                      imageUrl={album.coverUrl}
+                      to={`/disco/${encodeURIComponent(album.key)}`}
+                      onPlay={() =>
+                        playQueue(album.tracks, 0, {
+                          source: 'search',
+                          sourceId: `album:${album.key}`,
+                        })
+                      }
+                    />
+                  ))}
+                </SectionCarousel>
+              )}
+
               {showTracks && freeTracks.length > 0 && (
-                <section aria-label="Músicas" className="min-w-0">
-                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Músicas</h2>
+                <section aria-label="No catálogo grátis" className="min-w-0">
+                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
+                    No catálogo grátis
+                  </h2>
                   <TrackList>
                     {freeTracks.map((track, index) => (
                       <TrackRow
@@ -354,7 +411,7 @@ export default function SearchPage() {
               )}
 
               {showArtists && artists.length > 0 && (
-                <SectionCarousel title="Artistas">
+                <SectionCarousel title="Artistas no catálogo">
                   {artists.map((artist) => (
                     <MediaCard
                       key={artist.id}
