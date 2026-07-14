@@ -143,21 +143,23 @@ export async function removeDownloadedTrack(trackId: string): Promise<void> {
   emit();
 }
 
-let hydrated = false;
+let hydratePromise: Promise<void> | null = null;
 
 /**
  * Rebuild the object-URL map from IndexedDB on boot so downloaded tracks
  * are immediately playable (including offline). Drops registry entries whose
- * audio the browser has evicted.
+ * audio the browser has evicted. Memoized: callers may `await` it before
+ * deciding a playback source (idempotent, instant after the first run).
  */
-export async function hydrateDownloads(): Promise<void> {
-  if (hydrated || !cacheSupported()) return;
-  hydrated = true;
-  for (const entry of getDownloads()) {
-    if (blobUrls.has(entry.track.id)) continue;
-    const blob = await getAudioBlob(entry.track.id).catch(() => null);
-    if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
-    else removeDownload(entry.track.id);
-  }
-  emit();
+export function hydrateDownloads(): Promise<void> {
+  return (hydratePromise ??= (async () => {
+    if (!cacheSupported()) return;
+    for (const entry of getDownloads()) {
+      if (blobUrls.has(entry.track.id)) continue;
+      const blob = await getAudioBlob(entry.track.id).catch(() => null);
+      if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
+      else removeDownload(entry.track.id);
+    }
+    emit();
+  })());
 }

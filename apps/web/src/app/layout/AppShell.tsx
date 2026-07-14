@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { AnimatePresence, motion } from 'framer-motion';
+import { motion } from 'framer-motion';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn, trackArtistNames } from '@/lib/utils';
@@ -73,17 +73,16 @@ export function AppShell() {
                   : 'pb-[calc(5rem+env(safe-area-inset-bottom))] md:pb-8',
               )}
             >
-              <AnimatePresence mode="popLayout" initial={false}>
-                <motion.div
-                  key={location.pathname}
-                  initial={{ opacity: 0, y: 8 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: 8 }}
-                  transition={{ duration: 0.32, ease: [0.16, 1, 0.3, 1] }}
-                >
-                  <Outlet />
-                </motion.div>
-              </AnimatePresence>
+              {/* Instant-feel navigation (Spotify-like): no exit animation, no
+                  layout pop — just a 120ms opacity ease-in on the new page. */}
+              <motion.div
+                key={location.pathname}
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ duration: 0.12, ease: 'linear' }}
+              >
+                <Outlet />
+              </motion.div>
             </div>
           </main>
 

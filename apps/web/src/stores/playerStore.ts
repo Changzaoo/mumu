@@ -34,6 +34,8 @@ import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
   if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id) || track.streamUrl) return track;
   if (!track.id.startsWith('local:')) return track;
+  // OFFLINE: nunca sai atrás de rede — sem áudio local, a faixa é indisponível.
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return track;
   const remote = remoteUrlFor(track.id);
   if (remote) return { ...track, streamUrl: remote };
   const sourceUrl = sourceUrlFor(track.id);
@@ -110,6 +112,13 @@ export function setOnPlayRecorded(callback: ((input: RecordPlayInput) => void) |
   onPlayRecorded = callback;
 }
 
+// Local caches (library Cache Storage + downloads IndexedDB) rebuilt — await
+// before choosing a playback source so local audio always wins over network.
+let localAudioReadyPromise: Promise<unknown> | null = null;
+function localAudioReady(): Promise<unknown> {
+  return (localAudioReadyPromise ??= Promise.all([hydrateLocalLibrary(), hydrateDownloads()]));
+}
+
 // Per-loaded-track flags (reset on every load).
 let playRecorded = false;
 let preloadRequested = false;
@@ -165,24 +174,48 @@ export const usePlayerStore = create<PlayerState>()(
           duration: track.durationMs / 1000,
         });
 
-        // A source we can play right now (local audio, an existing stream URL, or
-        // a catalog track) → load instantly.
-        const hasSource =
-          Boolean(localLibraryAudioUrl(track.id)) ||
-          Boolean(localAudioUrl(track.id)) ||
-          Boolean(track.streamUrl) ||
-          !track.id.startsWith('local:');
-        if (hasSource) {
+        // Local audio already resolvable THIS instant → play with zero network.
+        const localNow = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
+        if (localNow) {
           audioEngine.load(track, { autoplay, crossfadeSeconds });
           applyEngineSettings();
           return;
         }
 
-        // Imported track with no audio on THIS device — resolve a stream first
-        // (uploaded copy or live from the source), then load. Guard against the
-        // user skipping to another track while we resolve.
+        // Wait for the local caches to hydrate before touching any network URL —
+        // on a fresh boot (especially OFFLINE) the object-URL maps may still be
+        // rebuilding, and a downloaded track must NEVER go to the server.
         set({ isBuffering: true });
-        void ensurePlayableSource(track).then((resolved) => {
+        void (async () => {
+          await localAudioReady();
+          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+
+          const local = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
+          if (local) {
+            audioEngine.load(track, { autoplay, crossfadeSeconds });
+            applyEngineSettings();
+            return;
+          }
+
+          // OFFLINE without a local copy: fail honestly, no network attempts.
+          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+            set({ isPlaying: false, isBuffering: false });
+            void import('sonner').then(({ toast }) =>
+              toast.error('Sem conexão — essa faixa não está baixada neste dispositivo.'),
+            );
+            return;
+          }
+
+          // Existing stream URL or catalog track → load directly.
+          if (track.streamUrl || !track.id.startsWith('local:')) {
+            audioEngine.load(track, { autoplay, crossfadeSeconds });
+            applyEngineSettings();
+            return;
+          }
+
+          // Imported track with no audio on THIS device — resolve a stream
+          // (uploaded copy or live from the source), then load.
+          const resolved = await ensurePlayableSource(track);
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
           if (resolved !== track && resolved.streamUrl) {
             set((s) => ({
@@ -192,7 +225,7 @@ export const usePlayerStore = create<PlayerState>()(
           }
           audioEngine.load(resolved, { autoplay, crossfadeSeconds });
           applyEngineSettings();
-        });
+        })();
       }
 
       return {
@@ -472,8 +505,7 @@ export function initPlayerEngine(): void {
   audioEngine.setLocalSourceResolver(
     (track) => localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id),
   );
-  void hydrateLocalLibrary();
-  void hydrateDownloads();
+  void localAudioReady();
 
   // OS lock-screen / notification controls + background-play signalling.
   initMediaSession();

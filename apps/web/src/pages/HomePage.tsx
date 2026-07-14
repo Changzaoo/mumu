@@ -7,7 +7,9 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
-import { Clock, Heart, ListMusic, Music, Users } from 'lucide-react';
+import type { IconType } from 'react-icons';
+import { IoHeart, IoMusicalNotesOutline, IoPeopleOutline, IoTimeOutline } from 'react-icons/io5';
+import { Music } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
 import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
@@ -61,7 +63,7 @@ interface QuickTile {
   sub: string;
   imageUrl?: string | null;
   gradient?: boolean;
-  icon?: typeof Heart;
+  icon?: IconType;
   round?: boolean;
 }
 
@@ -87,7 +89,7 @@ function QuickAccess({
       label: 'Músicas Curtidas',
       sub: `${likedCount} ${likedCount === 1 ? 'música' : 'músicas'}`,
       gradient: true,
-      icon: Heart,
+      icon: IoHeart,
     },
   ];
   for (const p of playlists.slice(0, 3)) {
@@ -97,7 +99,7 @@ function QuickAccess({
       label: p.title,
       sub: `Playlist • ${p.trackIds.length} faixas`,
       imageUrl: cover(p.trackIds),
-      icon: ListMusic,
+      icon: IoMusicalNotesOutline,
     });
   }
   for (const a of artists.slice(0, 3)) {
@@ -107,7 +109,7 @@ function QuickAccess({
       label: a.name,
       sub: 'Artista',
       imageUrl: a.coverUrl,
-      icon: Users,
+      icon: IoPeopleOutline,
       round: true,
     });
   }
@@ -116,7 +118,7 @@ function QuickAccess({
     to: '/history',
     label: 'Tocadas recentemente',
     sub: 'Histórico',
-    icon: Clock,
+    icon: IoTimeOutline,
   });
 
   return (
@@ -151,7 +153,7 @@ function cnTile(gradient?: boolean): string {
   return [
     'grid size-12 shrink-0 place-items-center overflow-hidden shadow-[2px_0_8px_rgba(0,0,0,0.25)]',
     gradient
-      ? 'bg-gradient-to-br from-indigo-500 via-violet-500 to-emerald-300 text-white'
+      ? 'bg-linear-to-br from-indigo-500 via-violet-500 to-blue-400 text-white'
       : 'bg-fg/10 text-fg-muted',
   ].join(' ');
 }
@@ -219,7 +221,7 @@ export default function HomePage() {
       {/* Spotify-style tinted header glow fading into the page background. */}
       <div
         aria-hidden
-        className="pointer-events-none absolute inset-x-0 -top-4 h-72 bg-gradient-to-b from-accent/14 to-transparent"
+        className="pointer-events-none absolute inset-x-0 -top-4 h-72 bg-linear-to-b from-accent/14 to-transparent"
       />
 
       <motion.h1

@@ -6,23 +6,23 @@
  */
 import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink } from 'react-router';
+import type { IconType } from 'react-icons';
 import {
-  Compass,
-  Disc3,
-  Download,
-  HardDriveDownload,
-  Heart,
-  History,
-  Home,
-  Library,
-  ListMusic,
-  PanelLeft,
-  Search,
-  Share2,
-  Upload,
-  Users,
-} from 'lucide-react';
-import type { LucideIcon } from 'lucide-react';
+  IoCompass,
+  IoCompassOutline,
+  IoDiscOutline,
+  IoHeartOutline,
+  IoHome,
+  IoHomeOutline,
+  IoLibraryOutline,
+  IoMusicalNotesOutline,
+  IoPeopleOutline,
+  IoPhonePortraitOutline,
+  IoSearch,
+  IoSearchOutline,
+  IoTimeOutline,
+} from 'react-icons/io5';
+import { PanelLeft } from 'lucide-react';
 import { AurialLogo, AurialMark } from '@/components/brand/AurialMark';
 import { IconButton } from '@/components/ui/icon-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -37,23 +37,22 @@ import { useUiStore } from '@/stores/uiStore';
 interface NavEntry {
   to: string;
   label: string;
-  icon: LucideIcon;
+  icon: IconType;
+  /** Filled variant shown when the route is active (iOS/Spotify feel). */
+  iconActive?: IconType;
 }
 
 const MAIN_NAV: NavEntry[] = [
-  { to: '/', label: 'Início', icon: Home },
-  { to: '/search', label: 'Buscar', icon: Search },
-  { to: '/discover', label: 'Descobrir', icon: Compass },
+  { to: '/', label: 'Início', icon: IoHomeOutline, iconActive: IoHome },
+  { to: '/search', label: 'Buscar', icon: IoSearchOutline, iconActive: IoSearch },
+  { to: '/discover', label: 'Descobrir', icon: IoCompassOutline, iconActive: IoCompass },
 ];
 
 /** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo', '/downloads', '/uploads']);
+const ADMIN_ONLY = new Set(['/dispositivo']);
 
 const TOOLS_NAV: NavEntry[] = [
-  { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
-  { to: '/compartilhar', label: 'Compartilhar', icon: Share2 },
-  { to: '/downloads', label: 'Downloads', icon: Download },
-  { to: '/uploads', label: 'Uploads', icon: Upload },
+  { to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline },
 ];
 
 type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
@@ -65,7 +64,7 @@ const FILTERS: Array<{ key: LibraryFilter; label: string }> = [
 ];
 
 function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {
-  const { to, label, icon: Icon } = entry;
+  const { to, label, icon: Icon, iconActive: IconActive } = entry;
   const link = (
     <NavLink
       to={to}
@@ -78,8 +77,16 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
         )
       }
     >
-      <Icon className="size-5 shrink-0" />
-      {!collapsed && <span className="truncate">{label}</span>}
+      {({ isActive }) => (
+        <>
+          {isActive && IconActive ? (
+            <IconActive className="size-5 shrink-0" />
+          ) : (
+            <Icon className="size-5 shrink-0" />
+          )}
+          {!collapsed && <span className="truncate">{label}</span>}
+        </>
+      )}
     </NavLink>
   );
 
@@ -105,7 +112,7 @@ function LibraryItem({
   title: string;
   subtitle: string;
   imageUrl?: string | null;
-  icon: LucideIcon;
+  icon: IconType;
   round?: boolean;
 }) {
   return (
@@ -203,9 +210,9 @@ export function Sidebar() {
             <SectionLabel collapsed>Biblioteca</SectionLabel>
             <div className="space-y-0.5">
               {[
-                { to: '/library', label: 'Sua Biblioteca', icon: Library },
-                { to: '/liked', label: 'Curtidas', icon: Heart },
-                { to: '/history', label: 'Histórico', icon: History },
+                { to: '/library', label: 'Sua Biblioteca', icon: IoLibraryOutline },
+                { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
+                { to: '/history', label: 'Histórico', icon: IoTimeOutline },
               ].map((entry) => (
                 <NavItem key={entry.to} entry={entry} collapsed />
               ))}
@@ -218,7 +225,7 @@ export function Sidebar() {
                 to="/library"
                 className="flex items-center gap-2 text-sm font-bold text-fg-muted transition-colors hover:text-fg"
               >
-                <Library className="size-5" />
+                <IoLibraryOutline className="size-5" />
                 Sua Biblioteca
               </NavLink>
               <NavLink
@@ -226,7 +233,7 @@ export function Sidebar() {
                 aria-label="Histórico"
                 className="text-fg-subtle transition-colors hover:text-fg"
               >
-                <History className="size-4" />
+                <IoTimeOutline className="size-4" />
               </NavLink>
             </div>
 
@@ -252,7 +259,7 @@ export function Sidebar() {
                   to="/liked"
                   title="Músicas Curtidas"
                   subtitle={`Playlist • ${likedCount} ${likedCount === 1 ? 'música' : 'músicas'}`}
-                  icon={Heart}
+                  icon={IoHeartOutline}
                 />
                 {filter === 'playlists' &&
                   playlists.map((playlist) => (
@@ -262,7 +269,7 @@ export function Sidebar() {
                       title={playlist.title}
                       subtitle={`Playlist • ${playlist.trackIds.length} faixas`}
                       imageUrl={playlistCover(playlist.trackIds)}
-                      icon={ListMusic}
+                      icon={IoMusicalNotesOutline}
                     />
                   ))}
                 {filter === 'artistas' &&
@@ -273,7 +280,7 @@ export function Sidebar() {
                       title={artist.name}
                       subtitle="Artista"
                       imageUrl={artist.coverUrl}
-                      icon={Users}
+                      icon={IoPeopleOutline}
                       round
                     />
                   ))}
@@ -285,7 +292,7 @@ export function Sidebar() {
                       title={album.title}
                       subtitle={`Álbum • ${album.artist}`}
                       imageUrl={album.coverUrl}
-                      icon={Disc3}
+                      icon={IoDiscOutline}
                     />
                   ))}
               </div>

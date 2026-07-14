@@ -19,6 +19,18 @@ import { RootLayout } from '@/app/RootLayout';
 
 const pageModules = import.meta.glob<{ default: ComponentType }>('/src/pages/*.tsx');
 
+// Warm every lazy page chunk during idle time so switching pages NEVER waits
+// on the network — navigation renders instantly instead of flashing a skeleton.
+if (typeof window !== 'undefined') {
+  const idle: (cb: () => void) => void =
+    'requestIdleCallback' in window
+      ? (cb) => window.requestIdleCallback(cb, { timeout: 4000 })
+      : (cb) => void setTimeout(cb, 1500);
+  idle(() => {
+    for (const load of Object.values(pageModules)) void load().catch(() => undefined);
+  });
+}
+
 function Placeholder() {
   return (
     <EmptyState

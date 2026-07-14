@@ -51,7 +51,7 @@ beforeEach(() => {
 });
 
 describe('playQueue', () => {
-  it('loads the start index and stores queue + context', () => {
+  it('loads the start index and stores queue + context', async () => {
     usePlayerStore.getState().playQueue(tracks, 1, { source: 'album', sourceId: 'al1' });
     const state = usePlayerStore.getState();
     expect(state.queue).toHaveLength(4);
@@ -59,10 +59,14 @@ describe('playQueue', () => {
     expect(state.currentTrack?.id).toBe('b');
     expect(state.isPlaying).toBe(true);
     expect(state.context).toEqual({ source: 'album', sourceId: 'al1' });
-    expect(audioEngine.load).toHaveBeenCalledWith(
-      tracks[1],
-      expect.objectContaining({ autoplay: true }),
-    );
+    // The engine load waits for the local audio caches to hydrate first (so a
+    // downloaded copy always beats a network URL) — flush that microtask.
+    await vi.waitFor(() => {
+      expect(audioEngine.load).toHaveBeenCalledWith(
+        tracks[1],
+        expect.objectContaining({ autoplay: true }),
+      );
+    });
   });
 
   it('shuffles keeping the chosen track first when shuffle is on', () => {

@@ -1,69 +1,70 @@
+/**
+ * Mobile bottom tabs (<768px) — Spotify-style: three destinations + "Mais",
+ * floating over a soft gradient (no hard bar), iOS-feel Ionicons with the
+ * FILLED variant when active. Safe-area aware; the MiniPlayer floats above.
+ */
 import { useState } from 'react';
 import { NavLink } from 'react-router';
+import type { IconType } from 'react-icons';
 import {
-  Compass,
-  Download,
-  HardDriveDownload,
-  Heart,
-  History,
-  Home,
-  Library,
-  type LucideIcon,
-  Menu,
-  Search,
-  Share2,
-  Upload,
-  Users,
-} from 'lucide-react';
+  IoCompassOutline,
+  IoEllipsisHorizontal,
+  IoHeartOutline,
+  IoHome,
+  IoHomeOutline,
+  IoLibrary,
+  IoLibraryOutline,
+  IoPeopleOutline,
+  IoPhonePortraitOutline,
+  IoSearch,
+  IoSearchOutline,
+  IoTimeOutline,
+} from 'react-icons/io5';
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useIsAuthorized } from '@/lib/auth/roles';
 import { cn } from '@/lib/utils';
 
-const TABS: Array<{ to: string; label: string; icon: LucideIcon }> = [
-  { to: '/', label: 'Início', icon: Home },
-  { to: '/search', label: 'Buscar', icon: Search },
-  { to: '/library', label: 'Biblioteca', icon: Library },
+interface Tab {
+  to: string;
+  label: string;
+  icon: IconType;
+  iconActive: IconType;
+}
+
+const TABS: Tab[] = [
+  { to: '/', label: 'Início', icon: IoHomeOutline, iconActive: IoHome },
+  { to: '/search', label: 'Buscar', icon: IoSearchOutline, iconActive: IoSearch },
+  { to: '/library', label: 'Sua Biblioteca', icon: IoLibraryOutline, iconActive: IoLibrary },
 ];
 
 interface MenuGroup {
   heading: string;
-  items: Array<{ to: string; label: string; icon: LucideIcon }>;
+  items: Array<{ to: string; label: string; icon: IconType }>;
 }
 
 /** Everything not on the bottom bar — reachable from the "Mais" sheet. */
 const MENU: MenuGroup[] = [
   {
     heading: 'Descobrir',
-    items: [
-      { to: '/', label: 'Início', icon: Home },
-      { to: '/search', label: 'Buscar', icon: Search },
-      { to: '/discover', label: 'Descobrir', icon: Compass },
-    ],
+    items: [{ to: '/discover', label: 'Descobrir', icon: IoCompassOutline }],
   },
   {
     heading: 'Meu espaço',
-    items: [
-      { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
-      { to: '/compartilhar', label: 'Compartilhar', icon: Share2 },
-    ],
+    items: [{ to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline }],
   },
   {
     heading: 'Biblioteca',
     items: [
-      { to: '/library', label: 'Biblioteca', icon: Library },
-      { to: '/artistas', label: 'Artistas', icon: Users },
-      { to: '/liked', label: 'Curtidas', icon: Heart },
-      { to: '/history', label: 'Histórico', icon: History },
-      { to: '/downloads', label: 'Downloads', icon: Download },
-      { to: '/uploads', label: 'Uploads', icon: Upload },
+      { to: '/artistas', label: 'Artistas', icon: IoPeopleOutline },
+      { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
+      { to: '/history', label: 'Histórico', icon: IoTimeOutline },
     ],
   },
 ];
 
 /** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo', '/downloads', '/uploads']);
+const ADMIN_ONLY = new Set(['/dispositivo']);
 
-/** Bottom tabs (<768px), glass, safe-area aware, with a "Mais" sheet (DESIGN §7). */
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const authorized = useIsAuthorized();
@@ -73,39 +74,39 @@ export function MobileNav() {
         (g) => g.items.length > 0,
       );
 
-  const tabClass = (isActive: boolean): string =>
-    cn(
-      'flex flex-1 flex-col items-center justify-center gap-1 text-[11px] font-medium transition-colors duration-200',
-      isActive ? 'text-accent' : 'text-fg-muted',
-    );
-
   return (
     <>
       <nav
         aria-label="Navegação"
-        className="glass fixed inset-x-0 bottom-0 z-40 flex h-16 items-stretch justify-around rounded-none border-x-0 border-b-0 pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 bg-linear-to-t from-bg via-bg/92 to-bg/0 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
       >
-        {TABS.map(({ to, label, icon: Icon }) => (
-          <NavLink
-            key={to}
-            to={to}
-            end={to === '/'}
-            className={({ isActive }) => tabClass(isActive)}
+        <div className="flex h-14 items-stretch justify-around">
+          {TABS.map(({ to, label, icon: Icon, iconActive: IconActive }) => (
+            <NavLink key={to} to={to} end={to === '/'} className="flex-1">
+              {({ isActive }) => (
+                <span
+                  className={cn(
+                    'flex h-full flex-col items-center justify-center gap-1 text-[10px] font-medium transition-colors duration-200',
+                    isActive ? 'text-fg' : 'text-fg-muted',
+                  )}
+                >
+                  {isActive ? <IconActive className="size-6" /> : <Icon className="size-6" />}
+                  {label}
+                </span>
+              )}
+            </NavLink>
+          ))}
+          <button
+            type="button"
+            aria-label="Mais"
+            aria-haspopup="dialog"
+            onClick={() => setOpen(true)}
+            className="flex flex-1 flex-col items-center justify-center gap-1 text-[10px] font-medium text-fg-muted transition-colors duration-200"
           >
-            <Icon className="size-5" />
-            {label}
-          </NavLink>
-        ))}
-        <button
-          type="button"
-          aria-label="Mais"
-          aria-haspopup="dialog"
-          onClick={() => setOpen(true)}
-          className={tabClass(false)}
-        >
-          <Menu className="size-5" />
-          Mais
-        </button>
+            <IoEllipsisHorizontal className="size-6" />
+            Mais
+          </button>
+        </div>
       </nav>
 
       <Sheet open={open} onOpenChange={setOpen}>

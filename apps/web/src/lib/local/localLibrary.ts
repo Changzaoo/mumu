@@ -878,32 +878,45 @@ export function sharedMeta(id: string): SharedTrackMeta | null {
   };
 }
 
-let hydrated = false;
+let hydratePromise: Promise<void> | null = null;
 
 /**
  * Rebuild the object-URL map from Cache Storage on boot so local tracks are
  * immediately playable. Entries without local audio are kept (they may be
  * synced from another device) — they simply aren't playable here.
  */
-export async function hydrate(): Promise<void> {
-  if (hydrated) return;
-  hydrated = true;
-  if (!cacheStorageSupported()) return;
-  for (const entry of read()) {
-    if (blobUrls.has(entry.track.id)) continue;
-    const blob = await getBlob(entry.track.id).catch(() => null);
-    if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
+export function hydrate(): Promise<void> {
+  return (hydratePromise ??= (async () => {
+    if (!cacheStorageSupported()) return;
+    for (const entry of read()) {
+      if (blobUrls.has(entry.track.id)) continue;
+      const blob = await getBlob(entry.track.id).catch(() => null);
+      if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
+    }
+    emit();
+    scheduleBackgroundCuration();
+  })());
+}
+
+/**
+ * Background, sequential curation (uploads + metadata healing). ALL of it hits
+ * the network — offline it must not run at all (playback stays 100% local);
+ * it waits for the connection to come back instead.
+ */
+function scheduleBackgroundCuration(): void {
+  const run = (): void =>
+    void (async () => {
+      await backfillRemote();
+      await reprocessExisting();
+      await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
+      await redriveFromSource().catch(() => false); // real metadata from the source
+      await auditAttributions().catch(() => undefined); // AI spot-checks a few
+    })();
+  if (typeof navigator !== 'undefined' && !navigator.onLine) {
+    window.addEventListener('online', run, { once: true });
+    return;
   }
-  emit();
-  // Background, sequential (gentle on the network): upload audio for other
-  // devices, then fix covers/names/artist-splits on pre-existing tracks.
-  void (async () => {
-    await backfillRemote();
-    await reprocessExisting();
-    await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
-    await redriveFromSource().catch(() => undefined); // real metadata from the source
-    await auditAttributions().catch(() => undefined); // AI spot-checks a few
-  })();
+  run();
 }
 
 /**
@@ -998,10 +1011,13 @@ async function auditAttributions(limit = 12): Promise<void> {
     ).catch(() => null);
     if (verdict === false) {
       const confirmed = await enrichLocalTrack(e.track.id).catch(() => false);
-      const rederived = confirmed
-        ? true
-        : await rederiveTrackFromSource(e.track.id).catch(() => false);
-      if (!confirmed && !rederived) clearWrongCredit(e.track.id);
+      if (!confirmed) {
+        const result = await rederiveTrackFromSource(e.track.id).catch(() => 'failed' as const);
+        // Importador fora do ar → NÃO apaga o crédito (a fonte poderia prová-lo
+        // depois) e não marca como auditada — re-tenta noutra sessão.
+        if (result === 'failed') continue;
+        if (result === 'unchanged') clearWrongCredit(e.track.id);
+      }
     }
     done.push(e.track.id);
   }
@@ -1045,15 +1061,18 @@ const hostOf = (url: string): string => {
  * precedência de evidência e, quando o crédito antigo CONFLITA com a fonte
  * (crédito alucinado por catálogo/IA — ex. "Warzone" → The Wanted), descarta
  * também a capa/álbum/gênero herdados do match errado, voltando à capa da
- * fonte. Retorna true quando algo foi corrigido.
+ * fonte. Resultado distingue FALHA (importador indisponível — tentar depois)
+ * de "nada novo" (a fonte concorda com o que já temos) e de "atualizado".
  */
-async function rederiveTrackFromSource(id: string): Promise<boolean> {
+type RederiveResult = 'failed' | 'unchanged' | 'updated';
+
+async function rederiveTrackFromSource(id: string): Promise<RederiveResult> {
   const entry = read().find((e) => e.track.id === id);
-  if (!entry?.sourceUrl || importerHostLabel(hostOf(entry.sourceUrl)) === null) return false;
+  if (!entry?.sourceUrl || importerHostLabel(hostOf(entry.sourceUrl)) === null) return 'unchanged';
   const meta = await fetchTrackMeta(entry.sourceUrl).catch(() => null);
-  if (!meta) return false;
+  if (!meta) return 'failed';
   const cur = read().find((x) => x.track.id === id);
-  if (!cur) return false;
+  if (!cur) return 'unchanged';
 
   const ev = extrator({
     artist: meta.artist,
@@ -1073,7 +1092,7 @@ async function rederiveTrackFromSource(id: string): Promise<boolean> {
   const artistFinal = albumVer?.artist ?? credito.artist;
   const sameArtist = artistFinal === (atual ?? 'Desconhecido');
   const sameTitle = credito.title === cur.track.title;
-  if (!conflito && !albumVer && sameArtist && sameTitle && !credito.album) return false; // nada novo
+  if (!conflito && !albumVer && sameArtist && sameTitle && !credito.album) return 'unchanged';
 
   const base = localTrackDto(
     id,
@@ -1098,15 +1117,19 @@ async function rederiveTrackFromSource(id: string): Promise<boolean> {
     const healed = read().find((x) => x.track.id === id);
     if (healed) void publishSharedTrack(healed.track, cur.sourceUrl);
   }
-  return true;
+  return 'updated';
 }
 
 /**
  * AUDITOR: varre faixas ainda não re-derivadas da fonte, algumas por sessão
  * (gentil com o YouTube). Cada faixa passa pelo pipeline completo do time —
- * EXTRATOR → CURADOR → JUIZ → VERIFICADOR.
+ * EXTRATOR → CURADOR → JUIZ → VERIFICADOR. Falhas não são marcadas (a faixa
+ * tenta de novo na próxima sessão) e 3 falhas SEGUIDAS abortam a varredura —
+ * um importador com problema não vira uma enxurrada de erros no console.
+ * Retorna true quando o lote terminou sem abortar.
  */
-async function redriveFromSource(limit = 6): Promise<void> {
+async function redriveFromSource(limit = 6): Promise<boolean> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
   const done = readRederived();
   const todo = read()
     .filter(
@@ -1114,16 +1137,28 @@ async function redriveFromSource(limit = 6): Promise<void> {
         e.sourceUrl && !done.has(e.track.id) && importerHostLabel(hostOf(e.sourceUrl)) !== null,
     )
     .slice(0, limit);
-  if (todo.length === 0) return;
+  if (todo.length === 0) return true;
   // Um importer ANTIGO (sem uploader/álbum) responderia sem as evidências e a
   // faixa seria marcada como "re-derivada" sem cura — só roda com o novo.
-  if (!(await helperSupportsMetaTeam())) return;
+  if (!(await helperSupportsMetaTeam())) return false;
   const marked: string[] = [];
+  let consecutiveFailures = 0;
+  let aborted = false;
   for (const e of todo) {
+    const result = await rederiveTrackFromSource(e.track.id).catch(() => 'failed' as const);
+    if (result === 'failed') {
+      consecutiveFailures += 1;
+      if (consecutiveFailures >= 3) {
+        aborted = true;
+        break;
+      }
+      continue; // não marca — tenta de novo quando o importador estiver saudável
+    }
+    consecutiveFailures = 0;
     marked.push(e.track.id);
-    await rederiveTrackFromSource(e.track.id).catch(() => undefined);
   }
   if (marked.length > 0) markRederived(marked);
+  return !aborted;
 }
 
 /** Split a single merged artist credit on an existing track (when enrichment couldn't). */
@@ -1173,7 +1208,10 @@ async function reprocessExisting(): Promise<void> {
   } catch {
     /* ignore */
   }
-  await redriveFromSource(Number.POSITIVE_INFINITY).catch(() => undefined);
+  const completed = await redriveFromSource(Number.POSITIVE_INFINITY).catch(() => false);
+  // Importador instável no meio do passe → NÃO grava a versão; o que faltou
+  // re-tenta na próxima sessão (as re-derivadas com sucesso ficam marcadas).
+  if (!completed) return;
 
   // 2. VERIFICADOR: refina capa/nome no catálogo (só matches estritos) e
   //    separa créditos de colaboração ainda fundidos num nome só.
