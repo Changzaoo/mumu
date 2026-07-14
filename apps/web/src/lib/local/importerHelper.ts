@@ -137,6 +137,10 @@ export interface HelperImport {
   title: string;
   /** Source thumbnail (e.g. the YouTube cover) — used until iTunes enriches. */
   coverUrl: string | null;
+  /** Real song metadata from yt-dlp (YouTube Music), when available. */
+  artist: string | null;
+  track: string | null;
+  album: string | null;
 }
 
 export interface PlaylistEntry {
@@ -233,6 +237,30 @@ export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | 
   }
 }
 
+export interface TrackMeta {
+  title: string | null;
+  artist: string | null;
+  track: string | null;
+  album: string | null;
+  thumbnail: string | null;
+}
+
+/** Real song metadata for a media link WITHOUT downloading — to re-identify a
+ *  track from its source. Returns null when unavailable / on failure. */
+export async function fetchTrackMeta(url: string): Promise<TrackMeta | null> {
+  try {
+    const res = await fetch(`${helperUrl()}/meta`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ url }),
+    });
+    if (!res.ok) return null;
+    return (await res.json()) as TrackMeta;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch a real artist photo (Deezer, via the importer to dodge CORS). */
 export async function fetchArtistImage(name: string): Promise<string | null> {
   try {
@@ -310,11 +338,16 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
     }
     throw new Error(message);
   }
-  const titleHeader = res.headers.get('X-Aurial-Title');
-  const title = titleHeader ? decodeURIComponent(titleHeader) : 'faixa';
-  const coverHeader = res.headers.get('X-Aurial-Cover');
-  const coverUrl = coverHeader ? decodeURIComponent(coverHeader) : null;
+  const decode = (h: string): string | null => {
+    const v = res.headers.get(h);
+    return v ? decodeURIComponent(v) : null;
+  };
+  const title = decode('X-Aurial-Title') ?? 'faixa';
+  const coverUrl = decode('X-Aurial-Cover');
+  const artist = decode('X-Aurial-Artist');
+  const track = decode('X-Aurial-Track');
+  const album = decode('X-Aurial-Album');
   const blob = await res.blob();
   if (blob.size === 0) throw new Error('O importador devolveu um arquivo vazio.');
-  return { blob, title, coverUrl };
+  return { blob, title, coverUrl, artist, track, album };
 }

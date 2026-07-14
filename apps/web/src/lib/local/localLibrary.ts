@@ -23,6 +23,7 @@ import { aiSplitArtists, aiVerifyArtist } from '@/lib/ai/ai';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
+  fetchTrackMeta,
   importerHostLabel,
   importViaHelper,
   uploadTrackBlob,
@@ -400,7 +401,15 @@ const AUDIO_EXT = /\.(mp3|m4a|aac|flac|wav|ogg|opus)$/i;
 /** Store an audio blob as a local track (shared path for imports + URLs). */
 async function saveBlobAsLocalTrack(
   blob: Blob,
-  opts: { title: string; sourceUrl?: string; coverUrl?: string | null },
+  opts: {
+    title: string;
+    sourceUrl?: string;
+    coverUrl?: string | null;
+    /** Real metadata from yt-dlp (YouTube Music) — trusted over title parsing. */
+    artist?: string | null;
+    track?: string | null;
+    album?: string | null;
+  },
 ): Promise<TrackDto> {
   // Dedup: same source link, or byte-identical audio already in the library.
   if (opts.sourceUrl) {
@@ -413,12 +422,23 @@ async function saveBlobAsLocalTrack(
     if (byHash) return byHash;
   }
   const id = `local:${crypto.randomUUID()}`;
-  const { title, artist } = parseFileName(opts.title);
+  // Prefer the source's OWN metadata (yt-dlp `artist`/`track` from YouTube Music)
+  // over parsing the messy video title — that's the reliable ground truth.
+  const parsed = parseFileName(opts.title);
+  const title = opts.track?.trim() || parsed.title;
+  const artist = opts.artist?.trim() || parsed.artist;
   const durationMs = await probeDurationMs(blob);
   const mimeType = blob.type || 'audio/mpeg';
   // Seed with the source thumbnail (e.g. YouTube cover) so it's never blank;
-  // iTunes enrichment may upgrade it to a clean album cover afterwards.
-  const track = localTrackDto(id, title, artist, durationMs, null, opts.coverUrl ?? null);
+  // enrichment may upgrade it to a clean album cover afterwards.
+  const track = localTrackDto(
+    id,
+    title,
+    artist,
+    durationMs,
+    opts.album ?? null,
+    opts.coverUrl ?? null,
+  );
   await putBlob(id, blob).catch(() => undefined);
   addEntry(
     {
@@ -459,11 +479,14 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   // local importer helper (apps/importer), route the link through it — it fetches
   // + converts to MP3 on their own machine and we store it like any local track.
   if (importerHostLabel(host)) {
-    const { blob, title, coverUrl } = await importViaHelper(parsed.toString());
-    const track = await saveBlobAsLocalTrack(blob, {
-      title: `${title}.mp3`,
+    const imported = await importViaHelper(parsed.toString());
+    const track = await saveBlobAsLocalTrack(imported.blob, {
+      title: `${imported.title}.mp3`,
       sourceUrl: parsed.toString(),
-      coverUrl,
+      coverUrl: imported.coverUrl,
+      artist: imported.artist,
+      track: imported.track,
+      album: imported.album,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
     void publishSharedTrack(track, parsed.toString()); // share with the community
@@ -852,6 +875,7 @@ export async function hydrate(): Promise<void> {
     await backfillRemote();
     await reprocessExisting();
     await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
+    await redriveFromSource().catch(() => undefined); // real metadata from the source
     await auditAttributions().catch(() => undefined); // AI spot-checks a few
   })();
 }
@@ -944,6 +968,78 @@ async function auditAttributions(limit = 12): Promise<void> {
     done.push(e.track.id);
   }
   if (done.length > 0) markAudited(done);
+}
+
+// ── re-identify existing tracks from their SOURCE metadata (yt-dlp) ──────────
+const REDERIVE_KEY = 'aurial:rederivedSet';
+
+function readRederived(): Set<string> {
+  try {
+    const raw = window.localStorage.getItem(REDERIVE_KEY);
+    const arr: unknown = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(arr) ? (arr as string[]) : []);
+  } catch {
+    return new Set();
+  }
+}
+
+function markRederived(ids: string[]): void {
+  try {
+    const s = readRederived();
+    for (const id of ids) s.add(id);
+    window.localStorage.setItem(REDERIVE_KEY, JSON.stringify([...s]));
+  } catch {
+    /* ignore */
+  }
+}
+
+const hostOf = (url: string): string => {
+  try {
+    return new URL(url).hostname.toLowerCase().replace(/^www\./, '');
+  } catch {
+    return '';
+  }
+};
+
+/**
+ * Pull the REAL song metadata (artist/track/album) from a link's source via the
+ * importer and apply it — the ground truth for YouTube-Music imports whose video
+ * title was messy. Capped per run (spreads over sessions, gentle on YouTube),
+ * then re-verifies cover/genre against iTunes with the now-correct artist.
+ */
+async function redriveFromSource(limit = 6): Promise<void> {
+  const done = readRederived();
+  const todo = read()
+    .filter(
+      (e) =>
+        e.sourceUrl && !done.has(e.track.id) && importerHostLabel(hostOf(e.sourceUrl)) !== null,
+    )
+    .slice(0, limit);
+  const marked: string[] = [];
+  for (const e of todo) {
+    marked.push(e.track.id);
+    const meta = await fetchTrackMeta(e.sourceUrl as string).catch(() => null);
+    if (!meta || (!meta.artist && !meta.track)) continue;
+    const cur = read().find((x) => x.track.id === e.track.id);
+    if (!cur) continue;
+    const title = meta.track?.trim() || cur.track.title;
+    const artist = meta.artist?.trim() || cur.track.artists[0]?.name || 'Desconhecido';
+    const base = localTrackDto(
+      cur.track.id,
+      title,
+      artist,
+      cur.track.durationMs,
+      meta.album?.trim() || cur.track.album?.title || null,
+      cur.track.coverUrl,
+    );
+    patchEntry(cur.track.id, {
+      ...cur,
+      track: { ...base, streamUrl: cur.remoteUrl ?? cur.track.streamUrl },
+    });
+    // Confirm cover + genre with iTunes now that the artist/title are correct.
+    await enrichLocalTrack(cur.track.id).catch(() => undefined);
+  }
+  if (marked.length > 0) markRederived(marked);
 }
 
 /** Split a single merged artist credit on an existing track (when enrichment couldn't). */
