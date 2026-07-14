@@ -152,6 +152,8 @@ export interface HelperImport {
   artist: string | null;
   track: string | null;
   album: string | null;
+  /** Channel/uploader name — the artist identity for underground/self-published tracks. */
+  uploader: string | null;
 }
 
 export interface PlaylistEntry {
@@ -254,6 +256,8 @@ export interface TrackMeta {
   track: string | null;
   album: string | null;
   thumbnail: string | null;
+  /** Channel/uploader name — the artist identity for underground/self-published tracks. */
+  uploader: string | null;
 }
 
 /** Real song metadata for a media link WITHOUT downloading — to re-identify a
@@ -358,7 +362,8 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
   const artist = decode('X-Aurial-Artist');
   const track = decode('X-Aurial-Track');
   const album = decode('X-Aurial-Album');
+  const uploader = decode('X-Aurial-Uploader');
   const blob = await res.blob();
   if (blob.size === 0) throw new Error('O importador devolveu um arquivo vazio.');
-  return { blob, title, coverUrl, artist, track, album };
+  return { blob, title, coverUrl, artist, track, album, uploader };
 }

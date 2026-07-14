@@ -276,6 +276,7 @@ async function importToMp3(ytdlp, url, quality) {
   let artist = '';
   let track = '';
   let album = '';
+  let uploader = '';
   try {
     const info = JSON.parse(await readFile(path.join(dir, 'audio.info.json'), 'utf8'));
     if (typeof info.title === 'string' && info.title.trim()) title = info.title.trim();
@@ -288,10 +289,14 @@ async function importToMp3(ytdlp, url, quality) {
     if (typeof rawArtist === 'string' && rawArtist.trim()) artist = rawArtist.trim();
     if (typeof info.track === 'string' && info.track.trim()) track = info.track.trim();
     if (typeof info.album === 'string' && info.album.trim()) album = info.album.trim();
+    // Channel/uploader name — for underground/self-published tracks (no catalog
+    // entry, bare titles like "MILAGRE") the channel IS the artist identity.
+    const rawUploader = info.uploader || info.channel || '';
+    if (typeof rawUploader === 'string' && rawUploader.trim()) uploader = rawUploader.trim();
   } catch {
     /* keep default */
   }
-  return { dir, file: path.join(dir, mp3), title, thumbnail, artist, track, album };
+  return { dir, file: path.join(dir, mp3), title, thumbnail, artist, track, album, uploader };
 }
 
 function interpret(stderr) {
@@ -455,7 +460,7 @@ function applyCors(req, res) {
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id');
   res.setHeader(
     'Access-Control-Expose-Headers',
-    'X-Aurial-Title, X-Aurial-Cover, X-Aurial-Artist, X-Aurial-Track, X-Aurial-Album',
+    'X-Aurial-Title, X-Aurial-Cover, X-Aurial-Artist, X-Aurial-Track, X-Aurial-Album, X-Aurial-Uploader',
   );
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])
@@ -806,6 +811,7 @@ async function main() {
           const rawArtist = Array.isArray(info.artists)
             ? info.artists.join(', ')
             : info.artist || info.creator || '';
+          const rawUploader = info.uploader || info.channel || '';
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(
             JSON.stringify({
@@ -814,6 +820,8 @@ async function main() {
               track: typeof info.track === 'string' ? info.track : null,
               album: typeof info.album === 'string' ? info.album : null,
               thumbnail: typeof info.thumbnail === 'string' ? info.thumbnail : null,
+              uploader:
+                typeof rawUploader === 'string' && rawUploader.trim() ? rawUploader.trim() : null,
             }),
           );
         } catch (err) {
@@ -893,6 +901,7 @@ async function main() {
             ...(job.artist ? { 'X-Aurial-Artist': encodeURIComponent(job.artist) } : {}),
             ...(job.track ? { 'X-Aurial-Track': encodeURIComponent(job.track) } : {}),
             ...(job.album ? { 'X-Aurial-Album': encodeURIComponent(job.album) } : {}),
+            ...(job.uploader ? { 'X-Aurial-Uploader': encodeURIComponent(job.uploader) } : {}),
           });
           const { createReadStream } = await import('node:fs');
           await new Promise((resolve, reject) => {

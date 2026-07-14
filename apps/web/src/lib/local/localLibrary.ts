@@ -16,16 +16,24 @@ import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
 import { pushNotification } from '@/stores/notificationsStore';
-import { verifyIdentity } from '@/lib/local/enrich';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 import { aiSplitArtists, aiVerifyArtist } from '@/lib/ai/ai';
+// O TIME DE METADADOS (5 agentes — ver metaTeam.ts). Aqui vive o AUDITOR;
+// os demais agentes são consultados em cada decisão de crédito.
+import {
+  extrator,
+  juizCreditoConflita,
+  juizDecideCredito,
+  verificadorConfirma,
+} from '@/lib/local/metaTeam';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
   fetchTrackMeta,
   importerHostLabel,
   importViaHelper,
+  probeHelper,
   uploadTrackBlob,
 } from '@/lib/local/importerHelper';
 
@@ -350,7 +358,10 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
     .map((a) => a.name)
     .filter((n) => n && n !== 'Desconhecido')[0];
 
-  const verified = await verifyIdentity(entry.track.title, currentArtist);
+  // VERIFICADOR (metaTeam): confirma no iTunes só com um palpite sustentado por
+  // evidência — sem artista conhecido ele se recusa a procurar (buscar por
+  // título sozinho é o que fabricava créditos errados).
+  const verified = await verificadorConfirma(entry.track.title, currentArtist);
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
 
@@ -409,6 +420,8 @@ async function saveBlobAsLocalTrack(
     artist?: string | null;
     track?: string | null;
     album?: string | null;
+    /** Channel/uploader — the artist identity for underground/self-published tracks. */
+    uploader?: string | null;
   },
 ): Promise<TrackDto> {
   // Dedup: same source link, or byte-identical audio already in the library.
@@ -422,21 +435,29 @@ async function saveBlobAsLocalTrack(
     if (byHash) return byHash;
   }
   const id = `local:${crypto.randomUUID()}`;
-  // Prefer the source's OWN metadata (yt-dlp `artist`/`track` from YouTube Music)
-  // over parsing the messy video title — that's the reliable ground truth.
-  const parsed = parseFileName(opts.title);
-  const title = opts.track?.trim() || parsed.title;
-  const artist = opts.artist?.trim() || parsed.artist;
+  // TIME DE METADADOS: o EXTRATOR consolida as evidências da fonte (yt-dlp +
+  // canal do uploader, via CURADOR) e o JUIZ decide o crédito por precedência —
+  // fonte > "Artista - Título" > canal. Faixa underground num canal de artista
+  // ("MILAGRE" no canal Brandão85) sai creditada ao canal, nunca "Desconhecido".
+  const credito = juizDecideCredito(
+    extrator({
+      artist: opts.artist,
+      track: opts.track,
+      album: opts.album,
+      uploader: opts.uploader,
+      title: opts.title,
+    }),
+  );
   const durationMs = await probeDurationMs(blob);
   const mimeType = blob.type || 'audio/mpeg';
   // Seed with the source thumbnail (e.g. YouTube cover) so it's never blank;
   // enrichment may upgrade it to a clean album cover afterwards.
   const track = localTrackDto(
     id,
-    title,
-    artist,
+    credito.title,
+    credito.artist,
     durationMs,
-    opts.album ?? null,
+    credito.album,
     opts.coverUrl ?? null,
   );
   await putBlob(id, blob).catch(() => undefined);
@@ -487,6 +508,7 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
       artist: imported.artist,
       track: imported.track,
       album: imported.album,
+      uploader: imported.uploader,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
     void publishSharedTrack(track, parsed.toString()); // share with the community
@@ -901,9 +923,10 @@ async function backfillRemote(): Promise<void> {
 // a wrong name, or two collaborating artists merged into one (which also breaks
 // lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
 const REPROCESS_KEY = 'aurial:reprocessVersion';
-// v4: purge the bad credits produced by the removed dominant-artist fallback —
-// re-audit EVERY track (AI flags wrong credits; unconfirmable ones are cleared).
-const REPROCESS_VERSION = 4;
+// v5: o TIME DE METADADOS assumiu (metaTeam.ts) — a FONTE é a autoridade.
+// Re-deriva TODAS as faixas da fonte (cura créditos alucinados por catálogo/IA,
+// ex. "Warzone" do Brandão85 creditada ao The Wanted) e re-audita tudo.
+const REPROCESS_VERSION = 5;
 
 // ── periodic AI audit of attributions ───────────────────────────
 // iTunes has the final word on who a song is by; the AI just periodically
@@ -944,9 +967,11 @@ function clearWrongCredit(id: string): void {
   patchEntry(id, { ...cur, track });
 }
 
-/** Audit up to `limit` not-yet-checked attributed tracks per run (spreads the
- *  cost over sessions). On a clear AI "NÃO": re-verify against iTunes, and if
- *  nothing confirms, DROP the wrong credit instead of keeping it. */
+/** AUDITOR: audit up to `limit` not-yet-checked attributed tracks per run
+ *  (spreads the cost over sessions). A IA só LEVANTA a suspeita (nunca decide):
+ *  num "NÃO" claro, tenta (1) confirmar no catálogo, (2) re-derivar da FONTE
+ *  (uploader/metadados reais) e, só se nada provar um crédito, apaga o errado —
+ *  melhor "Desconhecido" que um artista alucinado. */
 async function auditAttributions(limit = 12): Promise<void> {
   const audited = readAudited();
   const todo = read()
@@ -962,8 +987,11 @@ async function auditAttributions(limit = 12): Promise<void> {
       e.track.artists.map((a) => a.name).join(', '),
     ).catch(() => null);
     if (verdict === false) {
-      const fixed = await enrichLocalTrack(e.track.id).catch(() => false);
-      if (!fixed) clearWrongCredit(e.track.id);
+      const confirmed = await enrichLocalTrack(e.track.id).catch(() => false);
+      const rederived = confirmed
+        ? true
+        : await rederiveTrackFromSource(e.track.id).catch(() => false);
+      if (!confirmed && !rederived) clearWrongCredit(e.track.id);
     }
     done.push(e.track.id);
   }
@@ -1002,10 +1030,65 @@ const hostOf = (url: string): string => {
 };
 
 /**
- * Pull the REAL song metadata (artist/track/album) from a link's source via the
- * importer and apply it — the ground truth for YouTube-Music imports whose video
- * title was messy. Capped per run (spreads over sessions, gentle on YouTube),
- * then re-verifies cover/genre against iTunes with the now-correct artist.
+ * AUDITOR (metaTeam): re-deriva UMA faixa da sua fonte. Busca os metadados
+ * reais (yt-dlp, incluindo o canal do uploader), o JUIZ decide o crédito por
+ * precedência de evidência e, quando o crédito antigo CONFLITA com a fonte
+ * (crédito alucinado por catálogo/IA — ex. "Warzone" → The Wanted), descarta
+ * também a capa/álbum/gênero herdados do match errado, voltando à capa da
+ * fonte. Retorna true quando algo foi corrigido.
+ */
+async function rederiveTrackFromSource(id: string): Promise<boolean> {
+  const entry = read().find((e) => e.track.id === id);
+  if (!entry?.sourceUrl || importerHostLabel(hostOf(entry.sourceUrl)) === null) return false;
+  const meta = await fetchTrackMeta(entry.sourceUrl).catch(() => null);
+  if (!meta) return false;
+  const cur = read().find((x) => x.track.id === id);
+  if (!cur) return false;
+
+  const ev = extrator({
+    artist: meta.artist,
+    track: meta.track,
+    album: meta.album,
+    uploader: meta.uploader,
+    title: meta.title,
+  });
+  const atual = cur.track.artists[0]?.name ?? null;
+  const conflito = juizCreditoConflita(ev, atual);
+  const credito = juizDecideCredito(ev, { artist: conflito ? null : atual });
+
+  const sameArtist = credito.artist === (atual ?? 'Desconhecido');
+  const sameTitle = credito.title === cur.track.title;
+  if (!conflito && sameArtist && sameTitle && !credito.album) return false; // nada novo
+
+  const base = localTrackDto(
+    id,
+    credito.title || cur.track.title,
+    credito.artist,
+    cur.track.durationMs,
+    credito.album ?? (conflito ? null : (cur.track.album?.title ?? null)),
+    // Capa herdada de um match alucinado sai junto com o crédito errado.
+    conflito ? (safeCoverUrl(meta.thumbnail) ?? null) : cur.track.coverUrl,
+  );
+  const track: TrackDto = {
+    ...base,
+    genre: conflito ? null : (cur.track.genre ?? null),
+    streamUrl: cur.remoteUrl ?? cur.track.streamUrl,
+  };
+  patchEntry(id, { ...cur, track });
+  // VERIFICADOR: com o crédito agora provado, o iTunes pode refinar capa/gênero
+  // (só aplica quando título E artista batem — underground fica como está).
+  await enrichLocalTrack(id).catch(() => undefined);
+  if (cur.sourceUrl) {
+    const healed = read().find((x) => x.track.id === id);
+    if (healed) void publishSharedTrack(healed.track, cur.sourceUrl);
+  }
+  return true;
+}
+
+/**
+ * AUDITOR: varre faixas ainda não re-derivadas da fonte, algumas por sessão
+ * (gentil com o YouTube). Cada faixa passa pelo pipeline completo do time —
+ * EXTRATOR → CURADOR → JUIZ → VERIFICADOR.
  */
 async function redriveFromSource(limit = 6): Promise<void> {
   const done = readRederived();
@@ -1018,32 +1101,7 @@ async function redriveFromSource(limit = 6): Promise<void> {
   const marked: string[] = [];
   for (const e of todo) {
     marked.push(e.track.id);
-    const meta = await fetchTrackMeta(e.sourceUrl as string).catch(() => null);
-    if (!meta) continue;
-    const cur = read().find((x) => x.track.id === e.track.id);
-    if (!cur) continue;
-    // YouTube Music gives structured artist/track; regular videos give a title
-    // like "Artist - Song" — parse that as the (reliable) fallback.
-    const fromTitle = meta.title ? parseFileName(meta.title) : null;
-    const titleArtist = fromTitle && fromTitle.artist !== 'Desconhecido' ? fromTitle.artist : '';
-    const artist =
-      meta.artist?.trim() || titleArtist || cur.track.artists[0]?.name || 'Desconhecido';
-    const title = meta.track?.trim() || fromTitle?.title || cur.track.title;
-    if (artist === 'Desconhecido' && title === cur.track.title) continue; // nothing new
-    const base = localTrackDto(
-      cur.track.id,
-      title,
-      artist,
-      cur.track.durationMs,
-      meta.album?.trim() || cur.track.album?.title || null,
-      cur.track.coverUrl,
-    );
-    patchEntry(cur.track.id, {
-      ...cur,
-      track: { ...base, streamUrl: cur.remoteUrl ?? cur.track.streamUrl },
-    });
-    // Confirm cover + genre with iTunes now that the artist/title are correct.
-    await enrichLocalTrack(cur.track.id).catch(() => undefined);
+    await rederiveTrackFromSource(e.track.id).catch(() => undefined);
   }
   if (marked.length > 0) markRederived(marked);
 }
@@ -1082,18 +1140,30 @@ async function reprocessExisting(): Promise<void> {
   } catch {
     return;
   }
+  // v5 depende do importer (re-derivação da fonte). Se ele não estiver
+  // alcançável agora, NÃO marca a versão — tenta de novo no próximo boot,
+  // em vez de "concluir" uma cura que não aconteceu.
+  if ((await probeHelper()) === null) return;
+
+  // 1. AUDITOR: a fonte primeiro — re-deriva TODAS as faixas (zera o controle
+  //    para incluir as que a v<5 marcou como feitas com o crédito errado).
+  try {
+    window.localStorage.removeItem(REDERIVE_KEY);
+    window.localStorage.removeItem(AUDITED_KEY);
+  } catch {
+    /* ignore */
+  }
+  await redriveFromSource(Number.POSITIVE_INFINITY).catch(() => undefined);
+
+  // 2. VERIFICADOR: refina capa/nome no catálogo (só matches estritos) e
+  //    separa créditos de colaboração ainda fundidos num nome só.
   for (const entry of read()) {
     if (!entry.track.id.startsWith('local:')) continue;
     const applied = await enrichLocalTrack(entry.track.id).catch(() => false);
     if (!applied) await resplitArtistsInPlace(entry.track.id).catch(() => undefined);
   }
-  // v4: previous versions could have written bogus credits — re-audit everything
-  // (clear the audited set, then check every track, not just a per-boot batch).
-  try {
-    window.localStorage.removeItem(AUDITED_KEY);
-  } catch {
-    /* ignore */
-  }
+
+  // 3. AUDITOR (IA): re-audita todos os créditos com o pipeline de cura novo.
   await auditAttributions(Number.POSITIVE_INFINITY).catch(() => undefined);
   try {
     window.localStorage.setItem(REPROCESS_KEY, String(REPROCESS_VERSION));

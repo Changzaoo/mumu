@@ -9,14 +9,12 @@
  * so enrichment can never block or break an import.
  */
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
-import { aiCleanSongTitle, aiSplitArtists } from '@/lib/ai/ai';
+import { aiSplitArtists } from '@/lib/ai/ai';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 
 export interface CleanQuery {
   title: string;
   artist?: string;
-  /** Internal: guards the one-shot AI retry from recursing. */
-  aiTried?: boolean;
 }
 
 export interface EnrichedMeta {
@@ -181,15 +179,11 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
     }
   }
 
-  // Couldn't confirm the artist. Ask the AI once for a clean artist/title, then
-  // re-verify against iTunes (the AI alone is never trusted — iTunes must
-  // corroborate the artist). Guarantees we never assert an unconfirmed artist.
-  if (!q.aiTried) {
-    const cleaned = await aiCleanSongTitle(q.artist ? `${q.title} ${q.artist}` : q.title, q.artist);
-    if (cleaned?.artist) {
-      return enrichMeta({ title: cleaned.title, artist: cleaned.artist, aiTried: true });
-    }
-  }
+  // Couldn't confirm the artist → return null, PERIOD. Regra do JUIZ (metaTeam):
+  // a IA nunca introduz um artista. O caminho antigo — pedir um palpite de
+  // artista à IA só pelo título e "confirmar" o próprio palpite no iTunes —
+  // era confirmação circular: foi ele que creditou "Warzone" (do Brandão85)
+  // ao The Wanted, que tem uma música homônima no catálogo.
   return null;
 }
 
