@@ -200,6 +200,30 @@ async function resolveYtdlp() {
   return localBin;
 }
 
+// ── stale temp sweep ─────────────────────────────────────────────────────────
+// /tmp is a SMALL tmpfs (RAM) on the home server. Imports killed mid-flight
+// (restarts, crashes) leave their work dirs behind; enough of them fill the
+// tmpfs and EVERY download starts failing with "Disk quota exceeded". Sweep
+// anything of ours older than an hour, at boot and periodically.
+async function sweepStaleTmp() {
+  try {
+    const base = tmpdir();
+    const cutoff = Date.now() - 3600_000;
+    for (const name of await readdir(base)) {
+      if (!name.startsWith('aurial-import-') && !name.startsWith('_MEI')) continue;
+      const p = path.join(base, name);
+      try {
+        const st = await stat(p);
+        if (st.mtimeMs < cutoff) await rm(p, { recursive: true, force: true });
+      } catch {
+        /* raced with an active import — leave it */
+      }
+    }
+  } catch {
+    /* tmpdir unreadable — nothing to sweep */
+  }
+}
+
 // ── download + extract one URL to an MP3 on disk ─────────────────────────────
 // Spotify-style quality ladder (kbps). 'lossless' maps to 320 — the sources are
 // lossy already, so a FLAC re-encode would only inflate the file, not the sound.
@@ -509,6 +533,8 @@ async function main() {
   const ytdlp = await resolveYtdlp();
   log(`yt-dlp: ${ytdlp}`);
   await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
+  void sweepStaleTmp();
+  setInterval(() => void sweepStaleTmp(), 3600_000).unref();
 
   const server = http.createServer((req, res) => {
     void (async () => {
