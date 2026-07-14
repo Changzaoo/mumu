@@ -55,11 +55,18 @@ export function TopBar() {
   const [search, setSearch] = useState('');
   const debouncedSearch = useDebounce(search, 250);
   const onSearchPage = location.pathname === '/search';
+  // O que NÓS empurramos para a URL — para não espelhar o próprio eco de
+  // volta ao campo (o eco chegava ATRASADO pelo debounce e apagava a última
+  // letra digitada).
+  const pushedQuery = useRef<string | null>(null);
 
   // Something else set ?q (voice, recent-search chip) → mirror it here.
+  // NUNCA enquanto o usuário digita (campo focado) nem para o nosso próprio eco.
   useEffect(() => {
     if (!onSearchPage) return;
     const q = new URLSearchParams(location.search).get('q') ?? '';
+    if (q === pushedQuery.current) return; // eco da nossa digitação — ignora
+    if (document.activeElement === searchRef.current) return; // usuário digitando
     setSearch((prev) => (prev === q ? prev : q));
   }, [location.search, onSearchPage]);
 
@@ -69,6 +76,7 @@ export function TopBar() {
     const current = new URLSearchParams(location.search).get('q') ?? '';
     const next = debouncedSearch.trim();
     if (next === current) return;
+    pushedQuery.current = next;
     void navigate(next ? `/search?q=${encodeURIComponent(next)}` : '/search', { replace: true });
     // eslint-disable-next-line react-hooks/exhaustive-deps -- typing drives this
   }, [debouncedSearch]);

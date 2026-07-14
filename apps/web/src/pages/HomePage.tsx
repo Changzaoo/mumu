@@ -148,6 +148,16 @@ export default function HomePage() {
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
+  // Adicionadas recentemente (pela data real de adição, mais novas primeiro).
+  const recentlyAdded = useMemo(
+    () =>
+      [...entries]
+        .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
+        .slice(0, 12)
+        .map((e) => e.track),
+    [entries],
+  );
+
   // Recently played, deduped by track (latest first).
   const recentTracks = useMemo(() => {
     const seen = new Set<string>();
@@ -203,6 +213,24 @@ export default function HomePage() {
           cover={playlistCover}
         />
       </div>
+
+      {/* Adicionadas recentemente — "Mostrar tudo" leva à página completa. */}
+      {recentlyAdded.length > 0 && (
+        <SectionCarousel title="Adicionadas recentemente" href="/recentes">
+          {recentlyAdded.map((track, index) => (
+            <MediaCard
+              key={track.id}
+              title={track.title}
+              subtitle={trackArtistNames(track)}
+              imageUrl={track.coverUrl}
+              playing={currentTrack?.id === track.id && isPlaying}
+              onPlay={() =>
+                playQueue(recentlyAdded, index, { source: 'library', sourceId: 'recentes' })
+              }
+            />
+          ))}
+        </SectionCarousel>
+      )}
 
       {/* Recently played on THIS profile. */}
       {recentTracks.length > 0 && (
