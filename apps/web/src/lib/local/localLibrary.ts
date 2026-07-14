@@ -1019,11 +1019,17 @@ async function redriveFromSource(limit = 6): Promise<void> {
   for (const e of todo) {
     marked.push(e.track.id);
     const meta = await fetchTrackMeta(e.sourceUrl as string).catch(() => null);
-    if (!meta || (!meta.artist && !meta.track)) continue;
+    if (!meta) continue;
     const cur = read().find((x) => x.track.id === e.track.id);
     if (!cur) continue;
-    const title = meta.track?.trim() || cur.track.title;
-    const artist = meta.artist?.trim() || cur.track.artists[0]?.name || 'Desconhecido';
+    // YouTube Music gives structured artist/track; regular videos give a title
+    // like "Artist - Song" — parse that as the (reliable) fallback.
+    const fromTitle = meta.title ? parseFileName(meta.title) : null;
+    const titleArtist = fromTitle && fromTitle.artist !== 'Desconhecido' ? fromTitle.artist : '';
+    const artist =
+      meta.artist?.trim() || titleArtist || cur.track.artists[0]?.name || 'Desconhecido';
+    const title = meta.track?.trim() || fromTitle?.title || cur.track.title;
+    if (artist === 'Desconhecido' && title === cur.track.title) continue; // nothing new
     const base = localTrackDto(
       cur.track.id,
       title,
