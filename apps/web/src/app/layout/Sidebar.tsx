@@ -1,7 +1,14 @@
-import type { ReactNode } from 'react';
+/**
+ * Desktop sidebar — Spotify-style: main nav on top, then "Sua Biblioteca" with
+ * filter pills (Playlists / Artistas / Álbuns) and a rich item list showing the
+ * REAL artwork of each entry (round thumbs for artists), all from local data.
+ * Collapsible to a 72px icon rail (persisted).
+ */
+import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import {
   Compass,
+  Disc3,
   Download,
   HardDriveDownload,
   Heart,
@@ -19,11 +26,12 @@ import type { LucideIcon } from 'lucide-react';
 import { AurialLogo, AurialMark } from '@/components/brand/AurialMark';
 import { IconButton } from '@/components/ui/icon-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
-import { Skeleton } from '@/components/ui/skeleton';
-import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
-import { usePlaylistsNav } from '@/features/library/api';
 import { useIsAuthorized } from '@/lib/auth/roles';
+import * as localLibrary from '@/lib/local/localLibrary';
+import * as localLikes from '@/lib/local/localLikes';
+import * as localPlaylists from '@/lib/local/localPlaylists';
 import { cn } from '@/lib/utils';
+import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useUiStore } from '@/stores/uiStore';
 
 interface NavEntry {
@@ -41,18 +49,19 @@ const MAIN_NAV: NavEntry[] = [
 /** Device/management entries restricted to authorized users. */
 const ADMIN_ONLY = new Set(['/dispositivo', '/downloads', '/uploads']);
 
-const DEVICE_NAV: NavEntry[] = [
+const TOOLS_NAV: NavEntry[] = [
   { to: '/dispositivo', label: 'No dispositivo', icon: HardDriveDownload },
   { to: '/compartilhar', label: 'Compartilhar', icon: Share2 },
-];
-
-const LIBRARY_NAV: NavEntry[] = [
-  { to: '/library', label: 'Biblioteca', icon: Library },
-  { to: '/artistas', label: 'Artistas', icon: Users },
-  { to: '/liked', label: 'Curtidas', icon: Heart },
-  { to: '/history', label: 'Histórico', icon: History },
   { to: '/downloads', label: 'Downloads', icon: Download },
   { to: '/uploads', label: 'Uploads', icon: Upload },
+];
+
+type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
+
+const FILTERS: Array<{ key: LibraryFilter; label: string }> = [
+  { key: 'playlists', label: 'Playlists' },
+  { key: 'artistas', label: 'Artistas' },
+  { key: 'albuns', label: 'Álbuns' },
 ];
 
 function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {
@@ -63,13 +72,13 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
       end={to === '/'}
       className={({ isActive }) =>
         cn(
-          'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-medium transition-colors duration-200',
+          'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition-colors duration-200',
           collapsed && 'justify-center px-0',
-          isActive ? 'bg-accent/12 text-accent' : 'text-fg-muted hover:bg-fg/5 hover:text-fg',
+          isActive ? 'text-fg' : 'text-fg-muted hover:text-fg',
         )
       }
     >
-      <Icon className="size-[18px] shrink-0" />
+      <Icon className="size-5 shrink-0" />
       {!collapsed && <span className="truncate">{label}</span>}
     </NavLink>
   );
@@ -83,6 +92,52 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
   );
 }
 
+/** One rich library row: artwork thumb + title + subtitle (Spotify style). */
+function LibraryItem({
+  to,
+  title,
+  subtitle,
+  imageUrl,
+  icon: Icon,
+  round = false,
+}: {
+  to: string;
+  title: string;
+  subtitle: string;
+  imageUrl?: string | null;
+  icon: LucideIcon;
+  round?: boolean;
+}) {
+  return (
+    <NavLink
+      to={to}
+      className={({ isActive }) =>
+        cn(
+          'flex items-center gap-3 rounded-lg p-2 transition-colors duration-200',
+          isActive ? 'bg-fg/10' : 'hover:bg-fg/5',
+        )
+      }
+    >
+      <span
+        className={cn(
+          'grid size-12 shrink-0 place-items-center overflow-hidden bg-fg/8 text-fg-subtle',
+          round ? 'rounded-full' : 'rounded-md',
+        )}
+      >
+        {imageUrl ? (
+          <img src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+        ) : (
+          <Icon className="size-5" />
+        )}
+      </span>
+      <span className="min-w-0 flex-1">
+        <span className="line-clamp-1 text-sm font-medium text-fg">{title}</span>
+        <span className="line-clamp-1 text-[12px] text-fg-muted">{subtitle}</span>
+      </span>
+    </NavLink>
+  );
+}
+
 function SectionLabel({ children, collapsed }: { children: ReactNode; collapsed: boolean }) {
   if (collapsed) return <div className="mx-3 my-2 h-px bg-border" />;
   return (
@@ -92,23 +147,33 @@ function SectionLabel({ children, collapsed }: { children: ReactNode; collapsed:
   );
 }
 
-/**
- * Desktop sidebar (DESIGN §7): 280px, collapsible to 72px icons (persisted),
- * nav sections + user playlists.
- */
 export function Sidebar() {
   const collapsed = useUiStore((s) => s.sidebarCollapsed);
   const toggleSidebar = useUiStore((s) => s.toggleSidebar);
-  const { playlists, isLoading } = usePlaylistsNav();
   const authorized = useIsAuthorized();
-  const deviceNav = authorized ? DEVICE_NAV : DEVICE_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
-  const libraryNav = authorized ? LIBRARY_NAV : LIBRARY_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
+  const [filter, setFilter] = useState<LibraryFilter>('playlists');
+
+  const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => []);
+  const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
+  const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
+  const artists = localLibrary.artists();
+  const albums = localLibrary.albumGroups();
+
+  const toolsNav = authorized ? TOOLS_NAV : TOOLS_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
+
+  const playlistCover = (trackIds: string[]): string | null => {
+    for (const id of trackIds) {
+      const cover = entries.find((e) => e.track.id === id)?.track.coverUrl;
+      if (cover) return cover;
+    }
+    return null;
+  };
 
   return (
     <aside
       className={cn(
         'hidden shrink-0 flex-col border-r border-border bg-bg-elevated md:flex',
-        collapsed ? 'w-[72px]' : 'w-[280px]',
+        collapsed ? 'w-18' : 'w-75',
       )}
     >
       <div
@@ -132,53 +197,108 @@ export function Sidebar() {
           ))}
         </div>
 
-        <SectionLabel collapsed={collapsed}>Meu espaço</SectionLabel>
-        <div className="space-y-0.5">
-          {deviceNav.map((entry) => (
-            <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
-          ))}
-        </div>
-
-        <SectionLabel collapsed={collapsed}>Biblioteca</SectionLabel>
-        <div className="space-y-0.5">
-          {libraryNav.map((entry) => (
-            <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
-          ))}
-        </div>
-
-        {!collapsed && (
+        {/* ── Sua Biblioteca (Spotify-style) ── */}
+        {collapsed ? (
           <>
-            <SectionLabel collapsed={false}>Playlists</SectionLabel>
-            <ScrollArea className="min-h-0 flex-1">
+            <SectionLabel collapsed>Biblioteca</SectionLabel>
+            <div className="space-y-0.5">
+              {[
+                { to: '/library', label: 'Sua Biblioteca', icon: Library },
+                { to: '/liked', label: 'Curtidas', icon: Heart },
+                { to: '/history', label: 'Histórico', icon: History },
+              ].map((entry) => (
+                <NavItem key={entry.to} entry={entry} collapsed />
+              ))}
+            </div>
+          </>
+        ) : (
+          <>
+            <div className="mt-4 flex items-center justify-between px-3">
+              <NavLink
+                to="/library"
+                className="flex items-center gap-2 text-sm font-bold text-fg-muted transition-colors hover:text-fg"
+              >
+                <Library className="size-5" />
+                Sua Biblioteca
+              </NavLink>
+              <NavLink
+                to="/history"
+                aria-label="Histórico"
+                className="text-fg-subtle transition-colors hover:text-fg"
+              >
+                <History className="size-4" />
+              </NavLink>
+            </div>
+
+            <div className="mt-3 flex gap-1.5 px-1">
+              {FILTERS.map(({ key, label }) => (
+                <button
+                  key={key}
+                  type="button"
+                  onClick={() => setFilter(key)}
+                  className={cn(
+                    'rounded-full px-3 py-1 text-[12px] font-medium transition-colors duration-200',
+                    filter === key ? 'bg-fg text-bg' : 'bg-fg/8 text-fg hover:bg-fg/14',
+                  )}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+
+            <ScrollArea className="mt-2 min-h-0 flex-1">
               <div className="space-y-0.5 pr-2">
-                {isLoading &&
-                  Array.from({ length: 4 }, (_, i) => (
-                    <div key={i} className="flex h-9 items-center gap-3 px-3">
-                      <Skeleton className="size-4 rounded-sm" />
-                      <Skeleton className="h-3 flex-1" />
-                    </div>
+                <LibraryItem
+                  to="/liked"
+                  title="Músicas Curtidas"
+                  subtitle={`Playlist • ${likedCount} ${likedCount === 1 ? 'música' : 'músicas'}`}
+                  icon={Heart}
+                />
+                {filter === 'playlists' &&
+                  playlists.map((playlist) => (
+                    <LibraryItem
+                      key={playlist.id}
+                      to={`/playlist/${playlist.id}`}
+                      title={playlist.title}
+                      subtitle={`Playlist • ${playlist.trackIds.length} faixas`}
+                      imageUrl={playlistCover(playlist.trackIds)}
+                      icon={ListMusic}
+                    />
                   ))}
-                {playlists.map((playlist) => (
-                  <NavLink
-                    key={playlist.id}
-                    to={`/playlist/${playlist.id}`}
-                    className={({ isActive }) =>
-                      cn(
-                        'flex h-9 items-center gap-3 rounded-lg px-3 text-[13px] transition-colors duration-200',
-                        isActive
-                          ? 'bg-accent/12 text-accent'
-                          : 'text-fg-muted hover:bg-fg/5 hover:text-fg',
-                      )
-                    }
-                  >
-                    <ListMusic className="size-4 shrink-0" />
-                    <span className="truncate">{playlist.title}</span>
-                  </NavLink>
-                ))}
+                {filter === 'artistas' &&
+                  artists.map((artist) => (
+                    <LibraryItem
+                      key={artist.name}
+                      to={`/artista/${encodeURIComponent(artist.name)}`}
+                      title={artist.name}
+                      subtitle="Artista"
+                      imageUrl={artist.coverUrl}
+                      icon={Users}
+                      round
+                    />
+                  ))}
+                {filter === 'albuns' &&
+                  albums.map((album) => (
+                    <LibraryItem
+                      key={album.key}
+                      to={`/disco/${encodeURIComponent(album.key)}`}
+                      title={album.title}
+                      subtitle={`Álbum • ${album.artist}`}
+                      imageUrl={album.coverUrl}
+                      icon={Disc3}
+                    />
+                  ))}
               </div>
             </ScrollArea>
           </>
         )}
+
+        <SectionLabel collapsed={collapsed}>Ferramentas</SectionLabel>
+        <div className="space-y-0.5">
+          {toolsNav.map((entry) => (
+            <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
+          ))}
+        </div>
 
         {collapsed && (
           <div className="mt-auto flex justify-center pt-3">

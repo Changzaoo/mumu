@@ -19,7 +19,7 @@ export function LocalArtistCard({
   return (
     <MediaCard
       title={name}
-      subtitle={`${trackCount} ${trackCount === 1 ? 'música' : 'músicas'}`}
+      subtitle={`Artista • ${trackCount} ${trackCount === 1 ? 'música' : 'músicas'}`}
       shape="round"
       imageUrl={photo ?? fallbackImage ?? null}
       to={`/artista/${encodeURIComponent(name)}`}

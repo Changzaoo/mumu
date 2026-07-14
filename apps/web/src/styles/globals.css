@@ -15,7 +15,7 @@
   --fg: 240 6% 7%;
   --fg-muted: 240 4% 42%;
   --fg-subtle: 240 4% 62%;
-  --accent: 240 6% 10%; /* near-black — B&W accent (light) */
+  --accent: 141 76% 30%; /* Spotify green, darkened for light-bg contrast */
   --accent-fg: 0 0% 100%;
   --info: 221 83% 53%;
   --danger: 0 72% 46%;
@@ -30,8 +30,8 @@
   --fg: 0 0% 98%;
   --fg-muted: 240 4% 64%;
   --fg-subtle: 240 4% 40%;
-  --accent: 0 0% 98%; /* white — B&W accent (dark) */
-  --accent-fg: 240 6% 7%;
+  --accent: 141 73% 42%; /* Spotify green (#1db954) */
+  --accent-fg: 240 6% 7%; /* black glyphs on green, like Spotify's play button */
   --info: 217 92% 65%;
   --danger: 0 72% 58%;
   --border: 240 5% 14%;

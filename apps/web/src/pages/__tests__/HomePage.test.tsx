@@ -3,8 +3,6 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { render, screen } from '@testing-library/react';
 import { MemoryRouter } from 'react-router';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import type { UseQueryResult } from '@tanstack/react-query';
-import type { TrackDto } from '@aurial/shared';
 
 vi.mock('@/lib/audio/AudioEngine', () => ({
   audioEngine: {
@@ -28,32 +26,23 @@ vi.mock('@/lib/audio/AudioEngine', () => ({
   AudioEngine: class {},
 }));
 
-// The catalog home reads from these hooks (Audius); mock them per test.
-vi.mock('@/features/catalog/api', () => ({
-  useTrending: vi.fn(),
-  useTrendingPlaylists: vi.fn(),
+// Network-backed rows (Firestore / importer) — render nothing in tests.
+vi.mock('@/components/media/CommunityTracksRow', () => ({
+  CommunityTracksRow: () => null,
+}));
+vi.mock('@/components/media/DeviceTracksRow', () => ({
+  DeviceTracksRow: () => null,
+}));
+vi.mock('@/lib/artistImage', () => ({
+  useArtistImage: () => null,
 }));
 
-import { useTrending, useTrendingPlaylists } from '@/features/catalog/api';
-import HomePage from '@/pages/HomePage';
 import { makeTrack } from '@/test/factories';
 
-const mockedTrending = vi.mocked(useTrending);
-const mockedPlaylists = vi.mocked(useTrendingPlaylists);
-
-function result<T>(over: Partial<UseQueryResult<T>>): UseQueryResult<T> {
-  return {
-    data: undefined,
-    isLoading: false,
-    isError: false,
-    isFetching: false,
-    error: null,
-    refetch: vi.fn(),
-    ...over,
-  } as unknown as UseQueryResult<T>;
-}
-
-function renderHome(): void {
+// localLibrary caches its registry in module scope — re-import per test so each
+// test's seeded localStorage is actually read.
+async function renderHome(): Promise<void> {
+  const { default: HomePage } = await import('@/pages/HomePage');
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>
@@ -65,23 +54,39 @@ function renderHome(): void {
 
 beforeEach(() => {
   vi.clearAllMocks();
-  mockedPlaylists.mockReturnValue(result({ data: [] }));
+  vi.resetModules();
+  window.localStorage.clear();
 });
 
-describe('HomePage (catalog)', () => {
-  it('shows a skeleton while trending is loading', () => {
-    mockedTrending.mockReturnValue(result<TrackDto[]>({ isLoading: true }));
-    renderHome();
-    expect(document.querySelector('[aria-busy="true"]')).toBeInTheDocument();
+describe('HomePage (personal library)', () => {
+  it('renders the greeting, quick access and the empty state when the library is empty', async () => {
+    await renderHome();
+    expect(screen.getByText(/^(Bom dia|Boa tarde|Boa noite)$/)).toBeInTheDocument();
+    expect(screen.getByText('Músicas Curtidas')).toBeInTheDocument();
+    expect(screen.getByText('Tocadas recentemente')).toBeInTheDocument();
+    expect(screen.getByText('Sua biblioteca está vazia')).toBeInTheDocument();
   });
 
-  it('renders trending tracks and the on-device shortcut once loaded', () => {
-    const tracks = [makeTrack('audius:1', { title: 'Faixa em alta' })];
-    mockedTrending.mockReturnValue(result<TrackDto[]>({ data: tracks }));
-    renderHome();
+  it('renders artist and genre shelves from the local library', async () => {
+    const track = makeTrack('local:1', { title: 'Como Tudo Deve Ser' });
+    const entry = {
+      track: {
+        ...track,
+        genre: 'Rock',
+        artists: [{ id: 'a1', name: 'Charlie Brown Jr.', slug: '', imageUrl: null }],
+      },
+      addedAt: new Date().toISOString(),
+      sizeBytes: 1,
+      mimeType: 'audio/mpeg',
+    };
+    window.localStorage.setItem('aurial:library', JSON.stringify([entry]));
 
-    expect(screen.getByText('Em alta')).toBeInTheDocument();
-    expect(screen.getByText('Faixa em alta')).toBeInTheDocument();
-    expect(screen.getByText('No seu dispositivo')).toBeInTheDocument();
+    await renderHome();
+
+    expect(screen.getByText('Rock')).toBeInTheDocument();
+    expect(screen.getByText('Como Tudo Deve Ser')).toBeInTheDocument();
+    expect(screen.getByText('Seus artistas')).toBeInTheDocument();
+    expect(screen.getAllByText('Charlie Brown Jr.').length).toBeGreaterThan(0);
+    expect(screen.queryByText('Sua biblioteca está vazia')).not.toBeInTheDocument();
   });
 });

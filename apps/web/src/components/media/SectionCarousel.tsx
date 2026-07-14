@@ -52,13 +52,21 @@ export function SectionCarousel({
     <section className={cn('group/carousel relative', className)} {...props}>
       <header className="mb-3 flex items-end justify-between gap-4 px-3">
         <div>
-          <h2 className="text-xl font-semibold tracking-tight text-fg">{title}</h2>
+          {href ? (
+            <Link to={href} className="group/title inline-block">
+              <h2 className="text-xl font-bold tracking-tight text-fg group-hover/title:underline">
+                {title}
+              </h2>
+            </Link>
+          ) : (
+            <h2 className="text-xl font-bold tracking-tight text-fg">{title}</h2>
+          )}
           {subtitle && <p className="mt-0.5 text-[13px] text-fg-muted">{subtitle}</p>}
         </div>
         {href && (
           <Link
             to={href}
-            className="shrink-0 text-[13px] font-medium text-fg-muted transition-colors hover:text-fg"
+            className="shrink-0 text-[13px] font-semibold text-fg-muted transition-colors hover:text-fg hover:underline"
           >
             Mostrar tudo
           </Link>
