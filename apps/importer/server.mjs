@@ -335,8 +335,10 @@ function interpret(stderr) {
   return 'Não foi possível baixar desse link.';
 }
 
-// Max playlist entries returned in one enumeration (keeps it snappy + sane).
-const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 200);
+// Max playlist entries returned in one enumeration (0 = unlimited). Flat
+// enumeration is cheap (no per-video extraction), so the cap is generous —
+// the old default (200) silently truncated big playlists (1132 → 200).
+const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 5000);
 
 // ── NVIDIA AI proxy (key stays server-side) ─────────────────────────────────
 const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY ?? '').trim();
@@ -433,8 +435,7 @@ async function listPlaylist(ytdlp, url) {
     '--flat-playlist',
     '--no-warnings',
     '--dump-single-json',
-    '--playlist-end',
-    String(MAX_PLAYLIST),
+    ...(MAX_PLAYLIST > 0 ? ['--playlist-end', String(MAX_PLAYLIST)] : []),
     ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
     url,
   ];
