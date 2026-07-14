@@ -59,6 +59,11 @@ export interface LibraryEntry {
 const blobUrls = new Map<string, string>();
 const listeners = new Set<() => void>();
 let cache: LibraryEntry[] | null = null;
+/** Derivados caros (álbuns/artistas/gêneros) memoizados até a próxima write() —
+ *  Sidebar + Home consultam a cada render e recalcular O(n) toda vez derrubava
+ *  celulares modestos. */
+let groupsCache: { albums: LocalAlbum[]; artists: LocalArtist[]; genres: LocalGenre[] } | null =
+  null;
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -84,14 +89,38 @@ function read(): LibraryEntry[] {
   return cache;
 }
 
-function write(entries: LibraryEntry[]): void {
-  cache = entries;
+// A cura/enriquecimento em segundo plano faz patch de UMA faixa por vez; com a
+// persistência síncrona antiga cada patch custava JSON.stringify da biblioteca
+// INTEIRA (megabytes) + localStorage.setItem + re-render do app todo — centenas
+// em sequência CONGELAVAM a página (até "Página sem resposta"). O debounce
+// coalesce rajadas em uma escrita/emissão a cada ~300ms; a memória (cache) é
+// atualizada na hora, então toda leitura continua vendo o estado novo.
+let writeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function flushWrite(): void {
+  if (writeTimer) {
+    clearTimeout(writeTimer);
+    writeTimer = null;
+  }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache ?? []));
   } catch {
     // Quota / private mode — registry stays in memory for the session.
   }
   emit();
+}
+
+function write(entries: LibraryEntry[]): void {
+  cache = entries;
+  groupsCache = null; // seletores derivados (álbuns/artistas/gêneros) recalculam
+  writeTimer ??= setTimeout(flushWrite, 300);
+}
+
+// Não perder a rajada final se a aba fechar dentro da janela do debounce.
+if (typeof window !== 'undefined') {
+  window.addEventListener('pagehide', () => {
+    if (writeTimer) flushWrite();
+  });
 }
 
 // ── Cache Storage helpers ───────────────────────────────────────
@@ -659,7 +688,7 @@ const albumKey = (title: string, artist: string): string =>
  * its album has 2+ tracks OR the album name differs from the track name (a
  * genuine release, not an auto "Title - Single"). Everything else is a single.
  */
-export function albumGroups(): LocalAlbum[] {
+function computeAlbumGroups(): LocalAlbum[] {
   const byKey = new Map<string, LocalAlbum>();
   for (const entry of read()) {
     const t = entry.track;
@@ -678,6 +707,19 @@ export function albumGroups(): LocalAlbum[] {
   return [...byKey.values()].filter(
     (a) => a.tracks.length >= 2 || normName(a.title) !== normName(a.tracks[0]?.title ?? ''),
   );
+}
+
+/** Memo dos derivados — recalcula UMA vez por mudança da biblioteca. */
+function ensureGroups(): NonNullable<typeof groupsCache> {
+  return (groupsCache ??= {
+    albums: computeAlbumGroups(),
+    artists: computeArtists(),
+    genres: computeGenreGroups(),
+  });
+}
+
+export function albumGroups(): LocalAlbum[] {
+  return ensureGroups().albums;
 }
 
 export function albumByKey(key: string): LocalAlbum | null {
@@ -701,6 +743,10 @@ export interface LocalArtist {
 
 /** Every distinct artist across the library, most tracks first. */
 export function artists(): LocalArtist[] {
+  return ensureGroups().artists;
+}
+
+function computeArtists(): LocalArtist[] {
   const byName = new Map<string, LocalArtist>();
   for (const entry of read()) {
     for (const artist of entry.track.artists) {
@@ -741,6 +787,10 @@ export interface LocalGenre {
 
 /** Library tracks grouped by their (AI-assigned) genre, biggest first. */
 export function genreGroups(): LocalGenre[] {
+  return ensureGroups().genres;
+}
+
+function computeGenreGroups(): LocalGenre[] {
   const byKey = new Map<string, LocalGenre>();
   for (const entry of read()) {
     const g = entry.track.genre?.trim();
@@ -919,6 +969,10 @@ function scheduleBackgroundCuration(): void {
   run();
 }
 
+/** Respiro entre itens dos passes de fundo — sem isso, centenas de iterações
+ *  seguidas (stringify + renders) travavam a página em aparelhos modestos. */
+const descanso = (ms = 150): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 /**
  * One-time-ish backfill: upload any track that has local audio here but no
  * `remoteUrl` yet, so tracks added before cross-device sync existed become
@@ -932,6 +986,7 @@ async function backfillRemote(): Promise<void> {
     const blob = await blobFor(entry.track.id).catch(() => null);
     if (!blob) continue; // synced-in from another device — nothing to upload here
     await uploadAndLink(entry.track.id, blob);
+    await descanso();
   }
 }
 
@@ -1020,6 +1075,7 @@ async function auditAttributions(limit = 12): Promise<void> {
       }
     }
     done.push(e.track.id);
+    await descanso();
   }
   if (done.length > 0) markAudited(done);
 }
@@ -1156,6 +1212,7 @@ async function redriveFromSource(limit = 6): Promise<boolean> {
     }
     consecutiveFailures = 0;
     marked.push(e.track.id);
+    await descanso();
   }
   if (marked.length > 0) markRederived(marked);
   return !aborted;
@@ -1219,6 +1276,7 @@ async function reprocessExisting(): Promise<void> {
     if (!entry.track.id.startsWith('local:')) continue;
     const applied = await enrichLocalTrack(entry.track.id).catch(() => false);
     if (!applied) await resplitArtistsInPlace(entry.track.id).catch(() => undefined);
+    await descanso();
   }
 
   // 3. AUDITOR (IA): re-audita todos os créditos com o pipeline de cura novo.
