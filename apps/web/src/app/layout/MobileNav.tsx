@@ -80,9 +80,11 @@ export function MobileNav() {
 
   return (
     <>
+      {/* Solid bar (Spotify-like): only a hair of fade at the very top edge —
+          content scrolls "under" it without the tabs ever looking see-through. */}
       <nav
         aria-label="Navegação"
-        className="fixed inset-x-0 bottom-0 z-40 bg-linear-to-t from-bg via-bg/92 to-bg/0 pb-[env(safe-area-inset-bottom)] pt-2 md:hidden"
+        className="fixed inset-x-0 bottom-0 z-40 bg-linear-to-t from-bg from-85% to-bg/0 pb-[env(safe-area-inset-bottom)] pt-3 md:hidden"
       >
         {/* 64px-tall targets with 28px glyphs — comfortably above Apple's 44pt
             minimum touch size; labels readable at arm's length. */}
