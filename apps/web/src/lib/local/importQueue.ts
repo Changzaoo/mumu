@@ -316,6 +316,14 @@ async function process(item: ImportItem): Promise<void> {
       pause('auth');
       return;
     }
+    // 422/404 = defeito permanente DA FAIXA (vídeo removido/privado/não
+    // suportado): re-tentar nunca resolve, e a falha não é do sistema — marca
+    // erro definitivo, NÃO conta no breaker e a fila segue para a próxima.
+    // (Sem isto, 3 vídeos mortos seguidos numa playlist grande pausavam tudo.)
+    if (status === 422 || status === 404) {
+      update(item.id, { status: 'error', attempts: MAX_ATTEMPTS, error: message });
+      return;
+    }
     consecutiveFailures += 1;
     const attempts = (item.attempts ?? 0) + 1;
     if (consecutiveFailures >= PAUSE_AFTER_FAILURES) {

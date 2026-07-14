@@ -249,6 +249,25 @@
       overflow: hidden;
       overscroll-behavior: none;
     }
+
+    /* Comportamento de APP de verdade no toque: nada de selecionar texto,
+       callout de long-press (iOS), arrastar/salvar imagem ou flash azul de
+       toque — ações de navegador não existem em app nativo. Campos de texto
+       continuam selecionáveis, óbvio. */
+    * {
+      -webkit-touch-callout: none;
+      -webkit-tap-highlight-color: transparent;
+      user-select: none;
+    }
+    input,
+    textarea,
+    [contenteditable] {
+      user-select: text;
+    }
+    img {
+      -webkit-user-drag: none;
+      user-drag: none;
+    }
   }
 
   body {

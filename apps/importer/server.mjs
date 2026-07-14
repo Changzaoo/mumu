@@ -341,6 +341,21 @@ function interpret(stderr) {
   return 'Não foi possível baixar desse link.';
 }
 
+/**
+ * Erro PERMANENTE da faixa (vídeo removido/privado/não suportado): re-tentar
+ * nunca resolve. O /import devolve 422 nesses casos para o app marcar o item
+ * como erro definitivo sem retry — e sem pausar a fila inteira por causa de
+ * meia dúzia de vídeos mortos no meio de uma playlist grande.
+ */
+function isPermanentImportError(message) {
+  return (
+    message === 'Conteúdo privado ou exige login.' ||
+    message === 'Conteúdo indisponível.' ||
+    message === 'Link não suportado.' ||
+    message.startsWith('Sem áudio')
+  );
+}
+
 // Max playlist entries returned in one enumeration (0 = unlimited). Flat
 // enumeration is cheap (no per-video extraction), so the cap is generous —
 // the old default (200) silently truncated big playlists (1132 → 200).
@@ -1075,7 +1090,10 @@ async function main() {
           const message = err instanceof Error ? err.message : 'Falha na importação.';
           log('error:', message);
           if (!res.headersSent) {
-            res.writeHead(500, { 'Content-Type': 'application/json' });
+            // 422 = defeito permanente DA FAIXA (sem retry); 500 = transiente.
+            res.writeHead(isPermanentImportError(message) ? 422 : 500, {
+              'Content-Type': 'application/json',
+            });
             res.end(JSON.stringify({ error: message }));
           } else {
             res.destroy();

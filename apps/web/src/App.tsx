@@ -38,7 +38,20 @@ export default function App() {
     initImportQueue(); // resume any downloads queued before a reload
     initTelemetry(); // usage metrics for the admin /telemetria page
     initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
-    return initSettings();
+
+    // App de verdade no celular: sem menu de long-press do navegador (abrir em
+    // nova aba, salvar imagem…). Só em telas de toque — o desktop mantém o
+    // botão direito normal.
+    const blockContextMenu = (event: Event): void => {
+      if (window.matchMedia('(pointer: coarse)').matches) event.preventDefault();
+    };
+    document.addEventListener('contextmenu', blockContextMenu);
+
+    const cleanupSettings = initSettings();
+    return () => {
+      document.removeEventListener('contextmenu', blockContextMenu);
+      cleanupSettings?.();
+    };
   }, []);
 
   return (

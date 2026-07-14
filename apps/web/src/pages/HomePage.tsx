@@ -11,8 +11,6 @@ import type { IconType } from 'react-icons';
 import { IoHeart, IoMusicalNotesOutline, IoPeopleOutline, IoTimeOutline } from 'react-icons/io5';
 import { Music } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
-import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
-import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
@@ -276,9 +274,9 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {/* Recently added — by the community and on this device. */}
-      <CommunityTracksRow limit={20} />
-      <DeviceTracksRow limit={16} />
+      {/* Seções "adicionadas recentemente"/"no dispositivo" removidas a pedido —
+          a Home é recomendação + biblioteca organizada; adicionar músicas vive
+          na página própria. */}
 
       {/* Real albums in the library (capped — o resto vive em "Mostrar tudo"). */}
       {albums.length > 0 && (

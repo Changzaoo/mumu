@@ -54,6 +54,37 @@ export function AppShell() {
     recordNavigation(location.pathname);
   }, [location.pathname]);
 
+  // iOS: o Safari IGNORA overscroll-behavior em scrollers internos e quica o
+  // conteúdo (vão vazio em cima ao puxar). Guarda de toque determinística:
+  // cancela o gesto VERTICAL só quando o scroll já está na borda — pan
+  // horizontal (prateleiras) e o scroll normal seguem intactos.
+  useEffect(() => {
+    const el = scrollEl;
+    if (!el || !/iP(hone|od|ad)/.test(navigator.userAgent)) return;
+    let startX = 0;
+    let startY = 0;
+    const onStart = (event: TouchEvent): void => {
+      startX = event.touches[0]?.clientX ?? 0;
+      startY = event.touches[0]?.clientY ?? 0;
+    };
+    const onMove = (event: TouchEvent): void => {
+      const x = event.touches[0]?.clientX ?? 0;
+      const y = event.touches[0]?.clientY ?? 0;
+      const dx = x - startX;
+      const dy = y - startY;
+      if (Math.abs(dy) <= Math.abs(dx)) return; // gesto horizontal — deixa passar
+      const atTop = el.scrollTop <= 0;
+      const atBottom = el.scrollTop + el.clientHeight >= el.scrollHeight - 1;
+      if ((atTop && dy > 0) || (atBottom && dy < 0)) event.preventDefault();
+    };
+    el.addEventListener('touchstart', onStart, { passive: true });
+    el.addEventListener('touchmove', onMove, { passive: false });
+    return () => {
+      el.removeEventListener('touchstart', onStart);
+      el.removeEventListener('touchmove', onMove);
+    };
+  }, [scrollEl]);
+
   return (
     <ScrollContainerContext.Provider value={scrollEl}>
       <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
