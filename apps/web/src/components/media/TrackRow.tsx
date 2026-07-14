@@ -128,6 +128,14 @@ export function TrackRow({
       tabIndex={-1}
       aria-label={`${track.title} — ${trackArtistNames(track)}`}
       onDoubleClick={handlePlay}
+      onClick={(event) => {
+        // TOQUE: um tap na linha toca (no celular não existe hover para o
+        // botão de play — sem isto era preciso tocar duas vezes). Desktop
+        // mantém o duplo clique. Taps em botões/links internos não contam.
+        if (!window.matchMedia('(pointer: coarse)').matches) return;
+        if ((event.target as HTMLElement).closest('button, a, [role="button"]')) return;
+        handlePlay();
+      }}
       onKeyDown={handleKeyDown}
       className={cn(
         'group grid h-14 select-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200',
