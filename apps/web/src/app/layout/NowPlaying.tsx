@@ -23,7 +23,9 @@ import {
 } from 'lucide-react';
 import type { WaveformDto } from '@aurial/shared';
 import { fetchCredits } from '@/lib/credits/credits';
+import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
+import { useTrackLikes } from '@/features/library/api';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
 import { SpectrumVisualizer } from '@/components/media/SpectrumVisualizer';
@@ -95,6 +97,7 @@ export function NowPlaying() {
   const [visualizer, setVisualizer] = useState(false);
   const [miniclip, setMiniclip] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
+  const likes = useTrackLikes();
   const isTouch = useMediaQuery('(pointer: coarse)');
   const isDesktopQueue = useMediaQuery('(min-width: 1024px)');
   const dominant = useDominantColor(track?.coverUrl);
@@ -277,11 +280,18 @@ export function NowPlaying() {
                 )}
               </div>
 
-              {/* Title */}
+              {/* Title (+ curtir, como no Spotify) */}
               <div className="w-full text-center">
-                <h1 className="line-clamp-2 text-2xl font-bold tracking-tight text-fg">
-                  {track.title}
-                </h1>
+                <div className="flex items-center justify-center gap-2">
+                  <h1 className="line-clamp-2 min-w-0 text-2xl font-bold tracking-tight text-fg">
+                    {track.title}
+                  </h1>
+                  <LikeButton
+                    liked={likes.isLiked(track)}
+                    onToggle={(liked) => likes.toggle(track, liked)}
+                    className="shrink-0"
+                  />
+                </div>
                 <p className="mt-1 line-clamp-1 text-sm text-fg-muted">
                   {track.id.startsWith('local:') && track.artists[0]?.name ? (
                     <Link
