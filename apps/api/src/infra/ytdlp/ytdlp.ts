@@ -100,8 +100,10 @@ export function downloadAudio(opts: DownloadOptions): Promise<DownloadedAudio> {
     '-x',
     '--audio-format',
     'mp3',
+    // 320 kbps CBR — Spotify's "Muito alta" tier; avoids a second lossy
+    // generation biting into the (already lossy) source codec.
     '--audio-quality',
-    '0',
+    '320K',
     '--embed-thumbnail',
     '--embed-metadata',
     '--write-info-json',

@@ -61,9 +61,14 @@ const APP_VERSION = '0.1.0';
 const QUALITY_LABEL: Record<AudioQuality, string> = {
   low: 'Econômica (96 kbps)',
   normal: 'Normal (160 kbps)',
-  high: 'Alta (320 kbps)',
-  lossless: 'Sem perdas (FLAC)',
+  high: 'Muito alta (320 kbps)',
+  // Legacy value some devices persisted — behaves as 320 kbps (the sources are
+  // lossy, so a FLAC re-encode would inflate files without improving sound).
+  lossless: 'Muito alta (320 kbps)',
 };
+
+/** Selectable tiers — 'lossless' is hidden (kept only as a persisted legacy value). */
+const QUALITY_OPTIONS = AUDIO_QUALITIES.filter((q) => q !== 'lossless');
 
 function saved(): void {
   toast('Salvo');
@@ -306,7 +311,7 @@ export default function SettingsPage() {
       >
         <Row label="Qualidade do áudio" htmlFor="st-quality">
           <Select
-            value={settings.audioQuality}
+            value={settings.audioQuality === 'lossless' ? 'high' : settings.audioQuality}
             onValueChange={(value) => {
               settings.setAudioQuality(value as AudioQuality);
               saved();
@@ -316,7 +321,7 @@ export default function SettingsPage() {
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {AUDIO_QUALITIES.map((quality) => (
+              {QUALITY_OPTIONS.map((quality) => (
                 <SelectItem key={quality} value={quality}>
                   {QUALITY_LABEL[quality]}
                 </SelectItem>

@@ -11,6 +11,17 @@
  * token. Overridable via the ⚙ config (localStorage).
  */
 import { getIdToken } from '@/lib/firebase';
+import { useSettingsStore } from '@/stores/settingsStore';
+
+/** The user's chosen audio quality — sent to the helper so downloads/streams
+ *  are encoded at the matching bitrate (96/160/320 kbps, Spotify-style). */
+function preferredQuality(): string {
+  try {
+    return useSettingsStore.getState().audioQuality;
+  } catch {
+    return 'high';
+  }
+}
 
 // The importer runs on the owner's home server, exposed via a Cloudflare Tunnel.
 // We call it directly: Cloudflare terminates TLS and passes the importer's
@@ -210,7 +221,7 @@ export async function aiChat(
 export async function buildStreamUrl(sourceUrl: string): Promise<string | null> {
   const token = await getIdToken().catch(() => null);
   if (!token) return null;
-  return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}`;
+  return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}&quality=${encodeURIComponent(preferredQuality())}`;
 }
 
 /**
@@ -323,7 +334,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
     res = await fetch(`${helperUrl()}/import`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
-      body: JSON.stringify({ url }),
+      body: JSON.stringify({ url, quality: preferredQuality() }),
     });
   } catch {
     throw new Error('Não foi possível baixar esse link agora. Tente novamente em instantes.');

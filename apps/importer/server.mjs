@@ -201,7 +201,12 @@ async function resolveYtdlp() {
 }
 
 // ── download + extract one URL to an MP3 on disk ─────────────────────────────
-async function importToMp3(ytdlp, url) {
+// Spotify-style quality ladder (kbps). 'lossless' maps to 320 — the sources are
+// lossy already, so a FLAC re-encode would only inflate the file, not the sound.
+const QUALITY_KBPS = { low: 96, normal: 160, high: 320, lossless: 320 };
+const kbpsFor = (quality) => QUALITY_KBPS[quality] ?? 320;
+
+async function importToMp3(ytdlp, url, quality) {
   const dir = await mkdtemp(path.join(tmpdir(), 'aurial-import-'));
   const args = [
     '--no-playlist',
@@ -229,8 +234,11 @@ async function importToMp3(ytdlp, url) {
     '-x',
     '--audio-format',
     'mp3',
+    // Constant bitrate from the user's quality setting (default 320 kbps —
+    // Spotify's "Muito alta"). Encoding above the source never loses anything;
+    // it just avoids a second lossy generation on top of the source codec.
     '--audio-quality',
-    '0',
+    `${kbpsFor(quality)}K`,
     '--embed-thumbnail',
     '--embed-metadata',
     '--write-info-json',
@@ -694,7 +702,8 @@ async function main() {
           res.end('bad url');
           return;
         }
-        log('stream:', url);
+        const streamKbps = kbpsFor(params.get('quality'));
+        log('stream:', url, `${streamKbps}k`);
         res.writeHead(200, {
           'Content-Type': 'audio/mpeg',
           'Cache-Control': 'no-store',
@@ -719,7 +728,7 @@ async function main() {
         });
         const ff = spawn(
           FFMPEG_BIN,
-          ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', '192k', 'pipe:1'],
+          ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', `${streamKbps}k`, 'pipe:1'],
           { windowsHide: true },
         );
         let done = false;
@@ -867,14 +876,14 @@ async function main() {
         }
         let job;
         try {
-          const { url } = JSON.parse((await readBody(req)) || '{}');
+          const { url, quality } = JSON.parse((await readBody(req)) || '{}');
           if (typeof url !== 'string' || !hostSupported(url)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
           }
-          log('import:', url);
-          job = await importToMp3(ytdlp, url);
+          log('import:', url, `${kbpsFor(quality)}k`);
+          job = await importToMp3(ytdlp, url, quality);
           const { size } = await stat(job.file);
           res.writeHead(200, {
             'Content-Type': 'audio/mpeg',
