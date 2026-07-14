@@ -292,7 +292,10 @@ function listeningStats(): {
   topArtists: TopEntry[];
   recentPlays: RecentPlay[];
 } {
-  const history = localHistory.list();
+  // SÓ as reproduções carimbadas com o uid DESTA conta — o histórico local é
+  // do aparelho (compartilhado entre contas); entradas antigas sem uid contam
+  // apenas nos números por-aparelho, nunca no perfil da conta.
+  const history = localHistory.list().filter((h) => h.uid === currentUser?.uid);
   const byTrack = new Map<string, TopEntry>();
   const byArtist = new Map<string, TopEntry>();
   const recentPlays: RecentPlay[] = [];
@@ -358,7 +361,9 @@ function snapshot(): Record<string, unknown> {
     libraryCount: localLibrary.list().length,
     libraryBytes: localLibrary.totalBytes(),
     likedCount: localLikes.count(),
-    totalPlays: localHistory.list().length,
+    // Plays DA CONTA (carimbados com o uid dela) — o total bruto do aparelho
+    // fica em devices.{deviceId}.plays.
+    totalPlays: localHistory.list().filter((h) => h.uid === currentUser?.uid).length,
     ...(gpu ? { gpu } : {}),
     ...(heapMb !== null ? { jsHeapMb: heapMb } : {}),
     ...(Object.keys(vitals).length > 0 ? { vitals } : {}),

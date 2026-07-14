@@ -3,11 +3,24 @@
  * HistoryEntryDto-compatible so HistoryPage renders them unchanged.
  */
 import type { HistoryEntryDto, PlaySource, TrackDto } from '@aurial/shared';
+import { subscribeAuth } from '@/lib/firebase';
 
 const HISTORY_KEY = 'aurial:local-history';
 const MAX_ENTRIES = 200;
 
-export type LocalHistoryEntry = HistoryEntryDto;
+/**
+ * O storage é DO APARELHO, mas o aparelho é compartilhado entre contas — sem
+ * carimbar quem estava logado, uma conta "herdava" na telemetria os plays de
+ * outra (vinicinhos ganhou 106 plays do histórico do device). `uid` identifica
+ * o dono real de cada reprodução; entradas antigas (sem uid) contam só para o
+ * aparelho, nunca para uma conta.
+ */
+export type LocalHistoryEntry = HistoryEntryDto & { uid?: string | null };
+
+let currentUid: string | null = null;
+subscribeAuth((user) => {
+  currentUid = user?.uid ?? null;
+});
 
 let cache: LocalHistoryEntry[] | null = null;
 const listeners = new Set<() => void>();
@@ -67,6 +80,7 @@ export function record(track: TrackDto, meta?: { playedMs?: number; source?: Pla
     playedAt: now,
     playedMs: meta?.playedMs ?? 0,
     source: meta?.source ?? 'queue',
+    uid: currentUid,
     track,
   };
   write([entry, ...current].slice(0, MAX_ENTRIES));
