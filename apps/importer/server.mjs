@@ -388,6 +388,55 @@ const FFMPEG_BIN = process.env.FFMPEG_PATH
 // can't send headers). Kept on the eMMC root, never the flaky USB disk.
 const BLOB_DIR = process.env.BLOB_DIR ?? path.join(HERE, 'blobs');
 const MAX_BLOB = 140 * 1024 * 1024; // 140 MB per file (matches the client cap)
+
+// ── cofre de blobs em DISCO EXTERNO + teto LRU ──────────────────────────────
+// Com BLOB_DIR apontando para o USB, exigimos um arquivo-marcador dentro dele:
+// se o USB cair, o mountpoint vira um diretório vazio no disco RAIZ — sem o
+// marcador, gravações são recusadas (503) em vez de encher a raiz de novo.
+const BLOB_DIR_EXTERNAL = Boolean(process.env.BLOB_DIR);
+const BLOB_MARKER = path.join(BLOB_DIR, '.aurial-blobs');
+// Teto do cofre (LRU): ao passar, os blobs MAIS ANTIGOS saem primeiro. São
+// cópias para streaming entre aparelhos — o original continua no aparelho do
+// dono e a faixa segue tocável via streaming ao vivo da fonte.
+const MAX_BLOB_BYTES = Number(process.env.MAX_BLOB_GB ?? 15) * 1024 ** 3;
+
+async function blobStoreReady() {
+  if (!BLOB_DIR_EXTERNAL) return true;
+  try {
+    await stat(BLOB_MARKER);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function sweepBlobStore() {
+  try {
+    if (!(await blobStoreReady())) return;
+    const names = await readdir(BLOB_DIR);
+    const bins = [];
+    let total = 0;
+    for (const name of names) {
+      if (!name.endsWith('.bin')) continue;
+      const p = path.join(BLOB_DIR, name);
+      const st = await stat(p).catch(() => null);
+      if (!st) continue;
+      bins.push({ p, size: st.size, mtime: st.mtimeMs });
+      total += st.size;
+    }
+    if (total <= MAX_BLOB_BYTES) return;
+    bins.sort((a, b) => a.mtime - b.mtime); // mais antigos primeiro
+    for (const b of bins) {
+      if (total <= MAX_BLOB_BYTES) break;
+      await rm(b.p, { force: true }).catch(() => undefined);
+      await rm(b.p.replace(/\.bin$/, '.json'), { force: true }).catch(() => undefined);
+      total -= b.size;
+    }
+    log(`blob LRU: cofre reduzido para ${(total / 1024 ** 3).toFixed(1)}GB`);
+  } catch {
+    /* diretório ilegível — nada a varrer */
+  }
+}
 const safeBlobId = (s) => typeof s === 'string' && /^[A-Za-z0-9:_-]{1,128}$/.test(s);
 const blobPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.bin`);
 const blobMetaPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.json`);
@@ -574,9 +623,14 @@ async function authorize(req) {
 async function main() {
   const ytdlp = await resolveYtdlp();
   log(`yt-dlp: ${ytdlp}`);
-  await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
+  // Diretório local padrão pode ser criado; o EXTERNO nunca (mkdir num
+  // mountpoint desmontado criaria a pasta no disco raiz).
+  if (!BLOB_DIR_EXTERNAL) await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
+  else log(`blob store externo: ${BLOB_DIR} (${(await blobStoreReady()) ? 'ok' : 'INDISPONÍVEL'})`);
   void sweepStaleTmp();
+  void sweepBlobStore();
   setInterval(() => void sweepStaleTmp(), 3600_000).unref();
+  setInterval(() => void sweepBlobStore(), 3600_000).unref();
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -753,6 +807,12 @@ async function main() {
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
         }
+        // USB fora do ar → recusa em vez de gravar no disco raiz por engano.
+        if (!(await blobStoreReady())) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Armazenamento de blobs indisponível.' }));
+          return;
+        }
         const id = req.headers['x-blob-id'];
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -784,6 +844,7 @@ async function main() {
           return;
         }
         log('blob stored:', id, `${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+        void sweepBlobStore(); // mantém o cofre dentro do teto (LRU)
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id, token }));
         return;
