@@ -65,7 +65,7 @@ export function AppShell() {
               scrollRef.current = node;
               setScrollEl(node);
             }}
-            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden px-4 md:px-6 lg:px-8"
+            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 md:px-6 lg:px-8"
           >
             <TopBar />
             <div

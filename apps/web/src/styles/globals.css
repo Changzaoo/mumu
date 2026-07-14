@@ -223,6 +223,32 @@
     overscroll-behavior-y: none;
     /* font scale setting multiplies the root size (0.875×–1.25×). */
     font-size: calc(16px * var(--font-scale, 1));
+    /* Mata o zoom por duplo toque (iOS/Android) mantendo pan/scroll. */
+    touch-action: manipulation;
+  }
+
+  /* O iOS dá ZOOM AUTOMÁTICO ao focar campos com fonte < 16px — nunca deve
+     acontecer. Piso de 16px só em telas de toque; o desktop mantém os campos
+     compactos (text-sm) de sempre. */
+  @media (pointer: coarse) {
+    input,
+    select,
+    textarea {
+      font-size: max(16px, 1em);
+    }
+
+    /* Puxar a tela para baixo abria um VÃO em cima (rubber-band do documento).
+       No mobile o documento fica FIXO — todo scroll vive nos contêineres
+       internos do app (o <main> do shell), que não encadeiam para o body. */
+    html,
+    body {
+      position: fixed;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      overflow: hidden;
+      overscroll-behavior: none;
+    }
   }
 
   body {

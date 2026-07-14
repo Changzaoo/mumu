@@ -2,7 +2,13 @@
 <html lang="pt-BR" class="dark">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <!-- maximum-scale=1 + user-scalable=no: sem zoom por pinça/foco em lugar
+         nenhum (o iOS ainda ignora para pinça por acessibilidade — o zoom de
+         foco em input morre pelo piso de 16px nos campos, no globals.css). -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no, viewport-fit=cover"
+    />
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0A0A0C" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FCFCFC" />
