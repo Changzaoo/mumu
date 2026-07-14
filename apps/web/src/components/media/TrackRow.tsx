@@ -133,6 +133,10 @@ export function TrackRow({
         'group grid h-14 select-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200',
         showAlbum && 'md:grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_auto]',
         'hover:bg-fg/5 focus-visible:bg-fg/5',
+        // Listas grandes (500+ faixas) matavam celulares modestos: com
+        // content-visibility o navegador só renderiza as linhas VISÍVEIS —
+        // o resto vira um placeholder de 56px até entrar na tela.
+        '[content-visibility:auto] [contain-intrinsic-size:auto_3.5rem]',
         className,
       )}
       {...props}
@@ -175,7 +179,13 @@ export function TrackRow({
         {showArt && (
           <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
             {track.coverUrl ? (
-              <img src={track.coverUrl} alt="" loading="lazy" className="size-full object-cover" />
+              <img
+                src={track.coverUrl}
+                alt=""
+                loading="lazy"
+                decoding="async"
+                className="size-full object-cover"
+              />
             ) : (
               <span className="grid size-full place-items-center text-fg-subtle">
                 <Music className="size-4" />

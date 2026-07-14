@@ -280,10 +280,10 @@ export default function HomePage() {
       <CommunityTracksRow limit={20} />
       <DeviceTracksRow limit={16} />
 
-      {/* Real albums in the library. */}
+      {/* Real albums in the library (capped — o resto vive em "Mostrar tudo"). */}
       {albums.length > 0 && (
         <SectionCarousel title="Seus álbuns" href="/library">
-          {albums.map((album) => (
+          {albums.slice(0, 20).map((album) => (
             <MediaCard
               key={album.key}
               title={album.title}
@@ -320,10 +320,10 @@ export default function HomePage() {
         </SectionCarousel>
       ))}
 
-      {/* Your artists. */}
+      {/* Your artists (capped — a página /artistas tem todos). */}
       {artists.length > 0 && (
         <SectionCarousel title="Seus artistas" href="/artistas">
-          {artists.map((artist) => (
+          {artists.slice(0, 20).map((artist) => (
             <LocalArtistCard
               key={artist.name}
               name={artist.name}

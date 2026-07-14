@@ -49,7 +49,15 @@ export function SectionCarousel({
   };
 
   return (
-    <section className={cn('group/carousel relative', className)} {...props}>
+    <section
+      className={cn(
+        'group/carousel relative',
+        // Prateleiras fora da tela nem chegam a renderizar (RAM/CPU no mobile).
+        '[content-visibility:auto] [contain-intrinsic-size:auto_18rem]',
+        className,
+      )}
+      {...props}
+    >
       <header className="mb-3 flex items-end justify-between gap-4 px-3">
         <div>
           {href ? (

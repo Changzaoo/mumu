@@ -55,6 +55,7 @@ export function MediaCard({
           src={imageUrl}
           alt=""
           loading="lazy"
+          decoding="async"
           className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
         />
       ) : (
@@ -94,6 +95,9 @@ export function MediaCard({
     <div
       className={cn(
         'group w-40 shrink-0 snap-start rounded-xl p-3 transition-colors duration-200 hover:bg-fg/5 md:w-44',
+        // Cards fora da viewport (prateleiras longas) não são renderizados —
+        // essencial em celulares com pouca RAM.
+        '[content-visibility:auto] [contain-intrinsic-size:10rem_13.5rem]',
         clickable && 'cursor-pointer',
         className,
       )}

@@ -6,17 +6,21 @@
  *     estimativa do navegador (effectiveType/downlink/rtt);
  *   - o que mais ouve (top músicas/artistas do histórico local) e as últimas
  *     reproduções;
- *   - plataforma, tamanho da biblioteca e curtidas.
+ *   - plataforma, GPU, memória JS, Web Vitals, configurações do app, tamanho
+ *     da biblioteca, downloads offline e curtidas.
  * Tudo best-effort: sem Firestore/login, nada roda; falhas são silenciosas.
  * As regras do Firestore limitam a leitura aos admins (ver firestore.rules).
  */
 import { doc, increment, setDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import { getDownloads } from '@/features/downloads/registry';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { measureNetworkSpeed } from '@/lib/local/importerHelper';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
+import { useSettingsStore } from '@/stores/settingsStore';
+import { getVitals, initVitals } from './vitals';
 
 const HEARTBEAT_MS = 30_000;
 const FLUSH_MS = 120_000;
@@ -177,6 +181,78 @@ function connectionInfo(): Record<string, string | number> {
   };
 }
 
+// GPU via WebGL — coletada uma vez por carga da página e cacheada no módulo.
+// undefined = ainda não tentou; null = tentou e não conseguiu.
+let gpuRenderer: string | null | undefined;
+function gpuInfo(): string | null {
+  if (gpuRenderer !== undefined) return gpuRenderer;
+  gpuRenderer = null;
+  try {
+    const canvas = document.createElement('canvas');
+    const gl = canvas.getContext('webgl');
+    const ext = gl?.getExtension('WEBGL_debug_renderer_info');
+    if (gl && ext) {
+      const raw: unknown = gl.getParameter(ext.UNMASKED_RENDERER_WEBGL);
+      if (typeof raw === 'string' && raw) {
+        // "ANGLE (vendor, renderer, backend)" → mantém só o miolo legível.
+        const cleaned = raw.startsWith('ANGLE (') ? raw.slice(7).replace(/\)\s*$/, '') : raw;
+        gpuRenderer = cleaned.trim().slice(0, 120) || null;
+      }
+    }
+  } catch {
+    gpuRenderer = null;
+  }
+  return gpuRenderer;
+}
+
+/** Heap JS usado em MB (só Chrome expõe performance.memory). */
+function jsHeapMb(): number | null {
+  try {
+    const mem = (performance as Performance & { memory?: { usedJSHeapSize?: number } }).memory;
+    if (typeof mem?.usedJSHeapSize === 'number') return Math.round(mem.usedJSHeapSize / 1e6);
+  } catch {
+    /* sem suporte */
+  }
+  return null;
+}
+
+/** Recorte das configurações do app que interessam ao painel. */
+function settingsSnapshot(): Record<string, unknown> | null {
+  try {
+    const s = useSettingsStore.getState();
+    return {
+      audioQuality: s.audioQuality,
+      crossfadeSeconds: s.crossfadeSeconds,
+      eqEnabled: s.eq.enabled,
+      normalizeVolume: s.normalizeVolume,
+      theme: s.theme,
+    };
+  } catch {
+    return null;
+  }
+}
+
+/** Data de criação da conta Firebase em ISO, ou null se indisponível. */
+function accountCreatedAt(): string | null {
+  try {
+    const raw = currentUser?.metadata?.creationTime;
+    if (!raw) return null;
+    const date = new Date(raw);
+    return Number.isNaN(date.getTime()) ? null : date.toISOString();
+  } catch {
+    return null;
+  }
+}
+
+/** Quantidade de downloads offline registrados neste aparelho. */
+function downloadsCount(): number | null {
+  try {
+    return getDownloads().length;
+  } catch {
+    return null;
+  }
+}
+
 function platformInfo(): string {
   const ua = navigator.userAgent;
   if (/iP(hone|od)/.test(ua)) return 'iPhone';
@@ -252,6 +328,13 @@ async function push(data: Record<string, unknown>): Promise<void> {
 
 function snapshot(): Record<string, unknown> {
   const stats = listeningStats();
+  // Coletas best-effort: indisponível = campo ausente (nunca inventado).
+  const gpu = gpuInfo();
+  const heapMb = jsHeapMb();
+  const vitals = getVitals();
+  const settings = settingsSnapshot();
+  const createdAt = accountCreatedAt();
+  const downloads = downloadsCount();
   return {
     uid: currentUser?.uid ?? null,
     email: currentUser?.email ?? null,
@@ -275,6 +358,12 @@ function snapshot(): Record<string, unknown> {
     libraryBytes: localLibrary.totalBytes(),
     likedCount: localLikes.count(),
     totalPlays: localHistory.list().length,
+    ...(gpu ? { gpu } : {}),
+    ...(heapMb !== null ? { jsHeapMb: heapMb } : {}),
+    ...(Object.keys(vitals).length > 0 ? { vitals } : {}),
+    ...(settings ? { settingsSnapshot: settings } : {}),
+    ...(createdAt ? { accountCreatedAt: createdAt } : {}),
+    ...(downloads !== null ? { downloadsCount: downloads } : {}),
     ...stats,
   };
 }
@@ -337,6 +426,7 @@ function start(user: User): void {
   sessionStartMs = Date.now();
   sessionActions = [];
   probeBattery();
+  initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);
   void push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });

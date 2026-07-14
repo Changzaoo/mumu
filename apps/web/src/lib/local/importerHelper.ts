@@ -13,6 +13,24 @@
 import { getIdToken } from '@/lib/firebase';
 import { useSettingsStore } from '@/stores/settingsStore';
 
+/**
+ * Erro de uma chamada ao helper que carrega o status HTTP da resposta. A fila
+ * de importação (importQueue) usa o `status` para distinguir falha de
+ * autenticação (401/403 → pausa a fila inteira, retry não resolve) de falha
+ * transitória (retry com backoff resolve). A mensagem segue pt-BR, amigável
+ * para o toast/painel.
+ */
+export class HelperError extends Error {
+  /** Status HTTP devolvido pelo helper (ex.: 401, 403, 500). */
+  status: number;
+
+  constructor(message: string, status: number) {
+    super(message);
+    this.name = 'HelperError';
+    this.status = status;
+  }
+}
+
 /** The user's chosen audio quality — sent to the helper so downloads/streams
  *  are encoded at the matching bitrate (96/160/320 kbps, Spotify-style). */
 function preferredQuality(): string {
@@ -420,7 +438,7 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
     } catch {
       /* keep default */
     }
-    throw new Error(message);
+    throw new HelperError(message, res.status);
   }
   const data = (await res.json()) as Partial<PlaylistResult>;
   const entries = Array.isArray(data.entries)
@@ -449,7 +467,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
     } catch {
       /* keep default */
     }
-    throw new Error(message);
+    throw new HelperError(message, res.status);
   }
   const decode = (h: string): string | null => {
     const v = res.headers.get(h);

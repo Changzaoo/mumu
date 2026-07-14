@@ -15,8 +15,9 @@
  *
  * Run:  node apps/importer/server.mjs
  * Env:  PORT (default 8787) · YTDLP_PATH · FFMPEG_PATH · ALLOW_ORIGIN (csv, '*' = any)
- *       AURIAL_MAX_MINUTES (default 90) · IMPORT_ALLOWED_EMAILS (csv allow-list)
- *       IMPORT_REQUIRE_LOGIN (1 = any signed-in Firebase user) · IMPORT_TOKEN
+ *       AURIAL_MAX_MINUTES (default 90) · IMPORT_ALLOWED_EMAILS (csv allow-list,
+ *       verified emails only) · IMPORT_REQUIRE_LOGIN (1 = any Firebase account
+ *       with an email — verified or not; anonymous blocked) · IMPORT_TOKEN
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
@@ -38,9 +39,14 @@ const IMPORT_TOKEN = (process.env.IMPORT_TOKEN ?? '').trim();
 // ── Firebase auth gate ──────────────────────────────────────────────────────
 // Two Firebase-gated modes, both requiring a valid Firebase ID token (knowing
 // the URL grants nothing, and no shared secret ships in the browser bundle):
-//   • IMPORT_ALLOWED_EMAILS set → only those (verified) emails may import.
-//   • IMPORT_REQUIRE_LOGIN=1    → ANY signed-in user with a verified email may
-//     import (open to every logged-in user, but anonymous callers are blocked).
+//   • IMPORT_ALLOWED_EMAILS set → only those emails may import, and they must
+//     be VERIFIED (strict: it's an owner allow-list).
+//   • IMPORT_REQUIRE_LOGIN=1    → any signed-in user whose token carries an
+//     email claim may import. Email verification is NOT required here: an
+//     unverified email/password account is still a legitimate registered user,
+//     and requiring verification made those accounts (and their persisted
+//     import queues) hit 403 forever. Anonymous sign-ins have no email claim,
+//     so they stay blocked.
 // If neither is set, falls back to the shared token, else fully open.
 const FIREBASE_PROJECT_ID = (process.env.FIREBASE_PROJECT_ID ?? 'mumu-2f54e').trim();
 const ALLOWED_EMAILS = (process.env.IMPORT_ALLOWED_EMAILS ?? '')
@@ -393,9 +399,15 @@ async function authorizeToken(token) {
     if (!token) return false;
     try {
       const claims = await verifyFirebaseToken(token);
-      if (!claims.email_verified) return false;
+      // A registered account always carries an email claim; anonymous sign-ins
+      // don't — this alone blocks them.
+      if (!claims.email) return false;
+      // REQUIRE_LOGIN mode: any registered user, verified or not (an unverified
+      // email/password account is a legitimate user, not an attacker).
       if (ALLOWED_EMAILS.length === 0) return true;
-      return ALLOWED_EMAILS.includes(String(claims.email || '').toLowerCase());
+      // Allow-list mode stays strict: the email must be verified AND listed.
+      if (!claims.email_verified) return false;
+      return ALLOWED_EMAILS.includes(String(claims.email).toLowerCase());
     } catch {
       return false;
     }
@@ -508,9 +520,13 @@ const log = (...a) => console.log('[aurial-importer]', ...a);
 
 /**
  * Authorize a request. Firebase-gated when IMPORT_ALLOWED_EMAILS or
- * IMPORT_REQUIRE_LOGIN is set: a valid Firebase ID token with a verified email
- * is required (the URL alone grants nothing, no shared secret in the bundle).
- * With an allow-list only those emails pass; otherwise any signed-in user does.
+ * IMPORT_REQUIRE_LOGIN is set: a valid Firebase ID token carrying an email
+ * claim is required (the URL alone grants nothing, no shared secret in the
+ * bundle; anonymous sign-ins have no email claim and are blocked). With an
+ * allow-list only those emails pass and they must be VERIFIED; in plain
+ * REQUIRE_LOGIN mode any registered user passes — verified or not, since an
+ * unverified email/password account is a legitimate user and rejecting it
+ * left clients in a permanent 403 retry loop.
  * Else falls back to the shared token; else open.
  */
 async function authorize(req) {
@@ -519,9 +535,13 @@ async function authorize(req) {
     if (!bearer) return false;
     try {
       const claims = await verifyFirebaseToken(bearer);
+      // Anonymous accounts carry no email claim → blocked here.
+      if (!claims.email) return false;
+      // REQUIRE_LOGIN mode: any registered user (verified or not).
+      if (ALLOWED_EMAILS.length === 0) return true;
+      // Allow-list mode stays strict: verified AND listed.
       if (!claims.email_verified) return false;
-      if (ALLOWED_EMAILS.length === 0) return true; // any signed-in user
-      return ALLOWED_EMAILS.includes(String(claims.email || '').toLowerCase());
+      return ALLOWED_EMAILS.includes(String(claims.email).toLowerCase());
     } catch {
       return false;
     }

@@ -20,6 +20,11 @@ function StatusIcon({ status }: { status: importQueue.ImportStatus }) {
 
 export function ImportQueuePanel() {
   const items = useSyncExternalStore(importQueue.subscribe, importQueue.list, () => EMPTY);
+  const pauseReason = useSyncExternalStore(
+    importQueue.subscribe,
+    importQueue.pauseReason,
+    () => null,
+  );
   if (items.length === 0) return null;
 
   const s = importQueue.stats();
@@ -27,6 +32,22 @@ export function ImportQueuePanel() {
 
   return (
     <div className="mt-1 rounded-lg border border-border bg-bg/40 p-3">
+      {pauseReason && (
+        <div className="mb-2 flex items-center justify-between gap-3 rounded-md bg-fg/6 px-2.5 py-2">
+          <p className={`text-[13px] ${pauseReason === 'auth' ? 'text-danger' : 'text-fg-muted'}`}>
+            {pauseReason === 'auth'
+              ? 'Fila pausada: entre na sua conta para baixar'
+              : 'Fila pausada por falhas seguidas — tentando de novo em instantes'}
+          </p>
+          <button
+            type="button"
+            onClick={importQueue.resume}
+            className="shrink-0 text-[12px] font-medium text-accent transition-opacity hover:opacity-80"
+          >
+            Retomar agora
+          </button>
+        </div>
+      )}
       <div className="mb-2 flex items-center justify-between">
         <p className="text-[13px] font-medium text-fg">
           {inFlight > 0

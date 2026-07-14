@@ -1,38 +1,13 @@
-import { useEffect, useState } from 'react';
+import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
-import { useForm } from 'react-hook-form';
-import { zodResolver } from '@hookform/resolvers/zod';
-import { z } from 'zod';
 import { toast } from 'sonner';
-import { Ghost, Loader2, Mail, WandSparkles } from 'lucide-react';
+import { Loader2 } from 'lucide-react';
 import { AurialLogo } from '@/components/brand/AurialMark';
 import { Button } from '@/components/ui/button';
-import { Input } from '@/components/ui/input';
-import { Label } from '@/components/ui/label';
-import { Separator } from '@/components/ui/separator';
 import { useAuthUser } from '@/hooks/useAuthUser';
-import {
-  authDisabled,
-  completeMagicLink,
-  sendMagicLink,
-  signInAnonymously,
-  signInEmail,
-  signInGoogle,
-  signUpEmail,
-} from '@/lib/firebase';
-import { cn } from '@/lib/utils';
-
-const credentialsSchema = z.object({
-  email: z.string().email('Informe um e-mail válido'),
-  password: z.string().min(6, 'A senha precisa de pelo menos 6 caracteres'),
-});
-type CredentialsInput = z.infer<typeof credentialsSchema>;
+import { authDisabled, signInGoogle } from '@/lib/firebase';
 
 const AUTH_ERRORS: Record<string, string> = {
-  'auth/invalid-credential': 'E-mail ou senha incorretos.',
-  'auth/user-not-found': 'Conta não encontrada.',
-  'auth/wrong-password': 'E-mail ou senha incorretos.',
-  'auth/email-already-in-use': 'Este e-mail já tem uma conta. Tente entrar.',
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco.',
   'auth/popup-closed-by-user': 'Janela fechada antes de concluir.',
   'auth/network-request-failed': 'Falha de rede. Verifique sua conexão.',
@@ -74,74 +49,27 @@ function GoogleIcon() {
 
 /**
  * /login — outside the shell. Glass card over two ambient glows on deep black.
- * Google / anonymous, e-mail+senha (entrar ou criar) and magic link.
+ * GOOGLE ONLY: os fluxos de e-mail/senha, link mágico e convidado foram
+ * removidos — nunca funcionaram de ponta a ponta (verificação de e-mail nunca
+ * chegava) e viravam contas que serviços com gate de auth recusavam. Uma conta
+ * Google chega verificada e funciona em tudo.
  */
 export default function LoginPage() {
   const navigate = useNavigate();
   const { user, loading } = useAuthUser();
-  const [mode, setMode] = useState<'signin' | 'signup'>('signin');
-  const [pending, setPending] = useState<string | null>(null);
-
-  const {
-    register,
-    handleSubmit,
-    getValues,
-    formState: { errors, isSubmitting },
-  } = useForm<CredentialsInput>({
-    resolver: zodResolver(credentialsSchema),
-    defaultValues: { email: '', password: '' },
-  });
-
-  // Finish magic-link flows landing on /login.
-  useEffect(() => {
-    void completeMagicLink()
-      .then((cred) => {
-        if (cred) {
-          toast.success('Acesso concluído. Bem-vindo ao radinho.online.');
-          void navigate('/', { replace: true });
-        }
-      })
-      .catch((error: unknown) => toast.error(friendlyError(error)));
-  }, [navigate]);
+  const [pending, setPending] = useState(false);
 
   if (!loading && user) return <Navigate to="/" replace />;
 
-  const withPending = async (key: string, action: () => Promise<unknown>): Promise<void> => {
-    setPending(key);
+  const loginGoogle = async (): Promise<void> => {
+    setPending(true);
     try {
-      await action();
+      await signInGoogle();
       void navigate('/', { replace: true });
     } catch (error) {
       toast.error(friendlyError(error));
     } finally {
-      setPending(null);
-    }
-  };
-
-  const onSubmit = handleSubmit(async ({ email, password }) => {
-    try {
-      if (mode === 'signin') await signInEmail(email, password);
-      else await signUpEmail(email, password);
-      void navigate('/', { replace: true });
-    } catch (error) {
-      toast.error(friendlyError(error));
-    }
-  });
-
-  const onMagicLink = async (): Promise<void> => {
-    const email = getValues('email');
-    if (!credentialsSchema.shape.email.safeParse(email).success) {
-      toast.error('Informe seu e-mail para receber o link mágico.');
-      return;
-    }
-    setPending('magic');
-    try {
-      await sendMagicLink(email);
-      toast.success(`Link de acesso enviado para ${email}. Confira sua caixa de entrada.`);
-    } catch (error) {
-      toast.error(friendlyError(error));
-    } finally {
-      setPending(null);
+      setPending(false);
     }
   };
 
@@ -160,9 +88,7 @@ export default function LoginPage() {
       <main className="glass relative w-full max-w-sm rounded-2xl p-8">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
           <AurialLogo />
-          <p className="text-sm text-fg-muted">
-            {mode === 'signin' ? 'Entre para continuar ouvindo' : 'Crie sua conta em segundos'}
-          </p>
+          <p className="text-sm text-fg-muted">Entre para ouvir as músicas completas</p>
         </div>
 
         {authDisabled ? (
@@ -176,98 +102,18 @@ export default function LoginPage() {
           </div>
         ) : (
           <>
-            <div className="space-y-2.5">
-              <Button
-                variant="outline"
-                className="w-full"
-                disabled={pending !== null}
-                onClick={() => void withPending('google', signInGoogle)}
-              >
-                {pending === 'google' ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
-                Continuar com Google
-              </Button>
-              <Button
-                variant="ghost"
-                className="w-full"
-                disabled={pending !== null}
-                onClick={() => void withPending('anon', signInAnonymously)}
-              >
-                {pending === 'anon' ? <Loader2 className="animate-spin" /> : <Ghost />}
-                Entrar como convidado
-              </Button>
-            </div>
-
-            <div className="my-6 flex items-center gap-3">
-              <Separator className="flex-1" />
-              <span className="text-xs text-fg-subtle">ou</span>
-              <Separator className="flex-1" />
-            </div>
-
-            <form onSubmit={(e) => void onSubmit(e)} className="space-y-4" noValidate>
-              <div className="space-y-1.5">
-                <Label htmlFor="email">E-mail</Label>
-                <Input
-                  id="email"
-                  type="email"
-                  autoComplete="email"
-                  placeholder="voce@exemplo.com"
-                  aria-invalid={Boolean(errors.email)}
-                  {...register('email')}
-                />
-                {errors.email && <p className="text-xs text-danger">{errors.email.message}</p>}
-              </div>
-              <div className="space-y-1.5">
-                <Label htmlFor="password">Senha</Label>
-                <Input
-                  id="password"
-                  type="password"
-                  autoComplete={mode === 'signin' ? 'current-password' : 'new-password'}
-                  placeholder="••••••••"
-                  aria-invalid={Boolean(errors.password)}
-                  {...register('password')}
-                />
-                {errors.password && (
-                  <p className="text-xs text-danger">{errors.password.message}</p>
-                )}
-              </div>
-
-              <Button
-                type="submit"
-                variant="accent"
-                className="w-full"
-                disabled={isSubmitting || pending !== null}
-              >
-                {isSubmitting ? <Loader2 className="animate-spin" /> : <Mail />}
-                {mode === 'signin' ? 'Entrar com e-mail' : 'Criar conta'}
-              </Button>
-            </form>
-
-            <button
-              type="button"
-              onClick={() => void onMagicLink()}
-              disabled={pending !== null}
-              className={cn(
-                'mt-3 flex w-full items-center justify-center gap-2 rounded-md py-2 text-[13px] font-medium text-fg-muted transition-colors',
-                'hover:text-fg disabled:opacity-50',
-              )}
+            <Button
+              variant="accent"
+              className="w-full"
+              disabled={pending}
+              onClick={() => void loginGoogle()}
             >
-              {pending === 'magic' ? (
-                <Loader2 className="size-4 animate-spin" />
-              ) : (
-                <WandSparkles className="size-4" />
-              )}
-              Receber link mágico por e-mail
-            </button>
-
+              {pending ? <Loader2 className="animate-spin" /> : <GoogleIcon />}
+              Continuar com Google
+            </Button>
             <p className="mt-6 text-center text-[13px] text-fg-muted">
-              {mode === 'signin' ? 'Ainda não tem conta?' : 'Já tem conta?'}{' '}
-              <button
-                type="button"
-                onClick={() => setMode(mode === 'signin' ? 'signup' : 'signin')}
-                className="font-medium text-accent hover:underline"
-              >
-                {mode === 'signin' ? 'Criar conta' : 'Entrar'}
-              </button>
+              Grátis. Sua biblioteca sincroniza em todos os aparelhos — sem conta, você ouve prévias
+              de 30 segundos.
             </p>
           </>
         )}

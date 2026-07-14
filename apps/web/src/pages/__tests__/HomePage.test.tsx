@@ -59,15 +59,22 @@ beforeEach(() => {
 });
 
 describe('HomePage (personal library)', () => {
-  it('renders the greeting, quick access and the empty state when the library is empty', async () => {
-    await renderHome();
-    expect(screen.getByText(/^(Bom dia|Boa tarde|Boa noite)$/)).toBeInTheDocument();
-    expect(screen.getByText('Músicas Curtidas')).toBeInTheDocument();
-    expect(screen.getByText('Tocadas recentemente')).toBeInTheDocument();
-    expect(screen.getByText('Sua biblioteca está vazia')).toBeInTheDocument();
-  });
+  // vi.resetModules() força re-transform do grafo inteiro da Home a cada teste
+  // (necessário por causa do cache em módulo do localLibrary) — o primeiro
+  // import frio passa dos 5s padrão em máquinas ocupadas. 20s dá folga real.
+  it(
+    'renders the greeting, quick access and the empty state when the library is empty',
+    { timeout: 20_000 },
+    async () => {
+      await renderHome();
+      expect(screen.getByText(/^(Bom dia|Boa tarde|Boa noite)$/)).toBeInTheDocument();
+      expect(screen.getByText('Músicas Curtidas')).toBeInTheDocument();
+      expect(screen.getByText('Tocadas recentemente')).toBeInTheDocument();
+      expect(screen.getByText('Sua biblioteca está vazia')).toBeInTheDocument();
+    },
+  );
 
-  it('renders artist and genre shelves from the local library', async () => {
+  it('renders artist and genre shelves from the local library', { timeout: 20_000 }, async () => {
     const track = makeTrack('local:1', { title: 'Como Tudo Deve Ser' });
     const entry = {
       track: {

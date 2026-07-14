@@ -7,32 +7,49 @@
  * mais escuta. Rota protegida por AuthorizedRoute; as regras do Firestore
  * limitam a leitura aos e-mails de admin.
  */
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
   Activity,
   AlertTriangle,
   ArrowDown,
   ArrowUp,
   BatteryMedium,
+  BellRing,
+  CheckCircle2,
   Clock,
+  Copy,
   Cpu,
+  Download,
+  Fingerprint,
   Gauge,
   Globe,
   Library,
   ListMusic,
+  Loader2,
   LogIn,
+  Mail,
   MonitorSmartphone,
   MousePointerClick,
   Music2,
   PlayCircle,
+  Search,
+  SlidersHorizontal,
   Smartphone,
+  Sparkles,
+  Stethoscope,
+  UserRound,
   Users,
+  Wifi,
+  XCircle,
+  Zap,
 } from 'lucide-react';
 import { collection, onSnapshot } from 'firebase/firestore';
+import { toast } from 'sonner';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { db } from '@/lib/firebase';
+import { computeInsights } from '@/lib/telemetry/insights';
 import { cn, formatBytes } from '@/lib/utils';
 import type {
   RecentPlay,
@@ -81,6 +98,19 @@ interface TelemetryDoc {
   weekdayHistogram?: Record<string, number>;
   lastSessionActions?: SessionAction[];
   recentSessions?: SessionLogEntry[];
+  // Campos novos (coleta em andamento) — SEMPRE opcionais: docs antigos não têm.
+  gpu?: string;
+  jsHeapMb?: number;
+  vitals?: { lcpMs?: number; cls?: number; inpMs?: number; ttfbMs?: number };
+  settingsSnapshot?: {
+    audioQuality?: string;
+    crossfadeSeconds?: number;
+    eqEnabled?: boolean;
+    normalizeVolume?: boolean;
+    theme?: string;
+  };
+  accountCreatedAt?: string;
+  downloadsCount?: number;
 }
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -126,6 +156,29 @@ function formatClock(iso: string): string {
     hour: '2-digit',
     minute: '2-digit',
   });
+}
+
+/** Copia texto para a área de transferência com feedback via toast. */
+function copyText(text: string, message: string): void {
+  navigator.clipboard.writeText(text).then(
+    () => toast.success(message),
+    () => toast.error('Não foi possível copiar'),
+  );
+}
+
+/** Dispara o download de um arquivo gerado em memória (sem servidor). */
+function downloadBlob(filename: string, mime: string, content: string): void {
+  const url = URL.createObjectURL(new Blob([content], { type: mime }));
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  a.click();
+  URL.revokeObjectURL(url);
+}
+
+function csvEscape(value: unknown): string {
+  const s = value == null ? '' : String(value);
+  return /[",;\n]/.test(s) ? `"${s.replace(/"/g, '""')}"` : s;
 }
 
 interface FriendlyAction {
@@ -310,6 +363,144 @@ function SegmentBadge({ name }: { name: string }) {
   );
 }
 
+/** CSV com as colunas principais (uma linha por usuário). */
+function toCsv(docs: TelemetryDoc[]): string {
+  const header = [
+    'uid',
+    'nome',
+    'email',
+    'anonimo',
+    'plataforma',
+    'navegador',
+    'categoria',
+    'sessoes',
+    'tempo_total_seg',
+    'plays',
+    'curtidas',
+    'biblioteca',
+    'downloads',
+    'down_mbps',
+    'up_mbps',
+    'erros_js',
+    'app_instalado',
+    'conta_criada',
+    'ultimo_acesso',
+  ];
+  const rows = docs.map((t) =>
+    [
+      t.uid,
+      t.displayName,
+      t.email,
+      t.isAnonymous == null ? '' : t.isAnonymous ? 'sim' : 'não',
+      t.platform,
+      t.browser,
+      categorize(t).primary,
+      t.sessions ?? 0,
+      t.totalSeconds ?? 0,
+      t.totalPlays ?? 0,
+      t.likedCount ?? 0,
+      t.libraryCount ?? 0,
+      t.downloadsCount,
+      t.netDownMbps,
+      t.netUpMbps,
+      t.jsErrors ?? 0,
+      t.pwaInstalled == null ? '' : t.pwaInstalled ? 'sim' : 'não',
+      t.accountCreatedAt,
+      t.lastSeenAt,
+    ]
+      .map(csvEscape)
+      .join(','),
+  );
+  return [header.join(','), ...rows].join('\n');
+}
+
+// ── Web Vitals (thresholds oficiais do Google) ───────────────────────────────
+
+type VitalRating = 'bom' | 'regular' | 'ruim';
+
+/** Classifica um vital: ≤good → bom; ≤poor → regular; acima → ruim. */
+function rateVital(value: number, good: number, poor: number): VitalRating {
+  if (value <= good) return 'bom';
+  if (value <= poor) return 'regular';
+  return 'ruim';
+}
+
+const VITAL_STYLE: Record<VitalRating, string> = {
+  bom: 'bg-accent/15 text-accent',
+  regular: 'bg-fg/10 text-fg-muted',
+  ruim: 'bg-danger/15 text-danger',
+};
+
+/** Tile de Web Vital com selo colorido (bom/regular/ruim). */
+function VitalStat({
+  label,
+  value,
+  format,
+  good,
+  poor,
+}: {
+  label: string;
+  value: number | undefined;
+  format: (v: number) => string;
+  good: number;
+  poor: number;
+}) {
+  const rating = value != null ? rateVital(value, good, poor) : null;
+  return (
+    <div className="rounded-lg bg-fg/4 px-3 py-2">
+      <p className="text-[11px] leading-tight text-fg-subtle">{label}</p>
+      <div className="flex items-center gap-1.5">
+        <p className="text-[13px] font-semibold text-fg">{value != null ? format(value) : '—'}</p>
+        {rating && (
+          <span
+            className={cn(
+              'rounded-full px-1.5 py-0.5 text-[10px] font-semibold',
+              VITAL_STYLE[rating],
+            )}
+          >
+            {rating}
+          </span>
+        )}
+      </div>
+    </div>
+  );
+}
+
+/** Tile de insight com barra de progresso opcional (0–100, só divs). */
+function InsightTile({
+  label,
+  value,
+  pct,
+  tone,
+}: {
+  label: string;
+  value: string;
+  pct?: number;
+  tone?: 'accent' | 'danger' | 'muted';
+}) {
+  return (
+    <div className="rounded-lg bg-fg/4 px-3 py-2">
+      <p className="text-[11px] leading-tight text-fg-subtle">{label}</p>
+      <p
+        className={cn(
+          'text-[13px] font-semibold',
+          tone === 'danger' ? 'text-danger' : tone === 'muted' ? 'text-fg-muted' : 'text-fg',
+        )}
+      >
+        {value}
+      </p>
+      {pct != null && (
+        <div className="mt-1.5 h-1.5 overflow-hidden rounded-full bg-fg/10">
+          <div
+            className={cn('h-full rounded-full', tone === 'danger' ? 'bg-danger' : 'bg-accent')}
+            style={{ width: `${Math.min(100, Math.max(0, pct))}%` }}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
+
 /** Linha compacta (modo Lista) — expande para o card completo ao clicar. */
 function UserRow({
   t,
@@ -384,6 +575,8 @@ function UserCard({ t }: { t: TelemetryDoc }) {
     .slice(0, 10);
   const sessionsLog = [...(t.recentSessions ?? [])].reverse().slice(0, 8);
 
+  const insights = computeInsights(t);
+
   return (
     <article className="space-y-4 rounded-xl border border-border bg-bg-elevated p-5">
       <header className="flex items-center justify-between gap-3">
@@ -394,9 +587,19 @@ function UserCard({ t }: { t: TelemetryDoc }) {
             {t.pwaInstalled ? ' · app instalado' : ''}
           </p>
         </div>
-        <Badge variant={online ? 'accent' : 'default'}>
-          {online ? 'Online agora' : `Visto ${formatWhen(t.lastSeenAt)}`}
-        </Badge>
+        <div className="flex shrink-0 items-center gap-2">
+          <button
+            type="button"
+            onClick={() => copyText(JSON.stringify(t, null, 2), 'JSON do usuário copiado')}
+            title="Copiar JSON do usuário"
+            className="inline-flex items-center gap-1 rounded-full bg-fg/5 px-2.5 py-1 text-[11px] font-medium text-fg-muted transition-colors hover:bg-fg/10 hover:text-fg"
+          >
+            <Copy className="size-3" /> JSON
+          </button>
+          <Badge variant={online ? 'accent' : 'default'}>
+            {online ? 'Online agora' : `Visto ${formatWhen(t.lastSeenAt)}`}
+          </Badge>
+        </div>
       </header>
 
       {/* Rótulos de comportamento */}
@@ -409,81 +612,287 @@ function UserCard({ t }: { t: TelemetryDoc }) {
         ))}
       </div>
 
-      {/* Rede + uso */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat
-          icon={ArrowDown}
-          label="Download (medido)"
-          value={t.netDownMbps != null ? `${t.netDownMbps} Mbps` : 'não medido'}
-        />
-        <Stat
-          icon={ArrowUp}
-          label="Upload (medido)"
-          value={t.netUpMbps != null ? `${t.netUpMbps} Mbps` : 'não medido'}
-        />
-        <Stat icon={Clock} label="Tempo total no app" value={formatHours(t.totalSeconds)} />
-        <Stat
-          icon={LogIn}
-          label="Sessões"
-          value={`${t.sessions ?? 0}${peak ? ` · pico às ${peak}` : ''}`}
-        />
+      {/* Identidade */}
+      <div>
+        <SectionTitle icon={UserRound}>Identidade</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat icon={UserRound} label="Nome" value={t.displayName || '—'} />
+          <Stat icon={Mail} label="E-mail" value={t.email || '—'} />
+          <div className="flex items-start gap-2 rounded-lg bg-fg/4 px-3 py-2">
+            <Fingerprint className="mt-0.5 size-4 shrink-0 text-fg-muted" />
+            <div className="min-w-0 flex-1">
+              <p className="text-[11px] leading-tight text-fg-subtle">UID</p>
+              <p className="truncate font-mono text-[12px] font-semibold leading-snug text-fg">
+                {t.uid}
+              </p>
+            </div>
+            <button
+              type="button"
+              onClick={() => copyText(t.uid, 'UID copiado')}
+              title="Copiar UID"
+              aria-label="Copiar UID"
+              className="rounded-md p-1 text-fg-subtle transition-colors hover:bg-fg/8 hover:text-fg"
+            >
+              <Copy className="size-3.5" />
+            </button>
+          </div>
+          <Stat
+            icon={Clock}
+            label="Conta criada"
+            value={t.accountCreatedAt ? formatClock(t.accountCreatedAt) : '—'}
+          />
+          <Stat
+            icon={LogIn}
+            label="Tipo de conta"
+            value={t.isAnonymous == null ? '—' : t.isAnonymous ? 'Anônimo' : 'Google'}
+          />
+          <Stat
+            icon={Smartphone}
+            label="App instalado (PWA)"
+            value={t.pwaInstalled == null ? '—' : t.pwaInstalled ? 'Sim' : 'Não'}
+          />
+        </div>
+      </div>
+
+      {/* Rede */}
+      <div>
+        <SectionTitle icon={Wifi}>Rede</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat
+            icon={ArrowDown}
+            label="Download (medido)"
+            value={t.netDownMbps != null ? `${t.netDownMbps} Mbps` : 'não medido'}
+          />
+          <Stat
+            icon={ArrowUp}
+            label="Upload (medido)"
+            value={t.netUpMbps != null ? `${t.netUpMbps} Mbps` : 'não medido'}
+          />
+          <Stat
+            icon={Gauge}
+            label="Conexão (navegador)"
+            value={
+              t.connection?.effectiveType
+                ? `${t.connection.effectiveType}${t.connection.rttMs ? ` · ${t.connection.rttMs}ms` : ''}`
+                : '—'
+            }
+          />
+          <Stat
+            icon={Clock}
+            label="Medição feita"
+            value={t.netMeasuredAt ? formatWhen(t.netMeasuredAt) : '—'}
+          />
+        </div>
       </div>
 
       {/* Dispositivo */}
-      <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
-        <Stat
-          icon={MonitorSmartphone}
-          label="Plataforma"
-          value={`${t.platform ?? '—'}${t.browser ? ` · ${t.browser}` : ''}`}
-        />
-        <Stat
-          icon={Smartphone}
-          label="Tela / toque"
-          value={`${t.screen ?? '—'}${t.touchDevice ? ' · touch' : ''}`}
-        />
-        <Stat
-          icon={Cpu}
-          label="Hardware"
-          value={
-            [
-              t.cpuCores ? `${t.cpuCores} núcleos` : null,
-              t.deviceMemoryGb ? `${t.deviceMemoryGb}GB RAM` : null,
-            ]
-              .filter(Boolean)
-              .join(' · ') || '—'
-          }
-        />
-        <Stat
-          icon={BatteryMedium}
-          label="Bateria"
-          value={
-            t.battery ? `${t.battery.level}%${t.battery.charging ? ' · carregando' : ''}` : '—'
-          }
-        />
-        <Stat
-          icon={Globe}
-          label="Idioma / fuso"
-          value={[t.language, t.timezone].filter(Boolean).join(' · ') || '—'}
-        />
-        <Stat
-          icon={Gauge}
-          label="Conexão (navegador)"
-          value={
-            t.connection?.effectiveType
-              ? `${t.connection.effectiveType}${t.connection.rttMs ? ` · ${t.connection.rttMs}ms` : ''}`
-              : '—'
-          }
-        />
-        <Stat
-          icon={Library}
-          label="Biblioteca"
-          value={`${t.libraryCount ?? 0} faixas${t.libraryBytes ? ` · ${formatBytes(t.libraryBytes)}` : ''}`}
-        />
-        <Stat
-          icon={PlayCircle}
-          label="Reproduções / curtidas"
-          value={`${t.totalPlays ?? 0} plays · ${t.likedCount ?? 0} ♥`}
-        />
+      <div>
+        <SectionTitle icon={MonitorSmartphone}>Dispositivo</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat
+            icon={MonitorSmartphone}
+            label="Plataforma"
+            value={`${t.platform ?? '—'}${t.browser ? ` · ${t.browser}` : ''}`}
+          />
+          <Stat
+            icon={Smartphone}
+            label="Tela / toque"
+            value={`${t.screen ?? '—'}${t.touchDevice ? ' · touch' : ''}`}
+          />
+          <Stat
+            icon={Cpu}
+            label="Hardware"
+            value={
+              [
+                t.cpuCores ? `${t.cpuCores} núcleos` : null,
+                t.deviceMemoryGb ? `${t.deviceMemoryGb}GB RAM` : null,
+              ]
+                .filter(Boolean)
+                .join(' · ') || '—'
+            }
+          />
+          <Stat icon={Cpu} label="GPU" value={t.gpu || '—'} />
+          <Stat
+            icon={BatteryMedium}
+            label="Bateria"
+            value={
+              t.battery ? `${t.battery.level}%${t.battery.charging ? ' · carregando' : ''}` : '—'
+            }
+          />
+          <Stat
+            icon={Globe}
+            label="Idioma / fuso"
+            value={[t.language, t.timezone].filter(Boolean).join(' · ') || '—'}
+          />
+        </div>
+      </div>
+
+      {/* Uso */}
+      <div>
+        <SectionTitle icon={Activity}>Uso</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat icon={Clock} label="Tempo total no app" value={formatHours(t.totalSeconds)} />
+          <Stat
+            icon={LogIn}
+            label="Sessões"
+            value={`${t.sessions ?? 0}${peak ? ` · pico às ${peak}` : ''}`}
+          />
+          <Stat
+            icon={Library}
+            label="Biblioteca"
+            value={`${t.libraryCount ?? 0} faixas${t.libraryBytes ? ` · ${formatBytes(t.libraryBytes)}` : ''}`}
+          />
+          <Stat
+            icon={PlayCircle}
+            label="Reproduções / curtidas"
+            value={`${t.totalPlays ?? 0} plays · ${t.likedCount ?? 0} ♥`}
+          />
+          <Stat
+            icon={Download}
+            label="Downloads"
+            value={t.downloadsCount != null ? String(t.downloadsCount) : '—'}
+          />
+        </div>
+      </div>
+
+      {/* Performance (Web Vitals — thresholds do Google) */}
+      <div>
+        <SectionTitle icon={Zap}>Performance</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <VitalStat
+            label="LCP (carregou)"
+            value={t.vitals?.lcpMs}
+            format={(v) => `${(v / 1000).toFixed(1)}s`}
+            good={2500}
+            poor={4000}
+          />
+          <VitalStat
+            label="CLS (estabilidade)"
+            value={t.vitals?.cls}
+            format={(v) => v.toFixed(2)}
+            good={0.1}
+            poor={0.25}
+          />
+          <VitalStat
+            label="INP (resposta)"
+            value={t.vitals?.inpMs}
+            format={(v) => `${Math.round(v)}ms`}
+            good={200}
+            poor={500}
+          />
+          <VitalStat
+            label="TTFB (servidor)"
+            value={t.vitals?.ttfbMs}
+            format={(v) => `${Math.round(v)}ms`}
+            good={800}
+            poor={1800}
+          />
+          <Stat
+            icon={Cpu}
+            label="Heap JS"
+            value={t.jsHeapMb != null ? `${t.jsHeapMb} MB` : 'Não disponível via navegador'}
+          />
+          <Stat icon={AlertTriangle} label="Erros de JS" value={String(t.jsErrors ?? 0)} />
+        </div>
+      </div>
+
+      {/* Preferências de áudio (snapshot das configurações do app) */}
+      <div>
+        <SectionTitle icon={SlidersHorizontal}>Preferências de áudio</SectionTitle>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <Stat icon={Music2} label="Qualidade" value={t.settingsSnapshot?.audioQuality ?? '—'} />
+          <Stat
+            icon={Clock}
+            label="Crossfade"
+            value={
+              t.settingsSnapshot?.crossfadeSeconds != null
+                ? `${t.settingsSnapshot.crossfadeSeconds}s`
+                : '—'
+            }
+          />
+          <Stat
+            icon={SlidersHorizontal}
+            label="Equalizador"
+            value={
+              t.settingsSnapshot?.eqEnabled == null
+                ? '—'
+                : t.settingsSnapshot.eqEnabled
+                  ? 'Ativado'
+                  : 'Desativado'
+            }
+          />
+          <Stat
+            icon={Gauge}
+            label="Normalizar volume"
+            value={
+              t.settingsSnapshot?.normalizeVolume == null
+                ? '—'
+                : t.settingsSnapshot.normalizeVolume
+                  ? 'Ativado'
+                  : 'Desativado'
+            }
+          />
+          <Stat icon={Globe} label="Tema" value={t.settingsSnapshot?.theme ?? '—'} />
+        </div>
+      </div>
+
+      {/* Insights heurísticos (regras transparentes — ver lib/telemetry/insights.ts) */}
+      <div>
+        <SectionTitle icon={Sparkles}>Insights</SectionTitle>
+        <p className="mb-2 text-[11px] text-fg-subtle">
+          Estimativas heurísticas por regras transparentes sobre os dados coletados — não é ML.
+        </p>
+        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-4">
+          <InsightTile
+            label="Engajamento"
+            value={`${insights.engagement}/100`}
+            pct={insights.engagement}
+          />
+          <InsightTile
+            label="Risco de abandono"
+            value={insights.churnRisk}
+            tone={
+              insights.churnRisk === 'alto'
+                ? 'danger'
+                : insights.churnRisk === 'médio'
+                  ? 'muted'
+                  : 'accent'
+            }
+          />
+          <InsightTile
+            label="Chance de voltar amanhã"
+            value={`${insights.returnTomorrowPct}%`}
+            pct={insights.returnTomorrowPct}
+          />
+          <InsightTile
+            label="Heavy-user score"
+            value={`${insights.heavyUserScore}/100`}
+            pct={insights.heavyUserScore}
+          />
+        </div>
+        <div className="mt-2 flex items-start gap-2 rounded-lg bg-fg/4 px-3 py-2">
+          <BellRing className="mt-0.5 size-4 shrink-0 text-fg-muted" />
+          <div className="min-w-0">
+            <p className="text-[11px] leading-tight text-fg-subtle">
+              Melhor horário para notificar (pico de uso)
+            </p>
+            <p className="text-[13px] font-semibold text-fg">
+              {insights.bestNotifyHour != null ? `${insights.bestNotifyHour}h` : '—'}
+            </p>
+          </div>
+        </div>
+        <ul className="mt-2 space-y-1 text-[12px] text-fg-muted">
+          {insights.suggestions.length > 0 ? (
+            insights.suggestions.map((s) => (
+              <li key={s} className="flex items-baseline gap-1.5">
+                <span className="text-fg-subtle">•</span>
+                <span>{s}</span>
+              </li>
+            ))
+          ) : (
+            <li className="text-fg-subtle">Sem ações de retenção recomendadas no momento.</li>
+          )}
+        </ul>
       </div>
 
       {/* Uso por hora do dia */}
@@ -681,11 +1090,99 @@ function Summary({ docs }: { docs: TelemetryDoc[] }) {
   );
 }
 
+// ── diagnóstico do sistema (checklist do painel) ─────────────────────────────
+
+type CheckStatus = 'checando' | 'ok' | 'falha';
+
+function CheckIcon({ status }: { status: CheckStatus }) {
+  if (status === 'checando') return <Loader2 className="size-4 animate-spin text-fg-subtle" />;
+  if (status === 'ok') return <CheckCircle2 className="size-4 text-accent" />;
+  return <XCircle className="size-4 text-danger" />;
+}
+
+/**
+ * Checklist visual de saúde: Firestore (os docs chegaram?), Importer
+ * (GET /health com timeout curto) e Service Worker (registrado e ativo).
+ */
+function Diagnostics({ firestore }: { firestore: CheckStatus }) {
+  const [importer, setImporter] = useState<CheckStatus>('checando');
+  const [sw, setSw] = useState<CheckStatus>('checando');
+
+  useEffect(() => {
+    const ctrl = new AbortController();
+    const timer = setTimeout(() => ctrl.abort(), 5000);
+    fetch('https://importer.nexusholding.xyz/health', { signal: ctrl.signal })
+      .then((r) => setImporter(r.ok ? 'ok' : 'falha'))
+      .catch(() => setImporter('falha'))
+      .finally(() => clearTimeout(timer));
+
+    if ('serviceWorker' in navigator) {
+      navigator.serviceWorker.getRegistration().then(
+        (reg) => setSw(reg?.active ? 'ok' : 'falha'),
+        () => setSw('falha'),
+      );
+    } else {
+      setSw('falha');
+    }
+
+    return () => {
+      ctrl.abort();
+      clearTimeout(timer);
+    };
+  }, []);
+
+  const items: Array<{ label: string; detail: string; status: CheckStatus }> = [
+    {
+      label: 'Firestore',
+      detail:
+        firestore === 'ok' ? 'documentos de telemetria carregados' : 'sem acesso aos documentos',
+      status: firestore,
+    },
+    {
+      label: 'Importer',
+      detail: importer === 'ok' ? 'health check respondeu' : 'health check não respondeu',
+      status: importer,
+    },
+    {
+      label: 'Service Worker',
+      detail: sw === 'ok' ? 'registrado e ativo neste navegador' : 'inativo neste navegador',
+      status: sw,
+    },
+  ];
+
+  return (
+    <section>
+      <SectionTitle icon={Stethoscope}>Diagnóstico do sistema</SectionTitle>
+      <div className="grid grid-cols-1 gap-2 sm:grid-cols-3">
+        {items.map((item) => (
+          <div
+            key={item.label}
+            className="flex items-start gap-2 rounded-lg border border-border bg-bg-elevated px-3 py-2"
+          >
+            <span className="mt-0.5 shrink-0">
+              <CheckIcon status={item.status} />
+            </span>
+            <div className="min-w-0">
+              <p className="text-[13px] font-semibold text-fg">{item.label}</p>
+              <p className="text-[11px] text-fg-muted">
+                {item.status === 'checando' ? 'verificando…' : item.detail}
+              </p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </section>
+  );
+}
+
 export default function TelemetryPage() {
   const [docs, setDocs] = useState<TelemetryDoc[] | null>(null);
   const [error, setError] = useState(false);
   const [view, setView] = useState<ViewMode>('lista');
   const [expandedUid, setExpandedUid] = useState<string | null>(null);
+  const [query, setQuery] = useState('');
+  const [platformFilter, setPlatformFilter] = useState('todas');
+  const [categoryFilter, setCategoryFilter] = useState('todas');
 
   useEffect(() => {
     if (!db) {
@@ -702,6 +1199,61 @@ export default function TelemetryPage() {
       () => setError(true),
     );
   }, []);
+
+  // Plataformas realmente presentes nos docs (para o select de filtro).
+  const platforms = useMemo(
+    () =>
+      Array.from(new Set((docs ?? []).map((t) => t.platform).filter((p): p is string => !!p))).sort(
+        (a, b) => a.localeCompare(b, 'pt-BR'),
+      ),
+    [docs],
+  );
+
+  // Busca global + filtros — se aplicam a todos os modos de visualização.
+  const filteredDocs = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    return (docs ?? []).filter((t) => {
+      const segment = categorize(t).primary;
+      if (platformFilter !== 'todas' && t.platform !== platformFilter) return false;
+      if (categoryFilter !== 'todas' && segment !== categoryFilter) return false;
+      if (!q) return true;
+      return [t.displayName, t.email, t.uid, t.platform, t.browser, segment]
+        .filter(Boolean)
+        .join(' ')
+        .toLowerCase()
+        .includes(q);
+    });
+  }, [docs, query, platformFilter, categoryFilter]);
+
+  const categories = [
+    'Ouvinte pesado',
+    'Colecionador',
+    'Explorador',
+    'Curtidor',
+    'Casual',
+    'Novato',
+    'Inativo',
+  ];
+
+  const exportJson = () => {
+    downloadBlob(
+      `telemetria-${new Date().toISOString().slice(0, 10)}.json`,
+      'application/json',
+      JSON.stringify(docs ?? [], null, 2),
+    );
+  };
+  const exportCsv = () => {
+    downloadBlob(
+      `telemetria-${new Date().toISOString().slice(0, 10)}.csv`,
+      'text/csv;charset=utf-8',
+      toCsv(docs ?? []),
+    );
+  };
+
+  const toolbarBtn =
+    'inline-flex items-center gap-1.5 rounded-full bg-fg/5 px-3 py-1.5 text-[12px] font-medium text-fg-muted transition-colors hover:bg-fg/10 hover:text-fg';
+  const selectCls =
+    'h-9 rounded-lg border border-border bg-bg-elevated px-2.5 text-[13px] text-fg outline-none transition-colors focus:border-fg/30';
 
   return (
     <div className="space-y-6 py-4">
@@ -740,6 +1292,23 @@ export default function TelemetryPage() {
 
       {!error && docs !== null && docs.length > 0 && (
         <>
+          {/* Exportação do painel */}
+          <div className="flex flex-wrap items-center gap-2">
+            <button type="button" onClick={exportJson} className={toolbarBtn}>
+              <Download className="size-3.5" /> Exportar JSON
+            </button>
+            <button type="button" onClick={exportCsv} className={toolbarBtn}>
+              <Download className="size-3.5" /> Exportar CSV
+            </button>
+            <button
+              type="button"
+              onClick={() => copyText(JSON.stringify(docs, null, 2), 'JSON da telemetria copiado')}
+              className={toolbarBtn}
+            >
+              <Copy className="size-3.5" /> Copiar JSON
+            </button>
+          </div>
+
           <Summary docs={docs} />
 
           {/* Modo de visualização */}
@@ -763,10 +1332,64 @@ export default function TelemetryPage() {
             ))}
           </div>
 
+          {/* Busca global + filtros — valem para todos os modos */}
+          <div className="flex flex-wrap items-center gap-2">
+            <div className="relative min-w-52 flex-1">
+              <Search className="pointer-events-none absolute left-3 top-1/2 size-4 -translate-y-1/2 text-fg-subtle" />
+              <input
+                type="search"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+                placeholder="Buscar por nome, e-mail, uid, plataforma ou categoria…"
+                aria-label="Buscar usuários"
+                className="h-9 w-full rounded-lg border border-border bg-bg-elevated pl-9 pr-3 text-[13px] text-fg outline-none transition-colors placeholder:text-fg-subtle focus:border-fg/30"
+              />
+            </div>
+            <select
+              value={platformFilter}
+              onChange={(e) => setPlatformFilter(e.target.value)}
+              aria-label="Filtrar por plataforma"
+              className={selectCls}
+            >
+              <option value="todas">Todas as plataformas</option>
+              {platforms.map((p) => (
+                <option key={p} value={p}>
+                  {p}
+                </option>
+              ))}
+            </select>
+            <select
+              value={categoryFilter}
+              onChange={(e) => setCategoryFilter(e.target.value)}
+              aria-label="Filtrar por categoria"
+              className={selectCls}
+            >
+              <option value="todas">Todas as categorias</option>
+              {categories.map((c) => (
+                <option key={c} value={c}>
+                  {c}
+                </option>
+              ))}
+            </select>
+            {filteredDocs.length !== docs.length && (
+              <span className="text-[12px] text-fg-subtle">
+                {filteredDocs.length} de {docs.length}
+              </span>
+            )}
+          </div>
+
+          {filteredDocs.length === 0 && (
+            <EmptyState
+              icon={Search}
+              title="Nenhum usuário encontrado"
+              description="Nenhum usuário corresponde à busca e aos filtros atuais."
+            />
+          )}
+
           {/* Lista compacta — escala para centenas de usuários; clique expande. */}
-          {view === 'lista' && (
+          {view === 'lista' && filteredDocs.length > 0 && (
             <div className="space-y-1.5">
-              {docs.map((t) => (
+              {filteredDocs.map((t) => (
                 <UserRow
                   key={t.uid}
                   t={t}
@@ -778,10 +1401,10 @@ export default function TelemetryPage() {
           )}
 
           {/* Agrupado por categoria de comportamento. */}
-          {view === 'categorias' && (
+          {view === 'categorias' && filteredDocs.length > 0 && (
             <div className="space-y-6">
               {Object.entries(
-                docs.reduce<Record<string, TelemetryDoc[]>>((groups, t) => {
+                filteredDocs.reduce<Record<string, TelemetryDoc[]>>((groups, t) => {
                   const { primary } = categorize(t);
                   (groups[primary] ??= []).push(t);
                   return groups;
@@ -812,15 +1435,18 @@ export default function TelemetryPage() {
           )}
 
           {/* Cards completos (o modo de estudo profundo). */}
-          {view === 'detalhes' && (
+          {view === 'detalhes' && filteredDocs.length > 0 && (
             <div className="grid gap-4 xl:grid-cols-2">
-              {docs.map((t) => (
+              {filteredDocs.map((t) => (
                 <UserCard key={t.uid} t={t} />
               ))}
             </div>
           )}
         </>
       )}
+
+      {/* Saúde do sistema — independe de haver usuários. */}
+      <Diagnostics firestore={error ? 'falha' : docs === null ? 'checando' : 'ok'} />
     </div>
   );
 }

@@ -4,11 +4,28 @@
  * while the earlier ones finish. Playlists expand into one queued item per
  * track. Progress is observable for a small status panel; failures are kept so
  * they can be retried, and duplicates are skipped by localLibrary itself.
+ *
+ * Circuit breaker: um erro de autenticação (401/403) ou 3 falhas seguidas
+ * pausam a fila INTEIRA (ver PauseReason) — nunca mais aquele loop de centenas
+ * de POSTs 403 no console quando a conta não tem acesso ao importer.
  */
 import * as localLibrary from '@/lib/local/localLibrary';
 import { fetchPlaylistEntries, isPlaylistUrl } from '@/lib/local/importerHelper';
+import { subscribeAuth } from '@/lib/firebase';
 
 export type ImportStatus = 'pending' | 'downloading' | 'done' | 'error';
+
+/**
+ * Por que a fila pausou (circuit breaker global):
+ *   'auth'    → o importer respondeu 401/403 — retry NUNCA resolve sozinho
+ *               (conta sem permissão / usuário deslogado). Sem pausa, uma fila
+ *               persistida com centenas de itens vira uma metralhadora de POSTs
+ *               403 no console do usuário. Retomamos quando ele loga.
+ *   'backoff' → 3 falhas seguidas de qualquer tipo (importer fora do ar, rede…)
+ *               — em vez de martelar item a item, a fila inteira descansa e
+ *               tenta de novo sozinha em 5 minutos.
+ */
+export type PauseReason = 'auth' | 'backoff' | null;
 
 export interface ImportItem {
   id: string;
@@ -36,6 +53,20 @@ let active = 0;
 let seq = 0;
 let wakeTimer: ReturnType<typeof setTimeout> | null = null;
 const listeners = new Set<() => void>();
+
+// ── Circuit breaker global ──────────────────────────────────────────────────
+// Estado de pausa da fila INTEIRA (não por item). Enquanto pausada, pump() não
+// inicia nada — zero requisições ao importer, zero 403 em loop no console.
+let pausedFor: PauseReason = null;
+/** Falhas transitórias seguidas (qualquer item); zera a cada sucesso. */
+let consecutiveFailures = 0;
+/** Timer da retomada automática da pausa por 'backoff' (5 min). */
+let resumeTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Falhas seguidas (de qualquer tipo) antes da pausa geral com auto-retomada. */
+const PAUSE_AFTER_FAILURES = 3;
+/** Quanto tempo a pausa por 'backoff' dura antes de tentar de novo sozinha. */
+const BACKOFF_PAUSE_MS = 5 * 60_000;
 
 /** Persist unfinished work so links survive a reload and keep downloading. */
 function persist(): void {
@@ -82,10 +113,22 @@ export function list(): ImportItem[] {
 }
 
 /** Counts for a compact indicator (e.g. "3 baixando · 5 na fila"). */
-export function stats(): { pending: number; downloading: number; done: number; error: number } {
+export function stats(): {
+  pending: number;
+  downloading: number;
+  done: number;
+  error: number;
+  /** Motivo da pausa global (null = fila rodando normalmente). */
+  pauseReason: PauseReason;
+} {
   const s = { pending: 0, downloading: 0, done: 0, error: 0 };
   for (const it of items) s[it.status] += 1;
-  return s;
+  return { ...s, pauseReason: pausedFor };
+}
+
+/** Motivo da pausa global — snapshot primitivo para useSyncExternalStore. */
+export function pauseReason(): PauseReason {
+  return pausedFor;
 }
 
 /** Forget finished/failed items (keeps anything still in flight). */
@@ -111,8 +154,52 @@ export function cancelAll(): void {
     clearTimeout(wakeTimer);
     wakeTimer = null;
   }
+  // Fila vazia → a pausa perdeu o objeto; limpa para a próxima fila nascer limpa.
+  clearPause();
   emit();
 }
+
+/** Limpa o estado de pausa (sem emitir nem bombear — os chamadores decidem). */
+function clearPause(): void {
+  pausedFor = null;
+  consecutiveFailures = 0;
+  if (resumeTimer) {
+    clearTimeout(resumeTimer);
+    resumeTimer = null;
+  }
+}
+
+/**
+ * Pausa a fila INTEIRA. Para 'auth' não há timer — só login (auto) ou o botão
+ * "Retomar agora" religam; para 'backoff' um timer retoma sozinho em 5 min,
+ * então a falha geral se resolve sem hammering nem ação do usuário.
+ */
+function pause(reason: Exclude<PauseReason, null>): void {
+  if (pausedFor === reason) return;
+  pausedFor = reason;
+  if (wakeTimer) {
+    clearTimeout(wakeTimer);
+    wakeTimer = null;
+  }
+  if (resumeTimer) clearTimeout(resumeTimer);
+  resumeTimer = reason === 'backoff' ? setTimeout(resume, BACKOFF_PAUSE_MS) : null;
+  emit();
+}
+
+/** Retoma a fila pausada (botão "Retomar agora", login, ou timer do backoff). */
+export function resume(): void {
+  if (!pausedFor) return;
+  clearPause();
+  emit();
+  pump();
+}
+
+// Auto-retomada: pausa por 'auth' significa "espere o usuário entrar na conta".
+// Assim que o Firebase reporta um usuário logado, a fila volta sozinha — sem
+// isso o usuário teria de achar o botão manualmente depois de logar.
+subscribeAuth((user) => {
+  if (user && pausedFor === 'auth') resume();
+});
 
 /** Remove a single queued/failed item (not one actively downloading). */
 export function remove(id: string): void {
@@ -170,6 +257,9 @@ function scheduleWake(): void {
 }
 
 function pump(): void {
+  // Circuit breaker: fila pausada não inicia NADA (nem agenda wake). Quem
+  // religa é resume() — via botão, login ou o timer do backoff.
+  if (pausedFor) return;
   while (active < CONCURRENCY) {
     const next = nextReady();
     if (!next) break;
@@ -205,17 +295,41 @@ async function process(item: ImportItem): Promise<void> {
       // independently (and a big list doesn't hold a slot the whole time).
       const { entries } = await fetchPlaylistEntries(item.url);
       if (gen !== generation) return; // fila cancelada no meio — descarta
+      consecutiveFailures = 0; // sucesso fecha o circuito
       enqueue(entries.map((e) => e.url));
       update(item.id, { status: 'done', title: `Playlist · ${entries.length} faixas` });
       return;
     }
     const track = await localLibrary.addByUrl(item.url, { silent: true });
     if (gen !== generation) return; // fila cancelada — não re-insere estado
+    consecutiveFailures = 0; // sucesso fecha o circuito
     update(item.id, { status: 'done', title: track.title });
   } catch (err) {
     if (gen !== generation) return; // fila cancelada — sem retry fantasma
-    const attempts = (item.attempts ?? 0) + 1;
     const message = err instanceof Error ? err.message : 'Falha ao baixar';
+    // 401/403 do importer = problema de CONTA, não da faixa: retry por item
+    // jamais resolve e só inunda o console de POSTs recusados. O item volta a
+    // 'pending' SEM consumir attempts e a fila inteira pausa até o login.
+    const status = (err as { status?: unknown } | null)?.status;
+    if (status === 401 || status === 403) {
+      update(item.id, { status: 'pending', notBefore: undefined, error: message });
+      pause('auth');
+      return;
+    }
+    consecutiveFailures += 1;
+    const attempts = (item.attempts ?? 0) + 1;
+    if (consecutiveFailures >= PAUSE_AFTER_FAILURES) {
+      // Falha geral (importer fora do ar, rede caída…): pausa TUDO com
+      // retomada automática em 5 min, em vez de queimar attempts item a item.
+      update(item.id, {
+        status: 'pending',
+        attempts,
+        notBefore: undefined,
+        error: message,
+      });
+      pause('backoff');
+      return;
+    }
     if (attempts < MAX_ATTEMPTS) {
       // Auto-retry with backoff (10s, 20s, … capped) so a transient failure
       // (YouTube 403/throttle) fixes itself without the user tapping retry.

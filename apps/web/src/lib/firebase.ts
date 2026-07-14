@@ -13,6 +13,7 @@ import {
   getAuth,
   isSignInWithEmailLink,
   onAuthStateChanged,
+  sendEmailVerification,
   sendSignInLinkToEmail,
   signInAnonymously as fbSignInAnonymously,
   signInWithEmailAndPassword,
@@ -72,8 +73,13 @@ export function signInEmail(email: string, password: string): Promise<UserCreden
   return signInWithEmailAndPassword(requireAuth(), email, password);
 }
 
-export function signUpEmail(email: string, password: string): Promise<UserCredential> {
-  return createUserWithEmailAndPassword(requireAuth(), email, password);
+export async function signUpEmail(email: string, password: string): Promise<UserCredential> {
+  const credential = await createUserWithEmailAndPassword(requireAuth(), email, password);
+  // Dispara o e-mail de verificação na hora (best-effort). Sem isso, contas
+  // e-mail/senha ficavam não-verificadas PARA SEMPRE — e serviços que checam
+  // email_verified (ex.: modo allow-list do importer) as recusavam em silêncio.
+  void sendEmailVerification(credential.user).catch(() => undefined);
+  return credential;
 }
 
 export function signInAnonymously(): Promise<UserCredential> {
