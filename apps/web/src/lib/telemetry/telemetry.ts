@@ -154,6 +154,66 @@ function updateSessionLog(): SessionLogEntry[] {
   return log;
 }
 
+// ── fabricante/modelo do aparelho (async, cacheado) ─────────────────────────
+// Android (Chrome): UA Client Hints entrega o modelo real ("moto g34 5G").
+// Desktop: SO + versão real (Windows 11 via platformVersion) + arquitetura.
+// iOS: a Apple NÃO expõe o modelo (todos os iPhones têm o mesmo UA) — melhor
+// esforço honesto: o chip via string da GPU ("Apple A15 GPU") quando existe.
+let deviceModelCache: string | null = null;
+
+function probeDeviceModel(): void {
+  void (async () => {
+    try {
+      const uaData = (
+        navigator as Navigator & {
+          userAgentData?: {
+            getHighEntropyValues: (hints: string[]) => Promise<{
+              model?: string;
+              platform?: string;
+              platformVersion?: string;
+              architecture?: string;
+            }>;
+          };
+        }
+      ).userAgentData;
+      if (uaData?.getHighEntropyValues) {
+        const info = await uaData.getHighEntropyValues([
+          'model',
+          'platform',
+          'platformVersion',
+          'architecture',
+        ]);
+        if (info.model?.trim()) {
+          deviceModelCache = info.model.trim(); // Android: modelo real
+          return;
+        }
+        if (info.platform) {
+          // Desktop: "Windows 11 · x64" (Windows 11 = platformVersion >= 13).
+          const major = Number((info.platformVersion ?? '').split('.')[0]);
+          const os =
+            info.platform === 'Windows' && Number.isFinite(major)
+              ? `Windows ${major >= 13 ? 11 : 10}`
+              : info.platform;
+          deviceModelCache = [os, info.architecture].filter(Boolean).join(' · ');
+          return;
+        }
+      }
+      // Fallback sem Client Hints: modelo Android direto do UA.
+      const androidModel = /Android [\d.]+; ([^;)]+)[;)]/.exec(navigator.userAgent)?.[1]?.trim();
+      if (androidModel && androidModel !== 'K') {
+        deviceModelCache = androidModel;
+        return;
+      }
+      // iOS: chip via GPU quando a string nomeia ("Apple A15 GPU").
+      if (/iP(hone|od|ad)/.test(navigator.userAgent)) {
+        deviceModelCache = 'Modelo não exposto pelo iOS';
+      }
+    } catch {
+      /* fica null */
+    }
+  })();
+}
+
 // Battery info is async — probed once, cached for snapshots.
 let batteryInfo: { level: number; charging: boolean } | null = null;
 function probeBattery(): void {
@@ -346,6 +406,7 @@ function snapshot(): Record<string, unknown> {
     isAnonymous: currentUser?.isAnonymous ?? false,
     platform: platformInfo(),
     browser: browserInfo(),
+    ...(deviceModelCache ? { deviceModel: deviceModelCache } : {}),
     language: navigator.language ?? null,
     timezone: timezoneInfo() || null,
     screen: `${window.screen.width}×${window.screen.height}`,
@@ -448,6 +509,7 @@ function start(user: User): void {
   sessionStartMs = Date.now();
   sessionActions = [];
   probeBattery();
+  probeDeviceModel();
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);

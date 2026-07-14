@@ -36,6 +36,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { IconButton } from '@/components/ui/icon-button';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
 import { useDominantColor } from '@/hooks/useDominantColor';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
@@ -82,6 +83,9 @@ export function NowPlaying() {
   const shuffle = usePlayerStore((s) => s.shuffle);
   const playbackRate = usePlayerStore((s) => s.playbackRate);
   const context = usePlayerStore((s) => s.context);
+  const queue = usePlayerStore((s) => s.queue);
+  const queueIndex = usePlayerStore((s) => s.queueIndex);
+  const playAt = usePlayerStore((s) => s.playAt);
   const { toggle, next, prev, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat, setRate } =
     usePlayerStore.getState();
 
@@ -90,7 +94,9 @@ export function NowPlaying() {
 
   const [visualizer, setVisualizer] = useState(false);
   const [miniclip, setMiniclip] = useState(false);
+  const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const isTouch = useMediaQuery('(pointer: coarse)');
+  const isDesktopQueue = useMediaQuery('(min-width: 1024px)');
   const dominant = useDominantColor(track?.coverUrl);
   const glow = track?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
   const { data: waveform } = useWaveform(open ? track?.id : undefined);
@@ -164,10 +170,74 @@ export function NowPlaying() {
             <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-muted">
               Tocando {context ? (sourceLabels[context.source] ?? '') : ''}
             </p>
-            <IconButton aria-label="Fila" onClick={toggleQueue}>
+            <IconButton
+              aria-label="Fila"
+              onClick={() => {
+                // Desktop: painel lateral; mobile: o painel não existe — abre
+                // a folha com a fila AQUI (antes o botão não fazia nada).
+                if (isDesktopQueue) toggleQueue();
+                else setQueueSheetOpen(true);
+              }}
+            >
               <ListMusic />
             </IconButton>
           </header>
+
+          {/* Fila (mobile): folha com a playlist do que está tocando agora. */}
+          <Sheet open={queueSheetOpen} onOpenChange={setQueueSheetOpen}>
+            <SheetContent side="bottom" className="z-70 max-h-[70vh] overflow-y-auto md:hidden">
+              <SheetHeader>
+                <SheetTitle>Fila de reprodução</SheetTitle>
+              </SheetHeader>
+              <div className="space-y-0.5 pb-4">
+                {queue.map((qTrack, index) => (
+                  <button
+                    key={`${qTrack.id}:${index}`}
+                    type="button"
+                    onClick={() => {
+                      playAt(index);
+                      setQueueSheetOpen(false);
+                    }}
+                    className={cn(
+                      'flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-fg/5',
+                      index === queueIndex && 'bg-fg/8',
+                    )}
+                  >
+                    <span className="w-6 shrink-0 text-center font-mono text-[12px] text-fg-subtle">
+                      {index + 1}
+                    </span>
+                    <span className="relative size-9 shrink-0 overflow-hidden rounded-sm bg-fg/6">
+                      {qTrack.coverUrl ? (
+                        <img
+                          src={qTrack.coverUrl}
+                          alt=""
+                          loading="lazy"
+                          className="size-full object-cover"
+                        />
+                      ) : (
+                        <span className="grid size-full place-items-center text-fg-subtle">
+                          <Music className="size-4" />
+                        </span>
+                      )}
+                    </span>
+                    <span className="min-w-0 flex-1">
+                      <span
+                        className={cn(
+                          'line-clamp-1 text-sm font-medium',
+                          index === queueIndex ? 'text-accent' : 'text-fg',
+                        )}
+                      >
+                        {qTrack.title}
+                      </span>
+                      <span className="line-clamp-1 text-[12px] text-fg-muted">
+                        {trackArtistNames(qTrack)}
+                      </span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            </SheetContent>
+          </Sheet>
 
           {/* Body */}
           <div

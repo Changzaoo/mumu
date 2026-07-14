@@ -17,10 +17,16 @@ function supported(): boolean {
   return typeof navigator !== 'undefined' && 'mediaSession' in navigator;
 }
 
-/** Artwork entries for the lock screen — one cover, a few size hints. */
+/** Artwork entries for the lock screen — one cover, a few size hints.
+ *  Sem capa, usa o ícone do APP — a notificação nunca fica com o do navegador. */
 function artworkFor(track: TrackDto): MediaImage[] {
   const url = track.coverUrl;
-  if (!url) return [];
+  if (!url) {
+    return [
+      { src: '/icons/pwa-maskable-512.png', sizes: '512x512', type: 'image/png' },
+      { src: '/icons/pwa-maskable-192.png', sizes: '192x192', type: 'image/png' },
+    ];
+  }
   const type = url.startsWith('data:image/png') ? 'image/png' : 'image/jpeg';
   return [
     { src: url, sizes: '512x512', type },

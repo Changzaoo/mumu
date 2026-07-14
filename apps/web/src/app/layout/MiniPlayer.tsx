@@ -1,5 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { Music, Pause, Play, SkipForward } from 'lucide-react';
+import { LikeButton } from '@/components/media/LikeButton';
+import { useTrackLikes } from '@/features/library/api';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -15,7 +17,9 @@ export function MiniPlayer() {
   const duration = usePlayerStore((s) => s.duration);
   const toggle = usePlayerStore((s) => s.toggle);
   const next = usePlayerStore((s) => s.next);
+  const prev = usePlayerStore((s) => s.prev);
   const setNowPlayingOpen = useUiStore((s) => s.setNowPlayingOpen);
+  const likes = useTrackLikes();
 
   const pct = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
 
@@ -30,7 +34,19 @@ export function MiniPlayer() {
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
           className="glass fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 h-16 overflow-hidden rounded-xl md:hidden"
         >
-          <div className="flex h-full items-center gap-3 px-3">
+          {/* Swipe lateral (Spotify): arrastar para a ESQUERDA pula para a
+              próxima, para a DIREITA volta — solta e o card volta ao lugar. */}
+          <motion.div
+            className="flex h-full items-center gap-3 px-3"
+            drag="x"
+            dragConstraints={{ left: 0, right: 0 }}
+            dragElastic={0.25}
+            dragSnapToOrigin
+            onDragEnd={(_, info) => {
+              if (info.offset.x < -60 || info.velocity.x < -400) next();
+              else if (info.offset.x > 60 || info.velocity.x > 400) prev();
+            }}
+          >
             <button
               type="button"
               aria-label="Abrir reprodução em tela cheia"
@@ -53,6 +69,11 @@ export function MiniPlayer() {
                 </span>
               </span>
             </button>
+            <LikeButton
+              liked={likes.isLiked(track)}
+              onToggle={(liked) => likes.toggle(track, liked)}
+              className="shrink-0"
+            />
             <button
               type="button"
               aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
@@ -73,7 +94,7 @@ export function MiniPlayer() {
             >
               <SkipForward className="size-5 fill-current" />
             </button>
-          </div>
+          </motion.div>
           {/* progress hairline */}
           <div aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-fg/10">
             <div className="h-full bg-accent" style={{ width: `${pct}%` }} />

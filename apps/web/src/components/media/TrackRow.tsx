@@ -252,7 +252,9 @@ export function TrackRow({
           liked={liked}
           onToggle={onToggleLike}
           className={cn(
-            'opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100',
+            // Desktop: aparece no hover. TOQUE: sempre visível — sem hover no
+            // celular o botão praticamente não existia.
+            'opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100',
             liked && 'opacity-100',
           )}
         />

@@ -65,6 +65,8 @@ interface TelemetryDoc {
   isAnonymous?: boolean;
   platform?: string;
   browser?: string;
+  /** Fabricante/modelo real (Android via UA-CH); iOS não expõe (política Apple). */
+  deviceModel?: string;
   language?: string | null;
   timezone?: string | null;
   screen?: string;
@@ -700,6 +702,11 @@ function UserCard({ t }: { t: TelemetryDoc }) {
             icon={MonitorSmartphone}
             label="Plataforma"
             value={`${t.platform ?? '—'}${t.browser ? ` · ${t.browser}` : ''}`}
+          />
+          <Stat
+            icon={Smartphone}
+            label="Fabricante / modelo"
+            value={t.deviceModel ?? 'Não exposto pelo navegador'}
           />
           <Stat
             icon={Smartphone}

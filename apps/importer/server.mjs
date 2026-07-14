@@ -250,12 +250,18 @@ async function importToMp3(ytdlp, url, quality) {
     '10',
     '--extractor-retries',
     '3',
+    // Fragmentos em paralelo: o download do áudio em si fica ~3-4× mais
+    // rápido (fetches de CDN, não contam como "requests" na página).
+    '--concurrent-fragments',
+    '4',
+    // Pausas menores: o cliente já recua sozinho (modo devagar) se o YouTube
+    // pedir verificação — não precisamos pagar 3-8s de pausa em TODA faixa.
     '--sleep-requests',
-    '1',
+    '0.5',
     '--sleep-interval',
-    '2',
+    '1',
     '--max-sleep-interval',
-    '6',
+    '3',
     // Optional YouTube cookies (Netscape cookies.txt) to pass the "not a bot"
     // gate on large batches — set YTDLP_COOKIES to the file path.
     ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),

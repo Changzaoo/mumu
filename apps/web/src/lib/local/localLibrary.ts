@@ -416,6 +416,14 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   return true;
 }
 
+/** AGENTE DE CATEGORIAS: aplica um gênero classificado a uma faixa (patch
+ *  mínimo — não mexe em crédito/capa; ver lib/local/genreAgent.ts). */
+export function setTrackGenre(id: string, genre: string): void {
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur || cur.track.genre === genre) return;
+  patchEntry(id, { ...cur, track: { ...cur.track, genre } });
+}
+
 /** Enrich a list of ids one at a time (gentle on the iTunes endpoint). */
 async function enrichSequentially(ids: string[]): Promise<void> {
   for (const id of ids) {

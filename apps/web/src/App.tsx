@@ -11,6 +11,7 @@ import { initCloudSync } from '@/lib/sync/syncManager';
 import { init as initImportQueue } from '@/lib/local/importQueue';
 import { initTelemetry } from '@/lib/telemetry/telemetry';
 import { initPresence } from '@/lib/devices/presence';
+import { initGenreAgent } from '@/lib/local/genreAgent';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -38,6 +39,7 @@ export default function App() {
     initImportQueue(); // resume any downloads queued before a reload
     initTelemetry(); // usage metrics for the admin /telemetria page
     initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
+    initGenreAgent(); // plantão que categoriza a biblioteca por gênero (IA)
 
     // App de verdade no celular: sem menu de long-press do navegador (abrir em
     // nova aba, salvar imagem…). Só em telas de toque — o desktop mantém o

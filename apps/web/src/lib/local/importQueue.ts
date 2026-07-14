@@ -39,10 +39,23 @@ export interface ImportItem {
   notBefore?: number;
 }
 
-/** How many links download at once. One at a time: each runs yt-dlp on the home
- *  server AND hits YouTube, and bursts trigger YouTube's "confirm you're not a
- *  bot" gate — serial + the importer's per-download sleeps stay under the radar. */
-const CONCURRENCY = 1;
+/** Downloads simultâneos. 2 por padrão (o dobro da velocidade); se o YouTube
+ *  pedir verificação ("not a bot"), recua sozinho para 1 por 10 minutos e
+ *  depois volta — velocidade sem tomar bloqueio. */
+const FAST_CONCURRENCY = 2;
+let concurrency = FAST_CONCURRENCY;
+let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** YouTube reclamou de volume: modo devagar por 10 min, depois acelera de novo. */
+function slowDown(): void {
+  concurrency = 1;
+  if (cooldownTimer) clearTimeout(cooldownTimer);
+  cooldownTimer = setTimeout(() => {
+    concurrency = FAST_CONCURRENCY;
+    cooldownTimer = null;
+    pump();
+  }, 10 * 60_000);
+}
 /** Auto-retry a failed download this many times (with backoff) before giving up. */
 const MAX_ATTEMPTS = 5;
 
@@ -260,7 +273,7 @@ function pump(): void {
   // Circuit breaker: fila pausada não inicia NADA (nem agenda wake). Quem
   // religa é resume() — via botão, login ou o timer do backoff.
   if (pausedFor) return;
-  while (active < CONCURRENCY) {
+  while (active < concurrency) {
     const next = nextReady();
     if (!next) break;
     active += 1;
@@ -324,6 +337,8 @@ async function process(item: ImportItem): Promise<void> {
       update(item.id, { status: 'error', attempts: MAX_ATTEMPTS, error: message });
       return;
     }
+    // YouTube pediu verificação de volume → modo devagar (1 por vez) por 10min.
+    if (message.includes('pediu verificação')) slowDown();
     consecutiveFailures += 1;
     const attempts = (item.attempts ?? 0) + 1;
     if (consecutiveFailures >= PAUSE_AFTER_FAILURES) {

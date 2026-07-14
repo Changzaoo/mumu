@@ -126,6 +126,41 @@ let preloadRequested = false;
 let crossfadeTriggered = false;
 let lastProgressCommit = 0;
 
+// ── retomar de onde parou (Spotify-like) ────────────────────────
+// Ao reabrir o app, a ÚLTIMA faixa volta pausada na posição exata.
+// Persistência leve: só {faixa, segundos} — nunca a fila inteira (stringify
+// de fila grande já congelou o app uma vez).
+const RESUME_KEY = 'aurial:resume';
+let lastResumeSave = 0;
+/** Posição a buscar assim que o engine carregar a faixa restaurada. */
+let pendingResumeSeek: number | null = null;
+
+function saveResume(force = false): void {
+  const s = usePlayerStore.getState();
+  if (!s.currentTrack || s.progress <= 0) return;
+  const now = Date.now();
+  if (!force && now - lastResumeSave < 5_000) return; // no máx. 1 escrita / 5s
+  lastResumeSave = now;
+  try {
+    window.localStorage.setItem(
+      RESUME_KEY,
+      JSON.stringify({ track: s.currentTrack, progress: Math.floor(s.progress) }),
+    );
+  } catch {
+    /* quota */
+  }
+}
+
+function readResume(): { track: TrackDto; progress: number } | null {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(RESUME_KEY) ?? 'null');
+    const saved = parsed as { track?: TrackDto; progress?: number } | null;
+    return saved?.track ? { track: saved.track, progress: saved.progress ?? 0 } : null;
+  } catch {
+    return null;
+  }
+}
+
 // ── prévia de 30s para visitantes ────────────────────────────────
 // Sem login, cada faixa toca só PREVIEW_SECONDS; ao bater o limite o player
 // pausa e convida a criar conta (uma vez por faixa carregada).
@@ -195,6 +230,7 @@ export const usePlayerStore = create<PlayerState>()(
         preloadRequested = false;
         crossfadeTriggered = false;
         previewGateFired = false;
+        pendingResumeSeek = null; // troca de faixa normal — sem seek de retomada
         lastProgressCommit = 0;
         set({
           currentTrack: track,
@@ -329,14 +365,23 @@ export const usePlayerStore = create<PlayerState>()(
           if (isPlaying) {
             audioEngine.pause();
             set({ isPlaying: false });
+            saveResume(true);
           } else {
-            audioEngine.play();
-            set({ isPlaying: true });
+            get().play();
           }
         },
 
         play: () => {
-          if (!get().currentTrack) return;
+          const { currentTrack, queueIndex, progress } = get();
+          if (!currentTrack) return;
+          // Faixa restaurada de outra sessão (ou engine resetado): o engine
+          // ainda não a carregou — carrega agora e retoma NA POSIÇÃO salva.
+          if (audioEngine.currentTrack?.id !== currentTrack.id) {
+            const resumeAt = progress > 1 ? progress : null;
+            loadIndex(Math.max(0, queueIndex), true);
+            pendingResumeSeek = resumeAt; // depois do loadIndex (que zera)
+            return;
+          }
           audioEngine.play();
           set({ isPlaying: true });
         },
@@ -344,6 +389,7 @@ export const usePlayerStore = create<PlayerState>()(
         pause: () => {
           audioEngine.pause();
           set({ isPlaying: false });
+          saveResume(true);
         },
 
         seek: (seconds) => {
@@ -538,6 +584,27 @@ export function initPlayerEngine(): void {
   );
   void localAudioReady();
 
+  // Retomar de onde parou: a última faixa volta PAUSADA na posição exata —
+  // o primeiro play carrega o áudio e busca a posição (ver play()).
+  const resume = readResume();
+  if (resume && !store.getState().currentTrack) {
+    store.setState({
+      currentTrack: resume.track,
+      queue: [resume.track],
+      originalQueue: [resume.track],
+      queueIndex: 0,
+      progress: resume.progress,
+      duration: resume.track.durationMs / 1000,
+      isPlaying: false,
+      context: { source: 'queue' },
+    });
+  }
+  // Última chance de gravar a posição ao sair/minimizar o app.
+  window.addEventListener('pagehide', () => saveResume(true));
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden) saveResume(true);
+  });
+
   // OS lock-screen / notification controls + background-play signalling.
   initMediaSession();
 
@@ -570,6 +637,7 @@ export function initPlayerEngine(): void {
         duration: duration || state.duration,
         buffered: audioEngine.getBufferedEnd(),
       });
+      saveResume(); // "de onde parou" (1 escrita leve a cada 5s, no máximo)
     }
 
     // Record the play once at 30s or 50% listened (fire-and-forget).
@@ -646,6 +714,13 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('loaded', ({ duration }) => {
     if (duration > 0 && Number.isFinite(duration)) store.setState({ duration });
+    // Retomada: a faixa restaurada terminou de carregar → busca a posição salva.
+    if (pendingResumeSeek !== null) {
+      const at = Math.min(pendingResumeSeek, Math.max(0, (duration || Infinity) - 1));
+      pendingResumeSeek = null;
+      audioEngine.seek(at);
+      store.setState({ progress: at });
+    }
   });
 
   audioEngine.on('buffering', ({ buffering }) => {
