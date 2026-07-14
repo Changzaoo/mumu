@@ -128,6 +128,60 @@ function formatClock(iso: string): string {
   });
 }
 
+interface FriendlyAction {
+  when: string;
+  text: string;
+  count: number;
+}
+
+/**
+ * Linha do tempo da sessão em linguagem humana:
+ *  - cliques repetidos em sequência viram UMA linha com "×N";
+ *  - um clique seguido da abertura da página homônima é redundante — some;
+ *  - o offset vira horário de relógio (quando a hora de início é conhecida)
+ *    ou "logo ao abrir" / "X min depois".
+ */
+function humanizeActions(actions: SessionAction[], sessionStartIso?: string): FriendlyAction[] {
+  // 1. Remove o clique imediatamente confirmado pela navegação homônima.
+  const deduped = actions.filter((a, i) => {
+    const next = actions[i + 1];
+    return !(
+      a.type === 'click' &&
+      next?.type === 'nav' &&
+      next.atMs - a.atMs < 3000 &&
+      next.label.toLowerCase().includes(a.label.toLowerCase().slice(0, 12))
+    );
+  });
+
+  // 2. Colapsa sequências iguais ("clicou em Adicionar" ×5).
+  const collapsed: Array<SessionAction & { count: number }> = [];
+  for (const a of deduped) {
+    const last = collapsed[collapsed.length - 1];
+    if (last && last.type === a.type && last.label === a.label) last.count += 1;
+    else collapsed.push({ ...a, count: 1 });
+  }
+
+  // 3. Formata o momento de cada ação.
+  const start = sessionStartIso ? new Date(sessionStartIso).getTime() : null;
+  const when = (atMs: number): string => {
+    if (start) {
+      return new Date(start + atMs).toLocaleTimeString('pt-BR', {
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+    if (atMs < 10_000) return 'logo ao abrir';
+    if (atMs < 90_000) return `${Math.round(atMs / 1000)}s depois`;
+    return `${Math.round(atMs / 60_000)} min depois`;
+  };
+
+  return collapsed.map((a) => ({
+    when: when(a.atMs),
+    text: a.type === 'nav' ? `abriu ${PAGE_LABEL[a.label] ?? a.label}` : `clicou em “${a.label}”`,
+    count: a.count,
+  }));
+}
+
 /** Hora do dia com mais uso ("21h") a partir do histograma. */
 function peakHour(hist?: Record<string, number>): string | null {
   if (!hist) return null;
@@ -481,16 +535,27 @@ function UserCard({ t }: { t: TelemetryDoc }) {
         </div>
       )}
 
-      {/* O que fez ao abrir o app (última sessão) */}
+      {/* O que fez ao abrir o app (última sessão), em linguagem humana */}
       {(t.lastSessionActions?.length ?? 0) > 0 && (
         <div>
           <SectionTitle icon={LogIn}>Ao abrir o app (última sessão)</SectionTitle>
-          <ol className="space-y-0.5 text-[12px] text-fg-muted">
-            {t.lastSessionActions!.map((a, i) => (
-              <li key={i} className="truncate">
-                <span className="text-fg-subtle">+{Math.round(a.atMs / 1000)}s</span>{' '}
-                {a.type === 'nav' ? 'abriu' : 'clicou em'}{' '}
-                <span className="text-fg">{PAGE_LABEL[a.label] ?? a.label}</span>
+          <ol className="space-y-1 text-[12px] text-fg-muted">
+            {humanizeActions(
+              t.lastSessionActions!,
+              t.recentSessions?.[t.recentSessions.length - 1]?.startedAt,
+            ).map((a, i) => (
+              <li key={i} className="flex items-baseline gap-2">
+                <span className="w-14 shrink-0 font-mono text-[11px] tabular-nums text-fg-subtle">
+                  {a.when}
+                </span>
+                <span className="min-w-0 truncate">
+                  {a.text}
+                  {a.count > 1 && (
+                    <span className="ml-1.5 rounded-full bg-fg/8 px-1.5 py-0.5 text-[10px] font-semibold text-fg">
+                      ×{a.count}
+                    </span>
+                  )}
+                </span>
               </li>
             ))}
           </ol>
