@@ -91,7 +91,9 @@ describe('HomePage (personal library)', () => {
     await renderHome();
 
     expect(screen.getByText('Rock')).toBeInTheDocument();
-    expect(screen.getByText('Como Tudo Deve Ser')).toBeInTheDocument();
+    // A faixa aparece em mais de uma prateleira (gênero + adicionadas
+    // recentemente) — o que importa é existir pelo menos uma.
+    expect(screen.getAllByText('Como Tudo Deve Ser').length).toBeGreaterThan(0);
     expect(screen.getByText('Seus artistas')).toBeInTheDocument();
     expect(screen.getAllByText('Charlie Brown Jr.').length).toBeGreaterThan(0);
     expect(screen.queryByText('Sua biblioteca está vazia')).not.toBeInTheDocument();
