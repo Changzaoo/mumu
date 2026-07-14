@@ -65,7 +65,10 @@ export function AppShell() {
               scrollRef.current = node;
               setScrollEl(node);
             }}
-            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-contain px-4 md:px-6 lg:px-8"
+            // overscroll-y-NONE (não 'contain'): o Chrome Android 12+ estica o
+            // conteúdo do scroller ao puxar além do topo — 'contain' só impede
+            // o encadeamento ao body, 'none' desliga o efeito por completo.
+            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-none px-4 md:px-6 lg:px-8"
           >
             <TopBar />
             <div
