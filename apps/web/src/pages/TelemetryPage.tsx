@@ -188,11 +188,131 @@ function BarChart({
   );
 }
 
+// ── categorização automática por comportamento ──────────────────────────────
+
+interface UserSegment {
+  /** Rótulo principal (agrupa a visão "Categorias"). */
+  primary: string;
+  /** Rótulos extras (período do dia, sinais secundários). */
+  chips: string[];
+}
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/** Rotula o usuário pelo que ele MAIS faz — ordem = prioridade do rótulo. */
+function categorize(t: TelemetryDoc): UserSegment {
+  const chips: string[] = [];
+  const lastSeenMs = t.lastSeenAt ? Date.now() - new Date(t.lastSeenAt).getTime() : Infinity;
+  const hours = (t.totalSeconds ?? 0) / 3600;
+  const plays = t.totalPlays ?? 0;
+  const library = t.libraryCount ?? 0;
+
+  // Período do dia preferido (pelo histograma de horas).
+  const peak = peakHour(t.hourHistogram);
+  if (peak) {
+    const h = Number(peak.replace(/h$/, ''));
+    if (h < 6) chips.push('Madrugador');
+    else if (h < 12) chips.push('Matutino');
+    else if (h < 18) chips.push('Vespertino');
+    else chips.push('Noturno');
+  }
+  if (t.pwaInstalled) chips.push('App instalado');
+  if ((t.jsErrors ?? 0) > 0) chips.push('Com erros');
+
+  // Proporção de tempo em busca/descobrir → perfil explorador.
+  const pageTotal = Object.values(t.pageSeconds ?? {}).reduce((a, b) => a + b, 0);
+  const exploring = (t.pageSeconds?.search ?? 0) + (t.pageSeconds?.discover ?? 0);
+
+  let primary = 'Casual';
+  if (lastSeenMs > 7 * DAY_MS) primary = 'Inativo';
+  else if ((t.sessions ?? 0) <= 2 && hours < 0.5) primary = 'Novato';
+  else if (plays >= 100 || hours >= 10) primary = 'Ouvinte pesado';
+  else if (library >= 300) primary = 'Colecionador';
+  else if (pageTotal > 0 && exploring / pageTotal >= 0.35) primary = 'Explorador';
+  else if ((t.likedCount ?? 0) >= 50) primary = 'Curtidor';
+  return { primary, chips };
+}
+
+const SEGMENT_STYLE: Record<string, string> = {
+  'Ouvinte pesado': 'bg-accent text-accent-fg',
+  Colecionador: 'bg-fg/15 text-fg',
+  Explorador: 'bg-fg/15 text-fg',
+  Curtidor: 'bg-fg/15 text-fg',
+  Casual: 'bg-fg/8 text-fg-muted',
+  Novato: 'bg-fg/8 text-fg-muted',
+  Inativo: 'bg-danger/15 text-danger',
+};
+
+function SegmentBadge({ name }: { name: string }) {
+  return (
+    <span
+      className={cn(
+        'rounded-full px-2 py-0.5 text-[11px] font-semibold',
+        SEGMENT_STYLE[name] ?? 'bg-fg/8 text-fg-muted',
+      )}
+    >
+      {name}
+    </span>
+  );
+}
+
+/** Linha compacta (modo Lista) — expande para o card completo ao clicar. */
+function UserRow({
+  t,
+  expanded,
+  onToggle,
+}: {
+  t: TelemetryDoc;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  const online = t.lastSeenAt && Date.now() - new Date(t.lastSeenAt).getTime() < 3 * 60_000;
+  const seg = categorize(t);
+  const title = t.displayName || t.email || (t.isAnonymous ? 'Anônimo' : 'Usuário');
+  return (
+    <div className="rounded-lg border border-border bg-bg-elevated">
+      <button
+        type="button"
+        onClick={onToggle}
+        className="grid w-full grid-cols-[minmax(0,2fr)_auto_minmax(0,1fr)] items-center gap-3 px-3 py-2 text-left transition-colors hover:bg-fg/4 sm:grid-cols-[minmax(0,2fr)_auto_repeat(4,minmax(0,1fr))]"
+      >
+        <span className="min-w-0">
+          <span className="flex items-center gap-2">
+            <span
+              className={cn('size-2 shrink-0 rounded-full', online ? 'bg-accent' : 'bg-fg/20')}
+              aria-label={online ? 'Online' : 'Offline'}
+            />
+            <span className="truncate text-[13px] font-semibold text-fg">{title}</span>
+          </span>
+          <span className="block truncate pl-4 text-[11px] text-fg-muted">
+            {t.email ?? `uid ${t.uid.slice(0, 8)}…`}
+          </span>
+        </span>
+        <SegmentBadge name={seg.primary} />
+        <span className="hidden text-[12px] text-fg-muted sm:block">
+          {formatHours(t.totalSeconds)}
+        </span>
+        <span className="hidden text-[12px] text-fg-muted sm:block">{t.totalPlays ?? 0} plays</span>
+        <span className="hidden text-[12px] text-fg-muted sm:block">
+          {t.netDownMbps != null ? `↓ ${t.netDownMbps} Mbps` : '↓ —'}
+        </span>
+        <span className="text-right text-[12px] text-fg-subtle">{formatWhen(t.lastSeenAt)}</span>
+      </button>
+      {expanded && (
+        <div className="border-t border-border p-1">
+          <UserCard t={t} />
+        </div>
+      )}
+    </div>
+  );
+}
+
 function UserCard({ t }: { t: TelemetryDoc }) {
   const [showHistory, setShowHistory] = useState(false);
   const online = t.lastSeenAt && Date.now() - new Date(t.lastSeenAt).getTime() < 3 * 60_000;
   const title = t.displayName || t.email || (t.isAnonymous ? 'Usuário anônimo' : 'Usuário');
   const peak = peakHour(t.hourHistogram);
+  const seg = categorize(t);
 
   const hours = Array.from({ length: 24 }, (_, h) => ({
     key: `h${h}`,
@@ -224,6 +344,16 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           {online ? 'Online agora' : `Visto ${formatWhen(t.lastSeenAt)}`}
         </Badge>
       </header>
+
+      {/* Rótulos de comportamento */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        <SegmentBadge name={seg.primary} />
+        {seg.chips.map((chip) => (
+          <span key={chip} className="rounded-full bg-fg/6 px-2 py-0.5 text-[11px] text-fg-muted">
+            {chip}
+          </span>
+        ))}
+      </div>
 
       {/* Rede + uso */}
       <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
@@ -448,9 +578,49 @@ function UserCard({ t }: { t: TelemetryDoc }) {
   );
 }
 
+type ViewMode = 'lista' | 'categorias' | 'detalhes';
+
+const VIEWS: Array<{ value: ViewMode; label: string }> = [
+  { value: 'lista', label: 'Lista' },
+  { value: 'categorias', label: 'Categorias' },
+  { value: 'detalhes', label: 'Detalhes' },
+];
+
+/** Tile de resumo agregado (topo do painel). */
+function Summary({ docs }: { docs: TelemetryDoc[] }) {
+  const online = docs.filter(
+    (t) => t.lastSeenAt && Date.now() - new Date(t.lastSeenAt).getTime() < 3 * 60_000,
+  ).length;
+  const totalSeconds = docs.reduce((a, t) => a + (t.totalSeconds ?? 0), 0);
+  const speeds = docs.map((t) => t.netDownMbps).filter((v): v is number => v != null);
+  const avgDown = speeds.length
+    ? Math.round((speeds.reduce((a, b) => a + b, 0) / speeds.length) * 10) / 10
+    : null;
+  const plays = docs.reduce((a, t) => a + (t.totalPlays ?? 0), 0);
+  const tiles = [
+    { label: 'Usuários', value: String(docs.length) },
+    { label: 'Online agora', value: String(online) },
+    { label: 'Tempo somado', value: formatHours(totalSeconds) },
+    { label: 'Download médio', value: avgDown != null ? `${avgDown} Mbps` : '—' },
+    { label: 'Plays somados', value: String(plays) },
+  ];
+  return (
+    <div className="grid grid-cols-2 gap-2 sm:grid-cols-5">
+      {tiles.map((tile) => (
+        <div key={tile.label} className="rounded-lg border border-border bg-bg-elevated px-3 py-2">
+          <p className="text-[11px] text-fg-subtle">{tile.label}</p>
+          <p className="text-lg font-bold text-fg">{tile.value}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 export default function TelemetryPage() {
   const [docs, setDocs] = useState<TelemetryDoc[] | null>(null);
   const [error, setError] = useState(false);
+  const [view, setView] = useState<ViewMode>('lista');
+  const [expandedUid, setExpandedUid] = useState<string | null>(null);
 
   useEffect(() => {
     if (!db) {
@@ -504,11 +674,87 @@ export default function TelemetryPage() {
       )}
 
       {!error && docs !== null && docs.length > 0 && (
-        <div className="grid gap-4 xl:grid-cols-2">
-          {docs.map((t) => (
-            <UserCard key={t.uid} t={t} />
-          ))}
-        </div>
+        <>
+          <Summary docs={docs} />
+
+          {/* Modo de visualização */}
+          <div role="tablist" aria-label="Modo de visualização" className="flex gap-2">
+            {VIEWS.map((v) => (
+              <button
+                key={v.value}
+                type="button"
+                role="tab"
+                aria-selected={view === v.value}
+                onClick={() => setView(v.value)}
+                className={cn(
+                  'rounded-full px-4 py-1.5 text-[13px] font-medium transition-colors duration-200',
+                  view === v.value
+                    ? 'bg-fg text-bg'
+                    : 'bg-fg/5 text-fg-muted hover:bg-fg/10 hover:text-fg',
+                )}
+              >
+                {v.label}
+              </button>
+            ))}
+          </div>
+
+          {/* Lista compacta — escala para centenas de usuários; clique expande. */}
+          {view === 'lista' && (
+            <div className="space-y-1.5">
+              {docs.map((t) => (
+                <UserRow
+                  key={t.uid}
+                  t={t}
+                  expanded={expandedUid === t.uid}
+                  onToggle={() => setExpandedUid((cur) => (cur === t.uid ? null : t.uid))}
+                />
+              ))}
+            </div>
+          )}
+
+          {/* Agrupado por categoria de comportamento. */}
+          {view === 'categorias' && (
+            <div className="space-y-6">
+              {Object.entries(
+                docs.reduce<Record<string, TelemetryDoc[]>>((groups, t) => {
+                  const { primary } = categorize(t);
+                  (groups[primary] ??= []).push(t);
+                  return groups;
+                }, {}),
+              )
+                .sort((a, b) => b[1].length - a[1].length)
+                .map(([segment, users]) => (
+                  <section key={segment}>
+                    <div className="mb-2 flex items-center gap-2">
+                      <SegmentBadge name={segment} />
+                      <span className="text-[12px] text-fg-subtle">
+                        {users.length} {users.length === 1 ? 'usuário' : 'usuários'}
+                      </span>
+                    </div>
+                    <div className="space-y-1.5">
+                      {users.map((t) => (
+                        <UserRow
+                          key={t.uid}
+                          t={t}
+                          expanded={expandedUid === t.uid}
+                          onToggle={() => setExpandedUid((cur) => (cur === t.uid ? null : t.uid))}
+                        />
+                      ))}
+                    </div>
+                  </section>
+                ))}
+            </div>
+          )}
+
+          {/* Cards completos (o modo de estudo profundo). */}
+          {view === 'detalhes' && (
+            <div className="grid gap-4 xl:grid-cols-2">
+              {docs.map((t) => (
+                <UserCard key={t.uid} t={t} />
+              ))}
+            </div>
+          )}
+        </>
       )}
     </div>
   );
