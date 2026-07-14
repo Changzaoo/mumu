@@ -265,14 +265,25 @@ async function importToMp3(ytdlp, url) {
   }
   let title = 'faixa';
   let thumbnail = '';
+  let artist = '';
+  let track = '';
+  let album = '';
   try {
     const info = JSON.parse(await readFile(path.join(dir, 'audio.info.json'), 'utf8'));
     if (typeof info.title === 'string' && info.title.trim()) title = info.title.trim();
     if (typeof info.thumbnail === 'string' && info.thumbnail.trim()) thumbnail = info.thumbnail.trim();
+    // YouTube Music (and many music videos) carry proper song metadata — far more
+    // reliable than parsing the video title. `artist` may be a string or array.
+    const rawArtist = Array.isArray(info.artists)
+      ? info.artists.join(', ')
+      : info.artist || info.creator || '';
+    if (typeof rawArtist === 'string' && rawArtist.trim()) artist = rawArtist.trim();
+    if (typeof info.track === 'string' && info.track.trim()) track = info.track.trim();
+    if (typeof info.album === 'string' && info.album.trim()) album = info.album.trim();
   } catch {
     /* keep default */
   }
-  return { dir, file: path.join(dir, mp3), title, thumbnail };
+  return { dir, file: path.join(dir, mp3), title, thumbnail, artist, track, album };
 }
 
 function interpret(stderr) {
@@ -354,6 +365,27 @@ async function authorizeToken(token) {
   return true;
 }
 
+/** Dump a single video's full metadata JSON WITHOUT downloading the media. */
+async function dumpJson(ytdlp, url) {
+  const args = ['--no-playlist', '--no-warnings', '--skip-download', '--dump-single-json', url];
+  const out = await new Promise((resolve, reject) => {
+    let stdout = '';
+    let stderr = '';
+    const p = spawn(ytdlp, args, { windowsHide: true });
+    p.stdout.on('data', (c) => {
+      stdout += c;
+      if (stdout.length > 50_000_000) p.kill();
+    });
+    p.stderr.on('data', (c) => {
+      stderr += c;
+      if (stderr.length > 8192) stderr = stderr.slice(-8192);
+    });
+    p.on('error', reject);
+    p.on('close', (code) => (code === 0 ? resolve(stdout) : reject(new Error(interpret(stderr)))));
+  });
+  return JSON.parse(out);
+}
+
 /**
  * Enumerate a playlist's entries WITHOUT downloading them (flat, fast). Returns
  * `{ title, entries: [{ url, title }] }` — the web app then imports each entry
@@ -413,7 +445,10 @@ function applyCors(req, res) {
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
   res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id');
-  res.setHeader('Access-Control-Expose-Headers', 'X-Aurial-Title, X-Aurial-Cover');
+  res.setHeader(
+    'Access-Control-Expose-Headers',
+    'X-Aurial-Title, X-Aurial-Cover, X-Aurial-Artist, X-Aurial-Track, X-Aurial-Album',
+  );
   // Private Network Access: let an https public page reach this localhost helper.
   if (req.headers['access-control-request-private-network'])
     res.setHeader('Access-Control-Allow-Private-Network', 'true');
@@ -744,6 +779,41 @@ async function main() {
         return;
       }
 
+      // Real song metadata for a link WITHOUT downloading — to re-identify tracks.
+      if (req.method === 'POST' && pathname === '/meta') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        try {
+          const { url } = JSON.parse((await readBody(req)) || '{}');
+          if (typeof url !== 'string' || !hostSupported(url)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Link não suportado.' }));
+            return;
+          }
+          const info = await dumpJson(ytdlp, url);
+          const rawArtist = Array.isArray(info.artists)
+            ? info.artists.join(', ')
+            : info.artist || info.creator || '';
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(
+            JSON.stringify({
+              title: typeof info.title === 'string' ? info.title : null,
+              artist: typeof rawArtist === 'string' && rawArtist.trim() ? rawArtist.trim() : null,
+              track: typeof info.track === 'string' ? info.track : null,
+              album: typeof info.album === 'string' ? info.album : null,
+              thumbnail: typeof info.thumbnail === 'string' ? info.thumbnail : null,
+            }),
+          );
+        } catch (err) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: err instanceof Error ? err.message : 'Falha.' }));
+        }
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/ai/chat') {
         if (!(await authorize(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -811,6 +881,9 @@ async function main() {
             'Content-Length': String(size),
             'X-Aurial-Title': encodeURIComponent(job.title),
             ...(job.thumbnail ? { 'X-Aurial-Cover': encodeURIComponent(job.thumbnail) } : {}),
+            ...(job.artist ? { 'X-Aurial-Artist': encodeURIComponent(job.artist) } : {}),
+            ...(job.track ? { 'X-Aurial-Track': encodeURIComponent(job.track) } : {}),
+            ...(job.album ? { 'X-Aurial-Album': encodeURIComponent(job.album) } : {}),
           });
           const { createReadStream } = await import('node:fs');
           await new Promise((resolve, reject) => {
