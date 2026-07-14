@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { motion } from 'framer-motion';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
+import { RemotePlaybackBanner } from '@/components/media/RemotePlaybackBanner';
 import { ShareDialogHost } from '@/components/media/ShareDialog';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { recordNavigation } from '@/lib/telemetry/telemetry';
@@ -98,6 +99,7 @@ export function AppShell() {
         <NowPlaying />
         <EqualizerPanel />
         <ShareDialogHost />
+        <RemotePlaybackBanner />
         <TrackAnnouncer />
       </div>
     </ScrollContainerContext.Provider>

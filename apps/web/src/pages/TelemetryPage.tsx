@@ -98,6 +98,13 @@ interface TelemetryDoc {
   weekdayHistogram?: Record<string, number>;
   lastSessionActions?: SessionAction[];
   recentSessions?: SessionLogEntry[];
+  /** Números POR APARELHO — plays/biblioteca vêm do storage local de cada
+   *  device (compartilhado entre contas no mesmo navegador), então só fazem
+   *  sentido lidos aqui, aparelho a aparelho. */
+  devices?: Record<
+    string,
+    { name?: string; lastSeenAt?: string; seconds?: number; plays?: number; libraryCount?: number }
+  >;
   // Campos novos (coleta em andamento) — SEMPRE opcionais: docs antigos não têm.
   gpu?: string;
   jsHeapMb?: number;
@@ -894,6 +901,29 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           )}
         </ul>
       </div>
+
+      {/* Aparelhos da conta — plays/biblioteca são POR APARELHO (o storage
+          local é do device, compartilhado entre contas no mesmo navegador). */}
+      {t.devices && Object.keys(t.devices).length > 0 && (
+        <div>
+          <SectionTitle icon={MonitorSmartphone}>Aparelhos desta conta</SectionTitle>
+          <ul className="space-y-1 text-[12px] text-fg-muted">
+            {Object.entries(t.devices)
+              .sort((a, b) => (b[1].lastSeenAt ?? '').localeCompare(a[1].lastSeenAt ?? ''))
+              .map(([id, d]) => (
+                <li key={id} className="flex flex-wrap items-baseline justify-between gap-x-3">
+                  <span className="font-medium text-fg">
+                    {d.name ?? `Aparelho ${id.slice(0, 6)}`}
+                  </span>
+                  <span>
+                    {formatHours(d.seconds)} · {d.plays ?? 0} plays · {d.libraryCount ?? 0} faixas ·{' '}
+                    <span className="text-fg-subtle">{formatWhen(d.lastSeenAt)}</span>
+                  </span>
+                </li>
+              ))}
+          </ul>
+        </div>
+      )}
 
       {/* Uso por hora do dia */}
       {t.hourHistogram && (

@@ -10,6 +10,7 @@ import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/sto
 import { initCloudSync } from '@/lib/sync/syncManager';
 import { init as initImportQueue } from '@/lib/local/importQueue';
 import { initTelemetry } from '@/lib/telemetry/telemetry';
+import { initPresence } from '@/lib/devices/presence';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -36,6 +37,7 @@ export default function App() {
     initCloudSync();
     initImportQueue(); // resume any downloads queued before a reload
     initTelemetry(); // usage metrics for the admin /telemetria page
+    initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
     return initSettings();
   }, []);
 

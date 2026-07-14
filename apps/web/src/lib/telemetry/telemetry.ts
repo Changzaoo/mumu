@@ -14,6 +14,7 @@
 import { doc, increment, setDoc } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
 import { getDownloads } from '@/features/downloads/registry';
+import { deviceLabel, getDeviceId } from '@/lib/devices/presence';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { measureNetworkSpeed } from '@/lib/local/importerHelper';
 import * as localHistory from '@/lib/local/localHistory';
@@ -399,8 +400,24 @@ function flush(): void {
   for (const [d, s] of pendingWeekdaySeconds) weekdayHistogram[`d${d}`] = increment(s);
   pendingWeekdaySeconds.clear();
 
+  // IMPORTANTE: plays/biblioteca/histórico vêm do armazenamento LOCAL do
+  // aparelho — que é compartilhado entre contas no mesmo navegador. Sem esta
+  // divisão por aparelho, uma conta que logasse num navegador "usado" herdava
+  // no doc os números acumulados por outra conta (foi o que confundiu o
+  // painel). Cada aparelho reporta seus números sob devices.{deviceId}.
+  const deviceStats = {
+    [getDeviceId()]: {
+      name: deviceLabel(),
+      lastSeenAt: new Date().toISOString(),
+      ...(seconds > 0 ? { seconds: increment(seconds) } : {}),
+      plays: localHistory.list().length,
+      libraryCount: localLibrary.list().length,
+    },
+  };
+
   void push({
     ...snapshot(),
+    devices: deviceStats,
     ...(seconds > 0 ? { totalSeconds: increment(seconds) } : {}),
     ...(Object.keys(pageSeconds).length > 0 ? { pageSeconds } : {}),
     ...(Object.keys(clickCounts).length > 0
