@@ -8,6 +8,7 @@ import { useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
+  IoAddCircleOutline,
   IoCompass,
   IoCompassOutline,
   IoDiscOutline,
@@ -53,7 +54,7 @@ const MAIN_NAV: NavEntry[] = [
 const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
 
 const TOOLS_NAV: NavEntry[] = [
-  { to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline },
+  { to: '/dispositivo', label: 'Adicionar músicas', icon: IoAddCircleOutline },
   { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
 ];
 

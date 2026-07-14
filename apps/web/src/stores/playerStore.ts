@@ -11,6 +11,7 @@ import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@aurial/
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { initMediaSession } from '@/lib/audio/mediaSession';
 import { api } from '@/lib/api';
+import { subscribeAuth } from '@/lib/firebase';
 import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -125,6 +126,35 @@ let preloadRequested = false;
 let crossfadeTriggered = false;
 let lastProgressCommit = 0;
 
+// ── prévia de 30s para visitantes ────────────────────────────────
+// Sem login, cada faixa toca só PREVIEW_SECONDS; ao bater o limite o player
+// pausa e convida a criar conta (uma vez por faixa carregada).
+const PREVIEW_SECONDS = 30;
+let signedIn = false;
+let previewGateFired = false;
+subscribeAuth((user) => {
+  signedIn = user !== null;
+});
+
+function firePreviewGate(): void {
+  if (previewGateFired) return;
+  previewGateFired = true;
+  audioEngine.pause();
+  usePlayerStore.setState({ isPlaying: false });
+  void import('sonner').then(({ toast }) =>
+    toast('Crie sua conta para ouvir a música completa', {
+      description: 'De graça — sua biblioteca sincroniza em todos os aparelhos.',
+      action: {
+        label: 'Criar conta',
+        onClick: () => {
+          window.location.href = '/login';
+        },
+      },
+      duration: 10_000,
+    }),
+  );
+}
+
 function fisherYatesShuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
@@ -164,6 +194,7 @@ export const usePlayerStore = create<PlayerState>()(
         playRecorded = false;
         preloadRequested = false;
         crossfadeTriggered = false;
+        previewGateFired = false;
         lastProgressCommit = 0;
         set({
           currentTrack: track,
@@ -526,6 +557,9 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('timeupdate', ({ position, duration }) => {
     const state = store.getState();
+
+    // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
+    if (!signedIn && position >= PREVIEW_SECONDS) firePreviewGate();
 
     // Throttle store writes to ~5/s — components needing 60fps read the engine.
     const now = Date.now();

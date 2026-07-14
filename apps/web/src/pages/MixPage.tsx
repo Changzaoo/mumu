@@ -4,11 +4,13 @@
  * (the same ids HomePage builds). Playing from here shuffles, like a real mix.
  */
 import { useMemo, useSyncExternalStore } from 'react';
-import { Play, Shuffle, Sparkles } from 'lucide-react';
+import { Play, Share2, Shuffle, Sparkles } from 'lucide-react';
 import { useParams } from 'react-router';
 import type { TrackDto } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
+import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -107,11 +109,27 @@ export default function MixPage() {
             >
               <Play className="size-4 fill-current" /> Em ordem
             </button>
+            <button
+              type="button"
+              aria-label="Compartilhar mix"
+              onClick={() =>
+                openShare({
+                  type: 'mix',
+                  title: mix.title,
+                  subtitle: `${mix.tracks.length} músicas`,
+                  coverUrl: mix.cover,
+                  tracks: tracksToShare(mix.tracks),
+                })
+              }
+              className="grid size-10 place-items-center rounded-full border border-border text-fg transition-colors hover:bg-fg/5"
+            >
+              <Share2 className="size-4" />
+            </button>
           </div>
         </div>
       </header>
 
-      <TrackList aria-label={mix.title}>
+      <TrackList header aria-label={mix.title}>
         {mix.tracks.map((track, index) => (
           <TrackRow
             key={track.id}

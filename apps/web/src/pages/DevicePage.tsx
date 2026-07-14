@@ -1,9 +1,9 @@
 /**
- * /dispositivo — "No dispositivo": the on-device local library. Import audio
- * files (drag-drop / picker) or add by a direct file URL into Cache Storage,
- * auto-enrich real covers/metadata from iTunes, recreate a playlist from a
- * pasted track list, play everything through the shared engine (fully offline),
- * and share over P2P. Tracks received from peers also land here.
+ * /dispositivo — "Adicionar músicas": THE feeding hub of the app. Import audio
+ * files (drag-drop / picker), add by link, or recreate a whole playlist from a
+ * pasted list; everything lands in the on-device library (Cache Storage),
+ * auto-enriches covers/metadata and plays fully offline through the shared
+ * engine. Tracks received from peers also land here.
  */
 import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Link } from 'react-router';
@@ -19,7 +19,6 @@ import {
   Music,
   Pause,
   Play,
-  Share2,
   Trash2,
   Upload,
 } from 'lucide-react';
@@ -193,11 +192,11 @@ export default function DevicePage() {
       <header className="flex flex-wrap items-end justify-between gap-3">
         <div className="space-y-2">
           <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-fg">
-            <HardDriveDownload className="size-7 text-fg-muted" /> No dispositivo
+            <HardDriveDownload className="size-7 text-fg-muted" /> Adicionar músicas
           </h1>
           <p className="max-w-lg text-sm text-fg-muted">
-            Suas músicas ficam guardadas neste aparelho e tocam mesmo sem conexão. Importe arquivos,
-            adicione por link ou recrie uma playlist a partir de uma lista.
+            Alimente o app: importe arquivos, adicione por link ou recrie uma playlist inteira. Tudo
+            fica guardado neste aparelho e toca mesmo sem conexão.
           </p>
           {entries.length > 0 && (
             <p className="flex items-center gap-1.5 text-[13px] text-fg-subtle">
@@ -208,12 +207,6 @@ export default function DevicePage() {
             </p>
           )}
         </div>
-        <Link
-          to="/compartilhar"
-          className="inline-flex h-9 items-center gap-2 rounded-md border border-border px-4 text-sm font-medium text-fg transition-colors hover:bg-fg/5"
-        >
-          <Share2 className="size-4" /> Compartilhar
-        </Link>
       </header>
 
       {/* Add: files, link, list */}
@@ -426,7 +419,7 @@ export default function DevicePage() {
           <EmptyState
             icon={Music}
             title="Sua biblioteca está vazia"
-            description="Importe seus arquivos, adicione por link ou receba faixas de amigos em Compartilhar."
+            description="Importe seus arquivos, adicione por link ou recrie uma playlist inteira."
           />
         ) : (
           <div role="list" aria-label="Faixas no dispositivo" className="space-y-0.5">

@@ -36,6 +36,16 @@ service cloud.firestore {
         ];
     }
 
+    // Compartilhamentos por link (/s/:id): qualquer pessoa COM O LINK pode ler
+    // (a página funciona sem login); só usuários logados criam, e o doc é
+    // imutável depois de criado.
+    match /shares/{id} {
+      allow read: if true;
+      allow create: if request.auth != null
+        && request.resource.data.byUid == request.auth.uid;
+      allow update, delete: if false;
+    }
+
     // Community shared library: link-imported tracks visible to every user.
     // The FIRST sharer owns the entry — only they can update it, and nobody can
     // relabel/reorder someone else's (enforced server-side).

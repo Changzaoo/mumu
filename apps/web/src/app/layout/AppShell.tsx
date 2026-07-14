@@ -2,7 +2,9 @@ import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
 import { motion } from 'framer-motion';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
+import { ShareDialogHost } from '@/components/media/ShareDialog';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import { recordNavigation } from '@/lib/telemetry/telemetry';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -45,9 +47,10 @@ export function AppShell() {
   const hasTrack = usePlayerStore((s) => s.currentTrack !== null);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
 
-  // Reset page scroll on navigation (keep player untouched).
+  // Reset page scroll on navigation (keep player untouched) + telemetry.
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: 0 });
+    recordNavigation(location.pathname);
   }, [location.pathname]);
 
   return (
@@ -94,6 +97,7 @@ export function AppShell() {
         <MobileNav />
         <NowPlaying />
         <EqualizerPanel />
+        <ShareDialogHost />
         <TrackAnnouncer />
       </div>
     </ScrollContainerContext.Provider>

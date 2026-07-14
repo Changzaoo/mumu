@@ -31,6 +31,13 @@ export interface RecentPlay {
   artist: string;
   at: string;
 }
+/** One of the first user actions after opening the app (session timeline). */
+export interface SessionAction {
+  /** Milliseconds after the session started. */
+  atMs: number;
+  type: 'nav' | 'click';
+  label: string;
+}
 
 let currentUser: User | null = null;
 let pendingSeconds = 0;
@@ -38,6 +45,123 @@ let heartbeat: ReturnType<typeof setInterval> | null = null;
 let flusher: ReturnType<typeof setInterval> | null = null;
 let speedTimer: ReturnType<typeof setTimeout> | null = null;
 let initialized = false;
+
+// ── page time / clicks / session-start timeline ─────────────────
+let currentPage = 'inicio';
+let sessionStartMs = 0;
+const pendingPageSeconds = new Map<string, number>();
+const pendingClicks = new Map<string, number>();
+let sessionActions: SessionAction[] = [];
+let pendingErrors = 0;
+let lastError = '';
+
+// Firestore field names can't carry dots, tildes, asterisks, slashes or
+// brackets — strip them and keep keys short.
+function sanitizeKey(raw: string): string {
+  return raw
+    .replace(/[.~*/[\]]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim()
+    .slice(0, 40);
+}
+
+/** Coarse page bucket from a pathname ("/playlist/abc" → "playlist"). */
+function pageKey(pathname: string): string {
+  const seg = pathname.split('/')[1] ?? '';
+  return sanitizeKey(seg || 'inicio') || 'inicio';
+}
+
+/** Chamado pelo AppShell a cada navegação — alimenta tempo-por-página e a
+ *  linha do tempo do começo da sessão ("o que faz ao abrir o app"). */
+export function recordNavigation(pathname: string): void {
+  currentPage = pageKey(pathname);
+  if (sessionActions.length < 14) {
+    sessionActions.push({
+      atMs: sessionStartMs ? Date.now() - sessionStartMs : 0,
+      type: 'nav',
+      label: currentPage,
+    });
+  }
+}
+
+function onDocumentClick(event: MouseEvent): void {
+  const el = (event.target as HTMLElement | null)?.closest?.(
+    'button, a, [role="button"], [role="tab"]',
+  );
+  if (!el) return;
+  const label = sanitizeKey(
+    el.getAttribute('aria-label') ||
+      el.textContent?.trim().slice(0, 40) ||
+      el.tagName.toLowerCase(),
+  );
+  if (!label) return;
+  pendingClicks.set(label, (pendingClicks.get(label) ?? 0) + 1);
+  if (sessionActions.length < 14) {
+    sessionActions.push({
+      atMs: sessionStartMs ? Date.now() - sessionStartMs : 0,
+      type: 'click',
+      label,
+    });
+  }
+}
+
+function onWindowError(event: ErrorEvent): void {
+  pendingErrors += 1;
+  lastError = sanitizeKey(String(event.message ?? 'erro')).slice(0, 120);
+}
+
+// ── uso por hora do dia / dia da semana + registro de sessões ───────────────
+const pendingHourSeconds = new Map<number, number>();
+const pendingWeekdaySeconds = new Map<number, number>();
+
+export interface SessionLogEntry {
+  startedAt: string;
+  durationSec: number;
+}
+
+const SESSIONS_KEY = 'aurial:telemetrySessions';
+
+function readSessionLog(): SessionLogEntry[] {
+  try {
+    const parsed: unknown = JSON.parse(window.localStorage.getItem(SESSIONS_KEY) ?? '[]');
+    return Array.isArray(parsed) ? (parsed as SessionLogEntry[]).slice(-15) : [];
+  } catch {
+    return [];
+  }
+}
+
+function writeSessionLog(log: SessionLogEntry[]): void {
+  try {
+    window.localStorage.setItem(SESSIONS_KEY, JSON.stringify(log.slice(-15)));
+  } catch {
+    /* quota */
+  }
+}
+
+/** Marca a duração atual na última sessão do registro e devolve o log. */
+function updateSessionLog(): SessionLogEntry[] {
+  const log = readSessionLog();
+  const last = log[log.length - 1];
+  if (last && sessionStartMs) {
+    last.durationSec = Math.round((Date.now() - sessionStartMs) / 1000);
+    writeSessionLog(log);
+  }
+  return log;
+}
+
+// Battery info is async — probed once, cached for snapshots.
+let batteryInfo: { level: number; charging: boolean } | null = null;
+function probeBattery(): void {
+  const nav = navigator as Navigator & {
+    getBattery?: () => Promise<{ level: number; charging: boolean }>;
+  };
+  void nav
+    .getBattery?.()
+    .then((b) => {
+      batteryInfo = { level: Math.round(b.level * 100), charging: b.charging };
+    })
+    .catch(() => undefined);
+}
 
 function connectionInfo(): Record<string, string | number> {
   const conn = (
@@ -64,6 +188,25 @@ function platformInfo(): string {
   if (/Windows/.test(ua)) return 'Windows';
   if (/Linux/.test(ua)) return 'Linux';
   return 'Outro';
+}
+
+function browserInfo(): string {
+  const ua = navigator.userAgent;
+  if (/Edg\//.test(ua)) return 'Edge';
+  if (/OPR\//.test(ua)) return 'Opera';
+  if (/SamsungBrowser\//.test(ua)) return 'Samsung Internet';
+  if (/Chrome\//.test(ua)) return 'Chrome';
+  if (/Firefox\//.test(ua)) return 'Firefox';
+  if (/Safari\//.test(ua)) return 'Safari';
+  return 'Outro';
+}
+
+function timezoneInfo(): string {
+  try {
+    return Intl.DateTimeFormat().resolvedOptions().timeZone ?? '';
+  } catch {
+    return '';
+  }
 }
 
 /** Top músicas/artistas + últimas reproduções, tudo do histórico local. */
@@ -113,11 +256,25 @@ function snapshot(): Record<string, unknown> {
     uid: currentUser?.uid ?? null,
     email: currentUser?.email ?? null,
     displayName: currentUser?.displayName ?? null,
+    isAnonymous: currentUser?.isAnonymous ?? false,
     platform: platformInfo(),
+    browser: browserInfo(),
+    language: navigator.language ?? null,
+    timezone: timezoneInfo() || null,
+    screen: `${window.screen.width}×${window.screen.height}`,
+    pwaInstalled: window.matchMedia?.('(display-mode: standalone)').matches ?? false,
+    deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
+    cpuCores: navigator.hardwareConcurrency ?? null,
+    touchDevice: (navigator.maxTouchPoints ?? 0) > 0,
+    prefersDark: window.matchMedia?.('(prefers-color-scheme: dark)').matches ?? null,
+    battery: batteryInfo,
     lastSeenAt: new Date().toISOString(),
     connection: connectionInfo(),
+    online: navigator.onLine,
     libraryCount: localLibrary.list().length,
+    libraryBytes: localLibrary.totalBytes(),
     likedCount: localLikes.count(),
+    totalPlays: localHistory.list().length,
     ...stats,
   };
 }
@@ -126,9 +283,47 @@ function flush(): void {
   if (!currentUser) return;
   const seconds = pendingSeconds;
   pendingSeconds = 0;
+
+  // Tempo por página (acumulado no heartbeat com a aba visível).
+  const pageSeconds: Record<string, unknown> = {};
+  for (const [page, s] of pendingPageSeconds) pageSeconds[page] = increment(s);
+  pendingPageSeconds.clear();
+
+  // Onde clica: os 20 rótulos mais clicados desde o último flush.
+  const clicks = [...pendingClicks.entries()].sort((a, b) => b[1] - a[1]).slice(0, 20);
+  const clickCounts: Record<string, unknown> = {};
+  let clickTotal = 0;
+  for (const [label, n] of clicks) {
+    clickCounts[label] = increment(n);
+    clickTotal += n;
+  }
+  pendingClicks.clear();
+
+  const errors = pendingErrors;
+  pendingErrors = 0;
+
+  // Histogramas de uso (hora do dia / dia da semana), em segundos.
+  const hourHistogram: Record<string, unknown> = {};
+  for (const [h, s] of pendingHourSeconds) hourHistogram[`h${h}`] = increment(s);
+  pendingHourSeconds.clear();
+  const weekdayHistogram: Record<string, unknown> = {};
+  for (const [d, s] of pendingWeekdaySeconds) weekdayHistogram[`d${d}`] = increment(s);
+  pendingWeekdaySeconds.clear();
+
   void push({
     ...snapshot(),
     ...(seconds > 0 ? { totalSeconds: increment(seconds) } : {}),
+    ...(Object.keys(pageSeconds).length > 0 ? { pageSeconds } : {}),
+    ...(Object.keys(clickCounts).length > 0
+      ? { clickCounts, totalClicks: increment(clickTotal) }
+      : {}),
+    ...(Object.keys(hourHistogram).length > 0 ? { hourHistogram } : {}),
+    ...(Object.keys(weekdayHistogram).length > 0 ? { weekdayHistogram } : {}),
+    ...(errors > 0 ? { jsErrors: increment(errors), lastError } : {}),
+    // Linha do tempo do começo da sessão (sobrescrita a cada sessão).
+    ...(sessionActions.length > 0 ? { lastSessionActions: sessionActions.slice(0, 14) } : {}),
+    // Últimas entradas no app (deste aparelho), com duração de cada uma.
+    recentSessions: updateSessionLog(),
   });
 }
 
@@ -139,20 +334,36 @@ function onVisibility(): void {
 function start(user: User): void {
   currentUser = user;
   pendingSeconds = 0;
-  void push({ ...snapshot(), sessions: increment(1) });
+  sessionStartMs = Date.now();
+  sessionActions = [];
+  probeBattery();
+  // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
+  writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);
+  void push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });
 
   heartbeat ??= setInterval(() => {
-    if (!document.hidden) pendingSeconds += HEARTBEAT_MS / 1000;
+    if (document.hidden) return;
+    const s = HEARTBEAT_MS / 1000;
+    pendingSeconds += s;
+    pendingPageSeconds.set(currentPage, (pendingPageSeconds.get(currentPage) ?? 0) + s);
+    // Uso por hora do dia / dia da semana — "que horas mais usa o app".
+    const now = new Date();
+    pendingHourSeconds.set(now.getHours(), (pendingHourSeconds.get(now.getHours()) ?? 0) + s);
+    pendingWeekdaySeconds.set(now.getDay(), (pendingWeekdaySeconds.get(now.getDay()) ?? 0) + s);
   }, HEARTBEAT_MS);
   flusher ??= setInterval(flush, FLUSH_MS);
   document.addEventListener('visibilitychange', onVisibility);
+  document.addEventListener('click', onDocumentClick, { capture: true, passive: true });
+  window.addEventListener('error', onWindowError);
 
   // Real speed probe, once per session, after boot settles (online only).
+  // Carries the full snapshot too — every write self-heals missing fields.
   speedTimer = setTimeout(() => {
     if (!navigator.onLine) return;
     void measureNetworkSpeed().then(({ downMbps, upMbps }) => {
       if (downMbps === null && upMbps === null) return;
       void push({
+        ...snapshot(),
         netDownMbps: downMbps,
         netUpMbps: upMbps,
         netMeasuredAt: new Date().toISOString(),
@@ -171,6 +382,8 @@ function stop(): void {
   flusher = null;
   speedTimer = null;
   document.removeEventListener('visibilitychange', onVisibility);
+  document.removeEventListener('click', onDocumentClick, { capture: true });
+  window.removeEventListener('error', onWindowError);
 }
 
 /** Boot telemetry once (App). Follows auth: starts on sign-in, stops on out. */

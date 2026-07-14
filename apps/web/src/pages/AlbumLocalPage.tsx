@@ -4,9 +4,11 @@
  */
 import { useMemo, useSyncExternalStore } from 'react';
 import { Link, useParams } from 'react-router';
-import { Disc3, Play } from 'lucide-react';
+import { Disc3, Play, Share2 } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
+import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -65,17 +67,35 @@ export default function AlbumLocalPage() {
             </Link>{' '}
             · {tracks.length} {tracks.length === 1 ? 'faixa' : 'faixas'}
           </p>
-          <button
-            type="button"
-            onClick={() => play(0)}
-            className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg transition-transform hover:scale-[1.03]"
-          >
-            <Play className="size-4 fill-current" /> Tocar
-          </button>
+          <div className="mt-4 flex items-center justify-center gap-2 sm:justify-start">
+            <button
+              type="button"
+              onClick={() => play(0)}
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg transition-transform hover:scale-[1.03]"
+            >
+              <Play className="size-4 fill-current" /> Tocar
+            </button>
+            <button
+              type="button"
+              aria-label="Compartilhar álbum"
+              onClick={() =>
+                openShare({
+                  type: 'álbum',
+                  title: album.title,
+                  subtitle: album.artist,
+                  coverUrl: album.coverUrl,
+                  tracks: tracksToShare(tracks),
+                })
+              }
+              className="grid size-10 place-items-center rounded-full border border-border text-fg transition-colors hover:bg-fg/5"
+            >
+              <Share2 className="size-4" />
+            </button>
+          </div>
         </div>
       </header>
 
-      <TrackList aria-label={`Faixas de ${album.title}`}>
+      <TrackList header aria-label={`Faixas de ${album.title}`}>
         {tracks.map((track, index) => (
           <TrackRow
             key={track.id}

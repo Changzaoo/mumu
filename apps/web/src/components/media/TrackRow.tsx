@@ -3,6 +3,7 @@ import { Link, useNavigate } from 'react-router';
 import {
   ArrowDownToLine,
   CircleCheckBig,
+  Clock3,
   Disc3,
   ListEnd,
   ListPlus,
@@ -12,10 +13,13 @@ import {
   Music,
   Pause,
   Play,
+  Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import type { TrackDto } from '@aurial/shared';
 import { LikeButton } from '@/components/media/LikeButton';
+import { openShare } from '@/components/media/ShareDialog';
+import { sourceUrlFor } from '@/lib/local/localLibrary';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -321,6 +325,27 @@ export function TrackRow({
               </DropdownMenuItem>
             )}
             <DropdownMenuSeparator />
+            <DropdownMenuItem
+              onSelect={() =>
+                openShare({
+                  type: 'música',
+                  title: track.title,
+                  subtitle: trackArtistNames(track),
+                  coverUrl: track.coverUrl,
+                  tracks: [
+                    {
+                      title: track.title,
+                      artist: trackArtistNames(track),
+                      coverUrl: track.coverUrl,
+                      durationMs: track.durationMs,
+                      sourceUrl: sourceUrlFor(track.id),
+                    },
+                  ],
+                })
+              }
+            >
+              <Share2 /> Compartilhar
+            </DropdownMenuItem>
             {track.album && (
               <DropdownMenuItem onSelect={() => void navigate(`/album/${track.album?.id}`)}>
                 <Disc3 /> Ir para o álbum
@@ -342,7 +367,44 @@ export function TrackRow({
  * Roving-focus list container for TrackRow (DESIGN §10):
  * Tab enters the list, ↑/↓/Home/End move between rows, Enter/Space plays.
  */
-export function TrackList({ className, children, ...props }: ComponentProps<'div'>) {
+export interface TrackListProps extends ComponentProps<'div'> {
+  /** Spotify-style column header row ("# Título Álbum 🕐"). */
+  header?: boolean;
+  /** Match the rows' showAlbum so the header columns line up. */
+  showAlbumColumn?: boolean;
+}
+
+/** Column header (Spotify-like) — same grid template as TrackRow. */
+function TrackListHeader({ showAlbumColumn }: { showAlbumColumn: boolean }) {
+  return (
+    <div
+      aria-hidden
+      className={cn(
+        'mb-1 grid h-9 grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 border-b border-border px-2',
+        showAlbumColumn && 'md:grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_auto]',
+      )}
+    >
+      <span className="justify-self-center font-mono text-[13px] text-fg-subtle">#</span>
+      <span className="text-[12px] font-medium uppercase tracking-wide text-fg-subtle">Título</span>
+      {showAlbumColumn && (
+        <span className="hidden text-[12px] font-medium uppercase tracking-wide text-fg-subtle md:block">
+          Álbum
+        </span>
+      )}
+      <span className="justify-self-end pr-11 text-fg-subtle">
+        <Clock3 className="size-4" aria-label="Duração" />
+      </span>
+    </div>
+  );
+}
+
+export function TrackList({
+  header = false,
+  showAlbumColumn = true,
+  className,
+  children,
+  ...props
+}: TrackListProps) {
   const focusRow = (container: HTMLElement, direction: 1 | -1 | 'first' | 'last'): void => {
     const rows = Array.from(container.querySelectorAll<HTMLElement>('[data-track-row]'));
     if (rows.length === 0) return;
@@ -389,6 +451,7 @@ export function TrackList({ className, children, ...props }: ComponentProps<'div
       }}
       {...props}
     >
+      {header && <TrackListHeader showAlbumColumn={showAlbumColumn} />}
       {children}
     </div>
   );

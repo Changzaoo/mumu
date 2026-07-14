@@ -115,7 +115,7 @@ export default function LikedPage() {
           description="Toque no coração de qualquer faixa para guardá-la aqui."
         />
       ) : (
-        <TrackList aria-label="Faixas curtidas">
+        <TrackList header aria-label="Faixas curtidas">
           <VirtualList
             items={tracks}
             estimateSize={56}

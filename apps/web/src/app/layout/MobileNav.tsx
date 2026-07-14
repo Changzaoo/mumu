@@ -7,6 +7,7 @@ import { useState } from 'react';
 import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
+  IoAddCircleOutline,
   IoCompassOutline,
   IoEllipsisHorizontal,
   IoHeartOutline,
@@ -52,7 +53,7 @@ const MENU: MenuGroup[] = [
   {
     heading: 'Meu espaço',
     items: [
-      { to: '/dispositivo', label: 'No dispositivo', icon: IoPhonePortraitOutline },
+      { to: '/dispositivo', label: 'Adicionar músicas', icon: IoAddCircleOutline },
       { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
     ],
   },

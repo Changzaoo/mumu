@@ -61,7 +61,7 @@ export default function GenreLocalPage() {
         </button>
       </header>
 
-      <TrackList aria-label={`Músicas de ${genre}`}>
+      <TrackList header aria-label={`Músicas de ${genre}`}>
         {tracks.map((track, index) => (
           <TrackRow
             key={track.id}

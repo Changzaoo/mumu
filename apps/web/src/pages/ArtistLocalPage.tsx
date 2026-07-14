@@ -4,10 +4,12 @@
  */
 import { useMemo, useSyncExternalStore } from 'react';
 import { Link, useParams } from 'react-router';
-import { Disc3, MicVocal, Play } from 'lucide-react';
+import { Disc3, MicVocal, Play, Share2 } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
+import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import { useArtistImage } from '@/lib/artistImage';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -69,13 +71,31 @@ export default function ArtistLocalPage() {
             {tracks.length} {tracks.length === 1 ? 'música' : 'músicas'}
             {albums.length > 0 && ` · ${albums.length} ${albums.length === 1 ? 'álbum' : 'álbuns'}`}
           </p>
-          <button
-            type="button"
-            onClick={() => play(0)}
-            className="mt-4 inline-flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg transition-transform hover:scale-[1.03]"
-          >
-            <Play className="size-4 fill-current" /> Tocar
-          </button>
+          <div className="mt-4 flex items-center justify-center gap-2 sm:justify-start">
+            <button
+              type="button"
+              onClick={() => play(0)}
+              className="inline-flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg transition-transform hover:scale-[1.03]"
+            >
+              <Play className="size-4 fill-current" /> Tocar
+            </button>
+            <button
+              type="button"
+              aria-label="Compartilhar artista"
+              onClick={() =>
+                openShare({
+                  type: 'artista',
+                  title: artist,
+                  subtitle: `${tracks.length} ${tracks.length === 1 ? 'música' : 'músicas'}`,
+                  coverUrl: cover,
+                  tracks: tracksToShare(tracks),
+                })
+              }
+              className="grid size-10 place-items-center rounded-full border border-border text-fg transition-colors hover:bg-fg/5"
+            >
+              <Share2 className="size-4" />
+            </button>
+          </div>
         </div>
       </header>
 
@@ -102,7 +122,7 @@ export default function ArtistLocalPage() {
       {/* All tracks */}
       <section className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight text-fg">Músicas</h2>
-        <TrackList aria-label={`Músicas de ${artist}`}>
+        <TrackList header aria-label={`Músicas de ${artist}`}>
           {tracks.map((track, index) => (
             <TrackRow
               key={track.id}

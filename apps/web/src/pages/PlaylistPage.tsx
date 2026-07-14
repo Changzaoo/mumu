@@ -467,7 +467,7 @@ export default function PlaylistPage() {
           }
         />
       ) : (
-        <TrackList aria-label={`Faixas de ${data.title}`}>
+        <TrackList header aria-label={`Faixas de ${data.title}`}>
           <VirtualList
             items={data.tracks}
             estimateSize={56}
