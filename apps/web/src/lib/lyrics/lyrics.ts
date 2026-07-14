@@ -63,17 +63,25 @@ function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
 }
 
 // ── offline cache ───────────────────────────────────────────────
+// MEMOIZADO: o cache de letras chega a megabytes — fazer JSON.parse a cada
+// consulta (a busca por letra roda a cada tecla!) congelaria a página. O parse
+// acontece UMA vez; escrever atualiza a memória primeiro.
+let cacheMem: Record<string, Lyrics> | null = null;
+
 function readCache(): Record<string, Lyrics> {
+  if (cacheMem) return cacheMem;
   try {
     const raw = window.localStorage.getItem(CACHE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : {};
-    return parsed && typeof parsed === 'object' ? (parsed as Record<string, Lyrics>) : {};
+    cacheMem = parsed && typeof parsed === 'object' ? (parsed as Record<string, Lyrics>) : {};
   } catch {
-    return {};
+    cacheMem = {};
   }
+  return cacheMem;
 }
 
 function writeCache(next: Record<string, Lyrics>): void {
+  cacheMem = next;
   try {
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
   } catch {
@@ -83,6 +91,11 @@ function writeCache(next: Record<string, Lyrics>): void {
 
 export function cachedLyrics(trackId: string): Lyrics | null {
   return readCache()[trackId] ?? null;
+}
+
+/** Todas as letras em cache — combustível da busca por trecho de letra. */
+export function lyricsCacheEntries(): Array<[string, Lyrics]> {
+  return Object.entries(readCache());
 }
 
 // ── fetch ───────────────────────────────────────────────────────

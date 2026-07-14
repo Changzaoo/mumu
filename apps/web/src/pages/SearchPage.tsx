@@ -5,9 +5,9 @@
  * free catalog (Audius). Recent searches + voice input when the query is empty.
  */
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useSearchParams } from 'react-router';
+import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
-import { Mic, Search, SearchX, X } from 'lucide-react';
+import { Mic, MicVocal, Music, Quote, Search, SearchX, X } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
@@ -19,9 +19,11 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useRecentSearches } from '@/features/search/api';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSearch';
 import { useSyncExternalStore } from 'react';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
+import type { TrackDto } from '@aurial/shared';
 
 type Tab = 'all' | 'track' | 'artist' | 'album';
 
@@ -167,12 +169,91 @@ export default function SearchPage() {
     return { tracks, artists, albums };
   }, [entries, query]);
 
+  // ── busca por TRECHO DE LETRA (digitado ou falado no microfone) ──
+  // Assíncrona + fatiada (nunca trava) e cancelável: cada tecla aborta a
+  // varredura anterior antes de começar a nova.
+  const [lyricMatches, setLyricMatches] = useState<Array<{ track: TrackDto; excerpt: string }>>([]);
+  useEffect(() => {
+    if (!query) {
+      setLyricMatches([]);
+      return;
+    }
+    const controller = new AbortController();
+    void searchByLyrics(query, 8, controller.signal).then((matches) => {
+      if (controller.signal.aborted) return;
+      const byId = new Map(entries.map((e) => [e.track.id, e.track]));
+      setLyricMatches(
+        matches.flatMap((m) => {
+          const track = byId.get(m.trackId);
+          return track ? [{ track, excerpt: m.excerpt }] : [];
+        }),
+      );
+    });
+    return () => controller.abort();
+  }, [query, entries]);
+
+  // Indexador em segundo plano: completa o cache de letras da biblioteca aos
+  // poucos (15 por visita, pausado) — cada visita torna mais faixas acháveis.
+  useEffect(() => {
+    void indexLyricsInBackground(entries.map((e) => e.track));
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por visita
+  }, []);
+
   const freeTracks = tracksQuery.data ?? [];
   const artists = artistsQuery.data ?? [];
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
   const showAlbums = tab === 'all' || tab === 'album';
-  const topLocal = showTracks ? local.tracks[0] : undefined;
+
+  // ── melhor resultado POR INTENÇÃO (Spotify-style) ──
+  // Nome de artista → mostra O ARTISTA; nome de álbum → o álbum; título de
+  // música/single → a faixa. Pontuação por proximidade do nome, com desempate
+  // artista > álbum > faixa (quem digita só "Matuê" quer o artista).
+  const best = useMemo(() => {
+    const nq = norm(query);
+    if (!nq) return null;
+    const nameScore = (name: string): number => {
+      const n = norm(name);
+      if (!n) return 0;
+      if (n === nq) return 100;
+      if (n.startsWith(nq) || nq.startsWith(n)) {
+        return (
+          70 + Math.round((Math.min(n.length, nq.length) / Math.max(n.length, nq.length)) * 20)
+        );
+      }
+      if (n.includes(nq) && nq.length >= 4) return 40;
+      return 0;
+    };
+    let bestScore = 0;
+    let result:
+      | { kind: 'artist'; artist: localLibrary.LocalArtist }
+      | { kind: 'album'; album: localLibrary.LocalAlbum }
+      | { kind: 'track'; track: TrackDto }
+      | null = null;
+    // Ordem de avaliação = prioridade no desempate (>= substitui só com melhora).
+    for (const t of local.tracks) {
+      const s = nameScore(t.title);
+      if (s > bestScore) {
+        bestScore = s;
+        result = { kind: 'track', track: t };
+      }
+    }
+    for (const al of local.albums) {
+      const s = nameScore(al.title);
+      if (s >= bestScore && s > 0) {
+        bestScore = s;
+        result = { kind: 'album', album: al };
+      }
+    }
+    for (const a of local.artists) {
+      const s = nameScore(a.name);
+      if (s >= bestScore && s > 0) {
+        bestScore = s;
+        result = { kind: 'artist', artist: a };
+      }
+    }
+    return bestScore >= 40 ? result : null;
+  }, [query, local]);
 
   const isLoading =
     hasQuery && local.tracks.length === 0 && (tracksQuery.isLoading || artistsQuery.isLoading);
@@ -185,7 +266,8 @@ export default function SearchPage() {
     artists.length === 0 &&
     local.tracks.length === 0 &&
     local.artists.length === 0 &&
-    local.albums.length === 0;
+    local.albums.length === 0 &&
+    lyricMatches.length === 0;
 
   const playLocal = (index: number): void => {
     addRecent(query);
@@ -271,8 +353,8 @@ export default function SearchPage() {
           ) : (
             <EmptyState
               icon={Search}
-              title="Busque por músicas, artistas e álbuns"
-              description="Digite na barra de busca lá em cima — os resultados aparecem aqui na mesma tela."
+              title="Busque por músicas, artistas, álbuns — ou pela letra"
+              description="Digite na barra lá em cima, ou toque no microfone e fale um trecho da letra: a música aparece aqui."
             />
           )}
         </section>
@@ -306,31 +388,149 @@ export default function SearchPage() {
             />
           ) : (
             <>
-              {topLocal && (
+              {best && (
                 <section aria-label="Melhor resultado" className="min-w-0">
                   <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
                     Melhor resultado
                   </h2>
-                  <div className="group relative flex max-w-md flex-col justify-between rounded-xl border border-border bg-bg-elevated p-5">
-                    <div className="size-24 overflow-hidden rounded-lg bg-fg/6 shadow-lg">
-                      {topLocal.coverUrl && (
-                        <img src={topLocal.coverUrl} alt="" className="size-full object-cover" />
-                      )}
+                  {best.kind === 'artist' && (
+                    <Link
+                      to={`/artista/${encodeURIComponent(best.artist.name)}`}
+                      className="group relative flex max-w-md flex-col rounded-xl border border-border bg-bg-elevated p-5 transition-colors hover:bg-fg/4"
+                    >
+                      <div className="size-24 overflow-hidden rounded-full bg-fg/6 shadow-lg">
+                        {best.artist.coverUrl ? (
+                          <img
+                            src={best.artist.coverUrl}
+                            alt=""
+                            className="size-full object-cover"
+                          />
+                        ) : (
+                          <span className="grid size-full place-items-center text-fg-subtle">
+                            <MicVocal className="size-8" />
+                          </span>
+                        )}
+                      </div>
+                      <div className="mt-4 min-w-0">
+                        <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
+                          {best.artist.name}
+                        </p>
+                        <p className="mt-1 text-[13px] text-fg-muted">
+                          Artista · {best.artist.trackCount}{' '}
+                          {best.artist.trackCount === 1 ? 'música' : 'músicas'}
+                        </p>
+                      </div>
+                    </Link>
+                  )}
+                  {best.kind === 'album' && (
+                    <Link
+                      to={`/disco/${encodeURIComponent(best.album.key)}`}
+                      className="group relative flex max-w-md flex-col rounded-xl border border-border bg-bg-elevated p-5 transition-colors hover:bg-fg/4"
+                    >
+                      <div className="size-24 overflow-hidden rounded-lg bg-fg/6 shadow-lg">
+                        {best.album.coverUrl && (
+                          <img
+                            src={best.album.coverUrl}
+                            alt=""
+                            className="size-full object-cover"
+                          />
+                        )}
+                      </div>
+                      <div className="mt-4 min-w-0">
+                        <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
+                          {best.album.title}
+                        </p>
+                        <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
+                          Álbum · {best.album.artist}
+                        </p>
+                      </div>
+                      <PlayButton
+                        size="lg"
+                        onClick={(event) => {
+                          event.preventDefault();
+                          playQueue(best.album.tracks, 0, {
+                            source: 'search',
+                            sourceId: `album:${best.album.key}`,
+                          });
+                        }}
+                        className="absolute bottom-5 right-5"
+                      />
+                    </Link>
+                  )}
+                  {best.kind === 'track' && (
+                    <div className="group relative flex max-w-md flex-col justify-between rounded-xl border border-border bg-bg-elevated p-5">
+                      <div className="size-24 overflow-hidden rounded-lg bg-fg/6 shadow-lg">
+                        {best.track.coverUrl && (
+                          <img
+                            src={best.track.coverUrl}
+                            alt=""
+                            className="size-full object-cover"
+                          />
+                        )}
+                      </div>
+                      <div className="mt-4 min-w-0">
+                        <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
+                          {best.track.title}
+                        </p>
+                        <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
+                          {best.track.album ? 'Música' : 'Single'} · {trackArtistNames(best.track)}
+                        </p>
+                      </div>
+                      <PlayButton
+                        size="lg"
+                        playing={currentTrack?.id === best.track.id && isPlaying}
+                        onClick={() => {
+                          const index = local.tracks.findIndex((t) => t.id === best.track.id);
+                          playLocal(Math.max(0, index));
+                        }}
+                        className="absolute bottom-5 right-5"
+                      />
                     </div>
-                    <div className="mt-4 min-w-0">
-                      <p className="line-clamp-1 text-2xl font-bold tracking-tight text-fg">
-                        {topLocal.title}
-                      </p>
-                      <p className="mt-1 line-clamp-1 text-[13px] text-fg-muted">
-                        Música · {trackArtistNames(topLocal)}
-                      </p>
-                    </div>
-                    <PlayButton
-                      size="lg"
-                      playing={currentTrack?.id === topLocal.id && isPlaying}
-                      onClick={() => playLocal(0)}
-                      className="absolute bottom-5 right-5"
-                    />
+                  )}
+                </section>
+              )}
+
+              {/* Achou pela LETRA — digitada ou dita no microfone. */}
+              {showTracks && lyricMatches.length > 0 && (
+                <section aria-label="Pelas letras" className="min-w-0">
+                  <h2 className="mb-3 flex items-center gap-2 text-xl font-semibold tracking-tight text-fg">
+                    <Quote className="size-5 text-fg-muted" /> Pelas letras
+                  </h2>
+                  <div className="space-y-0.5">
+                    {lyricMatches.map(({ track, excerpt }) => (
+                      <button
+                        key={track.id}
+                        type="button"
+                        onClick={() =>
+                          playQueue([track], 0, { source: 'search', sourceId: `lyrics:${query}` })
+                        }
+                        className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-fg/5"
+                      >
+                        <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
+                          {track.coverUrl ? (
+                            <img
+                              src={track.coverUrl}
+                              alt=""
+                              loading="lazy"
+                              className="size-full object-cover"
+                            />
+                          ) : (
+                            <span className="grid size-full place-items-center text-fg-subtle">
+                              <Music className="size-4" />
+                            </span>
+                          )}
+                        </span>
+                        <span className="min-w-0 flex-1">
+                          <span className="line-clamp-1 text-sm font-medium text-fg">
+                            {track.title}{' '}
+                            <span className="text-fg-muted">· {trackArtistNames(track)}</span>
+                          </span>
+                          <span className="line-clamp-1 text-[13px] italic text-fg-muted">
+                            “{excerpt}”
+                          </span>
+                        </span>
+                      </button>
+                    ))}
                   </div>
                 </section>
               )}
