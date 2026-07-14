@@ -10,9 +10,12 @@
  *  2. CURADOR     — limpa as evidências: remove " - Topic", "VEVO", emojis e
  *                   ruído de título ("Official Video"…), e descarta canais
  *                   agregadores (playlist/lyrics/records) que NÃO são artistas.
- *  3. VERIFICADOR — consulta o catálogo (iTunes) e só CONFIRMA quando título E
- *                   artista batem estritamente. Nunca decide sozinho: sem um
- *                   palpite sustentado por evidência, ele nem procura.
+ *  3. VERIFICADOR — consulta o catálogo e só CONFIRMA quando as provas batem
+ *                   estritamente. Dois instrumentos: (a) iTunes — título E
+ *                   artista precisam bater; (b) a "lente" de álbum (Deezer) —
+ *                   identifica o álbum REAL citado pela fonte e só adota o
+ *                   artista/capa dele quando a faixa está na tracklist.
+ *                   Nunca decide sozinho: sem evidência, ele nem procura.
  *  4. JUIZ        — decide o crédito por precedência de evidência:
  *                   fonte estruturada > "Artista - Título" > canal do uploader
  *                   > crédito atual. O catálogo/IA pode no máximo REFINAR um
@@ -25,6 +28,7 @@
  *                   antigo era alucinado.
  */
 import { cleanQuery, verifyIdentity, type EnrichedMeta } from '@/lib/local/enrich';
+import { fetchAlbumInfo } from '@/lib/local/importerHelper';
 
 // ── evidências e veredito ───────────────────────────────────────────────────
 
@@ -190,4 +194,53 @@ export async function verificadorConfirma(
   const hint = artistHint?.trim();
   if (!hint || hint === 'Desconhecido') return null;
   return verifyIdentity(title, hint);
+}
+
+/** Título de faixa bate: igualdade normalizada, ou sufixo curto (live/remaster). */
+const tituloBate = (a: string, b: string): boolean => {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return long.startsWith(`${short} `) && long.length - short.length <= 18;
+};
+
+/** Título de álbum bate: igualdade, ou edição estendida ("Midnights (3am Edition)"). */
+const albumBate = (a: string, b: string): boolean => {
+  const na = norm(a);
+  const nb = norm(b);
+  if (!na || !nb) return false;
+  if (na === nb) return true;
+  const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
+  return long.startsWith(short) && long.length - short.length <= 25;
+};
+
+/** O que a lente de álbum devolve quando as DUAS provas fecham. */
+export interface VeredictoAlbum {
+  artist: string;
+  album: string;
+  coverUrl: string | null;
+}
+
+/**
+ * VERIFICADOR — a "lente" de álbum. Quando a FONTE cita um álbum (yt-dlp
+ * `album`), identifica esse álbum real no catálogo (Deezer, via importer) e
+ * adota o artista/capa autoritativos dele — mas SÓ quando duas provas
+ * independentes fecham: (1) o título do álbum bate com o citado pela fonte e
+ * (2) a faixa está na tracklist oficial. É o que devolve as faixas do
+ * "Nadando Cem Os Tubarões" ao Charlie Brown Jr. mesmo que um match antigo
+ * as tenha creditado a outra pessoa. Sem álbum na fonte, não faz nada.
+ */
+export async function verificadorAlbum(ev: Evidencia): Promise<VeredictoAlbum | null> {
+  if (!ev.sourceAlbum) return null;
+  const hint = ev.sourceArtist ?? ev.uploader ?? undefined;
+  const info = await fetchAlbumInfo(ev.sourceAlbum, hint);
+  if (!info || info.tracks.length === 0) return null;
+  if (!albumBate(info.title, ev.sourceAlbum)) return null; // não é o álbum citado
+  const wantedTitle = ev.sourceTrack || (ev.rawTitle ? cleanQuery(ev.rawTitle).title : '');
+  if (!wantedTitle) return null;
+  const pertence = info.tracks.some((t) => tituloBate(t, wantedTitle));
+  if (!pertence) return null; // a faixa não está nesse álbum — não adota nada
+  return { artist: info.artist, album: info.title, coverUrl: info.coverUrl };
 }

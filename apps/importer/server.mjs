@@ -528,6 +528,9 @@ async function main() {
             service: 'aurial-importer',
             hosts: HOSTS,
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
+            // Capabilities the web app gates on — the metadata-team healing pass
+            // must NOT run against an old importer that lacks these fields.
+            caps: ['uploader', 'album', 'quality'],
           }),
         );
         return;
@@ -562,6 +565,68 @@ async function main() {
         }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
         res.end(JSON.stringify({ imageUrl, name: matched }));
+        return;
+      }
+
+      // ── Album lookup ("lente" de álbum — Deezer, server-side p/ evitar CORS) ──
+      // Given an album title (+ optional artist hint), find the REAL album and
+      // return its authoritative artist, hi-res cover and full tracklist. The
+      // web app's VERIFICADOR only adopts it when the track title is actually
+      // in the tracklist — two independent proofs, zero guessing.
+      if (req.method === 'GET' && pathname === '/album') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const sp = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const title = (sp.get('title') || '').trim();
+        const artistHint = (sp.get('artist') || '').trim();
+        const normStr = (s) =>
+          String(s)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        let payload = null;
+        if (title) {
+          try {
+            const q = [title, artistHint].filter(Boolean).join(' ');
+            const r = await fetch(
+              `https://api.deezer.com/search/album?limit=5&q=${encodeURIComponent(q)}`,
+            );
+            const d = await r.json().catch(() => ({}));
+            const list = Array.isArray(d?.data) ? d.data : [];
+            const want = normStr(title);
+            const titled = list.filter((a) => a && typeof a.title === 'string');
+            const hit =
+              titled.find((a) => normStr(a.title) === want) ??
+              titled.find(
+                (a) => normStr(a.title).startsWith(want) || want.startsWith(normStr(a.title)),
+              );
+            if (hit?.id) {
+              const ar = await fetch(`https://api.deezer.com/album/${hit.id}`);
+              const album = await ar.json().catch(() => ({}));
+              const tracks = Array.isArray(album?.tracks?.data)
+                ? album.tracks.data
+                    .map((t) => (t && typeof t.title === 'string' ? t.title : ''))
+                    .filter(Boolean)
+                : [];
+              payload = {
+                title: typeof album.title === 'string' ? album.title : hit.title,
+                artist: album?.artist?.name ?? hit?.artist?.name ?? null,
+                coverUrl:
+                  album.cover_xl || album.cover_big || hit.cover_xl || hit.cover_big || null,
+                tracks,
+              };
+            }
+          } catch {
+            /* leave null */
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(JSON.stringify({ album: payload }));
         return;
       }
 

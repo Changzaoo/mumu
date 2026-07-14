@@ -1,10 +1,18 @@
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import {
   curadorLimpaUploader,
   extrator,
   juizCreditoConflita,
   juizDecideCredito,
+  verificadorAlbum,
 } from '@/lib/local/metaTeam';
+import { fetchAlbumInfo } from '@/lib/local/importerHelper';
+
+vi.mock('@/lib/local/importerHelper', () => ({
+  fetchAlbumInfo: vi.fn(),
+}));
+
+const mockAlbum = vi.mocked(fetchAlbumInfo);
 
 describe('CURADOR — limpeza de uploader', () => {
   it('remove sufixos de canal (" - Topic", VEVO, Oficial)', () => {
@@ -95,5 +103,47 @@ describe('JUIZ — detecção de crédito alucinado (conflito com a fonte)', () 
   it('crédito "Desconhecido" nunca conflita', () => {
     const ev = extrator({ title: 'Warzone', uploader: 'Brandão85' });
     expect(juizCreditoConflita(ev, 'Desconhecido')).toBe(false);
+  });
+});
+
+describe('VERIFICADOR — lente de álbum (prova dupla)', () => {
+  const nadando = {
+    title: 'Nadando Com os Tubarões',
+    artist: 'Charlie Brown Jr.',
+    coverUrl: 'https://cdn.example/capa.jpg',
+    tracks: ['Como Tudo Deve Ser', 'Só Lazer', 'Tarja Preta'],
+  };
+
+  it('adota artista/capa do álbum real quando a faixa está na tracklist', async () => {
+    mockAlbum.mockResolvedValueOnce(nadando);
+    const ev = extrator({
+      title: 'Como Tudo Deve Ser',
+      album: 'Nadando com os Tubarões',
+      uploader: 'Charlie Brown Jr. - Topic',
+    });
+    await expect(verificadorAlbum(ev)).resolves.toMatchObject({
+      artist: 'Charlie Brown Jr.',
+      album: 'Nadando Com os Tubarões',
+      coverUrl: 'https://cdn.example/capa.jpg',
+    });
+  });
+
+  it('recusa quando a faixa NÃO está na tracklist do álbum encontrado', async () => {
+    mockAlbum.mockResolvedValueOnce(nadando);
+    const ev = extrator({ title: 'Envolver', album: 'Nadando com os Tubarões' });
+    await expect(verificadorAlbum(ev)).resolves.toBeNull();
+  });
+
+  it('recusa quando o catálogo devolve um álbum de título diferente', async () => {
+    mockAlbum.mockResolvedValueOnce({ ...nadando, title: 'Outro Disco Qualquer' });
+    const ev = extrator({ title: 'Como Tudo Deve Ser', album: 'Nadando com os Tubarões' });
+    await expect(verificadorAlbum(ev)).resolves.toBeNull();
+  });
+
+  it('sem álbum citado pela fonte, nem consulta o catálogo', async () => {
+    mockAlbum.mockClear();
+    const ev = extrator({ title: 'Warzone', uploader: 'Brandão85' });
+    await expect(verificadorAlbum(ev)).resolves.toBeNull();
+    expect(mockAlbum).not.toHaveBeenCalled();
   });
 });

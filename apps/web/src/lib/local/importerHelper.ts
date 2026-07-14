@@ -122,6 +122,10 @@ async function baseHeaders(): Promise<Record<string, string>> {
 export interface HelperHealth {
   ok: boolean;
   hosts: string[];
+  /** Capabilities of the running importer ('uploader', 'album', 'quality') —
+   *  the metadata-team healing pass is gated on these (an OLD importer without
+   *  them must never "complete" a healing run). */
+  caps: string[];
 }
 
 /** Probe the helper with a short timeout. Returns null when it isn't running. */
@@ -135,12 +139,20 @@ export async function probeHelper(): Promise<HelperHealth | null> {
     });
     if (!res.ok) return null;
     const body = (await res.json()) as Partial<HelperHealth>;
-    return body.ok ? { ok: true, hosts: body.hosts ?? [] } : null;
+    return body.ok
+      ? { ok: true, hosts: body.hosts ?? [], caps: Array.isArray(body.caps) ? body.caps : [] }
+      : null;
   } catch {
     return null;
   } finally {
     clearTimeout(timer);
   }
+}
+
+/** True when the running importer supports the metadata-team fields. */
+export async function helperSupportsMetaTeam(): Promise<boolean> {
+  const health = await probeHelper();
+  return Boolean(health?.caps.includes('uploader') && health.caps.includes('album'));
 }
 
 export interface HelperImport {
@@ -271,6 +283,43 @@ export async function fetchTrackMeta(url: string): Promise<TrackMeta | null> {
     });
     if (!res.ok) return null;
     return (await res.json()) as TrackMeta;
+  } catch {
+    return null;
+  }
+}
+
+export interface AlbumInfo {
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  /** Titles of every track in the real album — membership proof for credits. */
+  tracks: string[];
+}
+
+/**
+ * A "lente" de álbum: identifica o álbum REAL no catálogo (Deezer, via o
+ * importer) e devolve artista/capa/tracklist autoritativos. O VERIFICADOR
+ * (metaTeam) só adota o resultado quando a faixa está na tracklist.
+ */
+export async function fetchAlbumInfo(title: string, artist?: string): Promise<AlbumInfo | null> {
+  try {
+    const params = new URLSearchParams({ title });
+    if (artist) params.set('artist', artist);
+    const res = await fetch(`${helperUrl()}/album?${params.toString()}`, {
+      headers: await baseHeaders(),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { album?: Partial<AlbumInfo> | null };
+    const album = data.album;
+    if (!album || typeof album.title !== 'string' || typeof album.artist !== 'string') return null;
+    return {
+      title: album.title,
+      artist: album.artist,
+      coverUrl: typeof album.coverUrl === 'string' ? album.coverUrl : null,
+      tracks: Array.isArray(album.tracks)
+        ? album.tracks.filter((t): t is string => typeof t === 'string' && t.length > 0)
+        : [],
+    };
   } catch {
     return null;
   }

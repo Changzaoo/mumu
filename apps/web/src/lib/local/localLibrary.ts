@@ -25,15 +25,16 @@ import {
   extrator,
   juizCreditoConflita,
   juizDecideCredito,
+  verificadorAlbum,
   verificadorConfirma,
 } from '@/lib/local/metaTeam';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
   fetchTrackMeta,
+  helperSupportsMetaTeam,
   importerHostLabel,
   importViaHelper,
-  probeHelper,
   uploadTrackBlob,
 } from '@/lib/local/importerHelper';
 
@@ -439,15 +440,18 @@ async function saveBlobAsLocalTrack(
   // canal do uploader, via CURADOR) e o JUIZ decide o crédito por precedência —
   // fonte > "Artista - Título" > canal. Faixa underground num canal de artista
   // ("MILAGRE" no canal Brandão85) sai creditada ao canal, nunca "Desconhecido".
-  const credito = juizDecideCredito(
-    extrator({
-      artist: opts.artist,
-      track: opts.track,
-      album: opts.album,
-      uploader: opts.uploader,
-      title: opts.title,
-    }),
-  );
+  const ev = extrator({
+    artist: opts.artist,
+    track: opts.track,
+    album: opts.album,
+    uploader: opts.uploader,
+    title: opts.title,
+  });
+  const credito = juizDecideCredito(ev);
+  // VERIFICADOR — lente de álbum: quando a fonte cita um álbum, identifica o
+  // álbum REAL no catálogo e adota artista/capa autoritativos (só com a faixa
+  // comprovadamente na tracklist).
+  const albumVer = await verificadorAlbum(ev).catch(() => null);
   const durationMs = await probeDurationMs(blob);
   const mimeType = blob.type || 'audio/mpeg';
   // Seed with the source thumbnail (e.g. YouTube cover) so it's never blank;
@@ -455,10 +459,10 @@ async function saveBlobAsLocalTrack(
   const track = localTrackDto(
     id,
     credito.title,
-    credito.artist,
+    albumVer?.artist ?? credito.artist,
     durationMs,
-    credito.album,
-    opts.coverUrl ?? null,
+    albumVer?.album ?? credito.album,
+    albumVer?.coverUrl ?? opts.coverUrl ?? null,
   );
   await putBlob(id, blob).catch(() => undefined);
   addEntry(
@@ -923,10 +927,12 @@ async function backfillRemote(): Promise<void> {
 // a wrong name, or two collaborating artists merged into one (which also breaks
 // lyrics lookup). Bump REPROCESS_VERSION to re-run this pass for everyone.
 const REPROCESS_KEY = 'aurial:reprocessVersion';
-// v5: o TIME DE METADADOS assumiu (metaTeam.ts) — a FONTE é a autoridade.
-// Re-deriva TODAS as faixas da fonte (cura créditos alucinados por catálogo/IA,
-// ex. "Warzone" do Brandão85 creditada ao The Wanted) e re-audita tudo.
-const REPROCESS_VERSION = 5;
+// v6: TIME DE METADADOS completo — a FONTE é a autoridade. Re-deriva TODAS as
+// faixas da fonte (cura créditos alucinados, ex. "Warzone" do Brandão85 →
+// The Wanted) com a lente de álbum (Deezer) e re-audita tudo. v6 re-arma a
+// cura da v5, que podia rodar contra um importer ANTIGO sem uploader/álbum e
+// "concluir" sem curar nada — agora o passe exige as capacidades novas.
+const REPROCESS_VERSION = 6;
 
 // ── periodic AI audit of attributions ───────────────────────────
 // iTunes has the final word on who a song is by; the AI just periodically
@@ -980,6 +986,10 @@ async function auditAttributions(limit = 12): Promise<void> {
       return a && a !== 'Desconhecido' && !audited.has(e.track.id);
     })
     .slice(0, limit);
+  if (todo.length === 0) return;
+  // Sem o importer novo a cura pela fonte não existe — não apaga crédito nenhum
+  // ainda (senão viraria "Desconhecido" o que a fonte poderia provar depois).
+  if (!(await helperSupportsMetaTeam())) return;
   const done: string[] = [];
   for (const e of todo) {
     const verdict = await aiVerifyArtist(
@@ -1055,19 +1065,25 @@ async function rederiveTrackFromSource(id: string): Promise<boolean> {
   const atual = cur.track.artists[0]?.name ?? null;
   const conflito = juizCreditoConflita(ev, atual);
   const credito = juizDecideCredito(ev, { artist: conflito ? null : atual });
+  // VERIFICADOR — lente de álbum: se a fonte cita um álbum real, o artista e a
+  // capa autoritativos vêm dele (prova dupla: título do álbum + faixa na
+  // tracklist). É o que devolve o "Nadando Cem Os Tubarões" ao Charlie Brown Jr.
+  const albumVer = await verificadorAlbum(ev).catch(() => null);
 
-  const sameArtist = credito.artist === (atual ?? 'Desconhecido');
+  const artistFinal = albumVer?.artist ?? credito.artist;
+  const sameArtist = artistFinal === (atual ?? 'Desconhecido');
   const sameTitle = credito.title === cur.track.title;
-  if (!conflito && sameArtist && sameTitle && !credito.album) return false; // nada novo
+  if (!conflito && !albumVer && sameArtist && sameTitle && !credito.album) return false; // nada novo
 
   const base = localTrackDto(
     id,
     credito.title || cur.track.title,
-    credito.artist,
+    artistFinal,
     cur.track.durationMs,
-    credito.album ?? (conflito ? null : (cur.track.album?.title ?? null)),
-    // Capa herdada de um match alucinado sai junto com o crédito errado.
-    conflito ? (safeCoverUrl(meta.thumbnail) ?? null) : cur.track.coverUrl,
+    albumVer?.album ?? credito.album ?? (conflito ? null : (cur.track.album?.title ?? null)),
+    // Capa herdada de um match alucinado sai junto com o crédito errado; a capa
+    // real do álbum (lente) tem prioridade sobre o thumbnail da fonte.
+    albumVer?.coverUrl ?? (conflito ? (safeCoverUrl(meta.thumbnail) ?? null) : cur.track.coverUrl),
   );
   const track: TrackDto = {
     ...base,
@@ -1098,6 +1114,10 @@ async function redriveFromSource(limit = 6): Promise<void> {
         e.sourceUrl && !done.has(e.track.id) && importerHostLabel(hostOf(e.sourceUrl)) !== null,
     )
     .slice(0, limit);
+  if (todo.length === 0) return;
+  // Um importer ANTIGO (sem uploader/álbum) responderia sem as evidências e a
+  // faixa seria marcada como "re-derivada" sem cura — só roda com o novo.
+  if (!(await helperSupportsMetaTeam())) return;
   const marked: string[] = [];
   for (const e of todo) {
     marked.push(e.track.id);
@@ -1140,13 +1160,13 @@ async function reprocessExisting(): Promise<void> {
   } catch {
     return;
   }
-  // v5 depende do importer (re-derivação da fonte). Se ele não estiver
-  // alcançável agora, NÃO marca a versão — tenta de novo no próximo boot,
-  // em vez de "concluir" uma cura que não aconteceu.
-  if ((await probeHelper()) === null) return;
+  // A cura depende do importer NOVO (uploader + lente de álbum). Sem ele no ar,
+  // NÃO marca a versão — tenta de novo no próximo boot, em vez de "concluir"
+  // uma cura que não aconteceu (foi o que a v5 fazia contra o importer antigo).
+  if (!(await helperSupportsMetaTeam())) return;
 
   // 1. AUDITOR: a fonte primeiro — re-deriva TODAS as faixas (zera o controle
-  //    para incluir as que a v<5 marcou como feitas com o crédito errado).
+  //    para incluir as que a v<6 marcou como feitas com o crédito errado).
   try {
     window.localStorage.removeItem(REDERIVE_KEY);
     window.localStorage.removeItem(AUDITED_KEY);
