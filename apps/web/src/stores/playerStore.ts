@@ -53,6 +53,33 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
   }
 }
 
+/**
+ * Próxima fonte para uma faixa local cuja fonte ATUAL morreu — o cofre de blobs
+ * pode ter evictado a cópia (LRU), estar fora do ar, ou a URL de /stream trazer
+ * um token Firebase expirado (gravado na fila/retomada de uma sessão anterior).
+ * Tenta, nesta ordem, o que ainda não foi tentado nesta carga: a cópia enviada
+ * (remoteUrl) → stream ao vivo da fonte com token NOVO → o link direto.
+ * Devolve a faixa com a nova fonte, ou null quando não há mais o que tentar.
+ */
+async function resolveNextSource(track: TrackDto, tried: Set<string>): Promise<TrackDto | null> {
+  if (!track.id.startsWith('local:')) return null;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  const remote = remoteUrlFor(track.id);
+  if (remote && !tried.has(remote)) return { ...track, streamUrl: remote };
+  const sourceUrl = sourceUrlFor(track.id);
+  if (!sourceUrl) return null;
+  try {
+    const host = new URL(sourceUrl).hostname;
+    if (importerHostLabel(host)) {
+      const streamUrl = await buildStreamUrl(sourceUrl); // token sempre fresco
+      return streamUrl && !tried.has(streamUrl) ? { ...track, streamUrl } : null;
+    }
+    return tried.has(sourceUrl) ? null : { ...track, streamUrl: sourceUrl };
+  } catch {
+    return null;
+  }
+}
+
 export interface PlayContext {
   source: PlaySource;
   sourceId?: string;
@@ -115,9 +142,16 @@ export function setOnPlayRecorded(callback: ((input: RecordPlayInput) => void) |
 
 // Local caches (library Cache Storage + downloads IndexedDB) rebuilt — await
 // before choosing a playback source so local audio always wins over network.
+// Cada hydrate é blindado: se um deles rejeitar (Cache Storage indisponível,
+// IndexedDB bloqueado), a promise memoizada NÃO pode ficar rejeitada para
+// sempre — todo load aguarda por ela, e uma rejeição eterna mataria TODA a
+// reprodução em silêncio.
 let localAudioReadyPromise: Promise<unknown> | null = null;
 function localAudioReady(): Promise<unknown> {
-  return (localAudioReadyPromise ??= Promise.all([hydrateLocalLibrary(), hydrateDownloads()]));
+  return (localAudioReadyPromise ??= Promise.all([
+    hydrateLocalLibrary().catch(() => undefined),
+    hydrateDownloads().catch(() => undefined),
+  ]));
 }
 
 // Per-loaded-track flags (reset on every load).
@@ -125,6 +159,23 @@ let playRecorded = false;
 let preloadRequested = false;
 let crossfadeTriggered = false;
 let lastProgressCommit = 0;
+
+// ── fonte morta não mata a faixa ─────────────────────────────────
+// URLs já tentadas na carga ATUAL (a primeira falha entra aqui) + quantas
+// alternativas já foram atrás. Zerado a cada troca de faixa (loadIndex).
+let fallbackTried = new Set<string>();
+let fallbackAttempts = 0;
+const MAX_FALLBACK_ATTEMPTS = 3;
+
+// Carregamento pendurado (ex.: /stream ao vivo que nunca emite bytes) não gera
+// evento de erro nenhum — sem watchdog a faixa fica "carregando" para sempre.
+const LOAD_WATCHDOG_MS = 30_000;
+let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
+
+function clearLoadWatchdog(): void {
+  if (loadWatchdog !== null) clearTimeout(loadWatchdog);
+  loadWatchdog = null;
+}
 
 // ── retomar de onde parou (Spotify-like) ────────────────────────
 // Ao reabrir o app, a ÚLTIMA faixa volta pausada na posição exata.
@@ -190,6 +241,51 @@ function firePreviewGate(): void {
   );
 }
 
+/**
+ * A fonte atual falhou (ou pendurou): tenta a PRÓXIMA fonte da faixa em vez de
+ * desistir. Devolve false só quando não há mais alternativa — aí o chamador
+ * para o player e avisa. true = já recarregou com outra fonte (ou a faixa
+ * mudou no meio do caminho e não há nada a fazer).
+ */
+async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
+  if (track.streamUrl) fallbackTried.add(track.streamUrl);
+  if (fallbackAttempts >= MAX_FALLBACK_ATTEMPTS) return false;
+  fallbackAttempts++;
+  const resolved = await resolveNextSource(track, fallbackTried);
+  const s = usePlayerStore.getState();
+  if (s.currentTrack?.id !== track.id) return true; // trocou de faixa — encerra
+  if (!resolved?.streamUrl) return false;
+  fallbackTried.add(resolved.streamUrl);
+  usePlayerStore.setState((st) => ({
+    queue: st.queue.map((t, i) => (i === st.queueIndex && t.id === track.id ? resolved : t)),
+    currentTrack: resolved,
+    isBuffering: true,
+  }));
+  audioEngine.load(resolved, { autoplay: s.isPlaying });
+  armLoadWatchdog(resolved.id);
+  return true;
+}
+
+/** Para de esperar um carregamento que nunca chega: sem 'loaded' nem posição
+ *  em 30s, trata como fonte morta e cai para a próxima. */
+function armLoadWatchdog(trackId: string): void {
+  clearLoadWatchdog();
+  if (typeof window === 'undefined') return;
+  loadWatchdog = setTimeout(() => {
+    loadWatchdog = null;
+    const current = usePlayerStore.getState().currentTrack;
+    if (!current || current.id !== trackId) return;
+    if (audioEngine.getPosition() > 0) return; // chegou a tocar — falso alarme
+    void (async () => {
+      if (await attemptSourceFallback(current)) return;
+      usePlayerStore.setState({ isPlaying: false, isBuffering: false });
+      void import('sonner').then(({ toast }) =>
+        toast.error('Não foi possível carregar esta faixa agora.'),
+      );
+    })();
+  }, LOAD_WATCHDOG_MS);
+}
+
 function fisherYatesShuffle<T>(items: T[]): T[] {
   const result = [...items];
   for (let i = result.length - 1; i > 0; i--) {
@@ -232,6 +328,9 @@ export const usePlayerStore = create<PlayerState>()(
         previewGateFired = false;
         pendingResumeSeek = null; // troca de faixa normal — sem seek de retomada
         lastProgressCommit = 0;
+        fallbackTried = new Set();
+        fallbackAttempts = 0;
+        clearLoadWatchdog();
         set({
           currentTrack: track,
           queueIndex: index,
@@ -277,6 +376,7 @@ export const usePlayerStore = create<PlayerState>()(
           if (track.streamUrl || !track.id.startsWith('local:')) {
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();
+            armLoadWatchdog(track.id);
             return;
           }
 
@@ -292,7 +392,15 @@ export const usePlayerStore = create<PlayerState>()(
           }
           audioEngine.load(resolved, { autoplay, crossfadeSeconds });
           applyEngineSettings();
-        })();
+          armLoadWatchdog(track.id);
+        })().catch(() => {
+          // Nada aqui pode deixar a faixa "carregando" para sempre.
+          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+          set({ isPlaying: false, isBuffering: false });
+          void import('sonner').then(({ toast }) =>
+            toast.error('Não foi possível carregar esta faixa agora.'),
+          );
+        });
       }
 
       return {
@@ -713,6 +821,7 @@ export function initPlayerEngine(): void {
   });
 
   audioEngine.on('loaded', ({ duration }) => {
+    clearLoadWatchdog();
     if (duration > 0 && Number.isFinite(duration)) store.setState({ duration });
     // Retomada: a faixa restaurada terminou de carregar → busca a posição salva.
     if (pendingResumeSeek !== null) {
@@ -727,7 +836,20 @@ export function initPlayerEngine(): void {
     store.setState({ isBuffering: buffering });
   });
 
-  audioEngine.on('error', ({ message }) => {
+  audioEngine.on('error', ({ message, track, kind }) => {
+    clearLoadWatchdog();
+    const current = store.getState().currentTrack;
+    // Fonte morta ≠ faixa morta: blob evictado do cofre (LRU), cofre fora do
+    // ar ou token expirado na URL gravada — tenta a próxima fonte antes de
+    // desistir. Só bloqueio de autoplay ('play') não é problema de fonte.
+    if (kind !== 'play' && current && track && current.id === track.id) {
+      void attemptSourceFallback(current).then((handled) => {
+        if (handled) return;
+        store.setState({ isPlaying: false, isBuffering: false });
+        void import('sonner').then(({ toast }) => toast.error(message));
+      });
+      return;
+    }
     store.setState({ isPlaying: false, isBuffering: false });
     // Toast lazily to avoid a hard dependency for unit tests.
     void import('sonner').then(({ toast }) => toast.error(message));

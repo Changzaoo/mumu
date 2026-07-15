@@ -26,12 +26,22 @@ import { resolveMediaUrl } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import type HlsType from 'hls.js';
 
+/**
+ * Why an `error` event fired — the consumer decides what is retryable:
+ * - 'source': the track has no resolvable source at all;
+ * - 'load':   the chosen source failed to load/decode (dead URL, 404/403, CDN
+ *             down) — trying an ALTERNATIVE source may succeed;
+ * - 'play':   the browser blocked playback (autoplay policy) — the source is
+ *             fine, only a user gesture is missing.
+ */
+export type PlaybackErrorKind = 'source' | 'load' | 'play';
+
 export interface AudioEngineEventMap {
   /** Emitted at rAF rate while playing (throttle on the consumer side). */
   timeupdate: { position: number; duration: number };
   loaded: { track: TrackDto; duration: number };
   ended: { track: TrackDto | null };
-  error: { message: string; track: TrackDto | null };
+  error: { message: string; track: TrackDto | null; kind: PlaybackErrorKind };
   buffering: { buffering: boolean };
 }
 
@@ -211,7 +221,7 @@ export class AudioEngine {
     const { autoplay = true, crossfadeSeconds = 0 } = options;
     const source = this.sourceFor(track);
     if (!source) {
-      this.emit('error', { message: 'Faixa indisponível para reprodução.', track });
+      this.emit('error', { message: 'Faixa indisponível para reprodução.', track, kind: 'source' });
       return;
     }
     const url = resolveMediaUrl(source);
@@ -514,7 +524,7 @@ export class AudioEngine {
     });
     howl.on('loaderror', () => {
       if (slot.seq === seq && slot === this.active) {
-        this.emit('error', { message: PLAYBACK_ERROR, track });
+        this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
       }
     });
     howl.on('playerror', () => {
@@ -550,7 +560,7 @@ export class AudioEngine {
     };
     const onError = (): void => {
       if (slot.seq === seq && slot === this.active) {
-        this.emit('error', { message: PLAYBACK_ERROR, track });
+        this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
       }
     };
     el.addEventListener('loadedmetadata', onMeta);
@@ -580,7 +590,7 @@ export class AudioEngine {
         hls.attachMedia(el);
         hls.on(Hls.Events.ERROR, (_event, data) => {
           if (data.fatal && slot.seq === seq && slot === this.active) {
-            this.emit('error', { message: PLAYBACK_ERROR, track });
+            this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
           }
         });
         if (slot.source?.kind === 'element') slot.source.hls = hls;
@@ -620,6 +630,7 @@ export class AudioEngine {
           this.emit('error', {
             message: 'Reprodução bloqueada pelo navegador — toque na página e tente novamente.',
             track: slot.track,
+            kind: 'play',
           });
         }
       });
