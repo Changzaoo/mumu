@@ -20,6 +20,7 @@ import {
   hydrate as hydrateLocalLibrary,
   localAudioUrl as localLibraryAudioUrl,
   remoteUrlFor,
+  reportDeadRemote,
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
@@ -248,7 +249,13 @@ function firePreviewGate(): void {
  * mudou no meio do caminho e não há nada a fazer).
  */
 async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
-  if (track.streamUrl) fallbackTried.add(track.streamUrl);
+  if (track.streamUrl) {
+    fallbackTried.add(track.streamUrl);
+    // Se a URL morta era a cópia do cofre, limpa da biblioteca (todos os
+    // aparelhos param de tentar o hop morto) e re-envia o áudio se ele
+    // existir NESTE aparelho — o cofre se cura sozinho. No-op nos demais casos.
+    reportDeadRemote(track.id, track.streamUrl);
+  }
   if (fallbackAttempts >= MAX_FALLBACK_ATTEMPTS) return false;
   fallbackAttempts++;
   const resolved = await resolveNextSource(track, fallbackTried);
@@ -267,7 +274,9 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
 }
 
 /** Para de esperar um carregamento que nunca chega: sem 'loaded' nem posição
- *  em 30s, trata como fonte morta e cai para a próxima. */
+ *  em 30s, trata como fonte morta e cai para a próxima. Fonte VIVA porém
+ *  lenta (bytes chegando — /stream ao vivo num servidor carregado) ganha mais
+ *  tempo em vez de ser morta no meio. */
 function armLoadWatchdog(trackId: string): void {
   clearLoadWatchdog();
   if (typeof window === 'undefined') return;
@@ -276,6 +285,10 @@ function armLoadWatchdog(trackId: string): void {
     const current = usePlayerStore.getState().currentTrack;
     if (!current || current.id !== trackId) return;
     if (audioEngine.getPosition() > 0) return; // chegou a tocar — falso alarme
+    if (audioEngine.getBufferedEnd() > 0) {
+      armLoadWatchdog(trackId); // dados chegando — só está lento, espera mais
+      return;
+    }
     void (async () => {
       if (await attemptSourceFallback(current)) return;
       usePlayerStore.setState({ isPlaying: false, isBuffering: false });

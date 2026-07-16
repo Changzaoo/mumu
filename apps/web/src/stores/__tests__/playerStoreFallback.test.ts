@@ -60,10 +60,12 @@ vi.mock('@/lib/audio/mediaSession', () => ({ initMediaSession: vi.fn() }));
 // reprodução tem de seguir mesmo assim. Sem áudio local neste aparelho.
 const remoteUrlFor = vi.fn<(id: string) => string | null>(() => null);
 const sourceUrlFor = vi.fn<(id: string) => string | null>(() => null);
+const reportDeadRemote = vi.fn<(id: string, deadUrl: string) => void>();
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.reject(new Error('cache storage indisponível'))),
   localAudioUrl: vi.fn(() => null),
   remoteUrlFor: (id: string) => remoteUrlFor(id),
+  reportDeadRemote: (id: string, deadUrl: string) => reportDeadRemote(id, deadUrl),
   sourceUrlFor: (id: string) => sourceUrlFor(id),
 }));
 
@@ -186,6 +188,21 @@ describe('fallback de fonte morta', () => {
     });
     expect(vi.mocked(audioEngine.load).mock.calls.length).toBe(loads);
     expect(usePlayerStore.getState().isBuffering).toBe(false);
+  });
+
+  it('reporta a URL morta à biblioteca para curar o cofre', async () => {
+    sourceUrlFor.mockReturnValue('https://www.youtube.com/watch?v=abc');
+    buildStreamUrl.mockResolvedValue(FRESH_STREAM);
+
+    const track = makeLocalTrack();
+    usePlayerStore.getState().playTrack(track);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+
+    emit('error', { message: 'x', track, kind: 'load' });
+
+    await vi.waitFor(() => {
+      expect(reportDeadRemote).toHaveBeenCalledWith('local:t1', DEAD_BLOB);
+    });
   });
 
   it('não tenta fallback em bloqueio de autoplay (kind=play)', async () => {

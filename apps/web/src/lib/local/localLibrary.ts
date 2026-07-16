@@ -258,6 +258,31 @@ async function uploadAndLink(id: string, blob: Blob): Promise<void> {
   });
 }
 
+/**
+ * O player reporta uma cópia enviada (remoteUrl) MORTA — o cofre a perdeu
+ * (eviction LRU, disco fora do ar). Limpa a URL da entrada (a metadata
+ * sincroniza e TODOS os aparelhos param de pagar o hop morto a cada play) e,
+ * se ESTE aparelho tiver o áudio, re-envia na hora para curar o cofre.
+ * Best-effort e estritamente guardado: só age quando a URL morta é exatamente
+ * a registrada.
+ */
+export function reportDeadRemote(id: string, deadUrl: string): void {
+  const entry = read().find((e) => e.track.id === id);
+  if (!entry || entry.remoteUrl !== deadUrl) return;
+  const { remoteUrl: _dead, ...rest } = entry;
+  patchEntry(id, {
+    ...rest,
+    track: {
+      ...entry.track,
+      streamUrl: entry.track.streamUrl === deadUrl ? null : entry.track.streamUrl,
+    },
+  });
+  void (async () => {
+    const blob = await blobFor(id).catch(() => null);
+    if (blob) await uploadAndLink(id, blob);
+  })();
+}
+
 // ── cross-device sync (Firestore, metadata only) ────────────────
 // Only the registry (track + metadata) syncs. The audio bytes stay on the
 // device that has them; a synced-in entry simply isn't playable elsewhere until
