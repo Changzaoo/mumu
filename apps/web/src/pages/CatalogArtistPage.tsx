@@ -10,6 +10,7 @@ import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
 import { useArtistTracks } from '@/features/catalog/api';
+import { useTrackLikes } from '@/features/library/api';
 import { usePlayerStore } from '@/stores/playerStore';
 
 export default function CatalogArtistPage() {
@@ -17,6 +18,7 @@ export default function CatalogArtistPage() {
   const tracksQuery = useArtistTracks(id);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
+  const likes = useTrackLikes();
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
@@ -82,6 +84,8 @@ export default function CatalogArtistPage() {
               showAlbum={false}
               active={track.id === currentTrack?.id}
               playing={track.id === currentTrack?.id && isPlaying}
+              liked={likes.isLiked(track)}
+              onToggleLike={(liked) => likes.toggle(track, liked)}
               onPlay={() => playQueue(tracks, index, { source: 'artist', sourceId: id })}
             />
           ))}

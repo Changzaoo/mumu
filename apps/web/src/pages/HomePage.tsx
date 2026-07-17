@@ -257,6 +257,7 @@ export default function HomePage() {
               title={rec.title}
               subtitle={rec.subtitle}
               imageUrl={rec.coverUrl}
+              imageUrls={rec.coverUrls}
               to={rec.key.startsWith('reco:') ? undefined : `/mix/${encodeURIComponent(rec.key)}`}
               onPlay={() =>
                 playQueue(seededShuffle(rec.tracks, daySeed()), 0, {

@@ -45,12 +45,15 @@ export default function HistoryPage() {
   const { data, isLoading, isError, refetch, fetchNextPage, hasNextPage, isFetchingNextPage } =
     useHistory();
   const likes = useTrackLikes();
-  const playTrack = usePlayerStore((s) => s.playTrack);
+  const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
   const entries = useMemo(() => data?.pages.flatMap((page) => page.items) ?? [], [data]);
   const groups = useMemo(() => groupByDay(entries), [entries]);
+  // A fila leva o histórico INTEIRO a partir da faixa tocada — uma fila de
+  // faixa única parava ao fim da música.
+  const queueTracks = useMemo(() => entries.map((e) => e.track), [entries]);
 
   const sentinelRef = useRef<HTMLDivElement>(null);
   useEffect(() => {
@@ -108,7 +111,10 @@ export default function HistoryPage() {
                         liked={likes.isLiked(entry.track)}
                         onToggleLike={(liked) => likes.toggle(entry.track, liked)}
                         onPlay={() =>
-                          playTrack(entry.track, { source: 'library', sourceId: 'history' })
+                          playQueue(queueTracks, entries.indexOf(entry), {
+                            source: 'library',
+                            sourceId: 'history',
+                          })
                         }
                       />
                     </div>

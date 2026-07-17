@@ -26,18 +26,43 @@ function shuffled<T>(items: T[]): T[] {
   return out;
 }
 
-function mixFor(key: string): { title: string; tracks: TrackDto[]; cover: string | null } {
+/** Até 4 capas distintas — cabeçalho vira colagem 2×2 com cara de mix. */
+function covers(tracks: TrackDto[]): string[] {
+  const out: string[] = [];
+  for (const t of tracks) {
+    if (t.coverUrl && !out.includes(t.coverUrl)) out.push(t.coverUrl);
+    if (out.length >= 4) break;
+  }
+  return out;
+}
+
+function mixFor(key: string): {
+  title: string;
+  tracks: TrackDto[];
+  cover: string | null;
+  covers: string[];
+} {
   const [kind, ...rest] = key.split(':');
   const name = rest.join(':');
   if (kind === 'genre') {
     const tracks = localLibrary.genreTracks(name);
-    return { title: `Mix ${name}`, tracks, cover: tracks[0]?.coverUrl ?? null };
+    return {
+      title: `Mix ${name}`,
+      tracks,
+      cover: tracks[0]?.coverUrl ?? null,
+      covers: covers(tracks),
+    };
   }
   if (kind === 'artist') {
     const tracks = localLibrary.artistTracks(name);
-    return { title: `Mix de ${name}`, tracks, cover: tracks[0]?.coverUrl ?? null };
+    return {
+      title: `Mix de ${name}`,
+      tracks,
+      cover: tracks[0]?.coverUrl ?? null,
+      covers: covers(tracks),
+    };
   }
-  return { title: 'Mix', tracks: [], cover: null };
+  return { title: 'Mix', tracks: [], cover: null, covers: [] };
 }
 
 export default function MixPage() {
@@ -77,7 +102,13 @@ export default function MixPage() {
     <div className="space-y-6 py-4">
       <header className="flex flex-col gap-5 sm:flex-row sm:items-end">
         <div className="size-44 shrink-0 overflow-hidden rounded-xl bg-fg/6 shadow-2xl sm:size-52">
-          {mix.cover ? (
+          {mix.covers.length >= 4 ? (
+            <div className="grid size-full grid-cols-2 grid-rows-2">
+              {mix.covers.map((url) => (
+                <img key={url} src={url} alt="" className="size-full object-cover" />
+              ))}
+            </div>
+          ) : mix.cover ? (
             <img src={mix.cover} alt="" className="size-full object-cover" />
           ) : (
             <div className="grid size-full place-items-center text-fg-subtle">

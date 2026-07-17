@@ -41,6 +41,10 @@ export interface Recommendation {
   title: string;
   subtitle: string;
   coverUrl: string | null;
+  /** Até 4 capas DISTINTAS das faixas — o card vira colagem 2×2 com cara de
+   *  mix. Uma capa única fazia o mix parecer um álbum específico que não
+   *  tinha nada a ver com o conteúdo. */
+  coverUrls: string[];
   tracks: TrackDto[];
 }
 
@@ -146,6 +150,53 @@ function comArtistas(tracks: readonly TrackDto[], max = 3): string {
 function primeiraCapa(tracks: readonly TrackDto[]): string | null {
   for (const t of tracks) if (t.coverUrl) return t.coverUrl;
   return null;
+}
+
+/** Até `max` capas distintas do mix (colagem 2×2 no card). */
+function capasDoMix(tracks: readonly TrackDto[], max = 4): string[] {
+  const out: string[] = [];
+  for (const t of tracks) {
+    if (t.coverUrl && !out.includes(t.coverUrl)) out.push(t.coverUrl);
+    if (out.length >= max) break;
+  }
+  return out;
+}
+
+/**
+ * Monta a tracklist do mix INTERCALANDO artistas (round-robin na ordem de
+ * score): sem isto o score do artista líder somava em TODAS as faixas dele e
+ * um artista com muitas faixas dominava o mix inteiro — "mix" com cara de
+ * discografia. Cada artista entra com no máximo `porArtista` faixas.
+ */
+function intercalaPorArtista(
+  cand: ReadonlyArray<{ t: TrackDto; score: number }>,
+  porArtista: number,
+  total: number,
+): TrackDto[] {
+  const buckets = new Map<string, TrackDto[]>();
+  const ordem: string[] = [];
+  for (const c of cand) {
+    const key = norm(c.t.artists[0]?.name ?? '');
+    let bucket = buckets.get(key);
+    if (!bucket) {
+      buckets.set(key, (bucket = []));
+      ordem.push(key);
+    }
+    if (bucket.length < porArtista) bucket.push(c.t);
+  }
+  const out: TrackDto[] = [];
+  for (let rodada = 0; rodada < porArtista && out.length < total; rodada++) {
+    let adicionou = false;
+    for (const key of ordem) {
+      const t = buckets.get(key)?.[rodada];
+      if (!t) continue;
+      out.push(t);
+      adicionou = true;
+      if (out.length >= total) break;
+    }
+    if (!adicionou) break;
+  }
+  return out;
 }
 
 function periodoDoDia(hour: number): string {
@@ -310,7 +361,9 @@ function compute(inputs: RecoInputs): Recommendation[] {
     }
     if (cand.length < 4) continue;
     cand.sort((a, b) => b.score - a.score);
-    const tracks = cand.slice(0, 25).map((c) => c.t);
+    // Rodízio por artista (máx. 5 faixas cada): variedade de verdade em vez
+    // de 25 faixas do artista líder.
+    const tracks = intercalaPorArtista(cand, 5, 25);
     const lead = artistIdx.get(cluster.artists[0]!)!.name;
     out.push({
       // /mix/:key só entende genre:/artist: — cluster com gênero usa a chave de
@@ -319,6 +372,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
       title: cluster.genreName ? `Seu mix de ${cluster.genreName}` : `Mix de ${lead}`,
       subtitle: comArtistas(tracks),
       coverUrl: primeiraCapa(tracks),
+      coverUrls: capasDoMix(tracks),
       tracks,
     });
   }
@@ -338,6 +392,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
         title: 'Para agora',
         subtitle: `O que você costuma ouvir ${periodoDoDia(horaAtual)}`,
         coverUrl: primeiraCapa(tracks),
+        coverUrls: capasDoMix(tracks),
         tracks,
       });
     }
@@ -362,6 +417,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
         title: 'De volta aos seus ouvidos',
         subtitle: 'Faixas que você amava e não ouve há um tempo',
         coverUrl: primeiraCapa(tracks),
+        coverUrls: capasDoMix(tracks),
         tracks,
       });
     }
@@ -394,6 +450,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
         title: 'Descobertas na sua biblioteca',
         subtitle: 'Faixas suas que você ainda não ouviu',
         coverUrl: primeiraCapa(tracks),
+        coverUrls: capasDoMix(tracks),
         tracks,
       });
     }
@@ -418,6 +475,7 @@ function fallbackMixes(
       title: `Mix ${g.name}`,
       subtitle: comArtistas(g.tracks),
       coverUrl: primeiraCapa(g.tracks),
+      coverUrls: capasDoMix(g.tracks),
       tracks: g.tracks,
     });
   }
@@ -429,6 +487,7 @@ function fallbackMixes(
       title: `Mix de ${a.name}`,
       subtitle: comArtistas(a.tracks),
       coverUrl: primeiraCapa(a.tracks),
+      coverUrls: capasDoMix(a.tracks),
       tracks: a.tracks,
     });
   }

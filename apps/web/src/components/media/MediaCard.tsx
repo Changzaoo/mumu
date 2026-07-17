@@ -8,6 +8,9 @@ export interface MediaCardProps extends ComponentProps<'div'> {
   title: string;
   subtitle?: ReactNode;
   imageUrl?: string | null;
+  /** 4+ capas → colagem 2×2 (cara de mix, não de álbum). Menos que 4 cai no
+   *  `imageUrl` normal. */
+  imageUrls?: readonly (string | null | undefined)[];
   /** round = artists (DESIGN §8). */
   shape?: 'square' | 'round';
   /** Route target for the whole card. */
@@ -26,6 +29,7 @@ export function MediaCard({
   title,
   subtitle,
   imageUrl,
+  imageUrls,
   shape = 'square',
   to,
   onPlay,
@@ -38,6 +42,8 @@ export function MediaCard({
   // A play-only card (no route) plays when tapped anywhere — no hunting for the
   // little corner button.
   const clickable = Boolean(onPlay) && !to;
+  const collage = (imageUrls ?? []).filter((u): u is string => Boolean(u)).slice(0, 4);
+  const showCollage = shape === 'square' && collage.length >= 4;
 
   const art = (
     <div className={cn('relative aspect-square overflow-hidden bg-fg/6', rounded)}>
@@ -50,7 +56,20 @@ export function MediaCard({
           30s
         </span>
       )}
-      {imageUrl ? (
+      {showCollage ? (
+        <div className="grid size-full grid-cols-2 grid-rows-2 transition-transform duration-300 ease-out group-hover:scale-[1.03]">
+          {collage.map((url, i) => (
+            <img
+              key={`${url}:${i}`}
+              src={url}
+              alt=""
+              loading="lazy"
+              decoding="async"
+              className="size-full object-cover"
+            />
+          ))}
+        </div>
+      ) : imageUrl ? (
         <img
           src={imageUrl}
           alt=""

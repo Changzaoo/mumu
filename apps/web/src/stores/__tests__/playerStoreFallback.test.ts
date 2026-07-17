@@ -205,6 +205,22 @@ describe('fallback de fonte morta', () => {
     });
   });
 
+  it('pula para a próxima faixa da fila quando a atual morre de vez', async () => {
+    // Sem remoteUrl nem sourceUrl: a faixa A não tem NENHUMA alternativa.
+    const a = makeTrack('local:t1', { streamUrl: DEAD_BLOB });
+    const b = makeTrack('local:t2', { streamUrl: 'https://cdn.example/b.mp3' });
+    usePlayerStore.getState().playQueue([a, b], 0);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+    emit('loaded', { track: a, duration: 100 }); // zera o contador de mortes seguidas
+
+    emit('error', { message: 'x', track: a, kind: 'load' });
+
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('local:t2');
+    });
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+  });
+
   it('não tenta fallback em bloqueio de autoplay (kind=play)', async () => {
     const track = makeLocalTrack();
     usePlayerStore.getState().playTrack(track);

@@ -17,6 +17,7 @@ import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
+import { useTrackLikes } from '@/features/library/api';
 import { useRecentSearches } from '@/features/search/api';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSearch';
@@ -133,6 +134,7 @@ export default function SearchPage() {
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
+  const likes = useTrackLikes();
 
   const tracksQuery = useCatalogSearch(query);
   const artistsQuery = useCatalogSearchArtists(query);
@@ -497,12 +499,18 @@ export default function SearchPage() {
                     <Quote className="size-5 text-fg-muted" /> Pelas letras
                   </h2>
                   <div className="space-y-0.5">
-                    {lyricMatches.map(({ track, excerpt }) => (
+                    {lyricMatches.map(({ track, excerpt }, index) => (
                       <button
                         key={track.id}
                         type="button"
                         onClick={() =>
-                          playQueue([track], 0, { source: 'search', sourceId: `lyrics:${query}` })
+                          // A fila leva TODOS os resultados da busca por letra —
+                          // uma fila de faixa única parava ao fim da música.
+                          playQueue(
+                            lyricMatches.map((m) => m.track),
+                            index,
+                            { source: 'search', sourceId: `lyrics:${query}` },
+                          )
                         }
                         className="flex w-full items-center gap-3 rounded-lg px-2 py-2 text-left transition-colors hover:bg-fg/5"
                       >
@@ -549,6 +557,8 @@ export default function SearchPage() {
                         showAlbum={false}
                         active={track.id === currentTrack?.id}
                         playing={track.id === currentTrack?.id && isPlaying}
+                        liked={likes.isLiked(track)}
+                        onToggleLike={(liked) => likes.toggle(track, liked)}
                         onPlay={() => playLocal(index)}
                       />
                     ))}
@@ -603,6 +613,8 @@ export default function SearchPage() {
                         showAlbum={false}
                         active={track.id === currentTrack?.id}
                         playing={track.id === currentTrack?.id && isPlaying}
+                        liked={likes.isLiked(track)}
+                        onToggleLike={(liked) => likes.toggle(track, liked)}
                         onPlay={() => playFree(index)}
                       />
                     ))}

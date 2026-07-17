@@ -178,6 +178,30 @@ function clearLoadWatchdog(): void {
   loadWatchdog = null;
 }
 
+// Uma faixa morta no meio da fila NÃO pode parar a música (Spotify pula e
+// segue). Zerado quando uma faixa carrega; 3 mortes seguidas = para honesto
+// (provável problema geral: sem rede, servidor fora…), não um loop de pulos.
+let consecutiveDeadTracks = 0;
+const MAX_DEAD_TRACK_SKIPS = 3;
+
+/**
+ * Fim da linha para a faixa ATUAL (todas as fontes falharam): se a fila tem
+ * próxima e estávamos tocando, avisa e PULA para ela em vez de parar tudo.
+ */
+function failCurrentTrack(message: string): void {
+  const s = usePlayerStore.getState();
+  consecutiveDeadTracks++;
+  const hasNext = s.queueIndex + 1 < s.queue.length || (s.repeat === 'all' && s.queue.length > 1);
+  if (s.isPlaying && hasNext && consecutiveDeadTracks <= MAX_DEAD_TRACK_SKIPS) {
+    const title = s.currentTrack?.title ?? 'faixa';
+    void import('sonner').then(({ toast }) => toast(`"${title}" indisponível — pulando.`));
+    s.next();
+    return;
+  }
+  usePlayerStore.setState({ isPlaying: false, isBuffering: false });
+  void import('sonner').then(({ toast }) => toast.error(message));
+}
+
 // ── retomar de onde parou (Spotify-like) ────────────────────────
 // Ao reabrir o app, a ÚLTIMA faixa volta pausada na posição exata.
 // Persistência leve: só {faixa, segundos} — nunca a fila inteira (stringify
@@ -291,10 +315,7 @@ function armLoadWatchdog(trackId: string): void {
     }
     void (async () => {
       if (await attemptSourceFallback(current)) return;
-      usePlayerStore.setState({ isPlaying: false, isBuffering: false });
-      void import('sonner').then(({ toast }) =>
-        toast.error('Não foi possível carregar esta faixa agora.'),
-      );
+      failCurrentTrack('Não foi possível carregar esta faixa agora.');
     })();
   }, LOAD_WATCHDOG_MS);
 }
@@ -376,12 +397,10 @@ export const usePlayerStore = create<PlayerState>()(
             return;
           }
 
-          // OFFLINE without a local copy: fail honestly, no network attempts.
+          // OFFLINE without a local copy: no network attempts — skip to the
+          // next queue track (it may be downloaded) or stop honestly.
           if (typeof navigator !== 'undefined' && !navigator.onLine) {
-            set({ isPlaying: false, isBuffering: false });
-            void import('sonner').then(({ toast }) =>
-              toast.error('Sem conexão — essa faixa não está baixada neste dispositivo.'),
-            );
+            failCurrentTrack('Sem conexão — essa faixa não está baixada neste dispositivo.');
             return;
           }
 
@@ -409,10 +428,7 @@ export const usePlayerStore = create<PlayerState>()(
         })().catch(() => {
           // Nada aqui pode deixar a faixa "carregando" para sempre.
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
-          set({ isPlaying: false, isBuffering: false });
-          void import('sonner').then(({ toast }) =>
-            toast.error('Não foi possível carregar esta faixa agora.'),
-          );
+          failCurrentTrack('Não foi possível carregar esta faixa agora.');
         });
       }
 
@@ -835,6 +851,7 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('loaded', ({ duration }) => {
     clearLoadWatchdog();
+    consecutiveDeadTracks = 0; // uma faixa carregou — a fila está saudável
     if (duration > 0 && Number.isFinite(duration)) store.setState({ duration });
     // Retomada: a faixa restaurada terminou de carregar → busca a posição salva.
     if (pendingResumeSeek !== null) {
@@ -858,8 +875,7 @@ export function initPlayerEngine(): void {
     if (kind !== 'play' && current && track && current.id === track.id) {
       void attemptSourceFallback(current).then((handled) => {
         if (handled) return;
-        store.setState({ isPlaying: false, isBuffering: false });
-        void import('sonner').then(({ toast }) => toast.error(message));
+        failCurrentTrack(message);
       });
       return;
     }

@@ -11,6 +11,7 @@ import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
 import { useCatalogPlaylist, usePlaylistTracks } from '@/features/catalog/api';
+import { useTrackLikes } from '@/features/library/api';
 import { usePlayerStore } from '@/stores/playerStore';
 
 export default function CatalogPlaylistPage() {
@@ -19,6 +20,7 @@ export default function CatalogPlaylistPage() {
   const tracksQuery = usePlaylistTracks(id);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
+  const likes = useTrackLikes();
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
@@ -84,6 +86,8 @@ export default function CatalogPlaylistPage() {
               index={index}
               active={track.id === currentTrack?.id}
               playing={track.id === currentTrack?.id && isPlaying}
+              liked={likes.isLiked(track)}
+              onToggleLike={(liked) => likes.toggle(track, liked)}
               onPlay={() => playQueue(tracks, index, { source: 'playlist', sourceId: id })}
             />
           ))}
