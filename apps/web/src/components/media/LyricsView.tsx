@@ -1,12 +1,16 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { MicVocal } from 'lucide-react';
 import type { TrackDto } from '@aurial/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
+import { audioEngine } from '@/lib/audio/AudioEngine';
 import { fetchLyrics } from '@/lib/lyrics/lyrics';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
+
+/** Acende a linha um pouco antes do timestamp — sensação de estar em sincronia. */
+const LEAD_MS = 180;
 
 export interface LyricsViewProps {
   track: TrackDto;
@@ -18,8 +22,9 @@ export interface LyricsViewProps {
  * Click a line to seek (synced lyrics only).
  */
 export function LyricsView({ track, className }: LyricsViewProps) {
-  const progress = usePlayerStore((s) => s.progress);
   const seek = usePlayerStore((s) => s.seek);
+  const isCurrent = usePlayerStore((s) => s.currentTrack?.id === track.id);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
 
   const { data: lyrics, isLoading } = useQuery({
     queryKey: ['lyrics', track.id],
@@ -28,16 +33,31 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     retry: false,
   });
 
+  // Karaokê fluido: a posição do STORE é throttled a ~5/s (passos visíveis e
+  // ~200ms atrasados). Amostramos a posição REAL do engine por rAF — mas só da
+  // faixa que está tocando, para não destacar linha na letra de outra faixa.
+  const [positionMs, setPositionMs] = useState(0);
+  const synced = Boolean(lyrics?.synced) && isCurrent;
+  useEffect(() => {
+    if (!synced) return;
+    let raf = 0;
+    const tick = (): void => {
+      setPositionMs(audioEngine.getPosition() * 1000 + LEAD_MS);
+      raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [synced, isPlaying, track.id]);
+
   const activeIndex = useMemo(() => {
-    if (!lyrics?.synced) return -1;
-    const positionMs = progress * 1000;
+    if (!synced || !lyrics) return -1;
     let index = -1;
     for (let i = 0; i < lyrics.lines.length; i++) {
       if ((lyrics.lines[i]?.timeMs ?? Infinity) <= positionMs) index = i;
       else break;
     }
     return index;
-  }, [lyrics, progress]);
+  }, [synced, lyrics, positionMs]);
 
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {

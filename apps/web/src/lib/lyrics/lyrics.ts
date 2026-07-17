@@ -22,8 +22,13 @@ export interface Lyrics {
 
 const CACHE_KEY = 'aurial:lyrics-cache';
 const LRC_TIME = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
+const LRC_OFFSET = /\[offset:\s*([+-]?\d+)\s*\]/i;
 
 function parseLrc(lrc: string): LyricLine[] {
+  // `[offset:±ms]` é um deslocamento global do arquivo; convenção dos players:
+  // tempo efetivo = tempo - offset (positivo adianta a letra). Ignorá-lo deixa
+  // TODAS as linhas fora de sincronia por esse valor fixo.
+  const offset = Number(LRC_OFFSET.exec(lrc)?.[1] ?? 0) || 0;
   const out: LyricLine[] = [];
   for (const raw of lrc.split(/\r?\n/)) {
     LRC_TIME.lastIndex = 0;
@@ -39,7 +44,7 @@ function parseLrc(lrc: string): LyricLine[] {
     }
     if (times.length === 0) continue;
     const text = raw.slice(end).trim();
-    for (const t of times) out.push({ timeMs: t, text });
+    for (const t of times) out.push({ timeMs: Math.max(0, t - offset), text });
   }
   return out.sort((a, b) => a.timeMs - b.timeMs);
 }
@@ -47,6 +52,45 @@ function parseLrc(lrc: string): LyricLine[] {
 interface LrclibRow {
   syncedLyrics?: string | null;
   plainLyrics?: string | null;
+  trackName?: string | null;
+  artistName?: string | null;
+  duration?: number | null;
+}
+
+/** Loose normalization for fuzzy title/artist comparison. */
+function normLoose(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * True when a fuzzy `/api/search` row plausibly IS this track — the search
+ * endpoint is loose full-text and returns many unrelated songs, so accepting
+ * the first row with synced lyrics is exactly how WRONG lyrics get locked in.
+ * Guard on title similarity + artist overlap + duration proximity.
+ */
+function rowMatches(row: LrclibRow, title: string, names: string[], durationSec: number): boolean {
+  const rt = normLoose(row.trackName ?? '');
+  const qt = normLoose(title);
+  if (!rt || !qt) return false;
+  const titleOk = rt === qt || rt.includes(qt) || qt.includes(rt);
+  if (!titleOk) return false;
+  const ra = normLoose(row.artistName ?? '');
+  const artistOk =
+    names.length === 0 ||
+    !ra ||
+    names.some((n) => {
+      const nn = normLoose(n);
+      return nn.length > 0 && (ra.includes(nn) || nn.includes(ra));
+    });
+  if (!artistOk) return false;
+  // Sem duração de referência (preview) não dá pra checar; título+artista bastam.
+  const durOk = !durationSec || !row.duration || Math.abs(row.duration - durationSec) <= 3;
+  return durOk;
 }
 
 function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
@@ -161,9 +205,12 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     for (const artist of artistCandidates) {
       const rows = await search(title, artist).catch(() => null);
       if (!rows || rows.length === 0) continue;
-      const synced = rows.find((r) => r.syncedLyrics);
+      // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
+      // duração) — a busca é full-text solta e devolve músicas alheias.
+      const synced = rows.find((r) => r.syncedLyrics && rowMatches(r, title, names, durationSec));
       if (synced) return toLyrics(synced);
-      if (!plainFallback) plainFallback = toLyrics(rows[0]);
+      const plain = rows.find((r) => rowMatches(r, title, names, durationSec));
+      if (plain && !plainFallback) plainFallback = toLyrics(plain);
     }
   }
 

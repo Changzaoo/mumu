@@ -54,7 +54,15 @@ function tx<T>(
       new Promise<T>((resolve, reject) => {
         const transaction = db.transaction(STORE, mode);
         const request = run(transaction.objectStore(STORE));
-        request.onsuccess = () => resolve(request.result);
+        let result: T;
+        request.onsuccess = () => {
+          result = request.result;
+        };
+        // CRÍTICO: num write, `request.onsuccess` dispara ANTES do commit. Se a
+        // transação depois abortar (pressão de quota), resolver no onsuccess
+        // engoliria o abort — a faixa "baixa" mas nunca vai pro disco e some no
+        // próximo boot. Só resolvemos quando a transação de fato commitou.
+        transaction.oncomplete = () => resolve(result);
         transaction.onerror = () => reject(transaction.error ?? request.error);
         transaction.onabort = () => reject(transaction.error ?? new Error('Transaction aborted'));
       }),
