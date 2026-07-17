@@ -362,6 +362,74 @@ function isPermanentImportError(message) {
   );
 }
 
+// ── Import por JOB (start → status → arquivo) ────────────────────────────────
+// O POST /import clássico não emite NENHUM byte até o MP3 ficar pronto; atrás
+// do Cloudflare, respostas mudas por ~100s morrem com 524 e o cliente perde
+// todo o progresso do download. Com jobs: o start responde na hora, o status é
+// uma consulta leve (imune a timeout) e o arquivo pronto desce numa
+// transferência curta. A rede do cliente pode até piscar no meio — o job segue
+// vivo no servidor e o download não recomeça do zero.
+const importJobs = new Map(); // id → job
+const JOB_TTL_MS = 60 * 60_000; // 1h — igual ao sweep de /tmp
+
+function startImportJob(url, quality) {
+  const id = crypto.randomUUID();
+  const job = {
+    status: 'running', // 'running' | 'done' | 'error'
+    error: null,
+    permanent: false,
+    dir: null,
+    file: null,
+    meta: null,
+    createdAt: Date.now(),
+  };
+  importJobs.set(id, job);
+  log('import job:', id.slice(0, 8), url, `${kbpsFor(quality)}k`);
+  void importToMp3(ytdlpBin, url, quality)
+    .then(async (r) => {
+      job.dir = r.dir;
+      job.file = r.file;
+      const { size } = await stat(r.file);
+      job.meta = {
+        title: r.title,
+        coverUrl: r.thumbnail || null,
+        artist: r.artist || null,
+        track: r.track || null,
+        album: r.album || null,
+        uploader: r.uploader || null,
+        size,
+      };
+      job.status = 'done';
+      log('job done:', r.title);
+    })
+    .catch((err) => {
+      const message = err instanceof Error ? err.message : 'Falha na importação.';
+      job.status = 'error';
+      job.error = message;
+      job.permanent = isPermanentImportError(message);
+      log('job error:', message);
+    });
+  return id;
+}
+
+function dropImportJob(id) {
+  const job = importJobs.get(id);
+  if (!job) return;
+  importJobs.delete(id);
+  if (job.dir) void rm(job.dir, { recursive: true, force: true }).catch(() => undefined);
+}
+
+function sweepImportJobs() {
+  const cutoff = Date.now() - JOB_TTL_MS;
+  for (const [id, job] of importJobs) {
+    if (job.createdAt < cutoff) dropImportJob(id);
+  }
+}
+
+// startImportJob roda fora do handler (sem acesso ao `ytdlp` do main) — o
+// binário resolvido é publicado aqui uma única vez no boot.
+let ytdlpBin = 'yt-dlp';
+
 // Max playlist entries returned in one enumeration (0 = unlimited). Flat
 // enumeration is cheap (no per-video extraction), so the cap is generous —
 // the old default (200) silently truncated big playlists (1132 → 200).
@@ -622,6 +690,7 @@ async function authorize(req) {
 
 async function main() {
   const ytdlp = await resolveYtdlp();
+  ytdlpBin = ytdlp; // publica para os import-jobs (rodam fora deste escopo)
   log(`yt-dlp: ${ytdlp}`);
   // Diretório local padrão pode ser criado; o EXTERNO nunca (mkdir num
   // mountpoint desmontado criaria a pasta no disco raiz).
@@ -631,6 +700,7 @@ async function main() {
   void sweepBlobStore();
   setInterval(() => void sweepStaleTmp(), 3600_000).unref();
   setInterval(() => void sweepBlobStore(), 3600_000).unref();
+  setInterval(() => sweepImportJobs(), 600_000).unref();
 
   const server = http.createServer((req, res) => {
     void (async () => {
@@ -652,7 +722,7 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
             // must NOT run against an old importer that lacks these fields.
-            caps: ['uploader', 'album', 'quality'],
+            caps: ['uploader', 'album', 'quality', 'jobs'],
           }),
         );
         return;
@@ -1114,6 +1184,89 @@ async function main() {
           log('ai error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Falha na IA.' }));
+        }
+        return;
+      }
+
+      // ── Import por JOB: POST /import/start → GET /import/job/:id → GET /import/file/:id ──
+      if (req.method === 'POST' && pathname === '/import/start') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado. Entre na sua conta para importar.' }));
+          return;
+        }
+        try {
+          const { url, quality } = JSON.parse((await readBody(req)) || '{}');
+          if (typeof url !== 'string' || !hostSupported(url)) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Link não suportado.' }));
+            return;
+          }
+          const id = startImportJob(url, quality);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ id }));
+        } catch {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Pedido inválido.' }));
+        }
+        return;
+      }
+
+      if (req.method === 'GET' && pathname.startsWith('/import/job/')) {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const job = importJobs.get(pathname.slice('/import/job/'.length));
+        if (!job) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Download não encontrado (expirou?).' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: job.status,
+            error: job.error,
+            permanent: job.permanent,
+            meta: job.meta,
+          }),
+        );
+        return;
+      }
+
+      if (req.method === 'GET' && pathname.startsWith('/import/file/')) {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const id = pathname.slice('/import/file/'.length);
+        const job = importJobs.get(id);
+        if (!job || job.status !== 'done' || !job.file) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Arquivo não está pronto (ou o download expirou).' }));
+          return;
+        }
+        try {
+          const { size } = await stat(job.file);
+          res.writeHead(200, { 'Content-Type': 'audio/mpeg', 'Content-Length': String(size) });
+          const { createReadStream } = await import('node:fs');
+          await new Promise((resolve, reject) => {
+            const rs = createReadStream(job.file);
+            rs.on('error', reject);
+            res.on('finish', resolve);
+            rs.pipe(res);
+          });
+          dropImportJob(id); // entregue — libera o /tmp na hora
+        } catch {
+          if (!res.headersSent) {
+            res.writeHead(500, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Falha ao ler o arquivo.' }));
+          } else {
+            res.destroy();
+          }
         }
         return;
       }

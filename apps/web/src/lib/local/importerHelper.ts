@@ -173,6 +173,17 @@ export async function helperSupportsMetaTeam(): Promise<boolean> {
   return Boolean(health?.caps.includes('uploader') && health.caps.includes('album'));
 }
 
+// Caps do importador em cache de sessão — o gate do fluxo por job não pode
+// custar um /health por faixa. Só memoiza sondagem BEM-SUCEDIDA (importador
+// fora do ar agora não pode virar "sem capacidade" para sempre).
+let cachedCaps: string[] | null = null;
+async function helperCaps(): Promise<string[]> {
+  if (cachedCaps) return cachedCaps;
+  const health = await probeHelper();
+  if (health) cachedCaps = health.caps;
+  return health?.caps ?? [];
+}
+
 export interface HelperImport {
   blob: Blob;
   title: string;
@@ -447,8 +458,104 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
   return { title: typeof data.title === 'string' ? data.title : 'Playlist', entries };
 }
 
+// Job de import: intervalo do acompanhamento e teto total (playlists têm
+// faixas longas; 15 min cobre qualquer música real sem segurar slot infinito).
+const JOB_POLL_MS = 2_500;
+const JOB_TIMEOUT_MS = 15 * 60_000;
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+interface JobStatus {
+  status: 'running' | 'done' | 'error';
+  error?: string | null;
+  permanent?: boolean;
+  meta?: {
+    title?: string | null;
+    coverUrl?: string | null;
+    artist?: string | null;
+    track?: string | null;
+    album?: string | null;
+    uploader?: string | null;
+  } | null;
+}
+
+/**
+ * Fluxo por JOB (importador novo): start → acompanha → busca o arquivo pronto.
+ * O POST /import clássico ficava mudo até o MP3 terminar e o Cloudflare matava
+ * a conexão em ~100s (erro 524) — download longo era progresso jogado fora.
+ * Aqui cada consulta é leve, a rede do cliente pode piscar sem matar o job, e
+ * o arquivo desce numa transferência curta.
+ */
+async function importViaJob(url: string): Promise<HelperImport> {
+  let start: Response;
+  try {
+    start = await fetch(`${helperUrl()}/import/start`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ url, quality: preferredQuality() }),
+    });
+  } catch {
+    throw new Error('Não foi possível baixar esse link agora. Tente novamente em instantes.');
+  }
+  if (!start.ok) {
+    let message = `Falha na importação (${start.status}).`;
+    try {
+      const body = (await start.json()) as { error?: string };
+      if (body.error) message = body.error;
+    } catch {
+      /* keep default */
+    }
+    throw new HelperError(message, start.status);
+  }
+  const { id } = (await start.json()) as { id?: string };
+  if (!id) throw new Error('O importador não abriu o download.');
+
+  const deadline = Date.now() + JOB_TIMEOUT_MS;
+  let meta: NonNullable<JobStatus['meta']> = {};
+  for (;;) {
+    await sleep(JOB_POLL_MS);
+    if (Date.now() > deadline) throw new Error('O download demorou demais e foi abortado.');
+    let res: Response;
+    try {
+      res = await fetch(`${helperUrl()}/import/job/${encodeURIComponent(id)}`, {
+        headers: await baseHeaders(),
+      });
+    } catch {
+      continue; // rede piscou — o job segue vivo no servidor, só continua olhando
+    }
+    if (res.status === 404) throw new Error('O download expirou no servidor. Tente de novo.');
+    if (!res.ok) continue; // 5xx transitório do túnel — não desiste do job
+    const body = (await res.json()) as JobStatus;
+    if (body.status === 'error') {
+      throw new HelperError(body.error ?? 'Falha na importação.', body.permanent ? 422 : 500);
+    }
+    if (body.status === 'done') {
+      meta = body.meta ?? {};
+      break;
+    }
+  }
+
+  const file = await fetch(`${helperUrl()}/import/file/${encodeURIComponent(id)}`, {
+    headers: await baseHeaders(),
+  });
+  if (!file.ok) throw new HelperError(`Falha ao buscar o arquivo (${file.status}).`, file.status);
+  const blob = await file.blob();
+  if (blob.size === 0) throw new Error('O importador devolveu um arquivo vazio.');
+  return {
+    blob,
+    title: meta.title ?? 'faixa',
+    coverUrl: meta.coverUrl ?? null,
+    artist: meta.artist ?? null,
+    track: meta.track ?? null,
+    album: meta.album ?? null,
+    uploader: meta.uploader ?? null,
+  };
+}
+
 /** Ask the helper to fetch + convert `url`; resolves with the MP3 blob + title. */
 export async function importViaHelper(url: string): Promise<HelperImport> {
+  // Importador novo → fluxo por job (sem 524, sem progresso perdido).
+  if ((await helperCaps()).includes('jobs')) return importViaJob(url);
+
   let res: Response;
   try {
     res = await fetch(`${helperUrl()}/import`, {

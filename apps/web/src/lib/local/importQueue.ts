@@ -39,10 +39,11 @@ export interface ImportItem {
   notBefore?: number;
 }
 
-/** Downloads simultâneos. 2 por padrão (o dobro da velocidade); se o YouTube
- *  pedir verificação ("not a bot"), recua sozinho para 1 por 10 minutos e
- *  depois volta — velocidade sem tomar bloqueio. */
-const FAST_CONCURRENCY = 2;
+/** Downloads simultâneos. 3 por padrão (com o fluxo por job o cliente só
+ *  acompanha — o peso fica no servidor, que baixa da rede em paralelo); se o
+ *  YouTube pedir verificação ("not a bot"), recua sozinho para 1 por 10
+ *  minutos e depois volta — velocidade sem tomar bloqueio. */
+const FAST_CONCURRENCY = 3;
 let concurrency = FAST_CONCURRENCY;
 let cooldownTimer: ReturnType<typeof setTimeout> | null = null;
 
