@@ -101,3 +101,26 @@ mesmo que a função hospedada um dia deixe de expor o modo offline.
 Ponta a ponta, com a letra "Cada segundo dessa nossa **canção**" e um ASR que
 ouviu "cancal", o LRC gerado saiu com a grafia da LETRA e o tempo do ÁUDIO —
 que é exatamente o objetivo do desenho.
+
+## Embeddings (recomendação semântica)
+
+`POST /ai/embed` `{ input: string[], input_type?: 'passage' | 'query' }` →
+`{ embeddings: number[][] }`. Modelo padrão
+`nvidia/llama-nemotron-embed-1b-v2` (`NVIDIA_EMBED_MODEL`), lote de 32
+(`NVIDIA_EMBED_BATCH`).
+
+`input_type` importa: indexar (`passage`) e consultar (`query`) geram vetores
+diferentes, e misturar os dois degrada a semelhança em silêncio.
+
+### Validado contra a API real
+
+| Pergunta                          | Resultado                                    |
+| --------------------------------- | -------------------------------------------- |
+| Dimensões                         | 2048, como documentado                       |
+| Separa estilos?                   | bossa×bossa **0,85** vs bossa×metal **0,51** |
+| Corte Matryoshka em 512 preserva? | **Sim** — 0,84 vs 0,44 (contraste até maior) |
+
+O cliente guarda só as 512 primeiras dimensões renormalizadas: um quarto do
+espaço em disco sem perder qualidade — a medição acima é a razão de a
+truncagem ser segura. Também calibra o corte de 0,55 usado em "Parecidas
+com X": fica acima do par semelhante e abaixo do par distante.
