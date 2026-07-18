@@ -488,6 +488,66 @@ export async function fetchArtistImage(name: string): Promise<string | null> {
   }
 }
 
+/** Uma faixa do "top" do artista, na ordem de popularidade REAL (Deezer). */
+export interface ArtistTopTrack {
+  title: string;
+  rank: number;
+  album: string | null;
+  duration: number | null;
+}
+
+export interface ArtistTop {
+  /** Nome canônico no catálogo — serve para conferir que casou o artista certo. */
+  name: string | null;
+  picture: string | null;
+  fans: number | null;
+  tracks: ArtistTopTrack[];
+}
+
+/**
+ * O ranking de popularidade mundial do artista (Deezer, via o importer para
+ * driblar o CORS). Usado só para ORDENAR as faixas que o usuário já tem — nada
+ * daqui vira faixa nova. Devolve null quando o importer/rede não responde: a
+ * página cai na ordem local sem quebrar.
+ */
+export async function fetchArtistTop(name: string): Promise<ArtistTop | null> {
+  // Ordenar uma lista nunca pode segurar a página: teto curto e explícito.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 6_000);
+  try {
+    const res = await fetch(`${helperUrl()}/artist-top?name=${encodeURIComponent(name)}`, {
+      headers: await baseHeaders(),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as {
+      artist?: { name?: unknown; picture?: unknown; nb_fan?: unknown } | null;
+      tracks?: unknown;
+    };
+    const rows = Array.isArray(data.tracks) ? data.tracks : [];
+    const tracks = rows
+      .map((t) => t as Partial<ArtistTopTrack>)
+      .filter((t): t is ArtistTopTrack => typeof t.title === 'string' && t.title.length > 0)
+      .map((t) => ({
+        title: t.title,
+        rank: typeof t.rank === 'number' ? t.rank : 0,
+        album: typeof t.album === 'string' ? t.album : null,
+        duration: typeof t.duration === 'number' ? t.duration : null,
+      }));
+    if (tracks.length === 0) return null;
+    return {
+      name: typeof data.artist?.name === 'string' ? data.artist.name : null,
+      picture: typeof data.artist?.picture === 'string' ? data.artist.picture : null,
+      fans: typeof data.artist?.nb_fan === 'number' ? data.artist.nb_fan : null,
+      tracks,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 /** Best-effort delete of an uploaded library blob (on track removal). */
 export async function deleteTrackBlob(id: string): Promise<void> {
   try {
