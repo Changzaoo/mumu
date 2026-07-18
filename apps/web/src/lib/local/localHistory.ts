@@ -3,6 +3,7 @@
  * HistoryEntryDto-compatible so HistoryPage renders them unchanged.
  */
 import type { HistoryEntryDto, PlaySource, TrackDto } from '@aurial/shared';
+import { isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { subscribeAuth } from '@/lib/firebase';
 
 const HISTORY_KEY = 'aurial:local-history';
@@ -111,10 +112,15 @@ export function clear(): void {
   write([]);
 }
 
-/** Drop history entries for 30s-preview (iTunes) tracks saved before. */
-export function purgePreviews(): number {
+/**
+ * Limpa do histórico o que veio do catálogo grátis (audius:/apple:/prévia de
+ * 30s). O histórico é lido como "o que EU ouço" — e alimenta a recomendação
+ * como se fosse acervo — então faixa de catálogo guardada aqui empurrava o
+ * usuário de volta para músicas que ele não tem.
+ */
+export function purgeCatalog(): number {
   const current = read();
-  const kept = current.filter((e) => !e.track.previewOnly);
+  const kept = current.filter((e) => !isCatalogTrack(e.track));
   if (kept.length === current.length) return 0;
   write(kept);
   return current.length - kept.length;

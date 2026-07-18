@@ -13,11 +13,12 @@ let started = false;
 export function initCloudSync(): void {
   if (started) return;
   started = true;
-  // One-time cleanup: drop 30s iTunes preview tracks saved before they were
-  // removed from the app (likes / history / playlists) so they stop showing.
+  // Limpeza de boot: o catálogo grátis não faz parte do acervo do usuário, mas
+  // versões antigas o gravavam em listas e histórico. Curtidas ficam de fora de
+  // propósito — curtir do catálogo continua valendo, só não vira biblioteca.
   localLikes.purgePreviews();
-  localHistory.purgePreviews();
-  localPlaylists.purgePreviews();
+  localHistory.purgeCatalog();
+  localPlaylists.purgeCatalog();
   subscribeAuth((user) => {
     const uid = user?.uid ?? null;
     localLikes.setUser(uid);
