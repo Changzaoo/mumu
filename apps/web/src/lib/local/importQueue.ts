@@ -37,6 +37,14 @@ export interface ImportItem {
   attempts?: number;
   /** Don't retry this pending item before this epoch-ms (backoff window). */
   notBefore?: number;
+  /**
+   * Defeito DA FAIXA (vídeo removido/privado/não suportado): re-tentar nunca
+   * resolve. Marcado assim, o item fica fora da recuperação automática — sem
+   * isso a fila tentaria para sempre um link que jamais vai funcionar.
+   */
+  permanent?: boolean;
+  /** Rodadas de recuperação automática já gastas (teto: MAX_RECOVERIES). */
+  recoveries?: number;
 }
 
 /** Downloads simultâneos. 3 por padrão (com o fluxo por job o cliente só
@@ -59,6 +67,21 @@ function slowDown(): void {
 }
 /** Auto-retry a failed download this many times (with backoff) before giving up. */
 const MAX_ATTEMPTS = 5;
+
+/**
+ * Esgotar as tentativas NÃO é o fim da linha. A causa quase sempre é
+ * temporária (YouTube pedindo verificação, importer reiniciando, rede do
+ * celular oscilando) e some sozinha em poucos minutos — deixar o item parado
+ * em vermelho até alguém tocar nele é desistir cedo demais. Passado este
+ * tempo, o item volta para a fila com tentativas zeradas.
+ */
+const ERROR_RECOVERY_MS = 3 * 60_000;
+/**
+ * Quantas RODADAS de recuperação um item ganha antes de virar erro definitivo.
+ * Sem teto, um link que falha por um motivo que nunca vai mudar ficaria
+ * eternamente entrando e saindo da fila, gastando rede e poluindo a lista.
+ */
+const MAX_RECOVERIES = 3;
 
 const STORAGE_KEY = 'aurial:import-queue';
 
@@ -244,12 +267,49 @@ export function enqueue(urls: string | string[]): void {
   pump();
 }
 
-/** Manually retry a failed item now (fresh set of attempts). */
+/**
+ * Tentar AGORA, manualmente. Vale tanto para o erro terminal quanto para o
+ * item que está só esperando a janela de backoff: em ambos os casos o usuário
+ * quer furar a espera, não descobrir que o botão não faz nada.
+ */
 export function retry(id: string): void {
   const item = items.find((i) => i.id === id);
-  if (!item || item.status !== 'error') return;
-  update(id, { status: 'pending', attempts: 0, notBefore: undefined, error: undefined });
-  pump();
+  if (!item || item.status === 'downloading' || item.status === 'done') return;
+  update(id, {
+    status: 'pending',
+    attempts: 0,
+    notBefore: undefined,
+    error: undefined,
+    // Pedido explícito zera o teto de recuperação: se a pessoa insiste, ela
+    // sabe de algo que nós não sabemos (religou o Wi-Fi, subiu o importer).
+    recoveries: 0,
+    permanent: false,
+  });
+  // Uma tentativa manual também vale como "pode voltar a tentar tudo".
+  if (pausedFor === 'backoff') resume();
+  else pump();
+}
+
+/** Tentar de novo TODOS os que falharam (botão único no painel da fila). */
+export function retryAllFailed(): void {
+  const failed = items.filter((i) => i.status === 'error');
+  if (failed.length === 0) return;
+  items = items.map((it) =>
+    it.status === 'error'
+      ? {
+          ...it,
+          status: 'pending' as const,
+          attempts: 0,
+          notBefore: undefined,
+          error: undefined,
+          recoveries: 0,
+          permanent: false,
+        }
+      : it,
+  );
+  emit();
+  if (pausedFor === 'backoff') resume();
+  else pump();
 }
 
 /** The next item ready to download (pending and past any backoff window). */
@@ -262,7 +322,14 @@ function nextReady(): ImportItem | undefined {
 function scheduleWake(): void {
   const now = Date.now();
   const waiting = items
-    .filter((i) => i.status === 'pending' && i.notBefore && i.notBefore > now)
+    // Inclui os 'error' à espera de recuperação — senão eles só voltariam
+    // quando algo ALHEIO acordasse a fila, e numa fila parada isso é nunca.
+    .filter(
+      (i) =>
+        (i.status === 'pending' || (i.status === 'error' && !i.permanent)) &&
+        i.notBefore &&
+        i.notBefore > now,
+    )
     .map((i) => i.notBefore as number);
   if (waiting.length === 0) return;
   const soonest = Math.min(...waiting);
@@ -274,6 +341,7 @@ function pump(): void {
   // Circuit breaker: fila pausada não inicia NADA (nem agenda wake). Quem
   // religa é resume() — via botão, login ou o timer do backoff.
   if (pausedFor) return;
+  reviveErrors(); // erros com tempo cumprido voltam para a fila sozinhos
   while (active < concurrency) {
     const next = nextReady();
     if (!next) break;
@@ -335,7 +403,12 @@ async function process(item: ImportItem): Promise<void> {
     // erro definitivo, NÃO conta no breaker e a fila segue para a próxima.
     // (Sem isto, 3 vídeos mortos seguidos numa playlist grande pausavam tudo.)
     if (status === 422 || status === 404) {
-      update(item.id, { status: 'error', attempts: MAX_ATTEMPTS, error: message });
+      update(item.id, {
+        status: 'error',
+        attempts: MAX_ATTEMPTS,
+        permanent: true, // fora da recuperação automática: nunca vai funcionar
+        error: message,
+      });
       return;
     }
     // YouTube pediu verificação de volume → modo devagar (1 por vez) por 10min.
@@ -364,7 +437,39 @@ async function process(item: ImportItem): Promise<void> {
         error: `${message} — tentando de novo (${attempts}/${MAX_ATTEMPTS})`,
       });
     } else {
-      update(item.id, { status: 'error', attempts, error: message });
+      // Tentativas esgotadas: vira erro VISÍVEL, mas com hora marcada para
+      // voltar sozinho — a causa costuma evaporar em minutos.
+      const recoveries = item.recoveries ?? 0;
+      const willRecover = recoveries < MAX_RECOVERIES;
+      update(item.id, {
+        status: 'error',
+        attempts,
+        error: willRecover ? `${message} — nova tentativa em instantes` : message,
+        notBefore: willRecover ? Date.now() + ERROR_RECOVERY_MS : undefined,
+      });
     }
   }
+}
+
+/**
+ * Ressuscita erros cujo tempo de espera passou. Chamado no pump(), então a
+ * recuperação acontece junto do fluxo normal da fila — sem timer paralelo.
+ */
+function reviveErrors(): void {
+  const now = Date.now();
+  let changed = false;
+  items = items.map((it) => {
+    if (it.status !== 'error' || it.permanent) return it;
+    if (!it.notBefore || it.notBefore > now) return it;
+    changed = true;
+    return {
+      ...it,
+      status: 'pending' as const,
+      attempts: 0,
+      notBefore: undefined,
+      recoveries: (it.recoveries ?? 0) + 1,
+      error: undefined,
+    };
+  });
+  if (changed) emit();
 }

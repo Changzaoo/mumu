@@ -55,6 +55,15 @@ export function ImportQueuePanel() {
             : `Fila concluída · ${s.done} baixada(s)${s.error ? `, ${s.error} com erro` : ''}`}
         </p>
         <span className="flex items-center gap-3">
+          {s.error > 0 && (
+            <button
+              type="button"
+              onClick={importQueue.retryAllFailed}
+              className="text-[12px] font-medium text-accent transition-opacity hover:opacity-80"
+            >
+              Tentar todos
+            </button>
+          )}
           <button
             type="button"
             onClick={importQueue.clearFinished}
@@ -81,10 +90,13 @@ export function ImportQueuePanel() {
             >
               {item.status === 'pending' && item.error ? item.error : (item.title ?? item.url)}
             </span>
-            {item.status === 'error' && (
+            {/* Vale também para o item que está só esperando o backoff: quem
+                viu o erro quer poder furar a espera, não só olhar. */}
+            {(item.status === 'error' || (item.status === 'pending' && item.error)) && (
               <button
                 type="button"
-                aria-label="Tentar novamente"
+                aria-label="Tentar novamente agora"
+                title="Tentar novamente agora"
                 onClick={() => importQueue.retry(item.id)}
                 className="grid size-6 shrink-0 place-items-center rounded-full text-fg-muted hover:bg-fg/8 hover:text-fg"
               >

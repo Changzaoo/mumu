@@ -179,7 +179,39 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
   inFlight.delete(track.id);
   failed.add(track.id);
   emit();
+  // As 3 tentativas seguidas caíram, mas a causa costuma ser passageira (rede
+  // do celular, CDN engasgado). Em vez de deixar a faixa parada em vermelho
+  // até alguém tocar nela, tenta de novo sozinha mais tarde.
+  scheduleAutoRetry(track);
   throw lastErr instanceof Error ? lastErr : new Error('Não foi possível baixar esta faixa.');
+}
+
+/** Espera antes da retomada automática de um download que falhou de vez. */
+const AUTO_RETRY_MS = 3 * 60_000;
+/** Teto de retomadas automáticas por faixa — sem isso um link morto tentaria
+ *  para sempre, gastando dados do usuário em silêncio. */
+const MAX_AUTO_RETRIES = 3;
+const autoRetries = new Map<string, number>();
+const autoRetryTimers = new Map<string, ReturnType<typeof setTimeout>>();
+
+function scheduleAutoRetry(track: TrackDto): void {
+  if (typeof window === 'undefined') return;
+  const used = autoRetries.get(track.id) ?? 0;
+  if (used >= MAX_AUTO_RETRIES) return;
+  if (autoRetryTimers.has(track.id)) return;
+  const timer = setTimeout(() => {
+    autoRetryTimers.delete(track.id);
+    // Some da fila de retomada se o usuário já resolveu no braço, apagou, ou
+    // está offline (tentar sem rede só queima uma rodada à toa).
+    if (isDownloaded(track.id) || inFlight.has(track.id)) return;
+    if (typeof navigator !== 'undefined' && !navigator.onLine) {
+      scheduleAutoRetry(track); // ainda sem rede: reagenda sem gastar rodada
+      return;
+    }
+    autoRetries.set(track.id, used + 1);
+    void downloadTrack(track).catch(() => undefined); // já emite estado
+  }, AUTO_RETRY_MS);
+  autoRetryTimers.set(track.id, timer);
 }
 
 export async function removeDownloadedTrack(trackId: string): Promise<void> {
@@ -192,6 +224,12 @@ export async function removeDownloadedTrack(trackId: string): Promise<void> {
   removeDownload(trackId);
   inFlight.delete(trackId);
   failed.delete(trackId);
+  // Apagar a faixa cancela qualquer retomada automática pendente — senão ela
+  // reapareceria sozinha minutos depois de o usuário mandar remover.
+  const timer = autoRetryTimers.get(trackId);
+  if (timer) clearTimeout(timer);
+  autoRetryTimers.delete(trackId);
+  autoRetries.delete(trackId);
   emit();
 }
 
