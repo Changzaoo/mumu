@@ -38,7 +38,6 @@ import { Switch } from '@/components/ui/switch';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { Textarea } from '@/components/ui/textarea';
 import { useCreatePlaylist, useLibrary, useLocalPlaylists } from '@/features/library/api';
-import { useLibraryArtistAlbums } from '@/features/catalog/api';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
 import { formatCompactNumber } from '@/lib/utils';
@@ -176,15 +175,13 @@ export default function LibraryPage() {
     const all = localLibrary.genreGroups();
     return term ? all.filter((g) => g.genre.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
-  // Full discography of your artists (iTunes), for the Álbuns tab.
-  const allArtistNames = useMemo(() => localLibrary.artists().map((a) => a.name), [libEntries]);
-  const artistAlbums = useLibraryArtistAlbums(allArtistNames);
+  // Álbuns que você REALMENTE tem faixa. Antes esta aba trazia a discografia
+  // inteira do iTunes de cada artista: dezenas de álbuns sem uma única música
+  // sua, que abriam vazios. Álbum sem faixa não é biblioteca, é catálogo.
   const discography = useMemo(() => {
-    const all = artistAlbums.data ?? [];
-    return term
-      ? all.filter((a) => `${a.collectionName} ${a.artistName}`.toLowerCase().includes(term))
-      : all;
-  }, [artistAlbums.data, term]);
+    const all = localLibrary.albumGroups();
+    return term ? all.filter((a) => `${a.title} ${a.artist}`.toLowerCase().includes(term)) : all;
+  }, [libEntries, term]);
   const filtered = useMemo(() => {
     // On-device playlists first, then any server ones.
     const playlists = [...localPlaylists, ...(data?.playlists ?? [])];
@@ -289,34 +286,23 @@ export default function LibraryPage() {
         </TabsContent>
 
         <TabsContent value="albums">
-          {artistAlbums.isLoading && discography.length === 0 ? (
-            <div className={grid}>
-              {Array.from({ length: 12 }, (_, i) => (
-                <div key={i}>
-                  <div className="aspect-square animate-pulse rounded-lg bg-fg/6" />
-                  <div className="mt-3 h-3 w-3/4 animate-pulse rounded bg-fg/6" />
-                </div>
-              ))}
-            </div>
-          ) : discography.length === 0 ? (
+          {discography.length === 0 ? (
             <EmptyState
               icon={Disc3}
               title={term ? 'Nenhum álbum com esse nome' : 'Nenhum álbum ainda'}
               description={
-                term
-                  ? undefined
-                  : 'Adicione músicas — todos os álbuns dos seus artistas aparecem aqui.'
+                term ? undefined : 'Os álbuns das músicas que você adicionar aparecem aqui.'
               }
             />
           ) : (
             <div className={grid}>
               {discography.map((album) => (
                 <MediaCard
-                  key={album.collectionId}
-                  title={album.collectionName}
-                  subtitle={album.artistName}
-                  imageUrl={album.artworkUrl100.replace('100x100bb', '400x400bb')}
-                  to={`/album-apple/${album.collectionId}`}
+                  key={album.key}
+                  title={album.title}
+                  subtitle={`${album.artist} · ${album.tracks.length} ${album.tracks.length === 1 ? 'música' : 'músicas'}`}
+                  imageUrl={album.coverUrl}
+                  to={`/disco/${encodeURIComponent(album.key)}`}
                 />
               ))}
             </div>

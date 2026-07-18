@@ -19,7 +19,7 @@ import {
 } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
-import { prefetchLyrics } from '@/lib/lyrics/lyrics';
+import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
@@ -452,7 +452,9 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
     streamUrl: current.remoteUrl ?? current.track.streamUrl,
   };
   patchEntry(id, { ...current, track });
-  prefetchLyrics(track); // fetch synced lyrics with the corrected name
+  // Nome corrigido → busca a letra certa e, com o áudio já no aparelho,
+  // também a sincronia (fila serial em segundo plano).
+  queueLyricsSync(track);
   if (current.sourceUrl) void publishSharedTrack(track, current.sourceUrl);
   return true;
 }
@@ -806,6 +808,10 @@ function computeArtists(): LocalArtist[] {
       if (!a) {
         a = { name, coverUrl: entry.track.coverUrl ?? null, trackCount: 0 };
         byName.set(key, a);
+      } else if (a.name === a.name.toLowerCase() && name !== name.toLowerCase()) {
+        // Rede de segurança para faixas que entraram DEPOIS da normalização:
+        // uma grafia com maiúsculas ganha da que está toda em minúscula.
+        a.name = name;
       }
       a.trackCount += 1;
       if (!a.coverUrl && entry.track.coverUrl) a.coverUrl = entry.track.coverUrl;
@@ -986,15 +992,80 @@ let hydratePromise: Promise<void> | null = null;
  */
 export function hydrate(): Promise<void> {
   return (hydratePromise ??= (async () => {
-    if (!cacheStorageSupported()) return;
+    // NÃO desistir sem Cache Storage: em http:// de LAN (o caso "abrir no
+    // celular") ela não existe e os bytes ficam no IndexedDB — desistir aqui
+    // deixaria toda a biblioteca importada mudinha nesses aparelhos.
     for (const entry of read()) {
       if (blobUrls.has(entry.track.id)) continue;
       const blob = await getBlob(entry.track.id).catch(() => null);
       if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
     }
+    normalizeArtistCasing();
     emit();
     scheduleBackgroundCuration();
   })());
+}
+
+/**
+ * UMA grafia por artista em toda a biblioteca.
+ *
+ * O agrupamento já ignora caixa/acento, então "anitta" e "Anitta" caem no mesmo
+ * balde — mas cada FAIXA guarda a grafia que veio da sua fonte, e a tela mostra
+ * a da faixa. O resultado é o mesmo artista aparecendo de dois jeitos em linhas
+ * vizinhas, o que o usuário lê (com razão) como duplicata.
+ *
+ * Em vez de inventar capitalização — o que estragaria "IZA", "AC/DC",
+ * "will.i.am" — elegemos entre as grafias QUE JÁ EXISTEM: a mais frequente,
+ * desempatando contra a que está toda em minúscula (quase sempre metadata
+ * desleixada). Só reescrevemos quando há divergência real.
+ */
+function normalizeArtistCasing(): void {
+  const variants = new Map<string, Map<string, number>>();
+  for (const entry of read()) {
+    for (const artist of entry.track.artists) {
+      const name = artist.name?.trim();
+      if (!name) continue;
+      const key = normName(name);
+      if (!key) continue;
+      const bucket = variants.get(key) ?? new Map<string, number>();
+      bucket.set(name, (bucket.get(name) ?? 0) + 1);
+      variants.set(key, bucket);
+    }
+  }
+
+  const canonical = new Map<string, string>();
+  for (const [key, bucket] of variants) {
+    if (bucket.size < 2) continue; // grafia única: nada a decidir
+    let best = '';
+    let bestScore = -1;
+    for (const [name, count] of bucket) {
+      const allLower = name === name.toLowerCase();
+      // Frequência manda; entre empatadas, a que não é toda minúscula vence.
+      const score = count * 2 + (allLower ? 0 : 1);
+      if (score > bestScore) {
+        bestScore = score;
+        best = name;
+      }
+    }
+    if (best) canonical.set(key, best);
+  }
+  if (canonical.size === 0) return;
+
+  let changed = false;
+  const next = read().map((entry) => {
+    let touched = false;
+    const artists = entry.track.artists.map((artist) => {
+      const name = artist.name?.trim();
+      const want = name ? canonical.get(normName(name)) : undefined;
+      if (!want || want === artist.name) return artist;
+      touched = true;
+      return { ...artist, name: want };
+    });
+    if (!touched) return entry;
+    changed = true;
+    return { ...entry, track: { ...entry.track, artists } };
+  });
+  if (changed) write(next);
 }
 
 /**

@@ -11,6 +11,8 @@ export const artistSchema = z.object({
   monthlyListeners: z.number().int(),
   followersCount: z.number().int(),
   genres: z.array(z.string()),
+  /** Gravadora / selo com que o artista trabalha (a mais frequente no acervo). */
+  label: z.string().nullable().optional(),
   /** Present only when the request is authenticated. */
   isFollowing: z.boolean().optional(),
 });
@@ -59,6 +61,12 @@ export const trackSchema = z.object({
   previewOnly: z.boolean().optional(),
   /** Primary genre from the catalog source — used for community trending buckets. */
   genre: z.string().nullable().optional(),
+  /** Quem ESCREVEU a música (compositor/letrista). Diferente do intérprete. */
+  composer: z.string().nullable().optional(),
+  /** Gravadora / selo que lançou a faixa (copyright holder). */
+  label: z.string().nullable().optional(),
+  /** Ano de lançamento — usado para ordenar e exibir na ficha da faixa. */
+  releaseYear: z.number().int().nullable().optional(),
   uploadedByUserId: z.string().nullable(),
 });
 export type TrackDto = z.infer<typeof trackSchema>;

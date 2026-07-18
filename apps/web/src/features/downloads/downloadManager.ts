@@ -11,7 +11,7 @@
 import type { TrackDto } from '@aurial/shared';
 import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
-import { prefetchLyrics } from '@/lib/lyrics/lyrics';
+import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
 import {
   cacheSupported,
@@ -154,7 +154,11 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
       await putAudio(track.id, blob);
       addDownload(track, blob.size);
       blobUrls.set(track.id, URL.createObjectURL(blob));
-      prefetchLyrics(track); // cache synced lyrics for offline
+      // O áudio acabou de chegar ao aparelho: além de cachear a letra, é AQUI
+      // que ela pode ganhar sincronia (a transcrição precisa do arquivo local).
+      // Vai para uma fila serial — baixar uma playlist não pode virar uma
+      // rajada de transcrições.
+      queueLyricsSync(track);
       inFlight.delete(track.id);
       emit();
       pushNotification({ type: 'download', title: 'Download concluído', body: track.title });

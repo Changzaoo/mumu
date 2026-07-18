@@ -18,7 +18,7 @@
  */
 import type { TrackDto } from '@aurial/shared';
 import { alignLyrics } from '@/lib/lyrics/align';
-import { cachedLyrics, writeLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
+import { cachedLyrics, fetchLyrics, writeLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
 import { aiTranscribe } from '@/lib/local/importerHelper';
 import { getAudioBlob } from '@/lib/offline/audioCache';
 import { blobFor as localLibraryBlob } from '@/lib/local/localLibrary';
@@ -89,4 +89,67 @@ export async function syncLyricsFromAudio(track: TrackDto): Promise<Lyrics | nul
   } finally {
     inFlight.delete(track.id);
   }
+}
+
+// ── fila de fundo: toda faixa baixada ganha letra sincronizada ───
+//
+// Baixar uma playlist inteira dispararia uma transcrição por faixa AO MESMO
+// TEMPO — uma rajada que derrubaria o importer e cozinharia o celular. A fila
+// abaixo processa UMA por vez, com uma pausa entre elas, e sempre atrás da
+// reprodução: sincronizar letra é enfeite, tocar música é o serviço.
+const queue: TrackDto[] = [];
+const queued = new Set<string>();
+let draining = false;
+
+/** Respiro entre transcrições — mantém o aparelho e o servidor confortáveis. */
+const GAP_MS = 4_000;
+
+async function drain(): Promise<void> {
+  if (draining) return;
+  draining = true;
+  try {
+    while (queue.length > 0) {
+      const track = queue.shift();
+      if (!track) continue;
+      queued.delete(track.id);
+      // Offline não adianta: nem letra nem transcrição. Devolve à fila e para.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) {
+        queue.unshift(track);
+        queued.add(track.id);
+        break;
+      }
+      try {
+        // 1) garante o TEXTO (LRCLIB) — sem ele não há o que sincronizar;
+        const lyrics = cachedLyrics(track.id) ?? (await fetchLyrics(track));
+        // 2) já veio com tempo? nada a fazer.
+        if (lyrics && !lyrics.synced) await syncLyricsFromAudio(track);
+      } catch {
+        /* faixa problemática não pode travar a fila */
+      }
+      if (queue.length > 0) await new Promise((r) => setTimeout(r, GAP_MS));
+    }
+  } finally {
+    draining = false;
+  }
+}
+
+/**
+ * Enfileira a faixa para ganhar letra sincronizada — chamado assim que o áudio
+ * fica disponível no aparelho (download concluído ou import). Não bloqueia
+ * quem chamou e nunca lança.
+ */
+export function queueLyricsSync(track: TrackDto): void {
+  if (typeof window === 'undefined') return;
+  if (track.previewOnly) return; // prévia de 30s não casa com a letra inteira
+  if (queued.has(track.id) || inFlight.has(track.id) || failed.has(track.id)) return;
+  // Já tem letra COM tempo: não há o que ganhar.
+  if (cachedLyrics(track.id)?.synced) return;
+  queued.add(track.id);
+  queue.push(track);
+  void drain();
+}
+
+/** Quantas faixas ainda esperando sincronia (para UI de progresso, se quisermos). */
+export function pendingLyricsSyncs(): number {
+  return queue.length + inFlight.size;
 }
