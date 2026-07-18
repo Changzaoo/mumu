@@ -17,6 +17,7 @@ import {
 } from 'lucide-react';
 import { Fragment } from 'react';
 import { LikeButton } from '@/components/media/LikeButton';
+import { DevicePickerButton } from '@/components/media/DevicePicker';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
 import { IconButton } from '@/components/ui/icon-button';
@@ -173,6 +174,8 @@ export function PlayerBar() {
             <IconButton aria-label="Fila" size="sm" active={queueOpen} onClick={toggleQueue}>
               <ListMusic />
             </IconButton>
+            {/* Aparelhos: some sozinho quando a conta só tem este. */}
+            <DevicePickerButton />
             <div className="hidden items-center gap-2 lg:flex">
               <IconButton
                 aria-label={muted ? 'Ativar som' : 'Silenciar'}
