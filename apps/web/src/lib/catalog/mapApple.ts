@@ -53,6 +53,8 @@ export function appleSongToDto(song: AppleSong): TrackDto {
     downloadUrl: null,
     previewOnly: true,
     genre: song.primaryGenreName ?? null,
+    // Só a busca por álbum traz o copyright; nas outras rotas fica null.
+    label: song.label ?? null,
     uploadedByUserId: null,
   };
 }

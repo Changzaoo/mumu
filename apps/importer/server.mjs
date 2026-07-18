@@ -798,6 +798,70 @@ async function main() {
         return;
       }
 
+      // ── Top do artista (Deezer, server-side p/ evitar CORS) ─────────────
+      // A Deezer devolve as faixas JÁ ordenadas por popularidade real (campo
+      // `rank`), que é o que o usuário quer ver primeiro na página do artista —
+      // popularidade do mundo, não o histórico dele. Sem este proxy o navegador
+      // não consegue chamar: a api.deezer.com não manda cabeçalho de CORS.
+      if (req.method === 'GET' && pathname === '/artist-top') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const name = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('name');
+        const normStr = (s) =>
+          String(s)
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[̀-ͯ]/g, '')
+            .replace(/[^a-z0-9]+/g, ' ')
+            .trim();
+        let artist = null;
+        let tracks = [];
+        if (name && name.trim()) {
+          try {
+            const r = await fetch(
+              `https://api.deezer.com/search/artist?limit=10&q=${encodeURIComponent(name.trim())}`,
+            );
+            const d = await r.json().catch(() => ({}));
+            const list = Array.isArray(d?.data) ? d.data : [];
+            // Homônimo é a regra, não a exceção: existem vários "Anitta" no
+            // Deezer e o primeiro resultado pode ser um perfil com 155 fãs. Fica
+            // com quem casa o nome EXATO e tem mais fãs — o artista de verdade.
+            const wanted = normStr(name);
+            const named = list.filter((x) => x && typeof x.name === 'string');
+            const exact = named.filter((x) => normStr(x.name) === wanted);
+            const a = (exact.length ? exact : named).sort(
+              (x, y) => (y.nb_fan ?? 0) - (x.nb_fan ?? 0),
+            )[0];
+            if (a?.id) {
+              artist = {
+                id: a.id,
+                name: a.name ?? null,
+                picture: a.picture_xl || a.picture_big || a.picture_medium || null,
+                nb_fan: typeof a.nb_fan === 'number' ? a.nb_fan : null,
+              };
+              const tr = await fetch(`https://api.deezer.com/artist/${a.id}/top?limit=50`);
+              const top = await tr.json().catch(() => ({}));
+              tracks = (Array.isArray(top?.data) ? top.data : [])
+                .filter((t) => t && typeof t.title === 'string')
+                .map((t) => ({
+                  title: t.title,
+                  rank: typeof t.rank === 'number' ? t.rank : 0,
+                  album: t?.album?.title ?? null,
+                  duration: typeof t.duration === 'number' ? t.duration : null,
+                }));
+            }
+          } catch (err) {
+            log(`artist-top falhou para "${name}": ${err?.message ?? err}`);
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(JSON.stringify({ artist, tracks }));
+        return;
+      }
+
       // ── Album lookup ("lente" de álbum — Deezer, server-side p/ evitar CORS) ──
       // Given an album title (+ optional artist hint), find the REAL album and
       // return its authoritative artist, hi-res cover and full tracklist. The

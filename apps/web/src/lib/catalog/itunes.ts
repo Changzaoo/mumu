@@ -20,6 +20,7 @@
  * Country defaults to `'br'` and falls back to `'us'` on empty results.
  */
 import { CatalogError } from '@/lib/catalog/audius';
+import { parseLabel } from '@/lib/catalog/label';
 
 /** iTunes Search/Lookup song result row (only the fields we consume). */
 export interface AppleSong {
@@ -34,6 +35,8 @@ export interface AppleSong {
   trackTimeMillis: number;
   trackExplicitness: string;
   primaryGenreName: string;
+  /** Gravadora do álbum (lida do `copyright` da coleção — ver `albumTracks`). */
+  label?: string | null;
 }
 
 const DEFAULT_COUNTRY = 'br';
@@ -70,6 +73,8 @@ export interface AppleAlbum {
   artworkUrl100: string;
   releaseDate: string | null;
   trackCount: number | null;
+  /** Gravadora, extraída do `copyright` da coleção. */
+  label: string | null;
 }
 
 const nrm = (s: string): string =>
@@ -116,6 +121,7 @@ export async function artistAlbums(artistId: number): Promise<AppleAlbum[]> {
     artworkUrl100: String(r.artworkUrl100 ?? ''),
     releaseDate: typeof r.releaseDate === 'string' ? r.releaseDate : null,
     trackCount: typeof r.trackCount === 'number' ? r.trackCount : null,
+    label: parseLabel(typeof r.copyright === 'string' ? r.copyright : null),
   }));
 }
 
@@ -125,9 +131,18 @@ export async function albumTracks(collectionId: number): Promise<AppleSong[]> {
   url.searchParams.set('id', String(collectionId));
   url.searchParams.set('entity', 'song');
   url.searchParams.set('country', DEFAULT_COUNTRY);
-  const body = await fetchJson<{ results?: Array<Partial<AppleSong>> }>(url.toString());
+  const body = await fetchJson<{ results?: Array<Partial<AppleSong> & { copyright?: unknown }> }>(
+    url.toString(),
+  );
+  const rows = body.results ?? [];
+  // A gravadora só existe na linha-cabeçalho do álbum (wrapperType=collection),
+  // e é ela que carrega o `copyright`. Lemos ali e repassamos para cada faixa —
+  // sem isso o dado se perderia junto com o cabeçalho no filtro abaixo.
+  const label = parseLabel(
+    rows.find((r) => typeof r.copyright === 'string')?.copyright as string | undefined,
+  );
   // The first row is the album header (wrapperType=collection) — keep only songs.
-  return (body.results ?? []).filter(isPlayable);
+  return rows.filter(isPlayable).map((song) => ({ ...song, label }));
 }
 
 async function fetchJson<T>(url: string): Promise<T> {
