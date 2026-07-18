@@ -9,7 +9,7 @@
  * so enrichment can never block or break an import.
  */
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
-import { aiSplitArtists } from '@/lib/ai/ai';
+import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 
 export interface CleanQuery {
@@ -25,7 +25,12 @@ export interface EnrichedMeta {
   album: string | null;
   coverUrl: string | null;
   genre: string | null;
+  /** Quem ESCREVEU a música, quando o catálogo informa (não é o intérprete). */
+  composer: string | null;
 }
+
+/** Compositor do catálogo — string vazia é "não informado", não um nome. */
+const composerOf = (song: AppleSong): string | null => song.composerName?.trim() || null;
 
 /**
  * Resolve a combined artist credit into distinct names: heuristic first, then —
@@ -91,6 +96,24 @@ export function cleanQuery(filename: string): CleanQuery {
     return { artist: split[1].trim(), title: split[2].trim() };
   }
   return { title: base || filename };
+}
+
+/**
+ * Nome de arquivo → {artist, title} para o import local. Reaproveita a limpeza
+ * do `cleanQuery` (extensão, "01 - ", "(Official Video)") e só depois tenta
+ * separar o crédito.
+ *
+ * `artist: null` quando não há como saber — antes devolvíamos "Desconhecido"
+ * aqui, o que fazia o chamador tratar um NÃO-SABER como se fosse um crédito.
+ * O hífen só separa artista quando tem espaço de algum lado: "Spider-Man Theme"
+ * não é o artista "Spider" (a regra antiga fazia exatamente isso).
+ */
+export function parseTrackFileName(fileName: string): { title: string; artist: string | null } {
+  const q = cleanQuery(fileName);
+  if (q.artist) return { artist: q.artist, title: q.title };
+  const split = /^(.+?)(?:\s+[-–—]\s*|\s*[-–—]\s+)(.+)$/.exec(q.title);
+  if (split?.[1] && split[2]) return { artist: split[1].trim(), title: split[2].trim() };
+  return { artist: null, title: q.title || fileName };
 }
 
 /**
@@ -175,6 +198,7 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
         album: best.collectionName || null,
         coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
         genre: best.primaryGenreName || null,
+        composer: composerOf(best),
       };
     }
   }
@@ -263,5 +287,81 @@ export async function verifyIdentity(
     album: chosen.collectionName || null,
     coverUrl: chosen.artworkUrl100 ? hiRes(chosen.artworkUrl100) : null,
     genre: chosen.primaryGenreName || null,
+    composer: composerOf(chosen),
+  };
+}
+
+/**
+ * Identifica uma faixa SÓ pelo título, para o arquivo solto que não trouxe
+ * nenhuma pista de artista (nem na tag embutida, nem no nome).
+ *
+ * Isto é deliberadamente uma EXCEÇÃO à regra do JUIZ ("sem palpite, não
+ * procura"). A regra existe para impedir que um crédito EXISTENTE seja trocado
+ * por outro alucinado; aqui não há crédito nenhum a proteger — a alternativa é
+ * a faixa ficar "Desconhecido" para sempre, sem capa, álbum nem letra. Ainda
+ * assim, um artista ERRADO é pior que "Desconhecido", então só adotamos com
+ * prova forte:
+ *
+ *   1. o título tem que ser IGUAL (normalizado) — nem substring, nem sufixo; e
+ *   2. todos os resultados com esse título têm que ser do MESMO artista —
+ *      título disputado é ambiguidade, e ambiguidade não vira crédito; ou
+ *   3. havendo disputa, a IA (aiIdentifyTrack) dá um segundo parecer e só
+ *      vale se apontar um artista QUE JÁ ESTÁ entre os candidatos do iTunes.
+ *      A IA nunca introduz um nome sozinha — ela só desempata.
+ */
+export async function identifyByTitle(title: string): Promise<EnrichedMeta | null> {
+  const t = title.trim();
+  // Título curto/genérico ("faixa", "01", "audio") não identifica nada.
+  if (norm(t).replace(/\s+/g, '').length < 4) return null;
+  const bare = t
+    .replace(/[([{][^)\]}]*[)\]}]/g, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  const byId = new Map<number, AppleSong>();
+  for (const term of new Set([t, bare].filter((s) => s.length > 1))) {
+    try {
+      for (const s of await searchSongs(term, 'br', 25)) byId.set(s.trackId, s);
+    } catch {
+      /* rede fora / catálogo instável — segue com o que já veio */
+    }
+  }
+  // Aqui a régua é ainda mais dura que a do `titleExact`: IGUALDADE normalizada.
+  // O `titleExact` tolera um sufixo curto ("ao vivo", "remaster") porque lá o
+  // artista JÁ foi confirmado por outra via; sem artista nenhum, "Tempo" e
+  // "Tempo Perdido" são músicas diferentes e ponto.
+  const alvo = norm(t);
+  const alvoBare = norm(bare);
+  const matches = [...byId.values()].filter((s) => {
+    const n = norm(s.trackName);
+    return n === alvo || n === alvoBare;
+  });
+  if (matches.length === 0) return null;
+
+  // Um artista por candidato, deduplicado — é a contagem que diz se há disputa.
+  const porArtista = new Map<string, AppleSong>();
+  for (const s of matches) {
+    const key = norm(s.artistName);
+    if (key && !porArtista.has(key)) porArtista.set(key, s);
+  }
+
+  let chosen: AppleSong | null =
+    porArtista.size === 1 ? (porArtista.values().next().value ?? null) : null;
+
+  if (!chosen) {
+    const ai = await aiIdentifyTrack(t).catch(() => null);
+    const palpite = ai?.artists[0] ? norm(ai.artists[0]) : '';
+    if (palpite) chosen = matches.find((s) => artistClose(s.artistName, palpite)) ?? null;
+  }
+  if (!chosen) return null;
+
+  return {
+    title: chosen.trackName,
+    artist: chosen.artistName,
+    artists: await resolveArtists(chosen.artistName, chosen.trackName),
+    album: chosen.collectionName || null,
+    coverUrl: chosen.artworkUrl100 ? hiRes(chosen.artworkUrl100) : null,
+    genre: chosen.primaryGenreName || null,
+    composer: composerOf(chosen),
   };
 }

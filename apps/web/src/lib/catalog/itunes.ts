@@ -34,6 +34,8 @@ export interface AppleSong {
   trackTimeMillis: number;
   trackExplicitness: string;
   primaryGenreName: string;
+  /** Compositor(es) — a Apple só devolve para parte do catálogo, daí opcional. */
+  composerName?: string;
 }
 
 const DEFAULT_COUNTRY = 'br';

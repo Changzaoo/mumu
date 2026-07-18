@@ -305,18 +305,25 @@ export function NowPlaying() {
                     trackArtistNames(track)
                   )}
                 </p>
-                {credits && !lyricsOpen && (
+                {(credits || track.composer) && !lyricsOpen && (
                   <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
                     {(() => {
                       const primary = track.artists[0]?.name;
-                      const extra = credits.performers.filter((p) => p !== primary);
+                      const extra = (credits?.performers ?? []).filter((p) => p !== primary);
                       return extra.length > 0 ? <p>Com {extra.join(', ')}</p> : null;
                     })()}
-                    {credits.composers.length > 0 && (
+                    {/* O MusicBrainz é a fonte melhor, mas cobre pouco: quando ele
+                        não tem, mostramos o compositor que veio na tag do arquivo
+                        (TCOM) ou do catálogo — melhor que esconder o crédito. */}
+                    {credits && credits.composers.length > 0 ? (
                       <p>Composição: {credits.composers.join(', ')}</p>
+                    ) : track.composer ? (
+                      <p>Composição: {track.composer}</p>
+                    ) : null}
+                    {credits && credits.lyricists.length > 0 && (
+                      <p>Letra: {credits.lyricists.join(', ')}</p>
                     )}
-                    {credits.lyricists.length > 0 && <p>Letra: {credits.lyricists.join(', ')}</p>}
-                    {credits.producers.length > 0 && (
+                    {credits && credits.producers.length > 0 && (
                       <p>Produção: {credits.producers.join(', ')}</p>
                     )}
                   </div>
