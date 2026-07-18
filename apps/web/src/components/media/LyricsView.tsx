@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { fetchLyrics } from '@/lib/lyrics/lyrics';
+import { syncLyricsFromAudio } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -28,7 +29,17 @@ export function LyricsView({ track, className }: LyricsViewProps) {
 
   const { data: lyrics, isLoading } = useQuery({
     queryKey: ['lyrics', track.id],
-    queryFn: () => fetchLyrics(track),
+    queryFn: async () => {
+      const found = await fetchLyrics(track);
+      // Letra existe mas sem tempo: tenta ganhar sincronia a partir do áudio
+      // que já está no aparelho. Se não rolar, seguimos com a letra plana —
+      // por isso o resultado nulo cai de volta em `found`.
+      if (found && !found.synced) {
+        const synced = await syncLyricsFromAudio(track).catch(() => null);
+        if (synced) return synced;
+      }
+      return found;
+    },
     staleTime: Infinity,
     retry: false,
   });

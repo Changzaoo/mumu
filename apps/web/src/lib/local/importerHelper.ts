@@ -255,6 +255,47 @@ export async function aiChat(
   }
 }
 
+/** Palavra reconhecida no áudio, com o instante em que começa. */
+export interface TranscribedWord {
+  text: string;
+  startMs: number;
+}
+
+/**
+ * Transcreve áudio COM tempo por palavra (proxy do importer → Riva).
+ *
+ * Serve para dar tempo a uma letra que só tem texto — o texto continua vindo
+ * da fonte confiável; daqui sai apenas o relógio. Devolve null quando o
+ * serviço não está disponível: a letra segue exibida sem sincronia.
+ */
+export async function aiTranscribe(
+  audio: Blob,
+  opts: { language?: string; signal?: AbortSignal } = {},
+): Promise<TranscribedWord[] | null> {
+  try {
+    const url = new URL(`${helperUrl()}/ai/transcribe`);
+    if (opts.language) url.searchParams.set('language', opts.language);
+    const res = await fetch(url.toString(), {
+      method: 'POST',
+      headers: {
+        'Content-Type': audio.type || 'application/octet-stream',
+        ...(await baseHeaders()),
+      },
+      body: audio,
+      signal: opts.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { words?: unknown };
+    if (!Array.isArray(data.words)) return null;
+    return data.words
+      .map((w) => w as { text?: unknown; startMs?: unknown })
+      .filter((w) => typeof w.text === 'string' && typeof w.startMs === 'number')
+      .map((w) => ({ text: w.text as string, startMs: w.startMs as number }));
+  } catch {
+    return null;
+  }
+}
+
 /**
  * Vetoriza textos (recomendação semântica) via proxy do importer.
  *

@@ -137,6 +137,14 @@ export function cachedLyrics(trackId: string): Lyrics | null {
   return readCache()[trackId] ?? null;
 }
 
+/**
+ * Grava (ou substitui) a letra de uma faixa no cache — usado quando ganhamos
+ * uma versão MELHOR da mesma letra, como a sincronizada a partir do áudio.
+ */
+export function writeLyrics(trackId: string, lyrics: Lyrics): void {
+  writeCache({ ...readCache(), [trackId]: lyrics });
+}
+
 /** Todas as letras em cache — combustível da busca por trecho de letra. */
 export function lyricsCacheEntries(): Array<[string, Lyrics]> {
   return Object.entries(readCache());
