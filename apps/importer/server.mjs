@@ -28,6 +28,12 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
+import {
+  timestampsAreDegenerate,
+  toWav16k,
+  transcribeConfigured,
+  transcribeWords,
+} from './riva.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
@@ -449,6 +455,8 @@ const NVIDIA_EMBED_MODEL =
 // conservador o bastante para não tomar 4xx e grande o bastante para não
 // transformar uma biblioteca em centenas de requisições.
 const EMBED_MAX_BATCH = Number(process.env.NVIDIA_EMBED_BATCH ?? 32);
+/** Teto do áudio aceito para transcrição (uma música cabe folgada em 40 MB). */
+const MAX_TRANSCRIBE_BYTES = Number(process.env.MAX_TRANSCRIBE_MB ?? 40) * 1024 * 1024;
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH
   ? path.join(process.env.FFMPEG_PATH, isWin ? 'ffmpeg.exe' : 'ffmpeg')
@@ -657,6 +665,29 @@ function readBody(req) {
       if (data.length > 1_000_000) reject(new Error('body too large'));
     });
     req.on('end', () => resolve(data));
+    req.on('error', reject);
+  });
+}
+
+/**
+ * Corpo BINÁRIO (áudio para transcrição). O readBody acima concatena em
+ * string, o que corromperia bytes — e o teto de 1 MB não serve para uma
+ * música. Aqui juntamos Buffers e cortamos no limite informado.
+ */
+function readBodyBuffer(req, maxBytes) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    let total = 0;
+    req.on('data', (c) => {
+      total += c.length;
+      if (total > maxBytes) {
+        reject(new Error('áudio grande demais'));
+        req.destroy();
+        return;
+      }
+      chunks.push(c);
+    });
+    req.on('end', () => resolve(Buffer.concat(chunks)));
     req.on('error', reject);
   });
 }
@@ -1191,6 +1222,50 @@ async function main() {
           log('ai error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Falha na IA.' }));
+        }
+        return;
+      }
+
+      // ── Transcrição com tempo por palavra (letra sincronizada) ─────────────
+      // Recebe o áudio que o navegador JÁ tem no aparelho e devolve só as
+      // palavras com seus instantes. O texto exibido continua vindo do LRCLIB;
+      // daqui sai apenas o relógio.
+      if (req.method === 'POST' && pathname === '/ai/transcribe') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        if (!transcribeConfigured()) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Transcrição não configurada no servidor.' }));
+          return;
+        }
+        try {
+          const audio = await readBodyBuffer(req, MAX_TRANSCRIBE_BYTES);
+          if (!audio || audio.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Áudio obrigatório.' }));
+            return;
+          }
+          const language =
+            new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('language') ||
+            undefined;
+          const wav = await toWav16k(audio, FFMPEG_BIN);
+          const words = await transcribeWords(wav, { language });
+          // Sem tempo útil, sincronizar produziria um karaokê que não anda —
+          // melhor dizer que não deu e deixar a letra plana em paz.
+          if (words.length === 0 || timestampsAreDegenerate(words)) {
+            res.writeHead(422, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Sem tempos utilizáveis para esta faixa.' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ words }));
+        } catch (err) {
+          log('transcribe error:', err instanceof Error ? err.message : err);
+          res.writeHead(502, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Falha ao transcrever.' }));
         }
         return;
       }

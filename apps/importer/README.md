@@ -56,3 +56,33 @@ shows a green “Importador local” badge and accepts YouTube / SoundCloud / Vi
   the `X-Aurial-Title` response header (URL-encoded).
 
 The web app never calls a remote server for this — only your local helper.
+
+## Letra sincronizada (ASR com tempo por palavra)
+
+`POST /ai/transcribe` recebe o áudio bruto e devolve `{ words: [{ text, startMs }] }`.
+Serve para dar TEMPO a letras que só têm texto — o texto exibido continua vindo
+do LRCLIB; daqui sai apenas o relógio.
+
+Variáveis:
+
+| Var                 | Padrão                     | Para quê                                     |
+| ------------------- | -------------------------- | -------------------------------------------- |
+| `NVIDIA_API_KEY`    | —                          | obrigatória; sem ela o endpoint responde 503 |
+| `RIVA_TARGET`       | `grpc.nvcf.nvidia.com:443` | endpoint gRPC                                |
+| `RIVA_FUNCTION_ID`  | `71203149-…`               | parakeet-1.1b-rnnt-multilingual (25 idiomas) |
+| `RIVA_LANGUAGE`     | `multi`                    | `multi` = detecta sozinho; ou fixe `pt-BR`   |
+| `MAX_TRANSCRIBE_MB` | `40`                       | teto do áudio aceito                         |
+
+Notas de campo:
+
+- Usamos `StreamingRecognize`, não `Recognize`: offline vs streaming é
+  propriedade do DEPLOY hospedado, não flag de cliente, e os exemplos da NVIDIA
+  para este modelo usam streaming. Streaming funciona nos dois casos.
+- O áudio é convertido para WAV 16 kHz **mono** (Riva só aceita canal único).
+  Mandamos o WAV inteiro e o Riva lê o cabeçalho, então não informamos
+  `encoding`/`sample_rate`.
+- **Ainda não validado contra a API real** (faltava a chave no ambiente de
+  desenvolvimento). O que está verificado: os protos carregam, o serviço e os
+  campos existem, e o ffmpeg produz o formato certo. Se o modelo não devolver
+  offsets de verdade, `timestampsAreDegenerate` detecta, o endpoint responde
+  422 e o app mantém a letra plana — a falha é segura.
