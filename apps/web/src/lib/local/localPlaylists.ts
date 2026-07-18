@@ -13,6 +13,7 @@
  * track can be added and it upgrades to full offline playback.
  */
 import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
+import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
@@ -109,13 +110,24 @@ export function get(id: string): LocalPlaylist | null {
   return readPlaylists().find((p) => p.id === id) ?? null;
 }
 
+/**
+ * Lista DO APARELHO só guarda faixa DO USUÁRIO. Faixa do catálogo grátis
+ * continua tocável em busca/descoberta, mas persistida aqui ela apareceria na
+ * Sidebar e em /library como se fosse acervo próprio — e sumiria no dia em que
+ * a fonte saísse do ar. Filtro único para toda escrita.
+ */
+function ownTracksOnly(tracks: TrackDto[]): TrackDto[] {
+  return tracks.filter((t) => !isCatalogTrack(t));
+}
+
 /** Create a playlist; optionally seed it with tracks (stored in the map). */
 export function create(title: string, tracks: TrackDto[] = []): LocalPlaylist {
-  rememberTracks(tracks);
+  const own = ownTracksOnly(tracks);
+  rememberTracks(own);
   const playlist: LocalPlaylist = {
     id: `local-list:${crypto.randomUUID()}`,
     title: title.trim() || 'Nova lista',
-    trackIds: tracks.map((t) => t.id),
+    trackIds: own.map((t) => t.id),
     createdAt: new Date().toISOString(),
   };
   writePlaylists([playlist, ...readPlaylists()]);
@@ -123,18 +135,27 @@ export function create(title: string, tracks: TrackDto[] = []): LocalPlaylist {
   return playlist;
 }
 
-/** Append tracks to a playlist (dedupes ids, persists the TrackDtos). */
-export function addTracks(id: string, tracks: TrackDto[]): void {
-  rememberTracks(tracks);
+/**
+ * Append tracks to a playlist (dedupes ids, persists the TrackDtos). Faixas do
+ * catálogo grátis são recusadas; devolve quantas de fato entraram para a tela
+ * poder avisar em vez de fingir que salvou.
+ */
+export function addTracks(id: string, tracks: TrackDto[]): number {
+  const own = ownTracksOnly(tracks);
+  if (own.length === 0) return 0;
+  rememberTracks(own);
+  let addedCount = 0;
   writePlaylists(
     readPlaylists().map((p) => {
       if (p.id !== id) return p;
       const seen = new Set(p.trackIds);
-      const added = tracks.map((t) => t.id).filter((tid) => !seen.has(tid));
+      const added = own.map((t) => t.id).filter((tid) => !seen.has(tid));
+      addedCount = added.length;
       return { ...p, trackIds: [...p.trackIds, ...added] };
     }),
   );
   pushPlaylist(id);
+  return addedCount;
 }
 
 export function remove(id: string): void {
@@ -182,11 +203,14 @@ function pushPlaylist(id: string): void {
 
 /** Apply a remote playlist (add or update) to local storage — no re-push. */
 function applyRemoteUpsert(id: string, data: PlaylistDocData): void {
-  rememberTracks(data.tracks);
+  // Outro aparelho (ou uma versão antiga do app) pode mandar faixa de catálogo:
+  // o filtro vale na entrada também, senão o sync desfaz a limpeza local.
+  const tracks = ownTracksOnly(data.tracks);
+  rememberTracks(tracks);
   const playlist: LocalPlaylist = {
     id,
     title: data.title,
-    trackIds: data.tracks.map((t) => t.id),
+    trackIds: tracks.map((t) => t.id),
     createdAt: data.createdAt,
   };
   const existing = readPlaylists();
@@ -201,13 +225,26 @@ function applyRemoteDelete(id: string): void {
   writePlaylists(readPlaylists().filter((p) => p.id !== id));
 }
 
-/** Drop 30s-preview (iTunes) tracks from every playlist + the companion map. */
-export function purgePreviews(): number {
+/**
+ * Tira do aparelho o que é catálogo grátis (audius:/apple:/prévia de 30s) —
+ * listas antigas foram montadas com substitutos do catálogo e ainda ocupam a
+ * Sidebar como se fossem acervo do usuário.
+ */
+export function purgeCatalog(): number {
   const map = readTracks();
-  const badIds = new Set(Object.keys(map).filter((id) => map[id]?.previewOnly));
+  const badIds = new Set(
+    Object.keys(map).filter((id) => {
+      const track = map[id];
+      return track ? isCatalogTrack(track) : isCatalogId(id);
+    }),
+  );
+  const playlists = readPlaylists();
+  // Um id de catálogo pode estar na lista sem DTO no mapa companheiro — a
+  // varredura precisa olhar as listas também, senão ele sobrevive à limpeza.
+  for (const p of playlists) for (const id of p.trackIds) if (isCatalogId(id)) badIds.add(id);
   if (badIds.size === 0) return 0;
   const changed: string[] = [];
-  const nextPlaylists = readPlaylists().map((p) => {
+  const nextPlaylists = playlists.map((p) => {
     if (!p.trackIds.some((id) => badIds.has(id))) return p;
     changed.push(p.id);
     return { ...p, trackIds: p.trackIds.filter((id) => !badIds.has(id)) };

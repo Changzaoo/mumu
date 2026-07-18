@@ -136,7 +136,11 @@ export function count(): number {
   return readIds().length;
 }
 
-/** Drop any 30s-preview (iTunes) tracks saved before — not real playable songs. */
+/**
+ * Curtir uma faixa do catálogo continua valendo (é sinal de gosto e alimenta a
+ * recomendação) — o que não pode é ela virar acervo. Esta limpeza remove só o
+ * que ficou de trás: prévias de 30s, que nunca foram músicas de verdade.
+ */
 export function purgePreviews(): number {
   const map = readTracks();
   const bad = readIds().filter((id) => map[id]?.previewOnly);

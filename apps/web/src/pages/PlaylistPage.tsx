@@ -236,7 +236,12 @@ function LocalAddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }
   );
 
   const add = (track: TrackDto): void => {
-    localPlaylists.addTracks(playlist.id, [track]);
+    // Lista do aparelho só guarda faixa do usuário: a do catálogo é recusada e
+    // o aviso diz o caminho, em vez de "salvar" algo que some no próximo boot.
+    if (localPlaylists.addTracks(playlist.id, [track]) === 0) {
+      toast.error('Essa é do catálogo. Baixe-a para o aparelho para incluir na lista.');
+      return;
+    }
     void queryClient.invalidateQueries({ queryKey: ['playlist', playlist.id] });
     toast('Adicionada à playlist');
   };

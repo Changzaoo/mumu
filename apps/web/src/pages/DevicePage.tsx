@@ -36,7 +36,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
-import { searchTracks } from '@/lib/catalog/audius';
+import { matchLinesToLibrary, parseLines } from '@/lib/local/listMatch';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as importQueue from '@/lib/local/importQueue';
 import { isPlaylistUrl } from '@/lib/local/importerHelper';
@@ -49,38 +49,26 @@ import { usePlayerStore } from '@/stores/playerStore';
 const EMPTY: localLibrary.LibraryEntry[] = [];
 const EMPTY_LISTS: localPlaylists.LocalPlaylist[] = [];
 
-/** Resolve a list of "Título - Artista" lines to cover-rich iTunes tracks, in
- * small concurrent batches to be gentle on the endpoint. */
-async function tracksFromList(
+/**
+ * Resolve as linhas coladas contra a BIBLIOTECA DO USUÁRIO — e só ela.
+ *
+ * Antes cada linha virava o primeiro resultado do catálogo grátis: a lista
+ * nascia completa, mas cheia de substitutos que o usuário nunca escolheu e que
+ * passavam a morar na Sidebar e em /library como se fossem dele. Agora a lista
+ * só recebe o que ele já tem; o que falta é DITO, não preenchido de mentira.
+ *
+ * O casamento é local e instantâneo, mas o progresso continua sendo reportado
+ * em blocos: listas de centenas de linhas seguem dando sinal de vida.
+ */
+function tracksFromList(
   text: string,
   onProgress: (done: number, total: number) => void,
-): Promise<TrackDto[]> {
-  const lines = text
-    .split('\n')
-    .map((l) => l.trim())
-    .filter(Boolean)
-    .slice(0, 300);
-  const out: TrackDto[] = [];
-  let done = 0;
-  const BATCH = 5;
-  for (let i = 0; i < lines.length; i += BATCH) {
-    const batch = lines.slice(i, i + BATCH);
-    const results = await Promise.all(
-      batch.map(async (line) => {
-        try {
-          const songs = await searchTracks(line);
-          return songs[0] ?? null; // full-length Audius track (no 30s previews)
-        } catch {
-          return null;
-        } finally {
-          done++;
-          onProgress(done, lines.length);
-        }
-      }),
-    );
-    for (const t of results) if (t) out.push(t);
-  }
-  return out;
+): { matched: TrackDto[]; missing: string[] } {
+  const lines = parseLines(text);
+  const library = localLibrary.list().map((e) => e.track);
+  const result = matchLinesToLibrary(lines, library);
+  onProgress(lines.length, lines.length);
+  return result;
 }
 
 export default function DevicePage() {
@@ -101,6 +89,9 @@ export default function DevicePage() {
   const [listTitle, setListTitle] = useState('Músicas Curtidas');
   const [listText, setListText] = useState('');
   const [listBusy, setListBusy] = useState<{ done: number; total: number } | null>(null);
+  /** Linhas que não existem na biblioteca do usuário — mostradas em vez de
+   *  silenciosamente substituídas por uma faixa qualquer do catálogo. */
+  const [listMissing, setListMissing] = useState<string[]>([]);
 
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
@@ -167,19 +158,28 @@ export default function DevicePage() {
     toast(isPlaylistUrl(url) ? 'Playlist adicionada à fila' : 'Adicionada à fila de download');
   };
 
-  const createList = async (): Promise<void> => {
+  const createList = (): void => {
     if (!listText.trim() || listBusy) return;
     setListBusy({ done: 0, total: 0 });
     try {
-      const found = await tracksFromList(listText, (done, total) => setListBusy({ done, total }));
-      if (found.length === 0) {
-        toast.error('Nenhuma música encontrada. Confira a lista.');
+      const { matched, missing } = tracksFromList(listText, (done, total) =>
+        setListBusy({ done, total }),
+      );
+      setListMissing(missing);
+      if (matched.length === 0) {
+        toast.error('Nenhuma dessas músicas está na sua biblioteca ainda.');
         return;
       }
-      localPlaylists.create(listTitle, found);
-      toast.success(`Lista criada com ${found.length} música(s).`);
-      setListOpen(false);
+      localPlaylists.create(listTitle, matched);
+      toast.success(
+        missing.length === 0
+          ? `Lista criada com ${matched.length} música(s).`
+          : `Lista criada com ${matched.length} da sua biblioteca · ${missing.length} não encontrada(s).`,
+      );
       setListText('');
+      // Com faltantes, o diálogo fica aberto mostrando QUAIS — fechar aqui
+      // esconderia justamente a informação que o usuário precisa para agir.
+      if (missing.length === 0) setListOpen(false);
     } catch {
       toast.error('Não foi possível criar a lista.');
     } finally {
@@ -540,14 +540,22 @@ export default function DevicePage() {
       </section>
 
       {/* Create-from-list dialog */}
-      <Dialog open={listOpen} onOpenChange={(o) => !listBusy && setListOpen(o)}>
+      <Dialog
+        open={listOpen}
+        onOpenChange={(o) => {
+          if (listBusy) return;
+          if (!o) setListMissing([]); // relatório antigo não sobrevive ao fechamento
+          setListOpen(o);
+        }}
+      >
         <DialogContent>
           <DialogHeader>
             <DialogTitle>Recriar playlist</DialogTitle>
             <DialogDescription>
-              Cole uma música por linha, no formato “Título - Artista”. Buscamos a capa e o nome
-              reais de cada uma. Tocam em prévia de 30s; para ouvir completo e offline, importe seus
-              arquivos.
+              Cole uma música por linha, no formato “Título - Artista”. Montamos a lista com as
+              faixas que já estão na sua biblioteca deste aparelho — nada é substituído por outra
+              versão. As que faltarem aparecem aqui embaixo: importe o arquivo ou adicione por link
+              e crie a lista de novo.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3">
@@ -567,16 +575,34 @@ export default function DevicePage() {
               disabled={!!listBusy}
               className="resize-none"
             />
+            {listMissing.length > 0 && (
+              <div className="space-y-1.5 rounded-lg border border-border bg-fg/3 p-3">
+                <p className="text-[13px] font-medium text-fg">
+                  {listMissing.length} não {listMissing.length === 1 ? 'encontrada' : 'encontradas'}{' '}
+                  na sua biblioteca
+                </p>
+                <ul className="max-h-32 space-y-0.5 overflow-y-auto">
+                  {listMissing.map((line) => (
+                    <li key={line} className="line-clamp-1 text-[13px] text-fg-muted">
+                      {line}
+                    </li>
+                  ))}
+                </ul>
+                <p className="text-[12px] text-fg-subtle">
+                  Importe o arquivo ou cole o link dessas músicas para incluí-las.
+                </p>
+              </div>
+            )}
             <div className="flex items-center justify-between gap-3">
               <span className="text-[13px] text-fg-muted">
                 {listBusy
-                  ? `Buscando ${listBusy.done}/${listBusy.total}…`
+                  ? `Procurando ${listBusy.done}/${listBusy.total}…`
                   : `${listText.split('\n').filter((l) => l.trim()).length} música(s)`}
               </span>
               <Button
                 variant="accent"
                 disabled={!!listBusy || !listText.trim()}
-                onClick={() => void createList()}
+                onClick={createList}
               >
                 {listBusy ? <Loader2 className="animate-spin" /> : 'Criar lista'}
               </Button>
