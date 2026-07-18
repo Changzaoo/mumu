@@ -27,7 +27,7 @@
  *                   evidência e restaura a capa da fonte quando o crédito
  *                   antigo era alucinado.
  */
-import { cleanQuery, verifyIdentity, type EnrichedMeta } from '@/lib/local/enrich';
+import { cleanQuery, identifyByTitle, verifyIdentity, type EnrichedMeta } from '@/lib/local/enrich';
 import { fetchAlbumInfo } from '@/lib/local/importerHelper';
 
 // ── evidências e veredito ───────────────────────────────────────────────────
@@ -194,6 +194,24 @@ export async function verificadorConfirma(
   const hint = artistHint?.trim();
   if (!hint || hint === 'Desconhecido') return null;
   return verifyIdentity(title, hint);
+}
+
+/**
+ * VERIFICADOR — lente de TÍTULO. Só para a faixa que não tem crédito NENHUM a
+ * proteger (arquivo solto sem tag embutida e com nome que não diz o artista).
+ * Sem isso ela ficava "Desconhecido" para sempre: o caminho normal se recusa a
+ * procurar sem palpite, então nunca ganhava capa, álbum, gênero nem letra.
+ * A prova exigida é alta (ver identifyByTitle) — na dúvida, devolve null.
+ */
+export async function verificadorPorTitulo(
+  title: string,
+  artistAtual: string | null | undefined,
+): Promise<EnrichedMeta | null> {
+  const atual = artistAtual?.trim();
+  if (atual && atual !== 'Desconhecido') return null; // há crédito: não mexer
+  const t = title.trim();
+  if (!t) return null;
+  return identifyByTitle(t);
 }
 
 /** Título de faixa bate: igualdade normalizada, ou sufixo curto (live/remaster). */

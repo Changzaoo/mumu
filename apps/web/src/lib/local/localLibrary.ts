@@ -32,7 +32,10 @@ import {
   juizDecideCredito,
   verificadorAlbum,
   verificadorConfirma,
+  verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
+import { parseTrackFileName } from '@/lib/local/enrich';
+import { readAudioTags } from '@/lib/local/audioTags';
 import {
   deleteTrackBlob,
   fetchPlaylistEntries,
@@ -177,15 +180,7 @@ async function hashBlob(blob: Blob): Promise<string | null> {
   }
 }
 
-// ── filename / duration probing ─────────────────────────────────
-/** "Artist - Title.mp3" → { artist, title }; falls back to "Desconhecido". */
-function parseFileName(fileName: string): { title: string; artist: string } {
-  const base = fileName.replace(/\.[^.]+$/, '').trim();
-  const match = /^(.+?)\s*[-–—]\s*(.+)$/.exec(base);
-  if (match?.[1] && match[2]) return { artist: match[1].trim(), title: match[2].trim() };
-  return { artist: 'Desconhecido', title: base || fileName };
-}
-
+// ── duration probing ────────────────────────────────────────────
 /** Read an audio blob's duration via a metadata-only decode probe (ms). */
 function probeDurationMs(file: Blob): Promise<number> {
   return new Promise((resolve) => {
@@ -207,6 +202,15 @@ function probeDurationMs(file: Blob): Promise<number> {
   });
 }
 
+/** Ficha extra da faixa — o que não cabe nos parâmetros posicionais acima. */
+interface LocalTrackExtras {
+  /** Quem escreveu a música (tag TCOM / catálogo). */
+  composer?: string | null;
+  /** Gravadora / selo (tag TPUB). */
+  label?: string | null;
+  releaseYear?: number | null;
+}
+
 function localTrackDto(
   id: string,
   title: string,
@@ -214,6 +218,7 @@ function localTrackDto(
   durationMs: number,
   album: string | null,
   coverUrl: string | null,
+  extras: LocalTrackExtras = {},
 ): TrackDto {
   // Sanitize every externally-derived string/URL that lands in a track.
   const safeTitle = sanitizeText(title) || 'Faixa';
@@ -244,6 +249,13 @@ function localTrackDto(
       slug: '',
       imageUrl: null,
     })),
+    composer: extras.composer ? sanitizeText(extras.composer, 200) || null : null,
+    label: extras.label ? sanitizeText(extras.label, 120) || null : null,
+    // Ano fora da faixa do plausível é metadata podre — melhor não exibir nada.
+    releaseYear:
+      extras.releaseYear && extras.releaseYear > 1800 && extras.releaseYear < 2200
+        ? extras.releaseYear
+        : null,
     streamUrl: null,
     downloadUrl: null,
     uploadedByUserId: null,
@@ -348,10 +360,21 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
       continue;
     }
     const id = `local:${crypto.randomUUID()}`;
-    const { title, artist } = parseFileName(file.name);
+    // As TAGS EMBUTIDAS mandam no nome do arquivo: elas foram escritas por quem
+    // produziu/rippou o arquivo (evidência de fonte, como o yt-dlp), enquanto o
+    // nome é o que sobrou depois de passar por downloads, WhatsApp e renomeios.
+    // É também a única chance de já nascer com álbum, compositor e capa reais.
+    const tags = await readAudioTags(file);
+    const fromName = parseTrackFileName(file.name);
+    const title = tags.title ?? fromName.title;
+    const artist = tags.artist ?? fromName.artist ?? 'Desconhecido';
     const durationMs = await probeDurationMs(file);
     const mimeType = file.type || 'audio/mpeg';
-    const track = localTrackDto(id, title, artist, durationMs, null, null);
+    const track = localTrackDto(id, title, artist, durationMs, tags.album, tags.coverDataUrl, {
+      composer: tags.composer,
+      label: tags.publisher,
+      releaseYear: tags.year,
+    });
 
     await putBlob(id, file).catch(() => undefined);
     addEntry(
@@ -432,7 +455,12 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   // VERIFICADOR (metaTeam): confirma no iTunes só com um palpite sustentado por
   // evidência — sem artista conhecido ele se recusa a procurar (buscar por
   // título sozinho é o que fabricava créditos errados).
-  const verified = await verificadorConfirma(entry.track.title, currentArtist);
+  // Sem artista nenhum não há crédito a proteger — e desistir aqui era o que
+  // condenava o arquivo solto ("audio.mp3") a ficar sem capa/álbum/letra para
+  // sempre. A lente de TÍTULO entra só nesse caso, e com prova alta.
+  const verified =
+    (await verificadorConfirma(entry.track.title, currentArtist)) ??
+    (await verificadorPorTitulo(entry.track.title, currentArtist));
   const current = read().find((e) => e.track.id === id);
   if (!current) return false;
 
@@ -445,6 +473,13 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
     current.track.durationMs,
     verified.album,
     verified.coverUrl ?? current.track.coverUrl,
+    {
+      // O catálogo refina, mas não apaga: compositor/selo/ano lidos da tag do
+      // arquivo continuam valendo quando o iTunes não informa os dele.
+      composer: verified.composer ?? current.track.composer,
+      label: current.track.label,
+      releaseYear: current.track.releaseYear,
+    },
   );
   const track: TrackDto = {
     ...base,
@@ -470,7 +505,14 @@ export function setTrackGenre(id: string, genre: string): void {
 /** Enrich a list of ids one at a time (gentle on the iTunes endpoint). */
 async function enrichSequentially(ids: string[]): Promise<void> {
   for (const id of ids) {
-    await enrichLocalTrack(id).catch(() => undefined);
+    const applied = await enrichLocalTrack(id).catch(() => false);
+    if (applied) continue;
+    // O catálogo não confirmou, mas a TAG do arquivo pode já ter dado um nome
+    // bom o bastante para achar a letra — só não vale gastar a busca com
+    // "Desconhecido", que nunca casa com nada no LRCLIB.
+    const entry = read().find((e) => e.track.id === id);
+    const artist = entry?.track.artists[0]?.name;
+    if (entry && artist && artist !== 'Desconhecido') queueLyricsSync(entry.track);
   }
 }
 
