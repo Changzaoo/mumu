@@ -46,3 +46,6 @@ test-results/
 
 # PWA generated
 apps/web/dev-dist/
+
+# Worktrees temporários de agentes
+.claude/worktrees/
