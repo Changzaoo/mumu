@@ -320,8 +320,9 @@ export function TrackRow({
               >
                 {download.status === 'downloading' ? (
                   <>
-                    <Loader2 className="animate-spin" /> Baixando…{' '}
-                    {Math.round(download.progress * 100)}%
+                    <Loader2 className="animate-spin" /> Baixando…
+                    {/* progresso < 0 = indeterminado (CDN sem Content-Length) */}
+                    {download.progress >= 0 && ` ${Math.round(download.progress * 100)}%`}
                   </>
                 ) : download.status === 'error' ? (
                   <>

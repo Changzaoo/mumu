@@ -63,6 +63,27 @@ export function list(): LocalHistoryEntry[] {
   return read();
 }
 
+// Memo por (uid, referência do cache): a recomendação chama isso a cada render.
+let scopedCacheKey: { uid: string | null; source: LocalHistoryEntry[] } | null = null;
+let scopedCacheValue: LocalHistoryEntry[] = [];
+
+/**
+ * Histórico DA CONTA logada, newest-first — o que deve alimentar recomendação
+ * e gosto. Sem isso, num aparelho compartilhado o gosto de uma conta é
+ * calculado com os plays de outra. Entradas antigas (sem uid) contam para
+ * quem está no aparelho; deslogado, tudo conta (histórico do aparelho).
+ */
+export function listForCurrentUser(): LocalHistoryEntry[] {
+  const all = read();
+  if (!currentUid) return all;
+  if (scopedCacheKey && scopedCacheKey.uid === currentUid && scopedCacheKey.source === all) {
+    return scopedCacheValue;
+  }
+  scopedCacheValue = all.filter((e) => e.uid == null || e.uid === currentUid);
+  scopedCacheKey = { uid: currentUid, source: all };
+  return scopedCacheValue;
+}
+
 /**
  * Record a play. Collapses consecutive repeats of the same track into a single
  * (timestamp-refreshed) entry, keeps newest-first, and caps the log length.

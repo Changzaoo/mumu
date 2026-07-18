@@ -24,6 +24,17 @@ import {
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
+import { nextAudiusHost } from '@/lib/catalog/audius';
+import { streamUrlFor } from '@/lib/catalog/map';
+
+/** Origem (scheme+host) de uma URL, para saber quais nós já falharam. */
+function hostOf(url: string): string | null {
+  try {
+    return new URL(url).origin;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * Ensure a track has a playable source. Local-library tracks store their audio
@@ -63,8 +74,23 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
  * Devolve a faixa com a nova fonte, ou null quando não há mais o que tentar.
  */
 async function resolveNextSource(track: TrackDto, tried: Set<string>): Promise<TrackDto | null> {
-  if (!track.id.startsWith('local:')) return null;
   if (typeof navigator !== 'undefined' && !navigator.onLine) return null;
+  // Faixa de catálogo: a streamUrl foi gravada com o nó de descoberta da vez.
+  // Se ESSE nó caiu, todas as faixas parecem mortas — rotaciona para outro nó
+  // e reescreve a URL em vez de declarar a faixa indisponível.
+  if (track.id.startsWith('audius:')) {
+    const audiusId = track.id.slice('audius:'.length);
+    const triedHosts = [...tried].map(hostOf).filter((h): h is string => h !== null);
+    for (let i = 0; i < 2; i++) {
+      const host = await nextAudiusHost(triedHosts);
+      if (!host) return null;
+      const url = streamUrlFor(audiusId, host);
+      if (!tried.has(url)) return { ...track, streamUrl: url, downloadUrl: url };
+      triedHosts.push(host);
+    }
+    return null;
+  }
+  if (!track.id.startsWith('local:')) return null;
   const remote = remoteUrlFor(track.id);
   if (remote && !tried.has(remote)) return { ...track, streamUrl: remote };
   const sourceUrl = sourceUrlFor(track.id);
@@ -171,11 +197,19 @@ const MAX_FALLBACK_ATTEMPTS = 3;
 // Carregamento pendurado (ex.: /stream ao vivo que nunca emite bytes) não gera
 // evento de erro nenhum — sem watchdog a faixa fica "carregando" para sempre.
 const LOAD_WATCHDOG_MS = 30_000;
+// Depois que a faixa JÁ tocou, checagens mais curtas detectam travamento no
+// meio (o elemento emite 'waiting' e nunca mais volta) — antes disso o player
+// ficava eternamente no spinner sem nenhum erro.
+const STALL_CHECK_MS = 10_000;
 let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
+let lastWatchdogPos = -1;
+let stallStrikes = 0;
 
 function clearLoadWatchdog(): void {
   if (loadWatchdog !== null) clearTimeout(loadWatchdog);
   loadWatchdog = null;
+  lastWatchdogPos = -1;
+  stallStrikes = 0;
 }
 
 // Uma faixa morta no meio da fila NÃO pode parar a música (Spotify pula e
@@ -301,14 +335,44 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
  *  em 30s, trata como fonte morta e cai para a próxima. Fonte VIVA porém
  *  lenta (bytes chegando — /stream ao vivo num servidor carregado) ganha mais
  *  tempo em vez de ser morta no meio. */
-function armLoadWatchdog(trackId: string): void {
-  clearLoadWatchdog();
+function armLoadWatchdog(trackId: string, delayMs = LOAD_WATCHDOG_MS): void {
+  if (loadWatchdog !== null) clearTimeout(loadWatchdog);
+  loadWatchdog = null;
   if (typeof window === 'undefined') return;
   loadWatchdog = setTimeout(() => {
     loadWatchdog = null;
-    const current = usePlayerStore.getState().currentTrack;
+    const state = usePlayerStore.getState();
+    const current = state.currentTrack;
     if (!current || current.id !== trackId) return;
-    if (audioEngine.getPosition() > 0) return; // chegou a tocar — falso alarme
+
+    const pos = audioEngine.getPosition();
+
+    // ── já tocou: vigia TRAVAMENTO no meio da faixa ────────────────
+    if (pos > 0) {
+      if (!state.isPlaying) return; // pausado de propósito — nada a vigiar
+      if (pos !== lastWatchdogPos) {
+        lastWatchdogPos = pos; // playhead andando: saudável
+        stallStrikes = 0;
+        armLoadWatchdog(trackId, STALL_CHECK_MS);
+        return;
+      }
+      // Playhead parado com o player "tocando" = travou.
+      stallStrikes++;
+      if (stallStrikes === 1) {
+        // Primeiro strike: cutuca o elemento (costuma destravar buffer preso).
+        audioEngine.seek(pos);
+        audioEngine.play();
+        armLoadWatchdog(trackId, STALL_CHECK_MS);
+        return;
+      }
+      void (async () => {
+        if (await attemptSourceFallback(current)) return;
+        failCurrentTrack('A reprodução travou — tentando a próxima faixa.');
+      })();
+      return;
+    }
+
+    // ── ainda não tocou: vigia CARREGAMENTO pendurado ──────────────
     if (audioEngine.getBufferedEnd() > 0) {
       armLoadWatchdog(trackId); // dados chegando — só está lento, espera mais
       return;
@@ -317,7 +381,7 @@ function armLoadWatchdog(trackId: string): void {
       if (await attemptSourceFallback(current)) return;
       failCurrentTrack('Não foi possível carregar esta faixa agora.');
     })();
-  }, LOAD_WATCHDOG_MS);
+  }, delayMs);
 }
 
 function fisherYatesShuffle<T>(items: T[]): T[] {
@@ -521,6 +585,9 @@ export const usePlayerStore = create<PlayerState>()(
           }
           audioEngine.play();
           set({ isPlaying: true });
+          // Voltou a tocar → volta a vigiar travamento (o watchdog se desarma
+          // sozinho quando a faixa é pausada).
+          armLoadWatchdog(currentTrack.id, STALL_CHECK_MS);
         },
 
         pause: () => {
@@ -762,6 +829,10 @@ export function initPlayerEngine(): void {
   audioEngine.on('timeupdate', ({ position, duration }) => {
     const state = store.getState();
 
+    // Som saindo = fila saudável. Zerar aqui (e não só no 'loaded') cobre a
+    // faixa PRÉ-CARREGADA promovida, que não redispara 'loaded'.
+    if (position > 0) consecutiveDeadTracks = 0;
+
     // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
     if (!signedIn && position >= PREVIEW_SECONDS) firePreviewGate();
 
@@ -853,6 +924,9 @@ export function initPlayerEngine(): void {
     clearLoadWatchdog();
     consecutiveDeadTracks = 0; // uma faixa carregou — a fila está saudável
     if (duration > 0 && Number.isFinite(duration)) store.setState({ duration });
+    // Carregou, mas ainda pode travar no meio — segue vigiando o playhead.
+    const loadedId = store.getState().currentTrack?.id;
+    if (loadedId) armLoadWatchdog(loadedId, STALL_CHECK_MS);
     // Retomada: a faixa restaurada terminou de carregar → busca a posição salva.
     if (pendingResumeSeek !== null) {
       const at = Math.min(pendingResumeSeek, Math.max(0, (duration || Infinity) - 1));

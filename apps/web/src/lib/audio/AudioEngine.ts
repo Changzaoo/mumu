@@ -240,6 +240,11 @@ export class AudioEngine {
       this.resetSlot(to);
       this.prepareSlot(to, track, url);
     }
+    // Um slot PRÉ-CARREGADO já disparou seu 'load' enquanto era o slot ocioso —
+    // e aqueles handlers são filtrados por `slot === this.active`, então o store
+    // nunca recebeu 'loaded'/'buffering:false' para ele. Sem re-emitir aqui, o
+    // isBuffering fica true para sempre: o player parece TRAVADO no spinner.
+    const promotedLoaded = preloaded && to.loaded;
 
     const canCrossfade =
       crossfadeSeconds > 0 && this.ctx !== null && this.playing && from.track !== null;
@@ -271,7 +276,11 @@ export class AudioEngine {
     this.applyRate(to);
     this.applyTrim(to);
     this.syncTicker();
-    this.emit('timeupdate', { position: 0, duration: track.durationMs / 1000 });
+    this.emit('timeupdate', { position: 0, duration: this.getDuration() });
+    if (promotedLoaded) {
+      this.emit('loaded', { track, duration: this.getDuration() });
+      this.emit('buffering', { buffering: false });
+    }
   }
 
   play(): void {
@@ -511,11 +520,23 @@ export class AudioEngine {
       if (el) {
         this.connectSlotElement(slot, el);
         this.attachBufferingEvents(slot, el, seq);
+        // Duração tardia (stream sem Content-Length / chunked): reemite quando
+        // o elemento finalmente souber o tamanho real da faixa.
+        const onDurationChange = (): void => {
+          if (slot.seq !== seq || slot !== this.active) return;
+          if (Number.isFinite(el.duration) && el.duration > 0) {
+            this.emit('loaded', { track, duration: el.duration });
+          }
+        };
+        el.addEventListener('durationchange', onDurationChange);
+        slot.cleanup.push(() => el.removeEventListener('durationchange', onDurationChange));
       }
       this.applyRate(slot);
       this.applyTrim(slot);
       if (slot === this.active) {
-        this.emit('loaded', { track, duration: howl.duration() });
+        // howl.duration() ainda pode ser 0 aqui; getDuration() cai para a
+        // metadata do catálogo e o durationchange acima corrige depois.
+        this.emit('loaded', { track, duration: howl.duration() || this.getDuration() });
         this.emit('buffering', { buffering: false });
       }
     });
@@ -563,11 +584,21 @@ export class AudioEngine {
         this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
       }
     };
+    // Streams em chunks só revelam a duração real DEPOIS do loadedmetadata
+    // (antes é Infinity/NaN) — sem isso a faixa fica em "0:00" para sempre.
+    const onDurationChange = (): void => {
+      if (slot.seq !== seq || slot !== this.active) return;
+      if (Number.isFinite(el.duration) && el.duration > 0) {
+        this.emit('loaded', { track, duration: el.duration });
+      }
+    };
     el.addEventListener('loadedmetadata', onMeta);
+    el.addEventListener('durationchange', onDurationChange);
     el.addEventListener('ended', onEnded);
     el.addEventListener('error', onError);
     slot.cleanup.push(() => {
       el.removeEventListener('loadedmetadata', onMeta);
+      el.removeEventListener('durationchange', onDurationChange);
       el.removeEventListener('ended', onEnded);
       el.removeEventListener('error', onError);
       el.pause();
@@ -625,14 +656,28 @@ export class AudioEngine {
       const { howl } = slot.source;
       if (!howl.playing()) howl.play();
     } else {
-      void slot.source.el.play().catch(() => {
-        if (slot === this.active) {
-          this.emit('error', {
-            message: 'Reprodução bloqueada pelo navegador — toque na página e tente novamente.',
-            track: slot.track,
-            kind: 'play',
-          });
-        }
+      const { el } = slot.source;
+      void el.play().catch(() => {
+        if (slot !== this.active) return;
+        // Autoplay bloqueado: em vez de só reclamar, retoma sozinho no PRIMEIRO
+        // gesto do usuário (igual ao 'unlock' do Howler) — senão a faixa fica
+        // parada mesmo depois de o usuário interagir com a página.
+        const resume = (): void => {
+          detach();
+          if (slot === this.active && this.playing) void el.play().catch(() => undefined);
+        };
+        const detach = (): void => {
+          document.removeEventListener('pointerdown', resume);
+          document.removeEventListener('keydown', resume);
+        };
+        document.addEventListener('pointerdown', resume, { once: true });
+        document.addEventListener('keydown', resume, { once: true });
+        slot.cleanup.push(detach);
+        this.emit('error', {
+          message: 'Reprodução bloqueada pelo navegador — toque na página e tente novamente.',
+          track: slot.track,
+          kind: 'play',
+        });
       });
     }
   }

@@ -491,13 +491,32 @@ function fallbackMixes(
       tracks: a.tracks,
     });
   }
+
+  // Biblioteca só de singles de artistas distintos (ou sem gênero atribuído)
+  // não atinge nenhum dos limiares acima e a prateleira SUMIA — quem tem música
+  // sempre merece ao menos um mix.
+  if (out.length === 0) {
+    const all = [...genreIdx.values()].flatMap((g) => g.tracks);
+    const tracks = all.length > 0 ? all : [...artistIdx.values()].flatMap((a) => a.tracks);
+    if (tracks.length > 0) {
+      out.push({
+        key: 'reco:library',
+        title: 'Da sua biblioteca',
+        subtitle: comArtistas(tracks),
+        coverUrl: primeiraCapa(tracks),
+        coverUrls: capasDoMix(tracks),
+        tracks,
+      });
+    }
+  }
   return out.slice(0, 10);
 }
 
 // ── memoização do caminho padrão ────────────────────────────────
 // A Home chama a cada render; o resultado só muda quando a biblioteca muda
 // (nova referência de list()), o histórico cresce ou o dia vira.
-let memoKey: { entries: unknown; day: number; historyLen: number } | null = null;
+let memoKey: { entries: unknown; day: number; historyLen: number; likedCount: number } | null =
+  null;
 let memoResult: Recommendation[] = [];
 
 /**
@@ -507,18 +526,24 @@ let memoResult: Recommendation[] = [];
 export function buildRecommendations(inputs?: RecoInputs): Recommendation[] {
   if (inputs) return compute(inputs);
   const entries = localLibrary.list();
-  const history = localHistory.list();
+  // Gosto é DA CONTA: num aparelho compartilhado, usar o histórico do device
+  // faria a recomendação de um usuário nascer dos plays de outro.
+  const history = localHistory.listForCurrentUser();
   const now = new Date();
   const day = daySeed(now);
+  // O like é o sinal de gosto MAIS forte (peso ×3) — ficar fora da chave fazia
+  // curtir/descurtir não mexer em nada até a biblioteca ou o dia mudarem.
+  const likedCount = localLikes.count();
   if (
     memoKey &&
     memoKey.entries === entries &&
     memoKey.day === day &&
-    memoKey.historyLen === history.length
+    memoKey.historyLen === history.length &&
+    memoKey.likedCount === likedCount
   ) {
     return memoResult;
   }
   memoResult = compute({ entries, history, liked: localLikes.list(), now });
-  memoKey = { entries, day, historyLen: history.length };
+  memoKey = { entries, day, historyLen: history.length, likedCount };
   return memoResult;
 }

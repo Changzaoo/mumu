@@ -174,10 +174,12 @@ export default function HomePage() {
   // Motor de recomendação local (lib/reco): afinidade com decaimento temporal,
   // mixes diários por cluster, nostalgia, descobertas e hora-consciente —
   // memoizado no módulo, muda quando a biblioteca/histórico/dia mudam.
+  // `likedCount` entra nas deps de propósito: curtir é o sinal de gosto mais
+  // forte (peso ×3) e sem ele a prateleira não reagia a likes.
   const recos = useMemo(
     () => buildRecommendations(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, history],
+    [entries, history, likedCount],
   );
 
   const playlistCover = (trackIds: string[]): string | null => {

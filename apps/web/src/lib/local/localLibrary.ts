@@ -11,7 +11,12 @@
  * Works fully offline and, on secure origins, survives reloads via Cache Storage.
  */
 import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
-import { cacheStorageSupported } from '@/lib/offline/audioCache';
+import {
+  cacheStorageSupported,
+  deleteAudio,
+  getAudioBlob,
+  putAudio,
+} from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { prefetchLyrics } from '@/lib/lyrics/lyrics';
@@ -124,8 +129,16 @@ if (typeof window !== 'undefined') {
 }
 
 // ── Cache Storage helpers ───────────────────────────────────────
+// A Cache Storage SÓ existe em contexto seguro (https/localhost). Num endereço
+// http:// de LAN — exatamente o caso "abrir no celular" — ela some, e antes
+// disso `putBlob` era um no-op SILENCIOSO: a faixa entrava no registro, tocava
+// na sessão e sumia no reload, sem nunca poder tocar offline. O IndexedDB
+// funciona em qualquer contexto, então ele é o fallback para os bytes.
 async function putBlob(id: string, blob: Blob): Promise<void> {
-  if (!cacheStorageSupported()) return;
+  if (!cacheStorageSupported()) {
+    await putAudio(id, blob); // IndexedDB — funciona em http:// também
+    return;
+  }
   const store = await caches.open(CACHE_NAME);
   await store.put(
     keyFor(id),
@@ -139,13 +152,16 @@ async function putBlob(id: string, blob: Blob): Promise<void> {
 }
 
 async function getBlob(id: string): Promise<Blob | null> {
-  if (!cacheStorageSupported()) return null;
+  if (!cacheStorageSupported()) return getAudioBlob(id);
   const store = await caches.open(CACHE_NAME);
   const res = await store.match(keyFor(id));
-  return res ? await res.blob() : null;
+  if (res) return await res.blob();
+  // Importada num contexto não-seguro anterior → bytes estão no IndexedDB.
+  return getAudioBlob(id);
 }
 
 async function deleteBlob(id: string): Promise<void> {
+  await deleteAudio(id).catch(() => undefined); // limpa a cópia IndexedDB
   if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
   await store.delete(keyFor(id));

@@ -63,9 +63,13 @@ export interface CatalogPlaylist {
   trackCount: number;
 }
 
-/** Directly-playable Audius stream URL (302 → mp3, CORS-enabled). */
-export function streamUrlFor(id: string): string {
-  return `${audiusHost()}/v1/tracks/${id}/stream?app_name=Aurial`;
+/**
+ * Directly-playable Audius stream URL (302 → mp3, CORS-enabled).
+ * `host` permite apontar para OUTRO nó de descoberta quando o atual morre —
+ * um nó fora do ar deixaria o catálogo inteiro "indisponível".
+ */
+export function streamUrlFor(id: string, host?: string): string {
+  return `${host ?? audiusHost()}/v1/tracks/${id}/stream?app_name=Aurial`;
 }
 
 export function audiusTrackToDto(t: AudiusTrack): TrackDto {
@@ -73,7 +77,8 @@ export function audiusTrackToDto(t: AudiusTrack): TrackDto {
   return {
     id: `audius:${t.id}`,
     title: t.title,
-    durationMs: t.duration * 1000,
+    // Nó sem `duration` viraria NaN e se propagaria até a UI como "0:00".
+    durationMs: Number.isFinite(t.duration) ? t.duration * 1000 : 0,
     trackNumber: null,
     discNumber: null,
     explicit: false,

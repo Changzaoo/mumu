@@ -80,6 +80,47 @@ export async function getHost(): Promise<string> {
   return cachedHost;
 }
 
+/**
+ * Lista de nós de descoberta (cacheada na sessão) para rotacionar quando o nó
+ * atual falha. Sem isso, UM nó fora do ar torna TODAS as faixas do catálogo
+ * "indisponíveis", já que a streamUrl é gravada no DTO com o host da vez.
+ */
+let hostListPromise: Promise<string[]> | null = null;
+
+function fetchHostList(): Promise<string[]> {
+  return (hostListPromise ??= (async () => {
+    try {
+      const res = await fetch('https://api.audius.co');
+      if (!res.ok) return [];
+      const body = (await res.json()) as { data?: string[] };
+      return (body.data ?? []).map((h) => h.replace(/\/$/, ''));
+    } catch {
+      return [];
+    }
+  })());
+}
+
+/**
+ * Próximo nó de descoberta ainda não descartado nesta tentativa. Promove o nó
+ * escolhido a host da sessão para que as PRÓXIMAS faixas já nasçam apontando
+ * para um nó vivo.
+ */
+export async function nextAudiusHost(triedHosts: Iterable<string>): Promise<string | null> {
+  const tried = new Set(triedHosts);
+  const hosts = await fetchHostList();
+  const candidate =
+    hosts.find((h) => !tried.has(h) && h !== cachedHost) ??
+    (tried.has(FALLBACK_HOST) || cachedHost === FALLBACK_HOST ? null : FALLBACK_HOST);
+  if (!candidate) return null;
+  cachedHost = candidate;
+  try {
+    localStorage.setItem(HOST_KEY, candidate);
+  } catch {
+    /* storage unavailable */
+  }
+  return candidate;
+}
+
 type QueryParams = Record<string, string | number | undefined>;
 
 async function fetchData<T>(path: string, params: QueryParams = {}): Promise<T> {
