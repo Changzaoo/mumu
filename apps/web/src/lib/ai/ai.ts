@@ -8,6 +8,30 @@ export { aiChat };
 export type { AiMessage };
 
 /**
+ * Modelo por CASO DE USO (NVIDIA NIM, endpoints gratuitos).
+ *
+ * Antes tudo caía no default do servidor (llama-3.1-8b) — barato, mas fraco em
+ * conhecimento de mundo. Identificar de quem é uma música, separar "Tyler, The
+ * Creator" de "Beyoncé, Jay-Z" ou auditar uma atribuição são tarefas de
+ * CONHECIMENTO, não de formatação: com 8B elas erram e a metadata da
+ * biblioteca inteira herda o erro. Já classificar num rótulo fixo e limpar um
+ * título de YouTube são tarefas mecânicas, onde o 8B acerta e é ~10× mais
+ * barato — e rodam em lote sobre a biblioteca toda.
+ */
+export const AI_MODELS = {
+  /** Conhecimento musical + JSON estrito. A autoridade sobre "de quem é". */
+  identity: 'meta/llama-3.3-70b-instruct',
+  /** Nomes de grupos com vírgula/& são conhecimento de mundo, não regex. */
+  splitArtists: 'meta/llama-3.3-70b-instruct',
+  /** Auditoria de atribuição: saída de 1 palavra, decisão de conhecimento. */
+  verify: 'meta/llama-3.3-70b-instruct',
+  /** Rótulo de uma lista fixa, em lote na biblioteca → o menor que resolve. */
+  genre: 'meta/llama-3.1-8b-instruct',
+  /** Extração de string, sem conhecimento de mundo → o menor que resolve. */
+  cleanTitle: 'meta/llama-3.1-8b-instruct',
+} as const;
+
+/**
  * Extract a clean {artist, title} from a messy YouTube-style title, to improve
  * lyric + cover lookups. Returns null when the AI is unavailable or unsure.
  */
@@ -29,7 +53,7 @@ export async function aiCleanSongTitle(
         content: `Texto: "${raw}"${artistHint ? `\nDica de artista: ${artistHint}` : ''}`,
       },
     ],
-    { maxTokens: 120, temperature: 0 },
+    { model: AI_MODELS.cleanTitle, maxTokens: 120, temperature: 0 },
   );
   if (!content) return null;
   try {
@@ -93,7 +117,7 @@ export async function aiClassifyGenre(title: string, artist?: string): Promise<s
       },
       { role: 'user', content: `Música: "${title}"${artist ? ` — Artista: ${artist}` : ''}` },
     ],
-    { maxTokens: 12, temperature: 0 },
+    { model: AI_MODELS.genre, maxTokens: 12, temperature: 0 },
   );
   if (!content) return null;
   const answer = content.trim().replace(/["'.]/g, '').toLowerCase();
@@ -118,7 +142,7 @@ export async function aiVerifyArtist(title: string, artist: string): Promise<boo
       },
       { role: 'user', content: `A música "${title}" é de "${artist}"?` },
     ],
-    { maxTokens: 5, temperature: 0 },
+    { model: AI_MODELS.verify, maxTokens: 5, temperature: 0 },
   );
   if (!content) return null;
   const a = content.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -167,7 +191,7 @@ export async function aiIdentifyTrack(
         content: `Título: "${rawTitle}"${currentArtist ? `\nArtista atual (pode estar errado): ${currentArtist}` : ''}`,
       },
     ],
-    { maxTokens: 220, temperature: 0 },
+    { model: AI_MODELS.identity, maxTokens: 220, temperature: 0 },
   );
   if (!content) return null;
   try {
@@ -214,7 +238,7 @@ export async function aiSplitArtists(credit: string, title?: string): Promise<st
       },
       { role: 'user', content: `Crédito: "${credit}"${title ? `\nTítulo: ${title}` : ''}` },
     ],
-    { maxTokens: 100, temperature: 0 },
+    { model: AI_MODELS.splitArtists, maxTokens: 100, temperature: 0 },
   );
   if (!content) return null;
   try {
