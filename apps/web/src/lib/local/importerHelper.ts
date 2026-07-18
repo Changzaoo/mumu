@@ -256,6 +256,36 @@ export async function aiChat(
 }
 
 /**
+ * Vetoriza textos (recomendação semântica) via proxy do importer.
+ *
+ * `inputType` importa: estes modelos geram vetores diferentes para indexar
+ * ('passage') e para consultar ('query'); misturar os dois degrada a
+ * semelhança em silêncio. Devolve null quando a IA não está disponível — o
+ * chamador degrada para a recomendação heurística.
+ */
+export async function aiEmbed(
+  input: string[],
+  inputType: 'passage' | 'query' = 'passage',
+): Promise<Array<number[] | null> | null> {
+  if (input.length === 0) return [];
+  try {
+    const res = await fetch(`${helperUrl()}/ai/embed`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ input, input_type: inputType }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { embeddings?: unknown };
+    if (!Array.isArray(data.embeddings)) return null;
+    return data.embeddings.map((v) =>
+      Array.isArray(v) && v.every((n) => typeof n === 'number') ? (v as number[]) : null,
+    );
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Live-stream URL for INSTANT playback of a media link (the importer pipes
  * yt-dlp → ffmpeg → mp3, so playback starts in seconds, no full download). The
  * Firebase token goes in the query because an <audio> element can't send

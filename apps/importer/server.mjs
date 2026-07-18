@@ -442,6 +442,13 @@ const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.co
   '',
 );
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'meta/llama-3.1-8b-instruct';
+// Embeddings multilíngues (26 idiomas, inclui pt-BR) — 2048 dims, contexto 8k.
+const NVIDIA_EMBED_MODEL =
+  process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/llama-nemotron-embed-1b-v2';
+// A NVIDIA não documenta o teto de lote do endpoint hospedado; 32 é
+// conservador o bastante para não tomar 4xx e grande o bastante para não
+// transformar uma biblioteca em centenas de requisições.
+const EMBED_MAX_BATCH = Number(process.env.NVIDIA_EMBED_BATCH ?? 32);
 
 const FFMPEG_BIN = process.env.FFMPEG_PATH
   ? path.join(process.env.FFMPEG_PATH, isWin ? 'ffmpeg.exe' : 'ffmpeg')
@@ -1184,6 +1191,74 @@ async function main() {
           log('ai error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Falha na IA.' }));
+        }
+        return;
+      }
+
+      // ── Embeddings (recomendação semântica) ────────────────────────────────
+      // Vetoriza textos de faixas para medir SEMELHANÇA real entre músicas —
+      // o que o rótulo de gênero não captura. Mesmo proxy do /ai/chat: a chave
+      // nunca chega ao navegador.
+      if (req.method === 'POST' && pathname === '/ai/embed') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        if (!NVIDIA_API_KEY) {
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'IA não configurada no servidor.' }));
+          return;
+        }
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          const input = Array.isArray(body.input) ? body.input.filter((t) => typeof t === 'string') : [];
+          if (input.length === 0) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'input obrigatório.' }));
+            return;
+          }
+          if (input.length > EMBED_MAX_BATCH) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `Máximo ${EMBED_MAX_BATCH} textos por chamada.` }));
+            return;
+          }
+          // input_type é semanticamente obrigatório nestes modelos: indexar
+          // ('passage') e consultar ('query') produzem vetores diferentes, e
+          // misturar os dois degrada a busca silenciosamente.
+          const inputType = body.input_type === 'query' ? 'query' : 'passage';
+          const upstream = await fetch(`${NVIDIA_BASE}/embeddings`, {
+            method: 'POST',
+            headers: {
+              Authorization: `Bearer ${NVIDIA_API_KEY}`,
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+              model: typeof body.model === 'string' ? body.model : NVIDIA_EMBED_MODEL,
+              input,
+              input_type: inputType,
+              encoding_format: 'float',
+              truncate: 'END', // título+artista jamais estoura contexto; guarda barata
+            }),
+          });
+          const data = await upstream.json().catch(() => ({}));
+          if (!upstream.ok) {
+            log('embed error:', upstream.status, JSON.stringify(data).slice(0, 300));
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Falha ao gerar embeddings.' }));
+            return;
+          }
+          // Resposta no formato OpenAI: data[].embedding, com index próprio.
+          // Reordenamos por `index` porque a ordem do array não é garantida.
+          const rows = Array.isArray(data?.data) ? [...data.data] : [];
+          rows.sort((a, b) => (a?.index ?? 0) - (b?.index ?? 0));
+          const embeddings = rows.map((r) => (Array.isArray(r?.embedding) ? r.embedding : null));
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ embeddings }));
+        } catch (err) {
+          log('embed error:', err instanceof Error ? err.message : err);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Falha ao gerar embeddings.' }));
         }
         return;
       }

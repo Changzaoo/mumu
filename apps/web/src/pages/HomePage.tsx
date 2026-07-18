@@ -4,7 +4,7 @@
  * artist/genre, albums, genres and artists. No external 30s-preview catalog —
  * only real, user-added songs.
  */
-import { useMemo, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import type { IconType } from 'react-icons';
@@ -20,6 +20,8 @@ import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { buildRecommendations, daySeed, seededShuffle } from '@/lib/reco/recommend';
+import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
+import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -182,6 +184,40 @@ export default function HomePage() {
     [entries, history, likedCount],
   );
 
+  // ── prateleiras semânticas (embeddings) ─────────────────────────
+  // Aditivas: se a IA não estiver disponível, `ready` nunca sobe e a Home
+  // fica exatamente como era. A vetorização roda em segundo plano, com teto
+  // por rodada, para não virar uma rajada na primeira abertura.
+  const [vectorsReadyCount, setVectorsReadyCount] = useState(0);
+  useEffect(() => {
+    let cancelled = false;
+    void (async () => {
+      await hydrateVectors();
+      if (cancelled) return;
+      setVectorsReadyCount(vectorCount());
+      const tracks = entries.map((e) => e.track);
+      if (tracks.length === 0) return;
+      const added = await ensureVectors(tracks);
+      if (!cancelled && added > 0) setVectorsReadyCount(vectorCount());
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [entries]);
+
+  const semanticRecos = useMemo(
+    () =>
+      buildSemanticMixes({
+        entries,
+        history,
+        liked: localLikes.list(),
+      }),
+    // `vectorsReadyCount` entra porque os vetores chegam DEPOIS do primeiro
+    // render — sem ele a prateleira só apareceria na próxima navegação.
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+    [entries, history, likedCount, vectorsReadyCount],
+  );
+
   const playlistCover = (trackIds: string[]): string | null => {
     for (const id of trackIds) {
       const cover = entries.find((e) => e.track.id === id)?.track.coverUrl;
@@ -267,6 +303,24 @@ export default function HomePage() {
                   sourceId: rec.key,
                 })
               }
+            />
+          ))}
+        </SectionCarousel>
+      )}
+
+      {/* Semântica (embeddings): proximidade real entre músicas, não rótulo de
+          gênero. Só aparece quando há vetor suficiente — some sozinha se a IA
+          não estiver configurada, sem deixar buraco na página. */}
+      {semanticRecos.length > 0 && (
+        <SectionCarousel title="Combina com você" subtitle="Pelo som, não pelo rótulo">
+          {semanticRecos.map((rec) => (
+            <MediaCard
+              key={rec.key}
+              title={rec.title}
+              subtitle={rec.subtitle}
+              imageUrl={rec.coverUrl}
+              imageUrls={rec.coverUrls}
+              onPlay={() => playQueue(rec.tracks, 0, { source: 'library', sourceId: rec.key })}
             />
           ))}
         </SectionCarousel>
