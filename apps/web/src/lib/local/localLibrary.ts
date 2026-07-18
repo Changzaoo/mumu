@@ -14,8 +14,11 @@ import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
 import {
   cacheStorageSupported,
   deleteAudio,
+  deleteCover,
   getAudioBlob,
+  getCoverBlob,
   putAudio,
+  putCover,
 } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
@@ -105,13 +108,35 @@ function read(): LibraryEntry[] {
 // atualizada na hora, então toda leitura continua vendo o estado novo.
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
 
+/**
+ * O que pode ir para o localStorage.
+ *
+ * Duas capas jamais podem ser persistidas aqui:
+ *  - `blob:` — morre com a aba; ao voltar seria uma URL quebrada;
+ *  - `data:` grande — o registro é UM JSON com cota de ~5 MB, e uma capa
+ *    embutida vira ~1 MB em base64. Cinco faixas estouram a cota, o setItem
+ *    falha EM SILÊNCIO e a biblioteca inteira deixa de persistir — o usuário
+ *    perde os imports recentes no próximo boot. A imagem mora no IndexedDB
+ *    (putCover); aqui fica só o marcador `hasEmbeddedCover`.
+ */
+const MAX_INLINE_COVER = 8 * 1024; // data URL minúscula (ícone) ainda passa
+
+function storableEntry(entry: LibraryEntry): LibraryEntry {
+  const cover = entry.track.coverUrl;
+  if (!cover) return entry;
+  const ephemeral = cover.startsWith('blob:');
+  const tooBig = cover.startsWith('data:') && cover.length > MAX_INLINE_COVER;
+  if (!ephemeral && !tooBig) return entry;
+  return { ...entry, track: { ...entry.track, coverUrl: null } };
+}
+
 function flushWrite(): void {
   if (writeTimer) {
     clearTimeout(writeTimer);
     writeTimer = null;
   }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(cache ?? []));
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify((cache ?? []).map(storableEntry)));
   } catch {
     // Quota / private mode — registry stays in memory for the session.
   }
@@ -168,6 +193,27 @@ async function deleteBlob(id: string): Promise<void> {
   if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
   await store.delete(keyFor(id));
+}
+
+// ── capas embutidas ─────────────────────────────────────────────
+/** Object URLs das capas guardadas no IndexedDB (reconstruídos a cada boot). */
+const coverUrls = new Map<string, string>();
+
+/**
+ * Guarda a capa embutida como BLOB e devolve um object URL para usar agora.
+ * Devolve null se algo falhar — capa é enfeite, jamais pode impedir o import.
+ */
+async function storeEmbeddedCover(id: string, dataUrl: string): Promise<string | null> {
+  try {
+    const blob = await (await fetch(dataUrl)).blob();
+    if (blob.size === 0) return null;
+    await putCover(id, blob);
+    const url = URL.createObjectURL(blob);
+    coverUrls.set(id, url);
+    return url;
+  } catch {
+    return null;
+  }
 }
 
 /** SHA-256 of the audio bytes (hex) — identifies identical files. */
@@ -265,7 +311,10 @@ function localTrackDto(
 function addEntry(entry: LibraryEntry, blob: Blob): void {
   blobUrls.set(entry.track.id, URL.createObjectURL(blob));
   write([entry, ...read().filter((e) => e.track.id !== entry.track.id)]);
-  cloud.push(entry.track.id, entry);
+  // NUNCA sincronizar object URL: ele só vale nesta aba, e no outro aparelho
+  // viraria uma capa morta que ainda por cima BLOQUEIA a reidratação (a
+  // restauração pula quem já tem coverUrl não-nulo).
+  cloud.push(entry.track.id, storableEntry(entry));
 }
 
 /**
@@ -327,10 +376,19 @@ export const setUser = cloud.setUser;
 
 function applyRemoteUpsert(id: string, entry: LibraryEntry): void {
   const existing = read();
+  // A entrada remota não conhece a capa DESTE aparelho (a imagem embutida
+  // mora no IndexedDB local e nunca é sincronizada). Sem preservar a capa já
+  // restaurada, cada eco da nuvem apagaria a capa da tela — o sintoma clássico
+  // de "a capa aparece no boot e some sozinha depois".
+  const localCover = coverUrls.get(id);
+  const merged =
+    localCover && !entry.track.coverUrl
+      ? { ...entry, track: { ...entry.track, coverUrl: localCover } }
+      : entry;
   write(
     existing.some((e) => e.track.id === id)
-      ? existing.map((e) => (e.track.id === id ? entry : e))
-      : [entry, ...existing],
+      ? existing.map((e) => (e.track.id === id ? merged : e))
+      : [merged, ...existing],
   );
 }
 
@@ -370,7 +428,11 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
     const artist = tags.artist ?? fromName.artist ?? 'Desconhecido';
     const durationMs = await probeDurationMs(file);
     const mimeType = file.type || 'audio/mpeg';
-    const track = localTrackDto(id, title, artist, durationMs, tags.album, tags.coverDataUrl, {
+    // A capa embutida vai para o IndexedDB e vira object URL — NUNCA data URL
+    // no registro (ver storableEntry: estouraria a cota e derrubaria a
+    // persistência da biblioteca inteira em silêncio).
+    const coverUrl = tags.coverDataUrl ? await storeEmbeddedCover(id, tags.coverDataUrl) : null;
+    const track = localTrackDto(id, title, artist, durationMs, tags.album, coverUrl, {
       composer: tags.composer,
       label: tags.publisher,
       releaseYear: tags.year,
@@ -429,7 +491,7 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
 /** Replace a registry entry in place, preserving its list position. */
 function patchEntry(id: string, next: LibraryEntry): void {
   write(read().map((e) => (e.track.id === id ? next : e)));
-  cloud.push(id, next);
+  cloud.push(id, storableEntry(next)); // nunca sincronizar object URL — ver addEntry
 }
 
 /**
@@ -938,6 +1000,13 @@ export async function remove(id: string): Promise<void> {
     URL.revokeObjectURL(url);
     blobUrls.delete(id);
   }
+  // A capa mora fora do registro: sem apagar aqui viraria lixo permanente.
+  void deleteCover(id);
+  const coverUrl = coverUrls.get(id);
+  if (coverUrl) {
+    URL.revokeObjectURL(coverUrl);
+    coverUrls.delete(id);
+  }
   write(read().filter((e) => e.track.id !== id));
   cloud.remove(id);
 }
@@ -1042,10 +1111,57 @@ export function hydrate(): Promise<void> {
       const blob = await getBlob(entry.track.id).catch(() => null);
       if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
     }
+    await restoreEmbeddedCovers();
     normalizeArtistCasing();
     emit();
     scheduleBackgroundCuration();
   })());
+}
+
+/**
+ * Reconstrói as capas embutidas a partir do IndexedDB.
+ *
+ * O registro guarda `coverUrl: null` para elas (a imagem não cabe no
+ * localStorage), então sem este passo a faixa apareceria sem capa depois de
+ * cada recarga, mesmo com a imagem salva. Só toca em quem está sem capa —
+ * capa vinda do iTunes é uma URL http normal e continua valendo.
+ */
+async function restoreEmbeddedCovers(): Promise<void> {
+  const entries = read();
+  let changed = false;
+  const next = await Promise.all(
+    entries.map(async (entry) => {
+      // Um `blob:` aqui é lixo de OUTRA sessão (ou sincronizado de outro
+      // aparelho): a URL não aponta para nada. Tratar como ausente — se
+      // fosse considerado "já tem capa", a faixa nunca mais recuperaria a
+      // dela, mesmo com a imagem salva no IndexedDB.
+      const dead = entry.track.coverUrl?.startsWith('blob:') ?? false;
+      if (entry.track.coverUrl && !dead) return entry;
+      const id = entry.track.id;
+      const known = coverUrls.get(id);
+      if (known) {
+        changed = true;
+        return { ...entry, track: { ...entry.track, coverUrl: known } };
+      }
+      const blob = await getCoverBlob(id).catch(() => null);
+      if (!blob) {
+        // Sem imagem guardada: limpa a URL morta para a UI mostrar o ícone
+        // padrão em vez de uma imagem quebrada.
+        if (!dead) return entry;
+        changed = true;
+        return { ...entry, track: { ...entry.track, coverUrl: null } };
+      }
+      const url = URL.createObjectURL(blob);
+      coverUrls.set(id, url);
+      changed = true;
+      return { ...entry, track: { ...entry.track, coverUrl: url } };
+    }),
+  );
+  // Só memória: o object URL é filtrado por storableEntry antes de persistir.
+  if (changed) {
+    cache = next;
+    groupsCache = null;
+  }
 }
 
 /**

@@ -73,6 +73,32 @@ export async function putAudio(trackId: string, blob: Blob): Promise<void> {
   await tx('readwrite', (store) => store.put(blob, trackId));
 }
 
+// ── capas ───────────────────────────────────────────────────────
+// Capa embutida (ID3 APIC) NÃO pode virar data URL no registro: o registro é
+// um JSON único no localStorage (~5 MB) e uma capa de 800 KB vira ~1 MB em
+// base64. Cinco faixas estourariam a cota — e como a escrita falha em
+// silêncio, a biblioteca INTEIRA pararia de persistir e voltaria ao estado
+// anterior no próximo boot. Então a imagem vai para o IndexedDB, como o áudio,
+// e o registro guarda apenas um marcador.
+const coverKey = (trackId: string): string => `cover:${trackId}`;
+
+export async function putCover(trackId: string, blob: Blob): Promise<void> {
+  await tx('readwrite', (store) => store.put(blob, coverKey(trackId)));
+}
+
+export async function getCoverBlob(trackId: string): Promise<Blob | null> {
+  if (!cacheSupported()) return null;
+  const blob = await tx<Blob | undefined>('readonly', (store) =>
+    store.get(coverKey(trackId)),
+  ).catch(() => undefined);
+  return blob instanceof Blob ? blob : null;
+}
+
+export async function deleteCover(trackId: string): Promise<void> {
+  if (!cacheSupported()) return;
+  await tx('readwrite', (store) => store.delete(coverKey(trackId))).catch(() => undefined);
+}
+
 export async function getAudioBlob(trackId: string): Promise<Blob | null> {
   if (!cacheSupported()) return null;
   const blob = await tx<Blob | undefined>('readonly', (store) => store.get(trackId)).catch(

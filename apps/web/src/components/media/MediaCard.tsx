@@ -1,3 +1,4 @@
+import { useEffect, useState } from 'react';
 import type { ComponentProps, KeyboardEvent, ReactNode } from 'react';
 import { Link } from 'react-router';
 import { Music } from 'lucide-react';
@@ -44,6 +45,11 @@ export function MediaCard({
   const clickable = Boolean(onPlay) && !to;
   const collage = (imageUrls ?? []).filter((u): u is string => Boolean(u)).slice(0, 4);
   const showCollage = shape === 'square' && collage.length >= 4;
+  // Capa que não carrega (thumbnail expirada, object URL de outra sessão) cai
+  // para o ícone padrão. Sem isto o card mostrava o ícone de imagem quebrada
+  // do navegador — pior que não ter capa nenhuma.
+  const [broken, setBroken] = useState(false);
+  useEffect(() => setBroken(false), [imageUrl]);
 
   const art = (
     <div className={cn('relative aspect-square overflow-hidden bg-fg/6', rounded)}>
@@ -69,12 +75,13 @@ export function MediaCard({
             />
           ))}
         </div>
-      ) : imageUrl ? (
+      ) : imageUrl && !broken ? (
         <img
           src={imageUrl}
           alt=""
           loading="lazy"
           decoding="async"
+          onError={() => setBroken(true)}
           className="size-full object-cover transition-transform duration-300 ease-out group-hover:scale-[1.03]"
         />
       ) : (
