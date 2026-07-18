@@ -1,6 +1,7 @@
 # @aurial/importer — local importer helper
 
-A tiny, **zero-dependency** service you run on **your own machine**. It does the
+A tiny service you run on **your own machine** (only dependency: the gRPC
+client used for word-level transcription). It does the
 one thing a browser can't: fetch audio from a media link (via `yt-dlp`) and hand
 the resulting **MP3** back to the Aurial web app, which stores it in your local
 library like any imported file — with cover art and metadata.
@@ -75,14 +76,28 @@ Variáveis:
 
 Notas de campo:
 
-- Usamos `StreamingRecognize`, não `Recognize`: offline vs streaming é
-  propriedade do DEPLOY hospedado, não flag de cliente, e os exemplos da NVIDIA
-  para este modelo usam streaming. Streaming funciona nos dois casos.
 - O áudio é convertido para WAV 16 kHz **mono** (Riva só aceita canal único).
   Mandamos o WAV inteiro e o Riva lê o cabeçalho, então não informamos
   `encoding`/`sample_rate`.
-- **Ainda não validado contra a API real** (faltava a chave no ambiente de
-  desenvolvimento). O que está verificado: os protos carregam, o serviço e os
-  campos existem, e o ffmpeg produz o formato certo. Se o modelo não devolver
-  offsets de verdade, `timestampsAreDegenerate` detecta, o endpoint responde
-  422 e o app mantém a letra plana — a falha é segura.
+- `timestampsAreDegenerate` é a rede de segurança: se algum dia o modelo parar
+  de devolver offsets de verdade, o endpoint responde 422 e o app mantém a
+  letra plana em vez de exibir um karaokê que não anda.
+
+### Validado contra a API real
+
+Medido com fala sintetizada em pt-BR (2:47, 5,3 MB), não inferido da doc:
+
+| Pergunta                              | Resultado                                            |
+| ------------------------------------- | ---------------------------------------------------- |
+| Timestamps por palavra?               | **Sim** — 324/324 palavras com instantes distintos   |
+| Cobre a faixa inteira?                | **Sim** — primeira em 0 ms, última em 166 s de 167 s |
+| Português com `language_code: multi`? | **Sim**, transcrição correta                         |
+| `Recognize` (offline) existe?         | **Sim** — ao contrário do que a doc sugeria          |
+| `StreamingRecognize`?                 | **Sim**, e devolveu MAIS palavras (324 vs 293)       |
+
+Por isso ficamos no **streaming**: cobre melhor o áudio longo e funciona
+mesmo que a função hospedada um dia deixe de expor o modo offline.
+
+Ponta a ponta, com a letra "Cada segundo dessa nossa **canção**" e um ASR que
+ouviu "cancal", o LRC gerado saiu com a grafia da LETRA e o tempo do ÁUDIO —
+que é exatamente o objetivo do desenho.
