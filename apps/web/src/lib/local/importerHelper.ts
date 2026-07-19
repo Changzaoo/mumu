@@ -11,6 +11,7 @@
  * token. Overridable via the ⚙ config (localStorage).
  */
 import { getIdToken } from '@/lib/firebase';
+import type { CatalogTrack } from '@/lib/local/catalogMatch';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 /**
@@ -460,6 +461,36 @@ export async function fetchCover(title: string, artist?: string | null): Promise
     };
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Catálogo completo de um artista (todos os álbuns, todos os perfis homônimos).
+ *
+ * Timeout generoso de propósito: são dezenas de chamadas à Deezer do lado do
+ * servidor. Roda em varredura de fundo, uma vez por artista por dia — pode
+ * demorar; o que não pode é voltar vazio por impaciência e deixar o acervo
+ * inteiro sem identificação.
+ */
+export async function fetchArtistCatalog(name: string): Promise<CatalogTrack[]> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 45_000);
+  try {
+    const res = await fetch(`${helperUrl()}/artist-catalog?name=${encodeURIComponent(name)}`, {
+      headers: await baseHeaders(),
+      signal: controller.signal,
+    });
+    if (!res.ok) return [];
+    const data = (await res.json()) as { tracks?: unknown };
+    if (!Array.isArray(data.tracks)) return [];
+    return data.tracks.filter(
+      (t): t is CatalogTrack =>
+        !!t && typeof (t as CatalogTrack).title === 'string' && !!(t as CatalogTrack).title,
+    );
+  } catch {
+    return [];
   } finally {
     clearTimeout(timer);
   }

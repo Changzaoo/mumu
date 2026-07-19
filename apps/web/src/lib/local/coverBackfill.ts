@@ -55,6 +55,9 @@ export function normalizeForMatch(value: string): string {
 export function titleSearchCandidates(rawTitle: string): string[] {
   const raw = rawTitle.trim();
   const limpo = raw
+    // Número de faixa colado pelo rip ("22 - SÃO PAULO"). Sai antes de tudo:
+    // levado para a busca, ele afunda o resultado certo.
+    .replace(/^\s*\d{1,2}\s*[-–—.]\s*/, '')
     .replace(/[([{][^)\]}]*[)\]}]/g, ' ') // (prod. X), [Clipe Oficial]
     .replace(/\b(?:ft|feat|featuring|part|participacao|participação)\b\.?.*$/i, ' ')
     .replace(/\bprod\.?\s*(?:by)?\b.*$/i, ' ')

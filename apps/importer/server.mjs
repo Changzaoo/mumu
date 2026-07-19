@@ -852,6 +852,71 @@ async function deezerCover(title, artist) {
   };
 }
 
+/** Catálogo de artista é caro (1 + N chamadas) e praticamente imutável — vale
+ *  guardar por um dia. Chave: nome em minúsculas. */
+const artistCatalogCache = new Map();
+const CATALOG_TTL_MS = 24 * 60 * 60 * 1000;
+/** Teto de álbuns por perfil: um artista prolífico não pode virar 300 chamadas. */
+const CATALOG_ALBUM_LIMIT = 60;
+
+/**
+ * Todas as faixas de todos os perfis que casam o nome EXATO do artista.
+ *
+ * Homônimo aqui é feature, não bug: "Alee" tem 6 perfis no Deezer e as faixas
+ * do usuário estão espalhadas entre eles. Diferente de /artist-top — que
+ * precisa de UM artista para ranquear — aqui só interessa o conjunto de
+ * faixas, então juntar tudo só aumenta a chance de casar. O falso positivo é
+ * barrado depois, no cliente, pela duração.
+ */
+async function deezerArtistCatalog(name) {
+  const norm = (s) =>
+    String(s)
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+  const wanted = norm(name);
+  const jf = async (url) => {
+    const r = await fetch(url, { signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS) });
+    return r.ok ? r.json().catch(() => ({})) : {};
+  };
+
+  const found = await jf(
+    `https://api.deezer.com/search/artist?limit=10&q=${encodeURIComponent(name)}`,
+  );
+  const profiles = (Array.isArray(found?.data) ? found.data : []).filter(
+    (a) => a?.id && typeof a.name === 'string' && norm(a.name) === wanted,
+  );
+
+  const out = [];
+  const seen = new Set();
+  for (const profile of profiles) {
+    const albums = await jf(`https://api.deezer.com/artist/${profile.id}/albums?limit=100`);
+    const list = (Array.isArray(albums?.data) ? albums.data : []).slice(0, CATALOG_ALBUM_LIMIT);
+    for (const album of list) {
+      if (!album?.id) continue;
+      const full = await jf(`https://api.deezer.com/album/${album.id}`);
+      const cover = full?.cover_xl || full?.cover_big || album?.cover_xl || album?.cover_big || null;
+      for (const t of Array.isArray(full?.tracks?.data) ? full.tracks.data : []) {
+        if (!t || typeof t.title !== 'string') continue;
+        const key = `${norm(t.title)}|${t.duration ?? 0}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        out.push({
+          title: t.title,
+          artist: t?.artist?.name ?? profile.name,
+          album: full?.title ?? album?.title ?? null,
+          // Segundos, como a Deezer entrega; o cliente converte.
+          duration: typeof t.duration === 'number' ? t.duration : null,
+          cover,
+        });
+      }
+    }
+  }
+  return out;
+}
+
 /**
  * Ficha técnica pela MusicBrainz: gravadora, número de catálogo e compositor.
  * É a ÚNICA fonte gratuita desses três campos — o iTunes e o Deezer não os
@@ -1133,6 +1198,49 @@ async function main() {
         }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
         res.end(JSON.stringify(payload ?? { coverUrl: null, album: null, artist: null, title: null }));
+        return;
+      }
+
+      // ── Catálogo COMPLETO do artista (Deezer, server-side p/ evitar CORS) ─
+      // Por que existe, se /cover já busca capa: buscar faixa a faixa é uma
+      // loteria quando a faixa não tem artista. "CAROLINA" sozinho no Deezer
+      // devolve o Ninho; "CEO" devolve o SCH. O acervo do usuário veio do
+      // YouTube em lotes por artista, então a pergunta certa não é "quem canta
+      // isso?" e sim "essa faixa está no catálogo do Brandão85?" — e aí título
+      // + duração conferem a identidade sem chute. Medido no acervo real:
+      // 52 de 55 faixas anônimas identificadas.
+      //
+      // Dois detalhes que /artist-top erra e este acerta:
+      //  • /top devolve no máximo ~100 e só as populares; álbuns dão o catálogo
+      //    inteiro, que é onde moram as faixas obscuras — justamente as que
+      //    chegam sem metadado.
+      //  • ficar com UM perfil (o de mais fãs) perdeu o Alee: ele tem 6 perfis
+      //    homônimos no Deezer, e o mais popular tinha 1 faixa. Junta todos.
+      if (req.method === 'GET' && pathname === '/artist-catalog') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const name = (
+          new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('name') || ''
+        ).trim();
+        let tracks = [];
+        if (name) {
+          const cached = artistCatalogCache.get(name.toLowerCase());
+          if (cached && Date.now() - cached.at < CATALOG_TTL_MS) {
+            tracks = cached.tracks;
+          } else {
+            try {
+              tracks = await deezerArtistCatalog(name);
+              artistCatalogCache.set(name.toLowerCase(), { at: Date.now(), tracks });
+            } catch (err) {
+              log(`artist-catalog falhou para "${name}": ${err?.message ?? err}`);
+            }
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(JSON.stringify({ tracks }));
         return;
       }
 

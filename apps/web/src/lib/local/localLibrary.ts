@@ -40,10 +40,13 @@ import {
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
 import { appleArtwork, searchSongsForArtwork } from '@/lib/catalog/itunes';
+import { candidateArtists, indexCatalog, matchInCatalog } from '@/lib/local/catalogMatch';
 import {
   bumpCoverAttempt,
   countPendingCovers,
+  isMissingCover,
   isMissingCredits,
+  normalizeForMatch,
   pickArtworkMatch,
   pickBackfillCandidates,
   readCoverAttempts,
@@ -53,6 +56,7 @@ import {
 } from '@/lib/local/coverBackfill';
 import {
   deleteTrackBlob,
+  fetchArtistCatalog,
   fetchCover,
   fetchCredits,
   fetchPlaylistEntries,
@@ -1302,6 +1306,12 @@ function scheduleBackgroundCuration(): void {
       // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
       // com o importador fora do ar, a vez das capas simplesmente nunca chegava.
       // É o que o usuário VÊ na tela; vem na frente.
+      // CATÁLOGO PRIMEIRO: ele conserta o NOME do artista, e a busca de capa
+      // logo abaixo depende do nome para achar qualquer coisa. Invertido, a
+      // varredura de capas gastava as três tentativas de cada faixa anônima
+      // buscando só pelo título — e as marcava como desistidas antes do
+      // catálogo ter a chance de identificá-las.
+      await catalogSweep().catch(() => 0);
       await backfillCovers().catch(() => undefined);
       await backfillRemote();
       await reprocessExisting();
@@ -1570,6 +1580,104 @@ async function healCoverFor(id: string): Promise<boolean> {
   return Boolean(nextCover);
 }
 
+/** Quantos artistas da biblioteca viram catálogo por varredura. Cada um custa
+ *  dezenas de chamadas no importador; os mais representados resolvem a maioria
+ *  e o resto continua na varredura seguinte. */
+const CATALOG_ARTIST_LIMIT = 12;
+
+/**
+ * Identificação em LOTE pelo catálogo do artista — a varredura que conserta as
+ * faixas que a busca faixa-a-faixa nunca ia consertar.
+ *
+ * O acervo veio do YouTube em lotes por artista e chegou sem metadado: título
+ * em caixa alta, artista "Desconhecido", nenhuma capa. Buscar cada uma pelo
+ * título é loteria — "CAROLINA" devolve o Ninho, "CEO" devolve o SCH. Aqui a
+ * pergunta é outra: baixa o catálogo inteiro de quem JÁ está creditado na
+ * biblioteca e confere se a órfã mora lá dentro, casando título E duração.
+ * Medido no acervo real: 52 de 55 identificadas, contra 29 pela busca solta.
+ *
+ * Roda antes das capas porque conserta o NOME — e a busca de capa que vem
+ * depois passa a ter artista para trabalhar nas que sobraram.
+ */
+async function catalogSweep(): Promise<number> {
+  const offline = (): boolean => typeof navigator !== 'undefined' && !navigator.onLine;
+  if (offline()) return 0;
+
+  const pendente = (t: TrackDto): boolean => isMissingCover(t) || artistaEhDesconhecido(t);
+  if (!read().some((e) => pendente(e.track))) return 0;
+
+  const artistas = candidateArtists(read().map((e) => e.track)).slice(0, CATALOG_ARTIST_LIMIT);
+  let curadas = 0;
+
+  for (const nome of artistas) {
+    if (offline()) return curadas;
+    const alvos = read().filter((e) => pendente(e.track));
+    if (!alvos.length) break; // acabou a pendência — não gasta o resto
+
+    const catalogo = await fetchArtistCatalog(nome).catch(() => []);
+    if (!catalogo.length) continue;
+    const index = indexCatalog(catalogo);
+
+    for (const entry of alvos) {
+      const hit = matchInCatalog(entry.track, index);
+      if (!hit) continue;
+
+      // Faixa JÁ creditada só aceita capa do catálogo do PRÓPRIO artista. Sem
+      // esta trava, uma faixa do Brandão85 com título xará casaria no catálogo
+      // do Matuê e receberia a capa errada — o defeito que estamos consertando.
+      const anonima = artistaEhDesconhecido(entry.track);
+      if (
+        !anonima &&
+        normalizeForMatch(entry.track.artists[0]?.name ?? '') !== normalizeForMatch(hit.artist)
+      ) {
+        continue;
+      }
+
+      const cur = read().find((e) => e.track.id === entry.track.id);
+      if (!cur) continue;
+      const capa = hit.cover ? safeCoverUrl(hit.cover) : null;
+      const coverFinal = capa ?? cur.track.coverUrl;
+      const artists = anonima
+        ? [
+            {
+              id: `local-artist:${cur.track.id}:0`,
+              name: hit.artist,
+              slug: '',
+              imageUrl: null,
+            },
+          ]
+        : cur.track.artists;
+      // O título do catálogo é o registrado; o do acervo veio do nome do vídeo.
+      // Só troca quando a faixa era anônima — nunca renomeia o que o usuário
+      // já tem identificado.
+      const title = anonima ? hit.title : cur.track.title;
+      const album =
+        hit.album && !cur.track.album
+          ? { id: `local-album:${cur.track.id}`, title: hit.album, slug: '', coverUrl: coverFinal }
+          : cur.track.album;
+
+      patchEntry(cur.track.id, {
+        ...cur,
+        track: {
+          ...cur.track,
+          title,
+          artists,
+          coverUrl: coverFinal,
+          album: album ? { ...album, coverUrl: coverFinal } : album,
+        },
+      });
+      curadas += 1;
+    }
+    await descanso(400); // gentil com o importador entre catálogos
+  }
+  return curadas;
+}
+
+/** "Identificar pelo catálogo": roda o passe agora, sob demanda. */
+export function runCatalogSweep(): Promise<number> {
+  return catalogSweep().catch(() => 0);
+}
+
 /**
  * O passe: uma faixa por vez, com respiro, teto por sessão e memória de
  * tentativas entre sessões (ver coverBackfill.ts). Offline ele nem começa — o
@@ -1600,10 +1708,18 @@ export function pendingCoverCount(): number {
   );
 }
 
-/** "Tentar de novo": zera as desistidas e roda a varredura já. */
+/** "Tentar de novo": zera as desistidas e roda a varredura já.
+ *
+ *  Passa pelo catálogo antes das capas pelo mesmo motivo da curadoria de
+ *  fundo — é ele que devolve o NOME do artista, e sem nome a busca de capa
+ *  das faixas anônimas não tem por onde começar. Este é o botão que o usuário
+ *  aperta quando a tela está errada; ele precisa rodar o conserto inteiro. */
 export function retryCoverBackfill(): void {
   resetCoverAttempts();
-  void backfillCovers().catch(() => undefined);
+  void (async () => {
+    await catalogSweep().catch(() => 0);
+    await backfillCovers().catch(() => undefined);
+  })();
 }
 
 // ── one-time reprocess of pre-existing tracks ───────────────────
