@@ -61,6 +61,7 @@ import {
   titleSearchCandidates,
 } from '@/lib/local/coverBackfill';
 import {
+  buildStreamUrl,
   deleteTrackBlob,
   fetchArtistCatalog,
   fetchCover,
@@ -186,21 +187,54 @@ if (typeof window !== 'undefined') {
 // disso `putBlob` era um no-op SILENCIOSO: a faixa entrava no registro, tocava
 // na sessão e sumia no reload, sem nunca poder tocar offline. O IndexedDB
 // funciona em qualquer contexto, então ele é o fallback para os bytes.
+/**
+ * Grava os bytes e CONFERE que ficaram gravados.
+ *
+ * A versão anterior tinha dois furos que, juntos, faziam a faixa evaporar sem
+ * ninguém notar: quando o Cache Storage existia ele era a única tentativa (um
+ * `put` que estourasse a cota se perdia, sem cair para o IndexedDB), e os três
+ * pontos de importação chamavam isto com `.catch(() => undefined)` — a rejeição
+ * ia para o lixo. Como `addEntry` cria o object URL de qualquer jeito, a faixa
+ * TOCAVA na aba aberta e só sumia no reload seguinte. Daí o relato "as últimas
+ * que adicionei estão indisponíveis": num lote, a cota estoura no meio e são
+ * justamente as últimas que se perdem.
+ *
+ * Agora: tenta Cache Storage, confere lendo de volta, e cai para o IndexedDB
+ * (que tem cota própria) se qualquer etapa falhar. Só resolve com prova de que
+ * os bytes estão lá; caso contrário LANÇA, e quem importou decide o que dizer
+ * ao usuário — nunca mais um sucesso fingido.
+ */
 async function putBlob(id: string, blob: Blob): Promise<void> {
+  const viaIndexedDb = async (): Promise<void> => {
+    await putAudio(id, blob); // funciona em http:// e tem cota separada
+    const gravado = await getAudioBlob(id).catch(() => null);
+    if (!gravado) throw new Error('Não foi possível guardar o áudio neste aparelho.');
+  };
+
   if (!cacheStorageSupported()) {
-    await putAudio(id, blob); // IndexedDB — funciona em http:// também
+    await viaIndexedDb();
     return;
   }
-  const store = await caches.open(CACHE_NAME);
-  await store.put(
-    keyFor(id),
-    new Response(blob, {
-      headers: {
-        'Content-Type': blob.type || 'audio/mpeg',
-        'Content-Length': String(blob.size),
-      },
-    }),
-  );
+
+  try {
+    const store = await caches.open(CACHE_NAME);
+    await store.put(
+      keyFor(id),
+      new Response(blob, {
+        headers: {
+          'Content-Type': blob.type || 'audio/mpeg',
+          'Content-Length': String(blob.size),
+        },
+      }),
+    );
+    // Conferência real: sob pressão de cota o navegador pode aceitar o put e
+    // despejar a entrada logo depois. Sem ler de volta, "gravado" é suposição.
+    const res = await store.match(keyFor(id));
+    if (res) return;
+  } catch {
+    // cai para o IndexedDB abaixo
+  }
+  await viaIndexedDb();
 }
 
 async function getBlob(id: string): Promise<Blob | null> {
@@ -430,6 +464,8 @@ function applyRemoteDelete(id: string): void {
 /** Import dropped/picked audio files into the local library. */
 export async function importFiles(files: File[]): Promise<TrackDto[]> {
   const imported: TrackDto[] = [];
+  /** Arquivos que não couberam no armazenamento — o usuário precisa saber. */
+  const falhas: string[] = [];
   for (const file of files) {
     // Reject anything that isn't genuinely audio (magic-byte sniff + size cap).
     const check = await validateAudioFile(file);
@@ -462,7 +498,17 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
       releaseYear: tags.year,
     });
 
-    await putBlob(id, file).catch(() => undefined);
+    // Num LOTE, a cota costuma estourar no meio: as primeiras entram e as
+    // últimas não. Por isso o erro é tratado por arquivo — abortar o lote
+    // inteiro perderia importações que já deram certo. O que não se faz mais é
+    // registrar a faixa mesmo assim: sem bytes gravados ela tocaria só nesta
+    // aba e apareceria "indisponível" no próximo reload.
+    try {
+      await putBlob(id, file);
+    } catch {
+      falhas.push(title);
+      continue;
+    }
     addEntry(
       {
         track,
@@ -475,6 +521,13 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
     );
     void uploadAndLink(id, file); // make it playable on the user's other devices
     imported.push(track);
+  }
+  if (falhas.length) {
+    const quantas =
+      falhas.length === 1 ? `"${falhas[0]}" não coube` : `${falhas.length} faixas não couberam`;
+    void import('sonner').then(({ toast }) =>
+      toast.error(`${quantas} no armazenamento deste aparelho. Libere espaço e tente de novo.`),
+    );
   }
   // Non-blocking: fetch real covers/metadata from iTunes for what we just added.
   void enrichSequentially(imported.map((t) => t.id));
@@ -500,7 +553,7 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
     meta.album,
     meta.coverDataUrl,
   );
-  await putBlob(id, blob).catch(() => undefined);
+  await putBlob(id, blob); // falha aqui PRECISA subir: sem bytes não há faixa
   addEntry(
     { track, addedAt: new Date().toISOString(), sizeBytes: blob.size, mimeType: meta.mimeType },
     blob,
@@ -672,7 +725,7 @@ async function saveBlobAsLocalTrack(
     albumVer?.album ?? credito.album,
     albumVer?.coverUrl ?? opts.coverUrl ?? null,
   );
-  await putBlob(id, blob).catch(() => undefined);
+  await putBlob(id, blob); // falha aqui PRECISA subir: sem bytes não há faixa
   addEntry(
     {
       track,
@@ -839,6 +892,67 @@ export function sourceUrlFor(id: string): string | null {
 /** The uploaded-audio stream URL for a local track, if it was uploaded. */
 export function remoteUrlFor(id: string): string | null {
   return read().find((e) => e.track.id === id)?.remoteUrl ?? null;
+}
+
+/** Faixas do registro cujo áudio NÃO está neste aparelho. */
+export function tracksMissingAudio(): LibraryEntry[] {
+  return read().filter((e) => !blobUrls.has(e.track.id));
+}
+
+/**
+ * Traz de volta o áudio das faixas que ficaram sem bytes gravados.
+ *
+ * Existe por causa de um defeito real deste código, não de um acidente do
+ * usuário: `putBlob` podia falhar (cota) e a falha era descartada, enquanto a
+ * faixa continuava no registro. Ela tocava na aba aberta — o object URL era
+ * criado do blob em memória — e só aparecia "indisponível" depois do reload,
+ * quando não havia mais nada para ler. O buraco está tapado, mas as faixas já
+ * afetadas continuam mudas até alguém repor os bytes.
+ *
+ * Duas fontes, nesta ordem: a cópia enviada ao importador (mais barata e é
+ * exatamente o mesmo arquivo) e, na falta dela, o link de origem. Devolve
+ * quantas voltaram a tocar.
+ */
+export async function repairMissingAudio(): Promise<number> {
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+  let recuperadas = 0;
+
+  for (const entry of tracksMissingAudio()) {
+    const id = entry.track.id;
+
+    // Pode já estar no cofre local e só faltar o object URL desta sessão —
+    // nesse caso não há o que baixar.
+    const local = await getBlob(id).catch(() => null);
+    if (local) {
+      blobUrls.set(id, URL.createObjectURL(local));
+      recuperadas += 1;
+      continue;
+    }
+
+    const fontes = [
+      entry.remoteUrl,
+      entry.sourceUrl ? await buildStreamUrl(entry.sourceUrl) : null,
+    ];
+    for (const url of fontes) {
+      if (!url) continue;
+      try {
+        const res = await fetch(url);
+        if (!res.ok) continue;
+        const blob = await res.blob();
+        if (!blob.size) continue;
+        await putBlob(id, blob); // já confere que ficou gravado
+        blobUrls.set(id, URL.createObjectURL(blob));
+        recuperadas += 1;
+        break;
+      } catch {
+        // tenta a próxima fonte
+      }
+    }
+    await descanso(200);
+  }
+
+  if (recuperadas) emit();
+  return recuperadas;
 }
 
 // ── album / artist organization (Spotify-style, all from local metadata) ──
@@ -1312,7 +1426,11 @@ function scheduleBackgroundCuration(): void {
       // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
       // com o importador fora do ar, a vez das capas simplesmente nunca chegava.
       // É o que o usuário VÊ na tela; vem na frente.
-      // CATÁLOGO PRIMEIRO: ele conserta o NOME do artista, e a busca de capa
+      // ÁUDIO ANTES DE TUDO: faixa sem capa é feia, faixa sem áudio não é
+      // faixa. Repõe os bytes que se perderam enquanto `putBlob` falhava em
+      // silêncio (ver repairMissingAudio) antes de gastar rede com metadados.
+      await repairMissingAudio().catch(() => 0);
+      // CATÁLOGO: ele conserta o NOME do artista, e a busca de capa
       // logo abaixo depende do nome para achar qualquer coisa. Invertido, a
       // varredura de capas gastava as três tentativas de cada faixa anônima
       // buscando só pelo título — e as marcava como desistidas antes do
