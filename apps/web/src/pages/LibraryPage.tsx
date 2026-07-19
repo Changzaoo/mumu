@@ -202,6 +202,11 @@ export default function LibraryPage() {
     };
   }, [data, term, localPlaylists]);
 
+  // Faixas ainda sem capa: a varredura roda em segundo plano e pode levar
+  // sessões (teto por sessão). Dizer quantas faltam evita a leitura de "o app
+  // desistiu" — e dá o botão para quem quer forçar as que já desistiram.
+  const missingCovers = useMemo(() => localLibrary.pendingCoverCount(), [libEntries]);
+
   const grid = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
 
   return (
@@ -218,6 +223,19 @@ export default function LibraryPage() {
       {/* Your downloaded / on-device tracks — always shown, independent of the
           central library API (not deployed in the P2P topology). */}
       <DeviceTracksRow />
+
+      {missingCovers > 0 && (
+        <p className="text-xs text-fg-subtle">
+          Buscando capas… {missingCovers} restantes.{' '}
+          <button
+            type="button"
+            onClick={() => localLibrary.retryCoverBackfill()}
+            className="underline underline-offset-2 hover:text-fg"
+          >
+            Tentar de novo
+          </button>
+        </p>
+      )}
 
       {/* Local-first: the library (genres/artists/albums/playlists) is built from
           the songs you added — always shown, no backend required. */}

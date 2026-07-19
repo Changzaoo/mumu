@@ -67,6 +67,50 @@ function isPlayable(song: Partial<AppleSong>): song is AppleSong {
   );
 }
 
+/**
+ * Resolução da arte no CDN da Apple. O `100x100bb` que vem na resposta é um
+ * selo; a mesma URL serve qualquer tamanho trocando esse trecho.
+ *
+ * 'grid' para miniatura de lista (barato em rede/memória em celular modesto) e
+ * 'full' para tela cheia / tocando agora, onde 600px já aparece borrado num
+ * display denso. Centralizado aqui porque antes cada módulo fazia o seu
+ * `replace('100x100bb', …)` — e quem recebia uma URL já reescrita (600x600)
+ * ficava preso nela para sempre.
+ */
+export type AppleArtworkSize = 'grid' | 'full';
+
+const ARTWORK_DIMENSIONS: Record<AppleArtworkSize, string> = {
+  grid: '600x600bb',
+  full: '1000x1000bb',
+};
+
+export function appleArtwork(url: string, size: AppleArtworkSize = 'grid'): string {
+  if (!url) return url;
+  // Casa QUALQUER dimensão já presente (100x100bb, 600x600bb…), então reescrever
+  // é idempotente e reversível — não só o 100x100 cru da API.
+  return url.replace(/\d+x\d+bb/, ARTWORK_DIMENSIONS[size]);
+}
+
+/**
+ * Linha do iTunes usada SÓ como fonte de arte/metadado — sem exigir preview.
+ *
+ * Catálogo regional (sertanejo, pagode, funk) frequentemente não expõe o clipe
+ * de 30s, e o filtro de "tocável" derrubava essas linhas ANTES de olharmos a
+ * capa. Para capa o preview é irrelevante, então esta rota tem tipo próprio:
+ * nada aqui pode virar faixa tocável por descuido.
+ */
+export interface AppleArtworkHit {
+  trackId: number;
+  trackName: string;
+  artistName: string;
+  collectionName: string;
+  artworkUrl100: string;
+}
+
+function isArtworkHit(song: Partial<AppleSong>): boolean {
+  return typeof song.trackId === 'number' && !!song.artworkUrl100;
+}
+
 /** iTunes album (collection) row — the fields we show in the discography. */
 export interface AppleAlbum {
   collectionId: number;
@@ -200,6 +244,43 @@ export async function searchSongs(
     url.searchParams.set('country', country);
     const body = await fetchJson<SearchResponse>(url.toString());
     return (body.results ?? []).filter(isPlayable);
+  };
+
+  const primary = await run(cc);
+  if (primary.length > 0 || cc === FALLBACK_COUNTRY) return primary;
+  return run(FALLBACK_COUNTRY);
+}
+
+/**
+ * Busca linhas do iTunes para APROVEITAR A ARTE — sem o filtro de preview.
+ *
+ * Mesma consulta de `searchSongs`, outro filtro: aqui basta ter capa. É o que
+ * devolve capa para o catálogo brasileiro sem clipe de 30s, que a busca
+ * tocável descarta. Nunca use para tocar: o retorno não carrega `previewUrl`.
+ */
+export async function searchSongsForArtwork(
+  q: string,
+  cc: string = DEFAULT_COUNTRY,
+  limit = 10,
+): Promise<AppleArtworkHit[]> {
+  const term = q.trim();
+  if (!term) return [];
+
+  const run = async (country: string): Promise<AppleArtworkHit[]> => {
+    const url = new URL('https://itunes.apple.com/search');
+    url.searchParams.set('term', term);
+    url.searchParams.set('media', 'music');
+    url.searchParams.set('entity', 'song');
+    url.searchParams.set('limit', String(limit));
+    url.searchParams.set('country', country);
+    const body = await fetchJson<SearchResponse>(url.toString());
+    return (body.results ?? []).filter(isArtworkHit).map((r) => ({
+      trackId: r.trackId as number,
+      trackName: String(r.trackName ?? ''),
+      artistName: String(r.artistName ?? ''),
+      collectionName: String(r.collectionName ?? ''),
+      artworkUrl100: String(r.artworkUrl100 ?? ''),
+    }));
   };
 
   const primary = await run(cc);

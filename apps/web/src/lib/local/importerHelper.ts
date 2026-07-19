@@ -425,6 +425,90 @@ export async function fetchAlbumInfo(title: string, artist?: string): Promise<Al
   }
 }
 
+export interface CoverHit {
+  coverUrl: string;
+  album: string | null;
+  artist: string | null;
+  title: string | null;
+}
+
+/**
+ * Capa REAL de uma faixa pelo Deezer (via o importer — a api.deezer.com não
+ * manda CORS). Segunda parada da varredura de capas, depois do iTunes. Devolve
+ * null quando não achou/o importer não responde: a varredura segue para a
+ * MusicBrainz e nada quebra.
+ */
+export async function fetchCover(title: string, artist?: string | null): Promise<CoverHit | null> {
+  // Passe de fundo: teto curto, jamais pode segurar a UI nem ficar pendurado.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 8_000);
+  try {
+    const params = new URLSearchParams({ title });
+    if (artist) params.set('artist', artist);
+    const res = await fetch(`${helperUrl()}/cover?${params.toString()}`, {
+      headers: await baseHeaders(),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<CoverHit>;
+    if (typeof data.coverUrl !== 'string' || !data.coverUrl) return null;
+    return {
+      coverUrl: data.coverUrl,
+      album: typeof data.album === 'string' ? data.album : null,
+      artist: typeof data.artist === 'string' ? data.artist : null,
+      title: typeof data.title === 'string' ? data.title : null,
+    };
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+export interface TrackCredits {
+  label: string | null;
+  catalogNumber: string | null;
+  composer: string | null;
+  coverUrl: string | null;
+}
+
+/**
+ * Ficha técnica (MusicBrainz, via o importer): gravadora, número de catálogo e
+ * compositor — os únicos campos que nenhuma outra fonte tem. A capa (Cover Art
+ * Archive) vem junto e serve de último recurso. Null em qualquer falha.
+ */
+export async function fetchCredits(
+  title: string,
+  artist?: string | null,
+): Promise<TrackCredits | null> {
+  // A MusicBrainz é serializada a 1 req/s no importer e cada consulta faz até
+  // 4 saltos — o teto aqui é proporcionalmente mais folgado que o do /cover.
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 20_000);
+  try {
+    const params = new URLSearchParams({ title });
+    if (artist) params.set('artist', artist);
+    const res = await fetch(`${helperUrl()}/credits?${params.toString()}`, {
+      headers: await baseHeaders(),
+      signal: controller.signal,
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as Partial<TrackCredits>;
+    const pick = (v: unknown): string | null => (typeof v === 'string' && v ? v : null);
+    const credits: TrackCredits = {
+      label: pick(data.label),
+      catalogNumber: pick(data.catalogNumber),
+      composer: pick(data.composer),
+      coverUrl: pick(data.coverUrl),
+    };
+    return credits.label || credits.composer || credits.coverUrl ? credits : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export interface NetworkSpeed {
   downMbps: number | null;
   upMbps: number | null;

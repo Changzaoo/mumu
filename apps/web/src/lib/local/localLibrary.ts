@@ -39,8 +39,20 @@ import {
 } from '@/lib/local/metaTeam';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
+import { appleArtwork, searchSongsForArtwork } from '@/lib/catalog/itunes';
+import {
+  bumpCoverAttempt,
+  countPendingCovers,
+  isMissingCredits,
+  pickArtworkMatch,
+  pickBackfillCandidates,
+  readCoverAttempts,
+  resetCoverAttempts,
+} from '@/lib/local/coverBackfill';
 import {
   deleteTrackBlob,
+  fetchCover,
+  fetchCredits,
   fetchPlaylistEntries,
   fetchTrackMeta,
   helperSupportsMetaTeam,
@@ -1238,6 +1250,7 @@ function scheduleBackgroundCuration(): void {
       await reprocessExisting();
       await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
       await redriveFromSource().catch(() => false); // real metadata from the source
+      await backfillCovers().catch(() => undefined); // faixa sem capa tenta de novo
       await auditAttributions().catch(() => undefined); // AI spot-checks a few
     })();
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1266,6 +1279,133 @@ async function backfillRemote(): Promise<void> {
     await uploadAndLink(entry.track.id, blob);
     await descanso();
   }
+}
+
+// ── varredura de capas que faltaram ─────────────────────────────
+// O enriquecimento roda UMA vez, na importação. Se ele falhou naquele instante
+// — sem rede, importador fora do ar, faixa sem artista — a capa nunca mais era
+// procurada e a faixa ficava cinza para sempre. Este passe é a segunda chance:
+// varre quem está sem capa e tenta as três fontes, da mais confiável para a mais
+// completa. É estritamente enfeite — serial, com teto, e jamais lança.
+
+/** Espera curta antes de aceitar uma URL de capa que pode não existir. A Cover
+ *  Art Archive devolve 404 para lançamento sem arte enviada, e gravar essa URL
+ *  trocaria o ícone padrão por uma imagem quebrada — pior que não ter capa. */
+function coverUrlLoads(url: string, timeoutMs = 6000): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const finish = (ok: boolean): void => {
+      if (settled) return;
+      settled = true;
+      resolve(ok);
+    };
+    const img = new Image();
+    img.onload = () => finish(img.naturalWidth > 0);
+    img.onerror = () => finish(false);
+    setTimeout(() => finish(false), timeoutMs);
+    img.src = url;
+  });
+}
+
+/**
+ * Procura a capa de UMA faixa nas três fontes, em ordem de confiança:
+ * iTunes (100% de acerto no catálogo brasileiro medido, e é a única sem proxy)
+ * → Deezer (cobre o que a Apple esconde por não ter preview) → MusicBrainz /
+ * Cover Art Archive (fraca em sertanejo/pagode, mas é a ÚNICA que traz
+ * gravadora e compositor — por isso vale a consulta mesmo com capa já achada).
+ * A primeira que responder vence. Devolve true quando a faixa saiu sem capa.
+ */
+async function healCoverFor(id: string): Promise<boolean> {
+  const entry = read().find((e) => e.track.id === id);
+  if (!entry) return true; // removida no meio do passe — não é mais pendência
+  const { track } = entry;
+  const artist = track.artists.map((a) => a.name).filter((n) => n && n !== 'Desconhecido')[0] ?? '';
+
+  let cover: string | null = null;
+
+  // 1. iTunes — busca SEM exigir preview (ver searchSongsForArtwork).
+  const term = [artist, track.title].filter(Boolean).join(' ');
+  const rows = await searchSongsForArtwork(term, 'br', 10).catch(() => []);
+  const hit = pickArtworkMatch(
+    rows.map((r) => ({ title: r.trackName, artist: r.artistName, artworkUrl: r.artworkUrl100 })),
+    track.title,
+    artist,
+  );
+  if (hit) cover = appleArtwork(hit.artworkUrl, 'grid');
+
+  // 2. Deezer, pelo importer (a api.deezer.com não manda CORS).
+  if (!cover) {
+    const deezer = await fetchCover(track.title, artist).catch(() => null);
+    if (deezer) cover = deezer.coverUrl;
+  }
+
+  // 3. MusicBrainz: capa de último recurso E a ficha técnica que só ela tem.
+  const wantCredits = isMissingCredits(track);
+  const credits =
+    !cover || wantCredits ? await fetchCredits(track.title, artist).catch(() => null) : null;
+  if (!cover && credits?.coverUrl && (await coverUrlLoads(credits.coverUrl))) {
+    cover = credits.coverUrl;
+  }
+
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur) return true;
+  const nextCover = cover ? safeCoverUrl(cover) : null;
+  const label = cur.track.label ?? credits?.label ?? null;
+  const composer = cur.track.composer ?? credits?.composer ?? null;
+  const changed =
+    Boolean(nextCover) || label !== cur.track.label || composer !== cur.track.composer;
+  if (changed) {
+    const coverFinal = nextCover ?? cur.track.coverUrl;
+    patchEntry(id, {
+      ...cur,
+      track: {
+        ...cur.track,
+        coverUrl: coverFinal,
+        // O álbum carrega a própria capa (é ela que a grade de álbuns mostra) —
+        // atualizar só a faixa deixaria o álbum cinza ao lado da faixa colorida.
+        album: cur.track.album ? { ...cur.track.album, coverUrl: coverFinal } : cur.track.album,
+        label,
+        composer,
+      },
+    });
+  }
+  return Boolean(nextCover);
+}
+
+/**
+ * O passe: uma faixa por vez, com respiro, teto por sessão e memória de
+ * tentativas entre sessões (ver coverBackfill.ts). Offline ele nem começa — o
+ * agendador já espera a conexão voltar — e reconfere a cada faixa, porque a
+ * rede pode cair no meio de uma varredura de 30.
+ */
+async function backfillCovers(): Promise<void> {
+  const offline = (): boolean => typeof navigator !== 'undefined' && !navigator.onLine;
+  if (offline()) return;
+  const attempts = readCoverAttempts();
+  const todo = pickBackfillCandidates(
+    read().map((e) => e.track),
+    attempts,
+  );
+  for (const track of todo) {
+    if (offline()) return; // o que sobrou continua pendente para a próxima sessão
+    const found = await healCoverFor(track.id).catch(() => false);
+    bumpCoverAttempt(track.id, found);
+    await descanso(400); // gentil com iTunes/Deezer/MusicBrainz
+  }
+}
+
+/** Quantas faixas a varredura ainda pretende tentar (linha "buscando capas…"). */
+export function pendingCoverCount(): number {
+  return countPendingCovers(
+    read().map((e) => e.track),
+    readCoverAttempts(),
+  );
+}
+
+/** "Tentar de novo": zera as desistidas e roda a varredura já. */
+export function retryCoverBackfill(): void {
+  resetCoverAttempts();
+  void backfillCovers().catch(() => undefined);
 }
 
 // ── one-time reprocess of pre-existing tracks ───────────────────

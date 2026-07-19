@@ -1,9 +1,15 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { identifyByTitle, parseTrackFileName } from '@/lib/local/enrich';
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
+import type * as itunes from '@/lib/catalog/itunes';
 import { aiIdentifyTrack } from '@/lib/ai/ai';
 
-vi.mock('@/lib/catalog/itunes', () => ({ searchSongs: vi.fn() }));
+// `appleArtwork` é lógica pura (reescrita da URL) — o mock usa a real, senão o
+// teste de capa hi-res estaria conferindo o mock, não o comportamento.
+vi.mock('@/lib/catalog/itunes', async (importOriginal) => ({
+  ...(await importOriginal<typeof itunes>()),
+  searchSongs: vi.fn(),
+}));
 vi.mock('@/lib/ai/ai', () => ({ aiIdentifyTrack: vi.fn(), aiSplitArtists: vi.fn() }));
 
 const mockSearch = vi.mocked(searchSongs);
