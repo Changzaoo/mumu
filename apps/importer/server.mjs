@@ -737,6 +737,182 @@ async function authorize(req) {
   return true;
 }
 
+// ── Capa & créditos (Deezer + MusicBrainz/Cover Art Archive) ──────────────────
+// Por que aqui e não no navegador: a api.deezer.com não manda cabeçalho de CORS
+// (chamada direta morre no preflight) e a MusicBrainz exige User-Agent próprio +
+// no máximo 1 requisição por segundo — um teto que só dá para respeitar num
+// ponto único, com fila. O token do Firebase nunca sai daqui para esses hosts.
+const MB_ROOT = 'https://musicbrainz.org/ws/2';
+const MB_USER_AGENT = 'Aurial/1.0 ( perdibitcoin@gmail.com )';
+const MB_MIN_INTERVAL_MS = 1100; // 1 req/s + folga; abusar rende bloqueio de IP
+const COVER_FETCH_TIMEOUT_MS = 8000;
+
+const normText = (s) =>
+  String(s ?? '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+
+// "Chitãozinho & Xororó" vs "Chitaozinho e Xororo": o conectivo no meio quebra
+// qualquer comparação por prefixo/substring, e dupla com conectivo é a regra no
+// catálogo brasileiro. Derrubar esses tokens é o que faz a dupla casar.
+const CONNECTORS = new Set(['e', 'and', 'feat', 'ft', 'with', 'com', 'y']);
+
+const normArtist = (s) =>
+  normText(s)
+    .split(' ')
+    .filter((token) => token && !CONNECTORS.has(token))
+    .join(' ');
+
+/**
+ * Quanto uma linha do catálogo se parece com o que procuramos (0 = descarta).
+ * Título E artista precisam bater — só título casa "Evidências" de qualquer um,
+ * e capa errada é pior que capa nenhuma (o usuário confia no que vê).
+ */
+function matchScore(row, wantTitle, wantArtist) {
+  const t = normText(row.title);
+  const a = normArtist(row.artist);
+  const wt = normText(wantTitle);
+  const wa = normArtist(wantArtist);
+  if (!t || !wt) return 0;
+  const titleScore = t === wt ? 3 : t.startsWith(wt) || wt.startsWith(t) ? 2 : 0;
+  if (titleScore === 0) return 0;
+  if (!wa) return titleScore; // sem artista para conferir, o título decide sozinho
+  const artistScore = a === wa ? 3 : a.includes(wa) || wa.includes(a) ? 2 : 0;
+  if (artistScore === 0) return 0;
+  return titleScore + artistScore;
+}
+
+// Fila serial da MusicBrainz: cada chamada espera a anterior + o intervalo
+// mínimo. Sem isto, duas faixas em paralelo já estouram o limite e a API passa a
+// devolver 503 para todo mundo.
+let mbChain = Promise.resolve();
+let mbLastAt = 0;
+
+function mbFetch(path) {
+  const run = async () => {
+    const wait = mbLastAt + MB_MIN_INTERVAL_MS - Date.now();
+    if (wait > 0) await new Promise((r) => setTimeout(r, wait));
+    mbLastAt = Date.now();
+    try {
+      const r = await fetch(`${MB_ROOT}/${path}`, {
+        headers: { 'User-Agent': MB_USER_AGENT, Accept: 'application/json' },
+        signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS),
+      });
+      if (!r.ok) return null; // 404 (não catalogado) e 503 (limite) são normais aqui
+      return await r.json();
+    } catch {
+      return null;
+    }
+  };
+  // Encadeia SEM propagar rejeição: uma falha não pode travar a fila inteira.
+  const result = mbChain.then(run, run);
+  mbChain = result.then(
+    () => undefined,
+    () => undefined,
+  );
+  return result;
+}
+
+/** Capa do Deezer para título+artista (consulta SOLTA — a sintaxe estrita
+ *  `track:"x" artist:"y"` não acha catálogo regional). */
+async function deezerCover(title, artist) {
+  const q = [artist, title].filter(Boolean).join(' ').trim();
+  if (!q) return null;
+  const r = await fetch(
+    `https://api.deezer.com/search?limit=5&q=${encodeURIComponent(q)}`,
+    { signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS) },
+  );
+  if (!r.ok) return null;
+  const d = await r.json().catch(() => ({}));
+  const rows = Array.isArray(d?.data) ? d.data : [];
+  let best = null;
+  let bestScore = 0;
+  for (const row of rows) {
+    const score = matchScore(
+      { title: row?.title_short || row?.title, artist: row?.artist?.name },
+      title,
+      artist,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = row;
+    }
+  }
+  if (!best) return null;
+  const cover = best?.album?.cover_xl || best?.album?.cover_big || best?.album?.cover_medium || null;
+  if (!cover) return null;
+  return {
+    coverUrl: cover,
+    album: best?.album?.title ?? null,
+    artist: best?.artist?.name ?? null,
+    title: best?.title ?? null,
+  };
+}
+
+/**
+ * Ficha técnica pela MusicBrainz: gravadora, número de catálogo e compositor.
+ * É a ÚNICA fonte gratuita desses três campos — o iTunes e o Deezer não os
+ * expõem. A capa (Cover Art Archive) vem de brinde, como último recurso.
+ * Compositor exige dois saltos: gravação → obra → pessoas creditadas na obra.
+ */
+async function musicbrainzCredits(title, artist) {
+  const query = artist
+    ? `artist:"${artist.replace(/"/g, '')}" AND recording:"${title.replace(/"/g, '')}"`
+    : `recording:"${title.replace(/"/g, '')}"`;
+  const found = await mbFetch(
+    `recording?query=${encodeURIComponent(query)}&fmt=json&limit=3&inc=releases`,
+  );
+  const recordings = Array.isArray(found?.recordings) ? found.recordings : [];
+  let best = null;
+  let bestScore = 0;
+  for (const rec of recordings) {
+    const score = matchScore(
+      { title: rec?.title, artist: rec?.['artist-credit']?.[0]?.name },
+      title,
+      artist,
+    );
+    if (score > bestScore) {
+      bestScore = score;
+      best = rec;
+    }
+  }
+  if (!best) return null;
+
+  const releaseId = Array.isArray(best.releases) ? best.releases[0]?.id : null;
+  let label = null;
+  let catalogNumber = null;
+  let coverUrl = null;
+  if (releaseId) {
+    coverUrl = `https://coverartarchive.org/release/${releaseId}/front-500`;
+    const release = await mbFetch(`release/${releaseId}?inc=labels&fmt=json`);
+    const info = Array.isArray(release?.['label-info']) ? release['label-info'][0] : null;
+    label = info?.label?.name ?? null;
+    catalogNumber = info?.['catalog-number'] ?? null;
+  }
+
+  // Salto 1: a gravação aponta para a OBRA (a composição, não esta execução).
+  const rec = await mbFetch(`recording/${best.id}?inc=work-rels&fmt=json`);
+  const workId = (Array.isArray(rec?.relations) ? rec.relations : []).find(
+    (rel) => rel?.['target-type'] === 'work',
+  )?.work?.id;
+  let composer = null;
+  if (workId) {
+    // Salto 2: a obra aponta para quem a escreveu (composer/lyricist/writer).
+    const work = await mbFetch(`work/${workId}?inc=artist-rels&fmt=json`);
+    const people = (Array.isArray(work?.relations) ? work.relations : [])
+      .filter((rel) => ['composer', 'lyricist', 'writer'].includes(rel?.type))
+      .map((rel) => rel?.artist?.name)
+      .filter(Boolean);
+    if (people.length > 0) composer = [...new Set(people)].join(', ');
+  }
+
+  if (!label && !catalogNumber && !composer && !coverUrl) return null;
+  return { label, catalogNumber, composer, coverUrl };
+}
+
 async function main() {
   const ytdlp = await resolveYtdlp();
   ytdlpBin = ytdlp; // publica para os import-jobs (rodam fora deste escopo)
@@ -771,7 +947,7 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
             // must NOT run against an old importer that lacks these fields.
-            caps: ['uploader', 'album', 'quality', 'jobs'],
+            caps: ['uploader', 'album', 'quality', 'jobs', 'cover', 'credits'],
           }),
         );
         return;
@@ -932,6 +1108,60 @@ async function main() {
         }
         res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
         res.end(JSON.stringify({ album: payload }));
+        return;
+      }
+
+      // ── Capa por título+artista (Deezer, server-side p/ evitar CORS) ─────
+      // Segunda tentativa da varredura de capas, depois do iTunes. O Deezer
+      // cobre catálogo brasileiro que a Apple não expõe sem preview.
+      if (req.method === 'GET' && pathname === '/cover') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const sp = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const title = (sp.get('title') || '').trim();
+        const artist = (sp.get('artist') || '').trim();
+        let payload = null;
+        if (title) {
+          try {
+            payload = await deezerCover(title, artist);
+          } catch (err) {
+            log(`cover falhou para "${title}": ${err?.message ?? err}`);
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(JSON.stringify(payload ?? { coverUrl: null, album: null, artist: null, title: null }));
+        return;
+      }
+
+      // ── Ficha técnica (MusicBrainz + Cover Art Archive) ──────────────────
+      // Gravadora, número de catálogo e compositor não existem em nenhuma das
+      // outras fontes. A capa vem junto, como ÚLTIMO recurso da varredura.
+      if (req.method === 'GET' && pathname === '/credits') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const sp = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const title = (sp.get('title') || '').trim();
+        const artist = (sp.get('artist') || '').trim();
+        let payload = null;
+        if (title) {
+          try {
+            payload = await musicbrainzCredits(title, artist);
+          } catch (err) {
+            log(`credits falhou para "${title}": ${err?.message ?? err}`);
+          }
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.end(
+          JSON.stringify(
+            payload ?? { label: null, catalogNumber: null, composer: null, coverUrl: null },
+          ),
+        );
         return;
       }
 

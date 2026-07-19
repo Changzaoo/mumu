@@ -11,18 +11,13 @@
  * true — these tracks are never downloaded, offline-cached or P2P-shared.
  */
 import type { TrackDto } from '@aurial/shared';
-import type { AppleSong } from '@/lib/catalog/itunes';
+import { appleArtwork, type AppleSong } from '@/lib/catalog/itunes';
 
 /** Apple preview clip length in ms (fixed — matches the seek bar). */
 const PREVIEW_DURATION_MS = 30_000;
 
-/** Upgrade the 100×100 artwork URL to 600×600. */
-function hiResArtwork(url: string): string {
-  return url.replace('100x100bb', '600x600bb');
-}
-
 export function appleSongToDto(song: AppleSong): TrackDto {
-  const cover = song.artworkUrl100 ? hiResArtwork(song.artworkUrl100) : null;
+  const cover = song.artworkUrl100 ? appleArtwork(song.artworkUrl100, 'grid') : null;
   return {
     id: `itunes:${song.trackId}`,
     title: song.trackName,

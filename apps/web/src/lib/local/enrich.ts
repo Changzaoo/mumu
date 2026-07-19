@@ -8,7 +8,7 @@
  * Spotify-style. Every function degrades silently to `null` on no-match/failure
  * so enrichment can never block or break an import.
  */
-import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
+import { appleArtwork, searchSongs, type AppleSong } from '@/lib/catalog/itunes';
 import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 
@@ -62,9 +62,7 @@ const NOISE = [
 ];
 
 /** Upgrade Apple's 100×100 artwork URL to a 600×600 hi-res cover. */
-function hiRes(url: string): string {
-  return url.replace('100x100bb', '600x600bb');
-}
+const hiRes = (url: string): string => appleArtwork(url, 'grid');
 
 /** Loose normalization for comparison: lowercase, strip accents + punctuation. */
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
