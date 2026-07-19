@@ -209,6 +209,23 @@ export default function LibraryPage() {
 
   const grid = 'grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6';
 
+  // Quantos cartões existem de cada vez. A página montava TODOS os artistas,
+  // álbuns e gêneros de uma vez: com 300 faixas isso dá 4440 nós no DOM, e a
+  // biblioteca do usuário é maior. Ninguém lê a centésima capa antes de rolar
+  // até ela — 60 cobre várias telas e o botão traz o resto sob demanda.
+  const PAGINA = 60;
+  const [mostrar, setMostrar] = useState(PAGINA);
+  const maisBotao = (total: number): React.ReactNode =>
+    total > mostrar ? (
+      <button
+        type="button"
+        onClick={() => setMostrar((n) => n + PAGINA)}
+        className="col-span-full mx-auto mt-2 rounded-md bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20"
+      >
+        Mostrar mais ({total - mostrar} restantes)
+      </button>
+    ) : null;
+
   return (
     <div className="space-y-6 py-4">
       <header className="flex flex-wrap items-center justify-between gap-3">
@@ -222,7 +239,11 @@ export default function LibraryPage() {
 
       {/* Your downloaded / on-device tracks — always shown, independent of the
           central library API (not deployed in the P2P topology). */}
-      <DeviceTracksRow />
+      {/* Sem `limit` isto montava a biblioteca INTEIRA num carrossel
+          horizontal — 300 faixas viravam 300 cartões e ~4400 nós no DOM, dos
+          quais o usuário vê uns seis. É um trilho de "mais recentes", e o link
+          do cabeçalho leva para /dispositivo, onde a lista completa mora. */}
+      <DeviceTracksRow limit={24} />
 
       {missingCovers > 0 && (
         <p className="text-xs text-fg-subtle">
@@ -269,7 +290,7 @@ export default function LibraryPage() {
             />
           ) : (
             <div className={grid}>
-              {localGenres.map((g) => (
+              {localGenres.slice(0, mostrar).map((g) => (
                 <MediaCard
                   key={g.genre}
                   title={g.genre}
@@ -278,6 +299,7 @@ export default function LibraryPage() {
                   to={`/genero/${encodeURIComponent(g.genre)}`}
                 />
               ))}
+              {maisBotao(localGenres.length)}
             </div>
           )}
         </TabsContent>
@@ -291,7 +313,7 @@ export default function LibraryPage() {
             />
           ) : (
             <div className={grid}>
-              {localArtists.map((artist) => (
+              {localArtists.slice(0, mostrar).map((artist) => (
                 <LocalArtistCard
                   key={artist.name}
                   name={artist.name}
@@ -299,6 +321,7 @@ export default function LibraryPage() {
                   fallbackImage={artist.coverUrl}
                 />
               ))}
+              {maisBotao(localArtists.length)}
             </div>
           )}
         </TabsContent>
@@ -314,7 +337,7 @@ export default function LibraryPage() {
             />
           ) : (
             <div className={grid}>
-              {discography.map((album) => (
+              {discography.slice(0, mostrar).map((album) => (
                 <MediaCard
                   key={album.key}
                   title={album.title}
@@ -323,6 +346,7 @@ export default function LibraryPage() {
                   to={`/disco/${encodeURIComponent(album.key)}`}
                 />
               ))}
+              {maisBotao(discography.length)}
             </div>
           )}
         </TabsContent>

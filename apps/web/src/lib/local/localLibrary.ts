@@ -17,6 +17,7 @@ import {
   deleteCover,
   getAudioBlob,
   getCoverBlob,
+  hasAudio,
   putAudio,
   putCover,
 } from '@/lib/offline/audioCache';
@@ -246,7 +247,91 @@ async function getBlob(id: string): Promise<Blob | null> {
   return getAudioBlob(id);
 }
 
+/**
+ * Ids cujo áudio está gravado NESTE aparelho.
+ *
+ * Substitui o papel que `blobUrls` fazia de "quem tem áudio": aquele mapa só
+ * ficava preenchido depois de abrir cada arquivo, o que custava o boot inteiro.
+ * Este conjunto é montado com uma pergunta barata (existe?) e é a resposta
+ * certa para "dá para tocar sem rede?".
+ */
+const audioLocal = new Set<string>();
+
+/**
+ * Monta o índice de "quem tem áudio aqui" com o mínimo de idas ao disco.
+ *
+ * `keys()` lista o cofre inteiro numa chamada; o IndexedDB entra só como
+ * complemento, para o que foi importado em contexto sem Cache Storage
+ * (http:// de LAN). O cruzamento com o registro é feito em memória.
+ */
+async function indexarAudioLocal(): Promise<void> {
+  const idsDoRegistro = new Set(read().map((e) => e.track.id));
+
+  if (cacheStorageSupported()) {
+    try {
+      const store = await caches.open(CACHE_NAME);
+      for (const req of await store.keys()) {
+        const url = new URL(req.url);
+        if (!url.pathname.startsWith('/__library_audio__/')) continue;
+        const id = decodeURIComponent(url.pathname.slice('/__library_audio__/'.length));
+        if (idsDoRegistro.has(id)) audioLocal.add(id);
+      }
+    } catch {
+      // Cofre indisponível: o IndexedDB abaixo ainda pode responder.
+    }
+  }
+
+  // Só pergunta ao IndexedDB por quem o cofre não respondeu — no caso comum
+  // (produção, https) isso é lista vazia e não custa nada.
+  const faltando = [...idsDoRegistro].filter((id) => !audioLocal.has(id));
+  const LOTE = 32;
+  for (let i = 0; i < faltando.length; i += LOTE) {
+    await Promise.all(
+      faltando.slice(i, i + LOTE).map(async (id) => {
+        if (await hasAudio(id).catch(() => false)) audioLocal.add(id);
+      }),
+    );
+    await new Promise((r) => setTimeout(r, 0)); // devolve a vez para a tela
+  }
+}
+
+/** Existe áudio gravado para esta faixa? Não lê os bytes — só confere. */
+async function blobExists(id: string): Promise<boolean> {
+  if (cacheStorageSupported()) {
+    const store = await caches.open(CACHE_NAME);
+    if (await store.match(keyFor(id))) return true;
+  }
+  return hasAudio(id).catch(() => false);
+}
+
+/**
+ * Garante o object URL da faixa, criando-o agora se preciso.
+ *
+ * É aqui que o custo que saiu do boot reaparece — uma vez, para a faixa que o
+ * usuário mandou tocar, em vez de para as centenas que ele não pediu.
+ */
+export async function ensureLocalAudioUrl(id: string): Promise<string | null> {
+  const pronto = blobUrls.get(id);
+  if (pronto) return pronto;
+  if (!audioLocal.has(id) && !(await blobExists(id).catch(() => false))) return null;
+  const blob = await getBlob(id).catch(() => null);
+  if (!blob) {
+    audioLocal.delete(id); // sumiu do cofre — não insistir
+    return null;
+  }
+  const url = URL.createObjectURL(blob);
+  blobUrls.set(id, url);
+  audioLocal.add(id);
+  return url;
+}
+
+/** A faixa tem áudio neste aparelho (sem precisar abrir o arquivo)? */
+export function hasLocalAudio(id: string): boolean {
+  return blobUrls.has(id) || audioLocal.has(id);
+}
+
 async function deleteBlob(id: string): Promise<void> {
+  audioLocal.delete(id);
   await deleteAudio(id).catch(() => undefined); // limpa a cópia IndexedDB
   if (!cacheStorageSupported()) return;
   const store = await caches.open(CACHE_NAME);
@@ -1314,11 +1399,22 @@ export function hydrate(): Promise<void> {
     // NÃO desistir sem Cache Storage: em http:// de LAN (o caso "abrir no
     // celular") ela não existe e os bytes ficam no IndexedDB — desistir aqui
     // deixaria toda a biblioteca importada mudinha nesses aparelhos.
-    for (const entry of read()) {
-      if (blobUrls.has(entry.track.id)) continue;
-      const blob = await getBlob(entry.track.id).catch(() => null);
-      if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
-    }
+    // A LISTA PRIMEIRO: os títulos já estão no registro (localStorage, leitura
+    // instantânea). Não há motivo para segurar a tela até o último arquivo de
+    // áudio ser aberto.
+    emit();
+
+    // UMA pergunta para o cofre inteiro, não uma por faixa.
+    //
+    // Medições que descartaram as duas tentativas anteriores: biblioteca vazia
+    // trava 70ms no boot, com 300 faixas trava 3000ms. Achei que era ler os
+    // bytes de cada áudio — troquei por checagem de existência e continuou
+    // 3000ms. O custo é a IDA ao Cache Storage, não o conteúdo: 300 consultas
+    // separadas num cofre cheio. `keys()` devolve tudo de uma vez, e aí é só
+    // cruzar em memória. O object URL passa a ser criado na hora de tocar
+    // (ver ensureLocalAudioUrl) — o usuário ouve uma faixa, não trezentas.
+    await indexarAudioLocal();
+
     await restoreEmbeddedCovers();
     normalizeArtistCasing();
     emit();

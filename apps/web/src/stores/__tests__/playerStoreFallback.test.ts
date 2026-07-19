@@ -64,6 +64,10 @@ const reportDeadRemote = vi.fn<(id: string, deadUrl: string) => void>();
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.reject(new Error('cache storage indisponível'))),
   localAudioUrl: vi.fn(() => null),
+  // Sem áudio neste aparelho: é a premissa de TODO este arquivo — só assim o
+  // player recorre à cópia enviada e ao stream, que é o que se testa aqui.
+  hasLocalAudio: vi.fn(() => false),
+  ensureLocalAudioUrl: vi.fn(() => Promise.resolve(null)),
   remoteUrlFor: (id: string) => remoteUrlFor(id),
   reportDeadRemote: (id: string, deadUrl: string) => reportDeadRemote(id, deadUrl),
   sourceUrlFor: (id: string) => sourceUrlFor(id),

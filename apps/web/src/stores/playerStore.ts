@@ -17,6 +17,8 @@ import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadManager';
 import {
+  ensureLocalAudioUrl,
+  hasLocalAudio,
   hydrate as hydrateLocalLibrary,
   localAudioUrl as localLibraryAudioUrl,
   remoteUrlFor,
@@ -45,6 +47,13 @@ function hostOf(url: string): string | null {
  * track unchanged when nothing can be resolved (genuinely unavailable).
  */
 async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
+  // `hasLocalAudio` responde sem abrir o arquivo. Vale checar aqui também:
+  // uma faixa com áudio no aparelho JAMAIS pode acabar buscando a rede só
+  // porque o object URL ainda não tinha sido criado.
+  if (hasLocalAudio(track.id)) {
+    await ensureLocalAudioUrl(track.id);
+    return track;
+  }
   if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id) || track.streamUrl) return track;
   if (!track.id.startsWith('local:')) return track;
   // OFFLINE: nunca sai atrás de rede — sem áudio local, a faixa é indisponível.
@@ -454,7 +463,12 @@ export const usePlayerStore = create<PlayerState>()(
           await localAudioReady();
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
 
-          const local = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
+          // `ensureLocalAudioUrl` abre o arquivo AGORA se ele existir. O boot
+          // deixou de abrir a biblioteca inteira (custava ~10ms por faixa e
+          // travava segundos), então a primeira reprodução de cada faixa paga
+          // esse custo — uma vez, só para a que foi pedida. Sem esta linha a
+          // faixa baixada iria para a rede, que é o pior erro possível aqui.
+          const local = (await ensureLocalAudioUrl(track.id)) ?? localAudioUrl(track.id);
           if (local) {
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();

@@ -91,8 +91,19 @@ interface OEmbed {
  * privado responde 401/404 — nesse caso não há o que fazer, devolve null e a
  * faixa segue para as outras fontes.
  */
+/** Respostas já obtidas nesta sessão, por URL.
+ *
+ *  Faixas do mesmo lote costumam repetir o link de origem, e a varredura roda
+ *  a cada boot. Sem isto, medido num acervo de teste, a mesma URL foi
+ *  consultada 12 vezes seguidas — rede desperdiçada no celular e um convite a
+ *  ser limitado pelo YouTube. Guarda inclusive o `null`: "esse vídeo não diz o
+ *  artista" é resposta, e perguntar de novo dá no mesmo. */
+const artistaPorFonte = new Map<string, string | null>();
+
 export async function artistFromSource(sourceUrl: string): Promise<string | null> {
   if (!youtubeIdFrom(sourceUrl)) return null;
+  const guardado = artistaPorFonte.get(sourceUrl);
+  if (guardado !== undefined) return guardado;
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 8_000);
   try {
@@ -102,7 +113,9 @@ export async function artistFromSource(sourceUrl: string): Promise<string | null
     const data = (await res.json()) as OEmbed;
     const titulo = typeof data.title === 'string' ? data.title : '';
     const canal = typeof data.author_name === 'string' ? data.author_name : '';
-    return artistFromVideo(titulo, canal);
+    const nome = artistFromVideo(titulo, canal);
+    artistaPorFonte.set(sourceUrl, nome);
+    return nome;
   } catch {
     return null;
   } finally {
