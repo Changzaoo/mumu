@@ -35,6 +35,10 @@ const fixtures = vi.hoisted(() => ({
 
 vi.mock('@/lib/local/importerHelper', () => ({ fetchArtistTop: vi.fn(async () => null) }));
 vi.mock('@/lib/artistImage', () => ({ useArtistImage: () => null }));
+// SEM este mock o teste chama a Wikipedia DE VERDADE: fica lento, falha sem
+// rede e quebra de forma intermitente quando a suíte inteira roda junta —
+// o pior tipo de teste, porque ensina a ignorar falha vermelha.
+vi.mock('@/lib/artistBio', () => ({ useArtistBio: () => null }));
 vi.mock('@/lib/local/localLibrary', () => ({
   subscribe: () => () => {},
   list: () => fixtures.none,
