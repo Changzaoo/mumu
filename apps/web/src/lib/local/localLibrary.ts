@@ -1041,6 +1041,31 @@ function dedupeKey(track: TrackDto): string | null {
   return `${title}|${artist}|${durBucket}`;
 }
 
+export function artistaEhDesconhecido(track: TrackDto): boolean {
+  return (
+    track.artists.length === 0 ||
+    track.artists.every((a) => !a.name?.trim() || a.name === 'Desconhecido')
+  );
+}
+
+/**
+ * Chave "mesma música, ignorando quem assina": título LIMPO + duração.
+ *
+ * Precisa do título limpo porque a cópia identificada costuma trazer o pacote
+ * completo — "100% MOLHO FT. JOVEM DEX, LEVIANO E ALEE" — enquanto a anônima
+ * tem só "100% MOLHO". O número de faixa na frente ("22 - SÃO PAULO") também
+ * sai, pelo mesmo motivo.
+ */
+export function tituloDuracaoKey(track: TrackDto): string | null {
+  const semNumero = track.title.replace(/^\s*\d{1,2}\s*[-–—.]\s*/, '');
+  const limpo = titleSearchCandidates(semNumero)[0] ?? semNumero;
+  const title = normName(limpo);
+  if (!title || title === 'faixa') return null;
+  const dur = track.durationMs || 0;
+  if (dur <= 0) return null; // sem duração não há evidência suficiente para apagar
+  return `${title}|${Math.round(dur / 3000)}`;
+}
+
 /** Which duplicate to keep: local audio > uploaded copy > has cover > older. */
 function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
   const score = (e: LibraryEntry): number =>
@@ -1071,6 +1096,30 @@ export async function dedupeLibrary(): Promise<number> {
     winners.set(key, keep);
     losers.push((keep === prev ? e : prev).track.id);
   }
+  // ── 2ª passada: a mesma faixa que entrou duas vezes, uma SEM artista ──
+  //
+  // "ÚLTIMA VEZ / ALEE" e "ÚLTIMA VEZ / Desconhecido" são a mesma música, mas
+  // a chave acima inclui o artista e por isso não casavam. Aqui relaxamos —
+  // porém SÓ quando um dos lados é desconhecido, e exigindo título limpo e
+  // duração iguais. Esta função APAGA faixas: relaxar demais custaria música
+  // do usuário, o que é pior que uma lista com repetição.
+  const porTituloDuracao = new Map<string, LibraryEntry>();
+  for (const e of winners.values()) {
+    const key = tituloDuracaoKey(e.track);
+    if (!key) continue;
+    const prev = porTituloDuracao.get(key);
+    if (!prev) {
+      porTituloDuracao.set(key, e);
+      continue;
+    }
+    const prevAnon = artistaEhDesconhecido(prev.track);
+    const curAnon = artistaEhDesconhecido(e.track);
+    if (prevAnon === curAnon) continue; // ambos nomeados (podem ser covers) ou ambos anônimos
+    const keep = preferredEntry(prev, e);
+    porTituloDuracao.set(key, keep);
+    losers.push((keep === prev ? e : prev).track.id);
+  }
+
   if (losers.length === 0) return 0;
   const drop = new Set(losers);
   write(read().filter((e) => !drop.has(e.track.id)));

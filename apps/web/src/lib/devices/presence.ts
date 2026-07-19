@@ -153,6 +153,14 @@ let initialized = false;
 /** Id do aparelho que detém a posse (null = ninguém reivindicou). */
 let activeDeviceId: string | null = null;
 let wasPlaying = false;
+/**
+ * Quando ESTE aparelho reivindicou a posse. A escrita no Firestore e o eco de
+ * volta levam centenas de milissegundos, e nesse intervalo ainda chegam
+ * snapshots com o dono ANTIGO. Sem esta carência, o próprio play do usuário se
+ * pausava sozinho.
+ */
+let lastClaimAt = 0;
+const CLAIM_GRACE_MS = 10_000;
 
 const remoteListeners = new Set<(remote: RemotePlayback | null) => void>();
 let remoteState: RemotePlayback | null = null;
@@ -252,6 +260,7 @@ function publish(force = false): void {
  * sempre atrás de um gesto, que é o que o navegador exige para tocar.
  */
 export function claimPlayback(): void {
+  lastClaimAt = Date.now(); // abre a carência ANTES de qualquer await
   if (!db || !currentUser) return;
   activeDeviceId = getDeviceId(); // otimista: a UI reage na hora
   void setDoc(doc(db, 'users', currentUser.uid, 'state', 'activeDevice'), {
@@ -352,11 +361,26 @@ function start(user: User): void {
     (snap) => {
       const data = snap.data() as { deviceId?: string; name?: string } | undefined;
       activeDeviceId = data?.deviceId ?? null;
-      // Perdi a posse enquanto tocava: silencia. É isto que garante "uma
-      // música num aparelho só" sem precisar travar o player por dentro.
+
+      // SILENCIAR O USUÁRIO É O PIOR ERRO POSSÍVEL AQUI.
+      //
+      // A primeira versão pausava sempre que o documento apontava para outro
+      // aparelho — sem olhar se aquele aparelho existe ainda. Bastava ter
+      // tocado no celular ontem: hoje, no computador, o play morria na hora,
+      // porque a posse antiga continuava gravada. Era exatamente o "não
+      // reproduz" relatado.
+      //
+      // Agora só pausamos diante de um conflito REAL: o outro aparelho está
+      // online E tocando agora. Em qualquer dúvida — presença desconhecida,
+      // posse velha, reivindicação nossa ainda em trânsito — a música
+      // continua. Dois aparelhos tocando por alguns segundos é um incômodo;
+      // o app emudecer sozinho é um defeito.
       if (activeDeviceId && activeDeviceId !== getDeviceId()) {
         const player = usePlayerStore.getState();
-        if (player.isPlaying) {
+        const dono = deviceState.find((d) => d.id === activeDeviceId);
+        const conflitoReal = Boolean(dono?.online && dono.isPlaying);
+        const reivindicacaoRecente = Date.now() - lastClaimAt < CLAIM_GRACE_MS;
+        if (player.isPlaying && conflitoReal && !reivindicacaoRecente) {
           player.pause();
           void import('sonner').then(({ toast }) =>
             toast(`Reprodução movida para ${data?.name ?? 'outro aparelho'}`),
