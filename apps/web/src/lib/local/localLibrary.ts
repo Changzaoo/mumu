@@ -914,15 +914,16 @@ export function tracksMissingAudio(): LibraryEntry[] {
 /**
  * Traz de volta o áudio das faixas que ficaram sem bytes gravados.
  *
- * Existe por causa de um defeito real deste código, não de um acidente do
- * usuário: `putBlob` podia falhar (cota) e a falha era descartada, enquanto a
- * faixa continuava no registro. Ela tocava na aba aberta — o object URL era
- * criado do blob em memória — e só aparecia "indisponível" depois do reload,
- * quando não havia mais nada para ler. O buraco está tapado, mas as faixas já
- * afetadas continuam mudas até alguém repor os bytes.
+ * NUNCA chamar no boot. Isto já rodou automaticamente e foi um estrago: "sem
+ * áudio local" é a condição NORMAL de toda faixa num aparelho que não a
+ * importou — no celular, onde só chega metadata sincronizada, a lista de
+ * "faixas a reparar" é a biblioteca inteira. O que devia ser um conserto virou
+ * o telefone baixando centenas de músicas no boot, enchendo o armazenamento de
+ * um aparelho que deveria apenas transmitir.
  *
- * Duas fontes, nesta ordem: a cópia enviada ao importador (mais barata e é
- * exatamente o mesmo arquivo) e, na falta dela, o link de origem. Devolve
+ * É uma ferramenta MANUAL, para o aparelho que de fato importou as faixas e
+ * perdeu os bytes. Duas fontes, nesta ordem: a cópia enviada ao importador
+ * (mesmo arquivo, mais barata) e, na falta dela, o link de origem. Devolve
  * quantas voltaram a tocar.
  */
 export async function repairMissingAudio(): Promise<number> {
@@ -1265,9 +1266,17 @@ export async function dedupeLibrary(): Promise<number> {
       URL.revokeObjectURL(url);
       blobUrls.delete(id);
     }
+    // SÓ o armazenamento DESTE aparelho. A cópia no importador e a entrada na
+    // nuvem são compartilhadas com todos os outros, e apagá-las daqui foi um
+    // estrago real: no celular o mapa `blobUrls` está vazio para tudo (lá as
+    // faixas são sincronizadas, não baixadas), então duas cópias empatam em
+    // `preferredEntry`, a perdedora é escolhida por idade e o telefone apagava
+    // no importador o upload que o computador tinha acabado de fazer — e o
+    // `cloud.remove` propagava a remoção para a conta inteira.
+    //
+    // A regra: quem não consegue provar que tem os bytes não destrói o que é
+    // de todos. Some da lista local, e pronto.
     void deleteBlob(id).catch(() => undefined);
-    void deleteTrackBlob(id);
-    cloud.remove(id);
   }
   return losers.length;
 }
@@ -1438,10 +1447,10 @@ function scheduleBackgroundCuration(): void {
       // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
       // com o importador fora do ar, a vez das capas simplesmente nunca chegava.
       // É o que o usuário VÊ na tela; vem na frente.
-      // ÁUDIO ANTES DE TUDO: faixa sem capa é feia, faixa sem áudio não é
-      // faixa. Repõe os bytes que se perderam enquanto `putBlob` falhava em
-      // silêncio (ver repairMissingAudio) antes de gastar rede com metadados.
-      await repairMissingAudio().catch(() => 0);
+      // `repairMissingAudio` NÃO roda aqui — ver a própria função. Em resumo:
+      // no celular toda faixa está "sem áudio local" por design, então no boot
+      // ele saía baixando a biblioteca inteira para um aparelho que deveria
+      // apenas transmitir. É ação manual, na página de diagnóstico.
       // CATÁLOGO: ele conserta o NOME do artista, e a busca de capa
       // logo abaixo depende do nome para achar qualquer coisa. Invertido, a
       // varredura de capas gastava as três tentativas de cada faixa anônima
