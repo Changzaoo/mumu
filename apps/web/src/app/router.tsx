@@ -92,6 +92,9 @@ export const router = createBrowserRouter([
             element: <AuthorizedRoute>{page('TelemetryPage', 'list')}</AuthorizedRoute>,
           },
           { path: '/compartilhar', element: page('SharePage', 'list') },
+          // Sem AuthorizedRoute de propósito: o diagnóstico precisa funcionar
+          // JUSTAMENTE quando o login é a coisa que está quebrada.
+          { path: '/diagnostico', element: page('DiagnosticoPage', 'list') },
           { path: '/catalogo/playlist/:id', element: page('CatalogPlaylistPage', 'detail') },
           { path: '/catalogo/artista/:id', element: page('CatalogArtistPage', 'detail') },
           { path: '/radios', element: page('RadiosPage', 'home') },

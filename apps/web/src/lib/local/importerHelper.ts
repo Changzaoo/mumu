@@ -345,22 +345,50 @@ export async function buildStreamUrl(sourceUrl: string): Promise<string | null> 
  * capability URL (token in the query, since an <audio> element can't send
  * headers) to store in the synced metadata, or null on failure / signed out.
  */
+/** Por que o último upload falhou — lido pelo diagnóstico, que é a única forma
+ *  do usuário saber que a faixa ficou presa num aparelho só. */
+export let ultimaFalhaDeUpload: string | null = null;
+
 export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | null> {
-  try {
-    const headers = await baseHeaders();
-    if (!headers.Authorization) return null; // must be signed in to upload
-    const res = await fetch(`${helperUrl()}/blob`, {
-      method: 'POST',
-      headers: { ...headers, 'X-Blob-Id': id, 'Content-Type': blob.type || 'audio/mpeg' },
-      body: blob,
-    });
-    if (!res.ok) return null;
-    const data = (await res.json()) as { id?: string; token?: string };
-    if (!data.token) return null;
-    return `${helperUrl()}/blob/${encodeURIComponent(id)}?k=${encodeURIComponent(data.token)}`;
-  } catch {
+  const headers = await baseHeaders();
+  if (!headers.Authorization) {
+    ultimaFalhaDeUpload = 'sem login — o envio exige conta';
     return null;
   }
+
+  // Três tentativas com espera crescente. Um envio de vários MB atravessa a
+  // Cloudflare por HTTP/2, e um stream derrubado no meio (ERR_HTTP2_PROTOCOL_
+  // ERROR) é transitório — desistir na primeira falha deixava a faixa SEM cópia
+  // enviada para sempre, e sem ela nenhum outro aparelho consegue tocá-la.
+  // Silêncio aqui vira "toca no PC, não toca no celular" sem nenhuma pista.
+  let motivo = 'falha desconhecida';
+  for (let tentativa = 0; tentativa < 3; tentativa++) {
+    if (tentativa > 0) await new Promise((r) => setTimeout(r, 1_000 * 2 ** tentativa));
+    try {
+      const res = await fetch(`${helperUrl()}/blob`, {
+        method: 'POST',
+        headers: { ...headers, 'X-Blob-Id': id, 'Content-Type': blob.type || 'audio/mpeg' },
+        body: blob,
+      });
+      if (!res.ok) {
+        motivo = `o importador recusou (HTTP ${res.status})`;
+        // 4xx é decisão do servidor: repetir dá o mesmo resultado.
+        if (res.status >= 400 && res.status < 500) break;
+        continue;
+      }
+      const data = (await res.json()) as { id?: string; token?: string };
+      if (!data.token) {
+        motivo = 'o importador respondeu sem token';
+        break;
+      }
+      ultimaFalhaDeUpload = null;
+      return `${helperUrl()}/blob/${encodeURIComponent(id)}?k=${encodeURIComponent(data.token)}`;
+    } catch (err) {
+      motivo = `conexão caiu no envio: ${(err as Error).message}`;
+    }
+  }
+  ultimaFalhaDeUpload = motivo;
+  return null;
 }
 
 export interface TrackMeta {

@@ -18,7 +18,7 @@
  */
 import { getIdToken } from '@/lib/firebase';
 import { entryFor, hasStoredAudio, localAudioUrl } from '@/lib/local/localLibrary';
-import { buildStreamUrl, helperUrl } from '@/lib/local/importerHelper';
+import { buildStreamUrl, helperUrl, ultimaFalhaDeUpload } from '@/lib/local/importerHelper';
 
 export interface Elo {
   etapa: string;
@@ -72,10 +72,15 @@ export async function diagnosticarFaixa(id: string): Promise<Elo[]> {
     const r = await respondeAudio(entry.remoteUrl);
     elos.push({ etapa: 'cópia enviada (remoteUrl)', ...r });
   } else {
+    // Este é o elo que decide se a faixa toca nos OUTROS aparelhos. Sem ele,
+    // o aparelho que importou continua tocando (tem os bytes) e todo o resto
+    // fica mudo — o sintoma "toca no PC, não toca no celular".
     elos.push({
       etapa: 'cópia enviada (remoteUrl)',
       ok: false,
-      detalhe: 'a faixa nunca foi enviada ao importador',
+      detalhe: ultimaFalhaDeUpload
+        ? `nunca enviada — última falha: ${ultimaFalhaDeUpload}`
+        : 'a faixa nunca foi enviada ao importador',
     });
   }
 

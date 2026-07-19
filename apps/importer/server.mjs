@@ -544,6 +544,44 @@ function readBinaryBody(req, limit) {
 }
 
 /**
+ * Descarta o corpo que ainda está subindo, e SÓ ENTÃO responde.
+ *
+ * Recusar um upload sem ler o corpo parece inofensivo, mas não é: o navegador
+ * ainda está mandando megabytes quando o servidor encerra a resposta, e sob
+ * HTTP/2 (que é o que a Cloudflare fala) isso derruba o stream. O cliente não
+ * recebe o 403/413 que explicaria tudo — recebe `ERR_HTTP2_PROTOCOL_ERROR`, um
+ * erro de transporte que não diz nada. Foi assim que um upload recusado virou
+ * "a faixa não toca no celular": sem a cópia enviada, o outro aparelho fica sem
+ * fonte, e a causa real nunca aparecia em lugar nenhum.
+ *
+ * Espera no máximo `timeoutMs` — corpo grande em conexão lenta não pode segurar
+ * a resposta de erro para sempre.
+ */
+function drainBody(req, timeoutMs = 5_000) {
+  return new Promise((resolve) => {
+    if (req.readableEnded || req.method === 'GET' || req.method === 'HEAD') {
+      resolve();
+      return;
+    }
+    const done = () => {
+      clearTimeout(timer);
+      resolve();
+    };
+    const timer = setTimeout(done, timeoutMs);
+    req.on('data', () => undefined); // consome e descarta
+    req.on('end', done);
+    req.on('error', done);
+  });
+}
+
+/** Recusa um upload de forma legível: drena, depois responde com o status. */
+async function rejectUpload(req, res, status, payload) {
+  await drainBody(req);
+  res.writeHead(status, { 'Content-Type': 'application/json' });
+  res.end(JSON.stringify(payload));
+}
+
+/**
  * Authorize a bare token (from a query string) the same way as a Bearer header —
  * for the streaming endpoint, since an <audio> element can't send headers.
  */
@@ -1323,27 +1361,29 @@ async function main() {
 
       // ── Library blob store: upload once, stream from any device ──────────
       if (req.method === 'POST' && pathname === '/blob') {
+        // Toda recusa passa por rejectUpload: responder sem drenar o corpo que
+        // ainda sobe vira ERR_HTTP2_PROTOCOL_ERROR no navegador em vez do
+        // status real (ver drainBody).
         if (!(await authorize(req))) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          await rejectUpload(req, res, 403, { error: 'Acesso negado.' });
           return;
         }
         // USB fora do ar → recusa em vez de gravar no disco raiz por engano.
         if (!(await blobStoreReady())) {
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Armazenamento de blobs indisponível.' }));
+          await rejectUpload(req, res, 503, { error: 'Armazenamento de blobs indisponível.' });
           return;
         }
         const id = req.headers['x-blob-id'];
         if (!safeBlobId(id)) {
-          res.writeHead(400, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'id inválido.' }));
+          await rejectUpload(req, res, 400, { error: 'id inválido.' });
           return;
         }
         let buf;
         try {
           buf = await readBinaryBody(req, MAX_BLOB);
         } catch {
+          // readBinaryBody já destruiu a requisição ao estourar o limite; aqui
+          // só resta responder — não há mais corpo para drenar.
           res.writeHead(413, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Arquivo grande demais.' }));
           return;
