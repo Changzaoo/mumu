@@ -894,6 +894,18 @@ export function remoteUrlFor(id: string): string | null {
   return read().find((e) => e.track.id === id)?.remoteUrl ?? null;
 }
 
+/** Os bytes desta faixa estão mesmo no cofre deste aparelho? Diferente de
+ *  `localAudioUrl`, que só diz se o object URL foi criado NESTA sessão. */
+export async function hasStoredAudio(id: string): Promise<boolean> {
+  const blob = await getBlob(id).catch(() => null);
+  return Boolean(blob && blob.size > 0);
+}
+
+/** A entrada do registro, para diagnóstico. */
+export function entryFor(id: string): LibraryEntry | null {
+  return read().find((e) => e.track.id === id) ?? null;
+}
+
 /** Faixas do registro cujo áudio NÃO está neste aparelho. */
 export function tracksMissingAudio(): LibraryEntry[] {
   return read().filter((e) => !blobUrls.has(e.track.id));
