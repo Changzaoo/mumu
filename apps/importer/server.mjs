@@ -571,7 +571,18 @@ async function authorizeToken(token) {
 
 /** Dump a single video's full metadata JSON WITHOUT downloading the media. */
 async function dumpJson(ytdlp, url) {
-  const args = ['--no-playlist', '--no-warnings', '--skip-download', '--dump-single-json', url];
+  const args = [
+    '--no-playlist',
+    '--no-warnings',
+    '--skip-download',
+    '--dump-single-json',
+    // A extração COMPLETA é justamente o caminho que o YouTube barra com
+    // "confirme que você não é um robô" — e era o único que não passava os
+    // cookies, ao contrário de listPlaylist e importToMp3. Sem isto, a leitura
+    // de metadados falha primeiro que o download, que é o inverso do esperado.
+    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+    url,
+  ];
   const out = await new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
