@@ -63,8 +63,9 @@ export function artistFromVideo(videoTitle: string, channel: string): string | n
   // Só o PRIMEIRO travessão separa artista de música; os seguintes costumam
   // pertencer ao nome da faixa.
   const corte = titulo.split(/\s[-–—|]\s/);
-  if (corte.length >= 2) {
-    const candidato = corte[0]
+  const primeiro = corte[0];
+  if (corte.length >= 2 && primeiro) {
+    const candidato = primeiro
       // "MATUÊ FEAT. TETO - X" → o dono é quem vem antes da participação.
       .replace(/\b(?:feat|ft|featuring|com)\b\.?.*$/i, '')
       .trim();

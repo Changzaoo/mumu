@@ -140,9 +140,8 @@ export function matchInCatalog(track: TrackDto, index: CatalogIndex): CatalogTra
       .filter((x) => x.delta <= DURATION_TOLERANCE_MS)
       .sort((a, b) => a.delta - b.delta);
 
-    if (!dentroDaMargem.length) continue;
-
     const [melhor, segundo] = dentroDaMargem;
+    if (!melhor) continue;
     if (
       segundo &&
       segundo.delta === melhor.delta &&
