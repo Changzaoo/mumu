@@ -48,6 +48,8 @@ import {
   pickBackfillCandidates,
   readCoverAttempts,
   resetCoverAttempts,
+  scoreArtworkMatch,
+  titleSearchCandidates,
 } from '@/lib/local/coverBackfill';
 import {
   deleteTrackBlob,
@@ -1392,6 +1394,12 @@ async function healCoverFor(id: string): Promise<boolean> {
     '';
 
   let cover: string | null = null;
+  /** Identidade CONFIRMADA por um catálogo — conserta "Desconhecido". */
+  let confirmed: { title: string; artist: string; album: string | null } | null = null;
+
+  // Títulos de trap/rap vêm com participante e produtor grudados
+  // ("TUDO BEM FT. BNYX"); o catálogo cadastra só "TUDO BEM".
+  const titles = titleSearchCandidates(track.title);
 
   // ORDEM MEDIDA, não suposta. Num acervo de trap/rap nacional independente
   // (Brandão85 etc.) o iTunes simplesmente NÃO TEM o catálogo: 0 de 4 faixas
@@ -1399,19 +1407,46 @@ async function healCoverFor(id: string): Promise<boolean> {
   // 100% ao iTunes usava artistas mainstream — não é a biblioteca real deste
   // usuário. Por isso o Deezer vem primeiro; o iTunes continua logo atrás
   // porque é direto do navegador e funciona mesmo com o importador fora do ar.
-  const deezer = await fetchCover(track.title, artist).catch(() => null);
-  if (deezer) cover = deezer.coverUrl;
+  for (const title of titles) {
+    const hit = await fetchCover(title, artist).catch(() => null);
+    if (!hit?.coverUrl) continue;
+    // CONFERIR o que o importador escolheu. Sem isto entrava capa errada:
+    // buscar "Brandao85 CAROLINA" no Deezer devolve "Sweet Caroline" da "Dani
+    // Brandão" como PRIMEIRO resultado. Capa errada é pior que capa nenhuma —
+    // ela mente com confiança e o usuário não tem como saber.
+    const score = scoreArtworkMatch(
+      { title: hit.title ?? '', artist: hit.artist ?? '', artworkUrl: hit.coverUrl },
+      title,
+      artist || null,
+    );
+    if (score === 0) continue;
+    cover = hit.coverUrl;
+    if (hit.title && hit.artist) {
+      confirmed = { title: hit.title, artist: hit.artist, album: hit.album };
+    }
+    break;
+  }
 
   // 2. iTunes — busca SEM exigir preview (ver searchSongsForArtwork).
   if (!cover) {
-    const term = [artist, track.title].filter(Boolean).join(' ');
-    const rows = await searchSongsForArtwork(term, 'br', 10).catch(() => []);
-    const hit = pickArtworkMatch(
-      rows.map((r) => ({ title: r.trackName, artist: r.artistName, artworkUrl: r.artworkUrl100 })),
-      track.title,
-      artist,
-    );
-    if (hit) cover = appleArtwork(hit.artworkUrl, 'grid');
+    for (const title of titles) {
+      const term = [artist, title].filter(Boolean).join(' ');
+      const rows = await searchSongsForArtwork(term, 'br', 10).catch(() => []);
+      const hit = pickArtworkMatch(
+        rows.map((r) => ({
+          title: r.trackName,
+          artist: r.artistName,
+          artworkUrl: r.artworkUrl100,
+          collection: r.collectionName,
+        })),
+        title,
+        artist,
+      );
+      if (!hit) continue;
+      cover = appleArtwork(hit.artworkUrl, 'grid');
+      confirmed = { title: hit.title, artist: hit.artist, album: hit.collection ?? null };
+      break;
+    }
   }
 
   // 3. MusicBrainz: capa de último recurso E a ficha técnica que só ela tem.
@@ -1440,18 +1475,44 @@ async function healCoverFor(id: string): Promise<boolean> {
   const nextCover = cover ? safeCoverUrl(cover) : null;
   const label = cur.track.label ?? credits?.label ?? null;
   const composer = cur.track.composer ?? credits?.composer ?? null;
+
+  // A identidade veio de tabela: se o catálogo confirmou a faixa (título E
+  // artista casaram no scoreArtworkMatch), ele sabe o nome certo melhor que o
+  // nome do arquivo. É o que tira o "Desconhecido" e o TÍTULO EM CAIXA ALTA
+  // com "FT. FULANO" pendurado. Só sobrescreve o artista quando ele é
+  // desconhecido — nunca troca um crédito que o usuário já tem por outro.
+  const artistaDesconhecido =
+    cur.track.artists.length === 0 ||
+    cur.track.artists.every((a) => !a.name || a.name === 'Desconhecido');
+  const artists =
+    confirmed && artistaDesconhecido
+      ? [{ id: `local-artist:${id}:0`, name: confirmed.artist, slug: '', imageUrl: null }]
+      : cur.track.artists;
+  const title = confirmed && artistaDesconhecido ? confirmed.title : cur.track.title;
+  const album =
+    confirmed?.album && !cur.track.album
+      ? { id: `local-album:${id}`, title: confirmed.album, slug: '', coverUrl: null }
+      : cur.track.album;
+
   const changed =
-    Boolean(nextCover) || label !== cur.track.label || composer !== cur.track.composer;
+    Boolean(nextCover) ||
+    label !== cur.track.label ||
+    composer !== cur.track.composer ||
+    artists !== cur.track.artists ||
+    title !== cur.track.title ||
+    album !== cur.track.album;
   if (changed) {
     const coverFinal = nextCover ?? cur.track.coverUrl;
     patchEntry(id, {
       ...cur,
       track: {
         ...cur.track,
+        title,
+        artists,
         coverUrl: coverFinal,
         // O álbum carrega a própria capa (é ela que a grade de álbuns mostra) —
         // atualizar só a faixa deixaria o álbum cinza ao lado da faixa colorida.
-        album: cur.track.album ? { ...cur.track.album, coverUrl: coverFinal } : cur.track.album,
+        album: album ? { ...album, coverUrl: coverFinal } : album,
         label,
         composer,
       },

@@ -42,6 +42,30 @@ export function normalizeForMatch(value: string): string {
 }
 
 /**
+ * Título de busca sem o ruído que o trap/rap carrega.
+ *
+ * Nesse meio o título quase nunca é só o título: vem com o participante
+ * ("TUDO BEM FT. BNYX"), o produtor ("(prod. by X)"), a origem ("[Clipe
+ * Oficial]"). O catálogo cadastra só "TUDO BEM" — então a comparação falha
+ * por causa de um pedaço que nem faz parte do nome da música.
+ *
+ * Devolve os candidatos em ordem: o limpo primeiro (mais provável de casar),
+ * o cru depois (às vezes o participante É parte do nome registrado).
+ */
+export function titleSearchCandidates(rawTitle: string): string[] {
+  const raw = rawTitle.trim();
+  const limpo = raw
+    .replace(/[([{][^)\]}]*[)\]}]/g, ' ') // (prod. X), [Clipe Oficial]
+    .replace(/\b(?:ft|feat|featuring|part|participacao|participação)\b\.?.*$/i, ' ')
+    .replace(/\bprod\.?\s*(?:by)?\b.*$/i, ' ')
+    .replace(/\s*[-–—]\s*(?:clipe|video|vídeo|official|oficial|lyric).*$/i, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const out = [limpo, raw].filter((t) => t.length > 0);
+  return [...new Set(out)];
+}
+
+/**
  * Normalização de NOME DE ARTISTA: além do resto, derruba os conectivos.
  *
  * "Chitãozinho & Xororó" e "Chitaozinho e Xororo" são o MESMO artista, mas o

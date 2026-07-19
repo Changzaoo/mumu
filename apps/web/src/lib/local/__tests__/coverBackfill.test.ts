@@ -10,6 +10,7 @@ import {
   pickArtworkMatch,
   pickBackfillCandidates,
   scoreArtworkMatch,
+  titleSearchCandidates,
 } from '@/lib/local/coverBackfill';
 
 function track(over: Partial<TrackDto> & { id: string }): TrackDto {
@@ -142,5 +143,78 @@ describe('candidate selection', () => {
     expect(pickBackfillCandidates(many, {})).toHaveLength(COVER_SWEEP_LIMIT);
     // A contagem exibida ignora o teto por sessão — mostra a pendência real.
     expect(countPendingCovers(many, {})).toBe(100);
+  });
+});
+
+// ── ruído de trap/rap e rejeição de capa errada ──────────────────
+describe('titleSearchCandidates', () => {
+  it('tira o participante grudado no título', () => {
+    // O Deezer cadastra "TUDO BEM"; o arquivo veio "TUDO BEM FT. BNYX".
+    expect(titleSearchCandidates('TUDO BEM FT. BNYX')[0]).toBe('TUDO BEM');
+  });
+
+  it('tira o crédito de produção', () => {
+    expect(titleSearchCandidates('CEO (prod. by Neo Beats)')[0]).toBe('CEO');
+    expect(titleSearchCandidates('CEO prod. Neo Beats')[0]).toBe('CEO');
+  });
+
+  it('tira marcação de clipe', () => {
+    expect(titleSearchCandidates('CAROLINA [Clipe Oficial]')[0]).toBe('CAROLINA');
+    expect(titleSearchCandidates('CAROLINA - Clipe Oficial')[0]).toBe('CAROLINA');
+  });
+
+  it('mantém o título cru como segunda tentativa', () => {
+    // Às vezes o participante É parte do nome registrado.
+    const out = titleSearchCandidates('TUDO BEM FT. BNYX');
+    expect(out).toContain('TUDO BEM FT. BNYX');
+    expect(out.indexOf('TUDO BEM')).toBeLessThan(out.indexOf('TUDO BEM FT. BNYX'));
+  });
+
+  it('não duplica quando não há ruído', () => {
+    expect(titleSearchCandidates('TRAPLIFE')).toEqual(['TRAPLIFE']);
+  });
+});
+
+describe('scoreArtworkMatch — recusa a capa errada', () => {
+  // Caso REAL: buscar "Brandao85 CAROLINA" no Deezer devolve isto em 1º lugar.
+  it('recusa "Sweet Caroline / Dani Brandão" para "CAROLINA / Brandão85"', () => {
+    const score = scoreArtworkMatch(
+      { title: 'Sweet Caroline', artist: 'Dani Brandão', artworkUrl: 'http://x/c.jpg' },
+      'CAROLINA',
+      'Brandão85',
+    );
+    expect(score).toBe(0);
+  });
+
+  it('aceita o casamento certo', () => {
+    const score = scoreArtworkMatch(
+      { title: 'TUDO BEM', artist: 'Brandão85', artworkUrl: 'http://x/c.jpg' },
+      'TUDO BEM',
+      'Brandão85',
+    );
+    expect(score).toBeGreaterThan(0);
+  });
+
+  it('sem artista conhecido, só o título EXATO passa', () => {
+    expect(
+      scoreArtworkMatch({ title: 'CAROLINA', artist: 'Alee', artworkUrl: 'u' }, 'CAROLINA', null),
+    ).toBeGreaterThan(0);
+    expect(
+      scoreArtworkMatch(
+        { title: 'Carolina Ao Vivo', artist: 'X', artworkUrl: 'u' },
+        'CAROLINA',
+        null,
+      ),
+    ).toBe(0);
+  });
+
+  it('recusa linha sem imagem', () => {
+    expect(
+      scoreArtworkMatch(
+        { title: 'TUDO BEM', artist: 'Brandão85', artworkUrl: '' },
+        'TUDO BEM',
+        'Brandão85',
+      ),
+    ).toBe(0);
   });
 });
