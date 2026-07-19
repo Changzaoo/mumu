@@ -1246,11 +1246,17 @@ function normalizeArtistCasing(): void {
 function scheduleBackgroundCuration(): void {
   const run = (): void =>
     void (async () => {
+      // CAPAS PRIMEIRO. Antes esta era a ÚLTIMA de cinco varreduras em série, e
+      // a primeira delas (backfillRemote) percorre a biblioteca inteira fazendo
+      // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
+      // com o importador fora do ar, a vez das capas simplesmente nunca chegava.
+      // É o que o usuário VÊ na tela; vem na frente.
+      await backfillCovers().catch(() => undefined);
       await backfillRemote();
       await reprocessExisting();
       await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
       await redriveFromSource().catch(() => false); // real metadata from the source
-      await backfillCovers().catch(() => undefined); // faixa sem capa tenta de novo
+      await backfillCovers().catch(() => undefined); // 2ª passada: nomes já corrigidos
       await auditAttributions().catch(() => undefined); // AI spot-checks a few
     })();
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
@@ -1315,28 +1321,97 @@ function coverUrlLoads(url: string, timeoutMs = 6000): Promise<boolean> {
  * gravadora e compositor — por isso vale a consulta mesmo com capa já achada).
  * A primeira que responder vence. Devolve true quando a faixa saiu sem capa.
  */
+/**
+ * Miniatura de um link do YouTube. `maxresdefault` nem sempre existe; o
+ * `hqdefault` existe SEMPRE, então ele é o alvo — capa garantida vale mais que
+ * capa grande que às vezes some.
+ */
+export function youtubeThumbFor(sourceUrl: string): string | null {
+  try {
+    const url = new URL(sourceUrl);
+    const host = url.hostname.replace(/^www\./, '');
+    const id =
+      host === 'youtu.be'
+        ? url.pathname.slice(1)
+        : /(^|\.)youtube\.com$/.test(host)
+          ? url.searchParams.get('v')
+          : null;
+    return id && /^[\w-]{6,}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Artista provável de uma faixa órfã, deduzido das irmãs.
+ *
+ * Preferimos as do MESMO álbum; sem álbum, as importadas na MESMA janela de
+ * tempo (mesmo lote de arquivos). Só devolve quando há maioria clara — um
+ * palpite dividido é pior que nenhum, porque contamina a busca.
+ */
+export function guessArtistFromSiblings(
+  entry: LibraryEntry,
+  all: readonly LibraryEntry[] = read(),
+): string | null {
+  const albumKeyOf = entry.track.album?.title?.trim().toLowerCase();
+  const addedAt = new Date(entry.addedAt).getTime();
+  const JANELA_MS = 5 * 60_000; // mesmo lote de import
+
+  const siblings = all.filter((e) => {
+    if (e.track.id === entry.track.id) return false;
+    const name = e.track.artists[0]?.name;
+    if (!name || name === 'Desconhecido') return false;
+    if (albumKeyOf) return e.track.album?.title?.trim().toLowerCase() === albumKeyOf;
+    const t = new Date(e.addedAt).getTime();
+    return Number.isFinite(t) && Math.abs(t - addedAt) <= JANELA_MS;
+  });
+  if (siblings.length === 0) return null;
+
+  const tally = new Map<string, number>();
+  for (const s of siblings) {
+    const name = s.track.artists[0]?.name as string;
+    tally.set(name, (tally.get(name) ?? 0) + 1);
+  }
+  const [best] = [...tally.entries()].sort((a, b) => b[1] - a[1]);
+  if (!best) return null;
+  // Maioria clara: mais da metade das irmãs concordam.
+  return best[1] * 2 > siblings.length ? best[0] : null;
+}
+
 async function healCoverFor(id: string): Promise<boolean> {
   const entry = read().find((e) => e.track.id === id);
   if (!entry) return true; // removida no meio do passe — não é mais pendência
   const { track } = entry;
-  const artist = track.artists.map((a) => a.name).filter((n) => n && n !== 'Desconhecido')[0] ?? '';
+  const artist =
+    track.artists.map((a) => a.name).filter((n) => n && n !== 'Desconhecido')[0] ??
+    // Faixa sem artista buscada só pelo título traz qualquer coisa ("CAROLINA"
+    // devolveu Sweet Caroline). Mas ela quase nunca chega sozinha: veio num
+    // lote, junto de irmãs que FORAM identificadas. O artista dominante do
+    // álbum/lote é um palpite muito melhor que nenhum.
+    guessArtistFromSiblings(entry) ??
+    '';
 
   let cover: string | null = null;
 
-  // 1. iTunes — busca SEM exigir preview (ver searchSongsForArtwork).
-  const term = [artist, track.title].filter(Boolean).join(' ');
-  const rows = await searchSongsForArtwork(term, 'br', 10).catch(() => []);
-  const hit = pickArtworkMatch(
-    rows.map((r) => ({ title: r.trackName, artist: r.artistName, artworkUrl: r.artworkUrl100 })),
-    track.title,
-    artist,
-  );
-  if (hit) cover = appleArtwork(hit.artworkUrl, 'grid');
+  // ORDEM MEDIDA, não suposta. Num acervo de trap/rap nacional independente
+  // (Brandão85 etc.) o iTunes simplesmente NÃO TEM o catálogo: 0 de 4 faixas
+  // testadas. O Deezer achou 3 de 4, com capa em alta. O benchmark que dava
+  // 100% ao iTunes usava artistas mainstream — não é a biblioteca real deste
+  // usuário. Por isso o Deezer vem primeiro; o iTunes continua logo atrás
+  // porque é direto do navegador e funciona mesmo com o importador fora do ar.
+  const deezer = await fetchCover(track.title, artist).catch(() => null);
+  if (deezer) cover = deezer.coverUrl;
 
-  // 2. Deezer, pelo importer (a api.deezer.com não manda CORS).
+  // 2. iTunes — busca SEM exigir preview (ver searchSongsForArtwork).
   if (!cover) {
-    const deezer = await fetchCover(track.title, artist).catch(() => null);
-    if (deezer) cover = deezer.coverUrl;
+    const term = [artist, track.title].filter(Boolean).join(' ');
+    const rows = await searchSongsForArtwork(term, 'br', 10).catch(() => []);
+    const hit = pickArtworkMatch(
+      rows.map((r) => ({ title: r.trackName, artist: r.artistName, artworkUrl: r.artworkUrl100 })),
+      track.title,
+      artist,
+    );
+    if (hit) cover = appleArtwork(hit.artworkUrl, 'grid');
   }
 
   // 3. MusicBrainz: capa de último recurso E a ficha técnica que só ela tem.
@@ -1345,6 +1420,19 @@ async function healCoverFor(id: string): Promise<boolean> {
     !cover || wantCredits ? await fetchCredits(track.title, artist).catch(() => null) : null;
   if (!cover && credits?.coverUrl && (await coverUrlLoads(credits.coverUrl))) {
     cover = credits.coverUrl;
+  }
+
+  // 4. Último recurso: a miniatura da FONTE (YouTube etc.).
+  //
+  // Não é arte de álbum — é um quadro de vídeo 16:9, e por isso ficou fora da
+  // ordem principal. Mas quando nenhum catálogo tem a faixa (rap independente,
+  // remix, gravação caseira), a escolha real não é "capa boa ou capa torta": é
+  // "alguma capa ou um ícone de nota musical". A imagem é cortada em quadrado
+  // no CSS (object-cover), então o resultado é o miolo do frame — quase sempre
+  // a arte que o próprio artista pôs no vídeo.
+  if (!cover && entry.sourceUrl) {
+    const thumb = youtubeThumbFor(entry.sourceUrl);
+    if (thumb && (await coverUrlLoads(thumb))) cover = thumb;
   }
 
   const cur = read().find((e) => e.track.id === id);

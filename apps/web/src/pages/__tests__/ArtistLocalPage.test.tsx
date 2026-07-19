@@ -58,11 +58,9 @@ describe('ArtistLocalPage smoke', () => {
         </MemoryRouter>
       </QueryClientProvider>,
     );
-    // Timeout explícito: a página é pesada para renderizar (~4s mesmo isolada)
-    // e o padrão de 1s virava falha intermitente quando a suíte roda inteira e
-    // os workers disputam CPU. O tempo em si é suspeito e está anotado para
-    // investigação — mas um teste que pisca não pode ficar de pé enquanto isso.
-    expect(await screen.findByText('Populares', undefined, { timeout: 15_000 })).toBeTruthy();
+    // O limite generoso do findBy* está centralizado em src/test/setup.ts —
+    // páginas inteiras levam ~4s para montar em jsdom.
+    expect(await screen.findByText('Populares')).toBeTruthy();
     const headings = screen.getAllByRole('heading').map((h) => h.textContent);
     expect(headings.indexOf('Populares')).toBeLessThan(headings.indexOf('Todas as músicas'));
     expect(screen.getAllByText('Hit Um').length).toBeGreaterThan(0);

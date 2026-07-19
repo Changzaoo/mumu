@@ -1,6 +1,17 @@
 import '@testing-library/jest-dom/vitest';
 import { afterEach } from 'vitest';
-import { cleanup } from '@testing-library/react';
+import { cleanup, configure } from '@testing-library/react';
+
+/**
+ * Páginas inteiras (Home, Artista) levam ~4s para montar em jsdom — são
+ * dezenas de componentes, providers e stores. O padrão de 1s do
+ * `findBy*` cabia com folga quando a suíte era pequena, mas passou a
+ * estourar quando os workers disputam CPU, produzindo falhas que mudavam a
+ * cada execução. Teste que pisca é pior que teste nenhum: ensina o time a
+ * ignorar vermelho. O limite é generoso de propósito — ele existe para
+ * pegar travamento de verdade, não para medir desempenho de render.
+ */
+configure({ asyncUtilTimeout: 15_000 });
 
 afterEach(() => {
   cleanup();

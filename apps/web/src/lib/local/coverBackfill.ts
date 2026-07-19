@@ -19,7 +19,15 @@ export const MAX_COVER_ATTEMPTS = 3;
 /** Teto por sessão — a varredura é enfeite, nunca pode virar carga de rede. */
 export const COVER_SWEEP_LIMIT = 30;
 
-const ATTEMPTS_KEY = 'aurial:coverAttempts';
+/**
+ * A chave carrega a VERSÃO da cadeia de busca. Quando a ordem das fontes muda
+ * (foi o caso: o Deezer passou à frente do iTunes por medição real, e entrou a
+ * miniatura da fonte como último recurso), as tentativas antigas viram
+ * história de outro algoritmo — mantê-las deixaria as faixas que já esgotaram
+ * o limite congeladas sem capa para sempre, justamente as que a mudança veio
+ * salvar. Trocar a versão dá a todo mundo uma chance nova, uma única vez.
+ */
+const ATTEMPTS_KEY = 'aurial:coverAttempts:v2';
 
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
 
