@@ -39,8 +39,14 @@ import {
 } from '@/lib/local/metaTeam';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
+import { artistFromSource } from '@/lib/local/sourceArtist';
 import { appleArtwork, searchSongsForArtwork } from '@/lib/catalog/itunes';
-import { candidateArtists, indexCatalog, matchInCatalog } from '@/lib/local/catalogMatch';
+import {
+  candidateArtists,
+  fetchAppleCatalog,
+  indexCatalog,
+  matchInCatalog,
+} from '@/lib/local/catalogMatch';
 import {
   bumpCoverAttempt,
   countPendingCovers,
@@ -1585,6 +1591,11 @@ async function healCoverFor(id: string): Promise<boolean> {
  *  e o resto continua na varredura seguinte. */
 const CATALOG_ARTIST_LIMIT = 12;
 
+/** Quantas faixas órfãs consultam a fonte por varredura. Uma chamada leve cada,
+ *  mas um acervo grande tem centenas — e um lote costuma ser todo do mesmo
+ *  artista, então as primeiras já revelam o nome que destrava o resto. */
+const SOURCE_LOOKUP_LIMIT = 40;
+
 /**
  * Identificação em LOTE pelo catálogo do artista — a varredura que conserta as
  * faixas que a busca faixa-a-faixa nunca ia consertar.
@@ -1606,18 +1617,69 @@ async function catalogSweep(): Promise<number> {
   const pendente = (t: TrackDto): boolean => isMissingCover(t) || artistaEhDesconhecido(t);
   if (!read().some((e) => pendente(e.track))) return 0;
 
-  const artistas = candidateArtists(read().map((e) => e.track)).slice(0, CATALOG_ARTIST_LIMIT);
+  let curadas = 0;
+  const jaVistos = new Set<string>();
+
+  /** Baixa o catálogo de um artista e cura tudo que casar. */
+  const rodar = async (nomes: readonly string[]): Promise<void> => {
+    for (const nome of nomes) {
+      if (offline()) return;
+      const chave = normalizeForMatch(nome);
+      if (!chave || jaVistos.has(chave)) continue;
+      jaVistos.add(chave);
+      const alvos = read().filter((e) => pendente(e.track));
+      if (!alvos.length) return; // acabou a pendência — não gasta o resto
+      curadas += await curarCom(nome, alvos);
+    }
+  };
+
+  // 1ª rodada: quem já está creditado na biblioteca. As órfãs quase sempre
+  // vieram no mesmo lote que as identificadas, então isto resolve a maioria.
+  await rodar(candidateArtists(read().map((e) => e.track)).slice(0, CATALOG_ARTIST_LIMIT));
+
+  // 2ª rodada: PERGUNTA À FONTE quem é o artista das que sobraram.
+  //
+  // Sem este passo, um lote inteiro de um artista que ninguém credita fica
+  // invisível — foi o que deixou 11 faixas do Matuê sem correspondência mesmo
+  // com o catálogo tendo todas elas. Tentei antes deduzir o dono buscando o
+  // título e conferindo a duração (1 acerto em 14: títulos como "PARTY" e
+  // "BACKSTAGE" afundam a faixa certa) e ranquear os parceiros dos artistas
+  // conhecidos (também 1 em 14: quem mais aparece é produtor). O vídeo de
+  // origem simplesmente DIZ o artista — é dado, não inferência.
+  const sobraram = read().filter((e) => pendente(e.track) && e.sourceUrl);
+  if (sobraram.length && !offline()) {
+    const daFonte = new Map<string, { name: string; n: number }>();
+    for (const e of sobraram.slice(0, SOURCE_LOOKUP_LIMIT)) {
+      if (offline()) break;
+      const nome = await artistFromSource(e.sourceUrl as string).catch(() => null);
+      if (!nome) continue;
+      const key = normalizeForMatch(nome);
+      if (!key || jaVistos.has(key)) continue;
+      const prev = daFonte.get(key);
+      if (prev) prev.n += 1;
+      else daFonte.set(key, { name: nome, n: 1 });
+    }
+    // Quem explica mais órfãs primeiro: um lote grande do mesmo artista se
+    // resolve numa consulta de catálogo só.
+    await rodar([...daFonte.values()].sort((a, b) => b.n - a.n).map((v) => v.name));
+  }
+  return curadas;
+}
+
+/** Cura as faixas pendentes que casarem no catálogo deste artista. */
+async function curarCom(nome: string, alvos: readonly LibraryEntry[]): Promise<number> {
   let curadas = 0;
 
-  for (const nome of artistas) {
-    if (offline()) return curadas;
-    const alvos = read().filter((e) => pendente(e.track));
-    if (!alvos.length) break; // acabou a pendência — não gasta o resto
-
-    const catalogo = await fetchArtistCatalog(nome).catch(() => []);
-    if (!catalogo.length) continue;
-    const index = indexCatalog(catalogo);
-
+  // Apple primeiro: é direto do navegador, então funciona mesmo com o
+  // importador caseiro desligado ou desatualizado — que foi exatamente o
+  // estado em que a varredura devolveu "sem correspondência" para tudo.
+  // A Deezer (via importador) entra só como reforço, para o que a Apple não
+  // tiver; as duas juntas cobrem mais que qualquer uma sozinha.
+  let catalogo = await fetchAppleCatalog(nome).catch(() => []);
+  if (!catalogo.length) catalogo = await fetchArtistCatalog(nome).catch(() => []);
+  if (!catalogo.length) return 0;
+  const index = indexCatalog(catalogo);
+  {
     for (const entry of alvos) {
       const hit = matchInCatalog(entry.track, index);
       if (!hit) continue;
@@ -1668,8 +1730,8 @@ async function catalogSweep(): Promise<number> {
       });
       curadas += 1;
     }
-    await descanso(400); // gentil com o importador entre catálogos
   }
+  await descanso(400); // gentil com a fonte entre catálogos
   return curadas;
 }
 

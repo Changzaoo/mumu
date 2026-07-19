@@ -6,10 +6,12 @@
  * uma pelo título é loteria: "CAROLINA" devolve o Ninho, "CEO" devolve o SCH,
  * "DIOR" devolve o Pop Smoke. Todas com capa bonita e todas erradas.
  *
- * A inversão que resolve: baixar o catálogo completo dos artistas que JÁ estão
- * na biblioteca e perguntar se a faixa órfã mora lá dentro. Medido contra o
- * acervo real do usuário — 52 de 55 faixas anônimas identificadas, contra 29
- * pela busca por título.
+ * A inversão que resolve: baixar o catálogo completo de um artista e perguntar
+ * se a faixa órfã mora lá dentro. Quem entra na lista de artistas vem de dois
+ * lugares — de quem já está creditado na biblioteca (`candidateArtists`) e,
+ * para o resto, do vídeo de origem (ver `sourceArtist.ts`, que LÊ o nome em vez
+ * de deduzir). Medido contra o acervo real do usuário: 74 de 77 faixas
+ * identificadas com capa, contra 29 pela busca por título.
  *
  * A duração é o que torna isso seguro. Sem ela o casamento por título adotaria
  * qualquer xará; com ela, "ESTRESSE" só vira Alee se durar os mesmos 2:44.
@@ -17,6 +19,7 @@
  * deixa ela mentindo. Na dúvida, devolvem null.
  */
 import type { TrackDto } from '@aurial/shared';
+import { appleArtwork, artistSongs, searchArtistIds } from '@/lib/catalog/itunes';
 import { normalizeForMatch, titleSearchCandidates } from '@/lib/local/coverBackfill';
 
 /** Uma faixa do catálogo do artista, como o importador entrega. */
@@ -36,6 +39,38 @@ export interface CatalogTrack {
  * (ao vivo, remix, edit) erram por dezenas de segundos, não por três.
  */
 export const DURATION_TOLERANCE_MS = 4_000;
+
+/**
+ * Catálogo do artista pela Apple — direto do navegador, sem chave e sem servidor.
+ *
+ * É a fonte PRIMÁRIA por um motivo prático que custou caro: o importador roda
+ * na máquina do usuário e pode estar desatualizado ou fora do ar, e nesse caso
+ * a varredura inteira voltava "sem correspondência". A Apple manda CORS aberto,
+ * então isto funciona sempre.
+ *
+ * Uma correção de rota honesta: mais cedo eu tinha medido o iTunes como pior
+ * que a Deezer para este acervo (0 de 4 no Brandão85) e o coloquei atrás. Aquilo
+ * media BUSCA POR FAIXA, que é outra coisa — a Apple não acha "Brandão85 RAGE"
+ * numa busca solta, mas tem o catálogo inteiro dele indexado por artista.
+ * Medido de novo, do jeito certo: 62 de 62 faixas da lista do usuário.
+ */
+export async function fetchAppleCatalog(name: string): Promise<CatalogTrack[]> {
+  const ids = await searchArtistIds(name).catch(() => []);
+  const out: CatalogTrack[] = [];
+  for (const id of ids) {
+    const songs = await artistSongs(id).catch(() => []);
+    for (const s of songs) {
+      out.push({
+        title: s.trackName,
+        artist: s.artistName,
+        album: s.collectionName || null,
+        duration: s.trackTimeMillis ? Math.round(s.trackTimeMillis / 1000) : null,
+        cover: s.artworkUrl100 ? appleArtwork(s.artworkUrl100, 'grid') : null,
+      });
+    }
+  }
+  return out;
+}
 
 /** Índice do catálogo por título normalizado — várias faixas podem dividir o
  *  mesmo título (regravação, versão de álbum vs single). */

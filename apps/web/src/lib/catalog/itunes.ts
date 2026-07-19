@@ -105,6 +105,10 @@ export interface AppleArtworkHit {
   artistName: string;
   collectionName: string;
   artworkUrl100: string;
+  /** Duração em ms — a Apple nem sempre manda. É o que permite CONFERIR que o
+   *  resultado é mesmo esta faixa, e não uma xará: sem ela, buscar "DIOR" pelo
+   *  título aceitaria o Pop Smoke. */
+  trackTimeMillis?: number | null;
 }
 
 function isArtworkHit(song: Partial<AppleSong>): boolean {
@@ -147,6 +151,59 @@ export async function searchArtistId(name: string): Promise<number | null> {
   const want = nrm(term);
   const exact = results.find((r) => r.artistName && nrm(r.artistName) === want);
   return (exact ?? results[0])?.artistId ?? null;
+}
+
+/**
+ * TODOS os ids que casam o nome EXATO do artista — não só o mais provável.
+ *
+ * Homônimo aqui é a regra: "Alee" tem 6 perfis na Apple e as faixas do acervo
+ * estão espalhadas entre eles. `searchArtistId` devolve UM (certo para montar
+ * a página do artista, onde é preciso escolher um); para varrer catálogo atrás
+ * de faixa perdida, ficar com um só é o que fazia a busca voltar vazia.
+ */
+export async function searchArtistIds(name: string): Promise<number[]> {
+  const term = name.trim();
+  if (!term) return [];
+  const url = new URL('https://itunes.apple.com/search');
+  url.searchParams.set('term', term);
+  url.searchParams.set('entity', 'musicArtist');
+  url.searchParams.set('limit', '10');
+  url.searchParams.set('country', DEFAULT_COUNTRY);
+  const body = await fetchJson<{ results?: Array<{ artistId?: number; artistName?: string }> }>(
+    url.toString(),
+  );
+  const want = nrm(term);
+  return (body.results ?? [])
+    .filter((r) => typeof r.artistId === 'number' && r.artistName && nrm(r.artistName) === want)
+    .map((r) => r.artistId as number);
+}
+
+/**
+ * Catálogo completo de um artista, direto do navegador.
+ *
+ * `entity=song` num lookup de artista devolve até 200 faixas de uma chamada —
+ * álbuns, singles e participações — com duração e capa. Um pedido por perfil,
+ * sem chave e sem servidor no meio: a Apple manda CORS aberto, então isto
+ * funciona mesmo com o importador caseiro fora do ar (que foi exatamente o
+ * caso em que o usuário ficou sem correspondência nenhuma).
+ */
+export async function artistSongs(artistId: number): Promise<AppleSong[]> {
+  const url = new URL('https://itunes.apple.com/lookup');
+  url.searchParams.set('id', String(artistId));
+  url.searchParams.set('entity', 'song');
+  url.searchParams.set('limit', '200');
+  url.searchParams.set('country', DEFAULT_COUNTRY);
+  const body = await fetchJson<{ results?: Array<Partial<AppleSong> & { wrapperType?: string }> }>(
+    url.toString(),
+  );
+  // NÃO usa `isPlayable`: ele exige previewUrl, e aqui não vamos tocar nada —
+  // só identificar. Boa parte do catálogo independente vem sem prévia, e exigi-la
+  // descartaria justamente as faixas obscuras que precisamos casar. Basta a
+  // linha ser uma faixa (a primeira é o cabeçalho do artista) com nome e arte.
+  return (body.results ?? []).filter(
+    (r): r is AppleSong =>
+      r.wrapperType === 'track' && typeof r.trackName === 'string' && !!r.trackName,
+  );
 }
 
 /** All albums released by an iTunes artist id (newest first, singles dropped). */
@@ -280,6 +337,7 @@ export async function searchSongsForArtwork(
       artistName: String(r.artistName ?? ''),
       collectionName: String(r.collectionName ?? ''),
       artworkUrl100: String(r.artworkUrl100 ?? ''),
+      trackTimeMillis: typeof r.trackTimeMillis === 'number' ? r.trackTimeMillis : null,
     }));
   };
 
