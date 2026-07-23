@@ -99,8 +99,12 @@ let cache: LibraryEntry[] | null = null;
 /** Derivados caros (álbuns/artistas/gêneros) memoizados até a próxima write() —
  *  Sidebar + Home consultam a cada render e recalcular O(n) toda vez derrubava
  *  celulares modestos. */
-let groupsCache: { albums: LocalAlbum[]; artists: LocalArtist[]; genres: LocalGenre[] } | null =
-  null;
+let groupsCache: {
+  albums: LocalAlbum[];
+  artists: LocalArtist[];
+  genres: LocalGenre[];
+  labels: LocalLabel[];
+} | null = null;
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -1106,6 +1110,7 @@ function ensureGroups(): NonNullable<typeof groupsCache> {
     albums: computeAlbumGroups(),
     artists: computeArtists(),
     genres: computeGenreGroups(),
+    labels: computeLabelGroups(),
   });
 }
 
@@ -1180,6 +1185,12 @@ export interface LocalGenre {
   tracks: TrackDto[];
 }
 
+export interface LocalLabel {
+  name: string;
+  coverUrl: string | null;
+  tracks: TrackDto[];
+}
+
 /** Library tracks grouped by their (AI-assigned) genre, biggest first. */
 export function genreGroups(): LocalGenre[] {
   return ensureGroups().genres;
@@ -1208,6 +1219,38 @@ export function genreTracks(genre: string): TrackDto[] {
   return read()
     .map((e) => e.track)
     .filter((t) => (t.genre ?? '').trim().toLowerCase() === key);
+}
+
+/** Library tracks grouped by label/publisher, biggest first. */
+export function labelGroups(): LocalLabel[] {
+  return ensureGroups().labels;
+}
+
+function computeLabelGroups(): LocalLabel[] {
+  const byKey = new Map<string, LocalLabel>();
+  for (const entry of read()) {
+    const name = entry.track.label?.trim();
+    if (!name) continue;
+    const key = normName(name);
+    if (!key) continue;
+    let group = byKey.get(key);
+    if (!group) {
+      group = { name, coverUrl: entry.track.coverUrl ?? null, tracks: [] };
+      byKey.set(key, group);
+    }
+    group.tracks.push(entry.track);
+    if (!group.coverUrl && entry.track.coverUrl) group.coverUrl = entry.track.coverUrl;
+  }
+  return [...byKey.values()].sort((a, b) => b.tracks.length - a.tracks.length);
+}
+
+/** All library tracks released by the provided label (case-insensitive). */
+export function labelTracks(label: string): TrackDto[] {
+  const key = normName(label);
+  if (!key) return [];
+  return read()
+    .map((e) => e.track)
+    .filter((t) => normName(t.label?.trim() ?? '') === key);
 }
 
 /** Object URL for a local track, or null when its audio is not available. */
@@ -1291,7 +1334,7 @@ export function tituloDuracaoKey(track: TrackDto): string | null {
 /** Which duplicate to keep: local audio > uploaded copy > has cover > older. */
 function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
   const score = (e: LibraryEntry): number =>
-    (blobUrls.has(e.track.id) ? 4 : 0) + (e.remoteUrl ? 2 : 0) + (e.track.coverUrl ? 1 : 0);
+    (hasLocalAudio(e.track.id) ? 4 : 0) + (e.remoteUrl ? 2 : 0) + (e.track.coverUrl ? 1 : 0);
   const sa = score(a);
   const sb = score(b);
   if (sa !== sb) return sa > sb ? a : b;
@@ -1306,6 +1349,7 @@ function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
 export async function dedupeLibrary(): Promise<number> {
   const winners = new Map<string, LibraryEntry>();
   const losers: string[] = [];
+  const replacements = new Map<string, string>();
   for (const e of read()) {
     const key = dedupeKey(e.track);
     if (!key) continue;
@@ -1316,7 +1360,9 @@ export async function dedupeLibrary(): Promise<number> {
     }
     const keep = preferredEntry(prev, e);
     winners.set(key, keep);
-    losers.push((keep === prev ? e : prev).track.id);
+    const loser = (keep === prev ? e : prev).track.id;
+    losers.push(loser);
+    replacements.set(loser, keep.track.id);
   }
   // ── 2ª passada: a mesma faixa que entrou duas vezes, uma SEM artista ──
   //
@@ -1339,7 +1385,9 @@ export async function dedupeLibrary(): Promise<number> {
     if (prevAnon === curAnon) continue; // ambos nomeados (podem ser covers) ou ambos anônimos
     const keep = preferredEntry(prev, e);
     porTituloDuracao.set(key, keep);
-    losers.push((keep === prev ? e : prev).track.id);
+    const loser = (keep === prev ? e : prev).track.id;
+    losers.push(loser);
+    replacements.set(loser, keep.track.id);
   }
 
   if (losers.length === 0) return 0;
@@ -1363,7 +1411,33 @@ export async function dedupeLibrary(): Promise<number> {
     // de todos. Some da lista local, e pronto.
     void deleteBlob(id).catch(() => undefined);
   }
+  try {
+    const localPlaylists = await import('@/lib/local/localPlaylists');
+    localPlaylists.remapTrackIds(replacements);
+  } catch {
+    /* playlist remap is best-effort */
+  }
   return losers.length;
+}
+
+export interface DedupeSummary {
+  removedTracks: number;
+  normalizedArtists: number;
+  normalizedAlbums: number;
+  normalizedTrackCredits: number;
+}
+
+/**
+ * Full duplicate cleanup across tracks + artist/album naming consistency.
+ * Track removal happens first; metadata normalization then collapses visual
+ * duplicates that differ only by spelling/casing.
+ */
+export async function dedupeLibraryDeep(): Promise<DedupeSummary> {
+  const removedTracks = await dedupeLibrary();
+  const normalizedTrackCredits = normalizeTrackArtistCredits();
+  const normalizedArtists = normalizeArtistCasing();
+  const normalizedAlbums = normalizeAlbumCasing();
+  return { removedTracks, normalizedArtists, normalizedAlbums, normalizedTrackCredits };
 }
 
 export function totalBytes(): number {
@@ -1481,7 +1555,25 @@ async function restoreEmbeddedCovers(): Promise<void> {
  * desempatando contra a que está toda em minúscula (quase sempre metadata
  * desleixada). Só reescrevemos quando há divergência real.
  */
-function normalizeArtistCasing(): void {
+function normalizeTrackArtistCredits(): number {
+  let changed = 0;
+  const next = read().map((entry) => {
+    const seen = new Set<string>();
+    const artists = entry.track.artists.filter((artist) => {
+      const key = normName(artist.name ?? '');
+      if (!key || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+    if (artists.length === entry.track.artists.length) return entry;
+    changed += 1;
+    return { ...entry, track: { ...entry.track, artists } };
+  });
+  if (changed > 0) write(next);
+  return changed;
+}
+
+function normalizeArtistCasing(): number {
   const variants = new Map<string, Map<string, number>>();
   for (const entry of read()) {
     for (const artist of entry.track.artists) {
@@ -1511,9 +1603,9 @@ function normalizeArtistCasing(): void {
     }
     if (best) canonical.set(key, best);
   }
-  if (canonical.size === 0) return;
+  if (canonical.size === 0) return 0;
 
-  let changed = false;
+  let changed = 0;
   const next = read().map((entry) => {
     let touched = false;
     const artists = entry.track.artists.map((artist) => {
@@ -1524,10 +1616,63 @@ function normalizeArtistCasing(): void {
       return { ...artist, name: want };
     });
     if (!touched) return entry;
-    changed = true;
+    changed += 1;
     return { ...entry, track: { ...entry.track, artists } };
   });
-  if (changed) write(next);
+  if (changed > 0) write(next);
+  return changed;
+}
+
+/**
+ * One canonical album title per (album, primary artist) identity to collapse
+ * duplicate album cards caused only by casing/punctuation drift.
+ */
+function normalizeAlbumCasing(): number {
+  const counts = new Map<string, Map<string, number>>();
+  for (const entry of read()) {
+    const album = entry.track.album?.title?.trim();
+    const artist = entry.track.artists[0]?.name?.trim() ?? '';
+    if (!album || !artist) continue;
+    const id = `${normName(album)}|${normName(artist)}`;
+    if (!id || id.startsWith('|')) continue;
+    const bucket = counts.get(id) ?? new Map<string, number>();
+    bucket.set(album, (bucket.get(album) ?? 0) + 1);
+    counts.set(id, bucket);
+  }
+
+  const canonical = new Map<string, string>();
+  for (const [id, bucket] of counts) {
+    if (bucket.size < 2) continue;
+    let best = '';
+    let bestScore = -1;
+    for (const [title, count] of bucket) {
+      const allLower = title === title.toLowerCase();
+      const score = count * 2 + (allLower ? 0 : 1);
+      if (score > bestScore) {
+        best = title;
+        bestScore = score;
+      }
+    }
+    if (best) canonical.set(id, best);
+  }
+  if (canonical.size === 0) return 0;
+
+  let changed = 0;
+  const next = read().map((entry) => {
+    const album = entry.track.album?.title?.trim();
+    const artist = entry.track.artists[0]?.name?.trim() ?? '';
+    if (!album || !artist) return entry;
+    const id = `${normName(album)}|${normName(artist)}`;
+    const want = canonical.get(id);
+    if (!want || want === album || !entry.track.album) return entry;
+    changed += 1;
+    return {
+      ...entry,
+      track: { ...entry.track, album: { ...entry.track.album, title: want } },
+    };
+  });
+  if (changed > 0) write(next);
+  return changed;
 }
 
 /**

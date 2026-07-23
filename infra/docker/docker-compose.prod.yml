@@ -153,9 +153,10 @@ services:
   nginx:
     image: nginx:alpine
     restart: unless-stopped
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
     ports:
       - '80:80'
-      - '443:443'
     volumes:
       - ../nginx/nginx.conf:/etc/nginx/nginx.conf:ro
       - ../nginx/certs:/etc/nginx/certs:ro # certbot certs go here (see docs/DEPLOY.md)

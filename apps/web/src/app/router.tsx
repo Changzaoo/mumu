@@ -72,6 +72,7 @@ export const router = createBrowserRouter([
           { path: '/search', element: page('SearchPage', 'list') },
           { path: '/library', element: page('LibraryPage', 'list') },
           { path: '/artistas', element: page('ArtistsPage', 'home') },
+          { path: '/gravadoras', element: page('LabelsPage', 'home') },
           { path: '/liked', element: page('LikedPage', 'list') },
           { path: '/history', element: page('HistoryPage', 'list') },
           {
@@ -105,6 +106,7 @@ export const router = createBrowserRouter([
           { path: '/artist/:id', element: page('ArtistPage', 'detail') },
           // Local library (Spotify-style) — grouped from on-device metadata.
           { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
+          { path: '/gravadora/:name', element: page('LabelLocalPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
           { path: '/mix/:key', element: page('MixPage', 'detail') },
           { path: '/recentes', element: page('RecentPage', 'list') },

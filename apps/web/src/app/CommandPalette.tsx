@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router';
 import {
   Compass,
+  Building2,
   Download,
   Heart,
   History,
@@ -40,6 +41,7 @@ const NAV_ITEMS: Array<{ to: string; label: string; icon: LucideIcon }> = [
   { to: '/search', label: 'Buscar', icon: Search },
   { to: '/discover', label: 'Descobrir', icon: Compass },
   { to: '/library', label: 'Biblioteca', icon: Library },
+  { to: '/gravadoras', label: 'Gravadoras', icon: Building2 },
   { to: '/liked', label: 'Curtidas', icon: Heart },
   { to: '/history', label: 'Histórico', icon: History },
   { to: '/downloads', label: 'Downloads', icon: Download },

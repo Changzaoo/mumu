@@ -45,8 +45,10 @@ else
   #     ./ v@192.168.0.100:/opt/aurial/
 fi
 
-step "2/6 Build images (api + worker share the aurial-api image)"
-compose build --pull api worker
+step "2/6 Build images (worker reuses aurial-api image tag)"
+# Build only once: with classic builder, building api+worker in parallel can race
+# while exporting the same `aurial-api:latest` tag.
+compose build --pull api
 
 step "3/6 Run database migrations (prisma migrate deploy)"
 compose --profile tools run --rm migrate

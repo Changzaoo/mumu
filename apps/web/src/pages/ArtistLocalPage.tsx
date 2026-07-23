@@ -181,7 +181,14 @@ export default function ArtistLocalPage() {
               {label && (
                 <div>
                   <dt className="uppercase tracking-[0.14em] text-fg-subtle">Gravadora</dt>
-                  <dd className="mt-0.5 text-fg">{label}</dd>
+                  <dd className="mt-0.5">
+                    <Link
+                      to={`/gravadora/${encodeURIComponent(label)}`}
+                      className="text-fg hover:text-accent"
+                    >
+                      {label}
+                    </Link>
+                  </dd>
                 </div>
               )}
               {bio?.url && (
@@ -194,7 +201,7 @@ export default function ArtistLocalPage() {
                       rel="noreferrer noopener"
                       className="text-fg hover:text-accent"
                     >
-                      Wikipédia ({bio.lang})
+                      Fonte ({bio.lang.toUpperCase()})
                     </a>
                   </dd>
                 </div>

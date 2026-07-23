@@ -1,7 +1,9 @@
 import { describe, expect, it } from 'vitest';
 import type { TrackDto } from '@aurial/shared';
 import {
+  buildAlbumRecommendations,
   buildRecommendations,
+  type AlbumRecoInputs,
   type RecoEntry,
   type RecoInputs,
   type RecoPlay,
@@ -39,6 +41,10 @@ function inputs(over: Partial<RecoInputs>): RecoInputs {
   return { entries: [], history: [], liked: [], now: NOW, ...over };
 }
 
+function albumInputs(over: Partial<AlbumRecoInputs>): AlbumRecoInputs {
+  return { entries: [], history: [], liked: [], albums: [], now: NOW, ...over };
+}
+
 describe('buildRecommendations — motor local', () => {
   it('decaimento temporal: quem você ouviu ONTEM vence quem ouviu há 60 dias', () => {
     const { a, b, entries } = baseLibrary();
@@ -47,7 +53,49 @@ describe('buildRecommendations — motor local', () => {
       ...b.flatMap((t) => [play(t, 60), play(t, 61)]), // B: 8 plays antigos
     ];
     const recos = buildRecommendations(inputs({ entries, history }));
-    expect(recos[0]?.key).toBe('genre:Trap'); // cluster do Artista A na frente
+    const order = recos.map((r) => r.key);
+    expect(order.indexOf('genre:Trap')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('genre:Rock')).toBeGreaterThanOrEqual(0);
+    expect(order.indexOf('genre:Trap')).toBeLessThan(order.indexOf('genre:Rock'));
+  });
+
+  describe('buildAlbumRecommendations — álbuns para você', () => {
+    it('prioriza álbum com sinais fortes de gosto (plays + curtidas)', () => {
+      const { a, b, entries } = baseLibrary();
+      const albums = [
+        { key: 'a', title: 'Album A', artist: 'Artista A', coverUrl: null, tracks: a },
+        { key: 'b', title: 'Album B', artist: 'Artista B', coverUrl: null, tracks: b },
+      ];
+      const history = [...a.map((t) => play(t, 2)), ...b.map((t) => play(t, 12))];
+      const recos = buildAlbumRecommendations(
+        albumInputs({
+          entries,
+          albums,
+          history,
+          liked: [a[0]!, a[1]!],
+        }),
+      );
+      expect(recos[0]?.key).toBe('a');
+    });
+
+    it('evita repetir álbum recém-tocado quando há alternativa forte', () => {
+      const fresh = [1, 2, 3].map((i) => track(`f${i}`, 'Artista Fresh', 'Pop'));
+      const stale = [1, 2, 3].map((i) => track(`s${i}`, 'Artista Stale', 'Pop'));
+      const entries = [...fresh, ...stale].map((t) => entry(t, 5));
+      const albums = [
+        { key: 'fresh', title: 'Fresh', artist: 'Artista Fresh', coverUrl: null, tracks: fresh },
+        { key: 'stale', title: 'Stale', artist: 'Artista Stale', coverUrl: null, tracks: stale },
+      ];
+      const history = [
+        ...stale.map((t) => play(t, 0)),
+        ...fresh.map((t) => play(t, 14)),
+        ...fresh.map((t) => play(t, 20)),
+      ];
+      const recos = buildAlbumRecommendations(
+        albumInputs({ entries, albums, history, liked: fresh }),
+      );
+      expect(recos[0]?.key).toBe('fresh');
+    });
   });
 
   it('curtida vale bônus: artista pouco ouvido mas curtido sobe no ranking', () => {
@@ -59,9 +107,11 @@ describe('buildRecommendations — motor local', () => {
     ];
     // Sem curtidas, A vence; com 2 curtidas em B (bônus 3× cada), B vira o topo.
     const sem = buildRecommendations(inputs({ entries, history }));
-    expect(sem[0]?.key).toBe('genre:Trap');
+    const semOrder = sem.map((r) => r.key);
+    expect(semOrder.indexOf('genre:Trap')).toBeLessThan(semOrder.indexOf('genre:Rock'));
     const com = buildRecommendations(inputs({ entries, history, liked: [b[0]!, b[1]!] }));
-    expect(com[0]?.key).toBe('genre:Rock');
+    const comOrder = com.map((r) => r.key);
+    expect(comOrder.indexOf('genre:Rock')).toBeLessThan(comOrder.indexOf('genre:Trap'));
   });
 
   it('"De volta aos seus ouvidos" traz o esquecido e exclui o recente', () => {

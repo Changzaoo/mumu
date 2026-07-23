@@ -8,6 +8,7 @@ import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import {
   Disc3,
+  Building2,
   Heart,
   Library,
   ListMusic,
@@ -175,6 +176,10 @@ export default function LibraryPage() {
     const all = localLibrary.genreGroups();
     return term ? all.filter((g) => g.genre.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
+  const localLabels = useMemo(() => {
+    const all = localLibrary.labelGroups();
+    return term ? all.filter((l) => l.name.toLowerCase().includes(term)) : all;
+  }, [libEntries, term]);
   // Álbuns que você REALMENTE tem faixa. Antes esta aba trazia a discografia
   // inteira do iTunes de cada artista: dezenas de álbuns sem uma única música
   // sua, que abriam vazios. Álbum sem faixa não é biblioteca, é catálogo.
@@ -276,6 +281,7 @@ export default function LibraryPage() {
           <TabsTrigger value="genres">Gêneros</TabsTrigger>
           <TabsTrigger value="artists">Artistas</TabsTrigger>
           <TabsTrigger value="albums">Álbuns</TabsTrigger>
+          <TabsTrigger value="labels">Gravadoras</TabsTrigger>
           <TabsTrigger value="playlists">Playlists</TabsTrigger>
         </TabsList>
 
@@ -347,6 +353,33 @@ export default function LibraryPage() {
                 />
               ))}
               {maisBotao(discography.length)}
+            </div>
+          )}
+        </TabsContent>
+
+        <TabsContent value="labels">
+          {localLabels.length === 0 ? (
+            <EmptyState
+              icon={Building2}
+              title={term ? 'Nenhuma gravadora com esse nome' : 'Nenhuma gravadora ainda'}
+              description={
+                term
+                  ? undefined
+                  : 'Conforme as músicas forem identificadas, as gravadoras aparecem aqui.'
+              }
+            />
+          ) : (
+            <div className={grid}>
+              {localLabels.slice(0, mostrar).map((label) => (
+                <MediaCard
+                  key={label.name}
+                  title={label.name}
+                  subtitle={`${label.tracks.length} ${label.tracks.length === 1 ? 'música' : 'músicas'}`}
+                  imageUrl={label.coverUrl}
+                  to={`/gravadora/${encodeURIComponent(label.name)}`}
+                />
+              ))}
+              {maisBotao(localLabels.length)}
             </div>
           )}
         </TabsContent>

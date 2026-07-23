@@ -9,6 +9,7 @@ import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
   IoAddCircleOutline,
+  IoBusinessOutline,
   IoCompass,
   IoCompassOutline,
   IoDiscOutline,
@@ -58,12 +59,13 @@ const TOOLS_NAV: NavEntry[] = [
   { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
 ];
 
-type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
+type LibraryFilter = 'playlists' | 'artistas' | 'albuns' | 'gravadoras';
 
 const FILTERS: Array<{ key: LibraryFilter; label: string }> = [
   { key: 'playlists', label: 'Playlists' },
   { key: 'artistas', label: 'Artistas' },
   { key: 'albuns', label: 'Álbuns' },
+  { key: 'gravadoras', label: 'Gravadoras' },
 ];
 
 function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {
@@ -168,6 +170,7 @@ export function Sidebar() {
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
   const artists = localLibrary.artists();
   const albums = localLibrary.albumGroups();
+  const labels = localLibrary.labelGroups();
 
   const toolsNav = authorized ? TOOLS_NAV : TOOLS_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
 
@@ -300,6 +303,17 @@ export function Sidebar() {
                       subtitle={`Álbum • ${album.artist}`}
                       imageUrl={album.coverUrl}
                       icon={IoDiscOutline}
+                    />
+                  ))}
+                {filter === 'gravadoras' &&
+                  labels.map((label) => (
+                    <LibraryItem
+                      key={label.name}
+                      to={`/gravadora/${encodeURIComponent(label.name)}`}
+                      title={label.name}
+                      subtitle={`Gravadora • ${label.tracks.length} faixas`}
+                      imageUrl={label.coverUrl}
+                      icon={IoBusinessOutline}
                     />
                   ))}
               </div>

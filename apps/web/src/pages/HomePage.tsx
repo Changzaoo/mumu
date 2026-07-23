@@ -19,7 +19,12 @@ import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localPlaylists from '@/lib/local/localPlaylists';
-import { buildRecommendations, daySeed, seededShuffle } from '@/lib/reco/recommend';
+import {
+  buildAlbumRecommendations,
+  buildRecommendations,
+  daySeed,
+  seededShuffle,
+} from '@/lib/reco/recommend';
 import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
 import { trackArtistNames } from '@/lib/utils';
@@ -183,6 +188,11 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
     [entries, history, likedCount],
   );
+  const albumRecos = useMemo(
+    () => buildAlbumRecommendations(),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+    [entries, albums, history, likedCount],
+  );
 
   // ── prateleiras semânticas (embeddings) ─────────────────────────
   // Aditivas: se a IA não estiver disponível, `ready` nunca sobe e a Home
@@ -329,6 +339,26 @@ export default function HomePage() {
       {/* Seções "adicionadas recentemente"/"no dispositivo" removidas a pedido —
           a Home é recomendação + biblioteca organizada; adicionar músicas vive
           na página própria. */}
+
+      {albumRecos.length > 0 && (
+        <SectionCarousel title="Álbuns para você" subtitle="Baseado no que você curte e escuta">
+          {albumRecos.map((album) => (
+            <MediaCard
+              key={`reco-album:${album.key}`}
+              title={album.title}
+              subtitle={album.artist}
+              imageUrl={album.coverUrl}
+              to={`/disco/${encodeURIComponent(album.key)}`}
+              onPlay={() =>
+                playQueue(album.tracks, 0, {
+                  source: 'library',
+                  sourceId: `reco-album:${album.key}`,
+                })
+              }
+            />
+          ))}
+        </SectionCarousel>
+      )}
 
       {/* Real albums in the library (capped — o resto vive em "Mostrar tudo"). */}
       {albums.length > 0 && (

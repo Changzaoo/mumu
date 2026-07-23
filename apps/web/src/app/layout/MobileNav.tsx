@@ -8,6 +8,7 @@ import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
   IoAddCircleOutline,
+  IoBusinessOutline,
   IoCompassOutline,
   IoEllipsisHorizontal,
   IoHeartOutline,
@@ -61,6 +62,7 @@ const MENU: MenuGroup[] = [
     heading: 'Biblioteca',
     items: [
       { to: '/artistas', label: 'Artistas', icon: IoPeopleOutline },
+      { to: '/gravadoras', label: 'Gravadoras', icon: IoBusinessOutline },
       { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
       { to: '/history', label: 'Histórico', icon: IoTimeOutline },
     ],

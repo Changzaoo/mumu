@@ -395,12 +395,41 @@ export default function DevicePage() {
                     variant="ghost"
                     size="sm"
                     onClick={() =>
-                      void toast.promise(localLibrary.dedupeLibrary(), {
-                        loading: 'Procurando duplicadas…',
-                        success: (n) =>
-                          n > 0
-                            ? `${n} ${n === 1 ? 'duplicada removida' : 'duplicadas removidas'}`
-                            : 'Nenhuma duplicada',
+                      void toast.promise(localLibrary.dedupeLibraryDeep(), {
+                        loading: 'Limpando duplicadas (faixas, artistas e álbuns)…',
+                        success: (summary) => {
+                          const actions = [
+                            summary.removedTracks > 0
+                              ? `${summary.removedTracks} ${
+                                  summary.removedTracks === 1
+                                    ? 'faixa duplicada removida'
+                                    : 'faixas duplicadas removidas'
+                                }`
+                              : null,
+                            summary.normalizedArtists > 0
+                              ? `${summary.normalizedArtists} ${
+                                  summary.normalizedArtists === 1
+                                    ? 'artista normalizado'
+                                    : 'artistas normalizados'
+                                }`
+                              : null,
+                            summary.normalizedAlbums > 0
+                              ? `${summary.normalizedAlbums} ${
+                                  summary.normalizedAlbums === 1
+                                    ? 'álbum normalizado'
+                                    : 'álbuns normalizados'
+                                }`
+                              : null,
+                            summary.normalizedTrackCredits > 0
+                              ? `${summary.normalizedTrackCredits} ${
+                                  summary.normalizedTrackCredits === 1
+                                    ? 'faixa com crédito de artista corrigido'
+                                    : 'faixas com crédito de artista corrigido'
+                                }`
+                              : null,
+                          ].filter(Boolean);
+                          return actions.length > 0 ? actions.join(' · ') : 'Nenhuma duplicada';
+                        },
                         error: 'Falha ao limpar',
                       })
                     }

@@ -34,6 +34,7 @@ import type { TrackDto } from '@aurial/shared';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
+import type { LocalAlbum } from '@/lib/local/localLibrary';
 
 export interface Recommendation {
   /** `genre:<nome>` / `artist:<nome>` abrem em /mix/:key; `reco:*` só tocam. */
@@ -61,6 +62,14 @@ export interface RecoInputs {
   entries: readonly RecoEntry[];
   history: readonly RecoPlay[];
   liked: readonly TrackDto[];
+  now?: Date;
+}
+
+export interface AlbumRecoInputs {
+  entries: readonly RecoEntry[];
+  history: readonly RecoPlay[];
+  liked: readonly TrackDto[];
+  albums: readonly LocalAlbum[];
   now?: Date;
 }
 
@@ -206,6 +215,25 @@ function periodoDoDia(hour: number): string {
   return 'à noite';
 }
 
+function albumArtistKey(album: LocalAlbum): string {
+  return norm(album.artist);
+}
+
+function bumpAffinity(
+  artistScore: Map<string, number>,
+  genreScore: Map<string, number>,
+  track: TrackDto,
+  weight: number,
+): void {
+  for (const artist of track.artists) {
+    const name = artist.name?.trim();
+    if (!name || name === 'Desconhecido') continue;
+    bump(artistScore, norm(name), weight);
+  }
+  const g = track.genre?.trim();
+  if (g) bump(genreScore, g.toLowerCase(), weight);
+}
+
 // ── índices da biblioteca (uma passada) ─────────────────────────
 interface ArtistBucket {
   name: string;
@@ -223,6 +251,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
   const now = inputs.now ?? new Date();
   const nowMs = now.getTime();
   const seed = daySeed(now);
+  const recentTrackIds = new Set(inputs.history.slice(0, 20).map((p) => p.track.id));
 
   // Passada única pela BIBLIOTECA: índices por faixa, artista e gênero.
   const trackById = new Map<string, TrackDto>();
@@ -356,7 +385,8 @@ function compute(inputs: RecoInputs): Recommendation[] {
         // afinidade × frescor determinístico do dia (0.6–1.4): o mix "gira" a
         // cada dia sem nunca ficar aleatório dentro do mesmo dia.
         const base = aScore + (fastByTrack.get(t.id) ?? 0) + (likedIds.has(t.id) ? 1 : 0);
-        cand.push({ t, score: base * (0.6 + 0.8 * frescorDoDia(t.id, seed)) });
+        const repeatPenalty = recentTrackIds.has(t.id) ? 0.55 : 1;
+        cand.push({ t, score: base * repeatPenalty * (0.6 + 0.8 * frescorDoDia(t.id, seed)) });
       }
     }
     if (cand.length < 4) continue;
@@ -461,6 +491,86 @@ function compute(inputs: RecoInputs): Recommendation[] {
   return out.length > 0 ? out : fallbackMixes(genreIdx, artistIdx);
 }
 
+function computeAlbumRecommendations(inputs: AlbumRecoInputs): LocalAlbum[] {
+  const now = inputs.now ?? new Date();
+  const nowMs = now.getTime();
+  const seed = daySeed(now);
+  if (inputs.albums.length === 0) return [];
+
+  const artistScore = new Map<string, number>();
+  const genreScore = new Map<string, number>();
+  const playedTrackIds = new Set<string>();
+  const recentTrackIds = new Set(inputs.history.slice(0, 40).map((p) => p.track.id));
+  const likedIds = new Set(inputs.liked.map((t) => t.id));
+  const addedAtById = new Map<string, number>();
+  for (const entry of inputs.entries) {
+    const ms = Date.parse(entry.addedAt);
+    if (Number.isFinite(ms)) addedAtById.set(entry.track.id, ms);
+  }
+
+  for (const play of inputs.history) {
+    const at = Date.parse(play.playedAt);
+    if (!Number.isFinite(at)) continue;
+    const days = Math.max(0, (nowMs - at) / 86_400_000);
+    const weight = Math.exp(-days / 21);
+    playedTrackIds.add(play.track.id);
+    bumpAffinity(artistScore, genreScore, play.track, weight);
+  }
+  for (const liked of inputs.liked) {
+    bumpAffinity(artistScore, genreScore, liked, BONUS_CURTIDA);
+  }
+
+  const scored = inputs.albums
+    .map((album) => {
+      let affinitySum = 0;
+      let recentHits = 0;
+      let unplayed = 0;
+      let newestAdded = 0;
+      for (const t of album.tracks) {
+        const a = artistScore.get(norm(t.artists[0]?.name?.trim() ?? '')) ?? 0;
+        const g = t.genre ? (genreScore.get(t.genre.toLowerCase()) ?? 0) : 0;
+        const liked = likedIds.has(t.id) ? 1.8 : 0;
+        const played = playedTrackIds.has(t.id);
+        if (!played) unplayed += 1;
+        if (recentTrackIds.has(t.id)) recentHits += 1;
+        const addedAt = addedAtById.get(t.id) ?? 0;
+        if (addedAt > newestAdded) newestAdded = addedAt;
+        affinitySum += a + g * 0.45 + liked + (played ? 0 : 0.35);
+      }
+      const base = affinitySum / Math.max(1, album.tracks.length);
+      const daysSinceNewest =
+        newestAdded > 0 ? Math.max(0, (nowMs - newestAdded) / 86_400_000) : 999;
+      const freshnessBoost = 1 + Math.exp(-daysSinceNewest / 45) * 0.25;
+      const discoveryBoost =
+        unplayed > 0 ? 1 + Math.min(0.35, (unplayed / Math.max(1, album.tracks.length)) * 0.35) : 1;
+      const repeatPenalty =
+        recentHits > 0
+          ? Math.max(0.25, 1 - (recentHits / Math.max(1, album.tracks.length)) * 0.8)
+          : 1;
+      const hardRepeatPenalty = recentHits >= Math.ceil(album.tracks.length * 0.7) ? 0.4 : 1;
+      const dayFreshness = 0.92 + frescorDoDia(`album:${album.key}`, seed) * 0.16;
+      return {
+        album,
+        score:
+          base * freshnessBoost * discoveryBoost * repeatPenalty * hardRepeatPenalty * dayFreshness,
+      };
+    })
+    .filter((row) => row.score > 0.15)
+    .sort((a, b) => b.score - a.score);
+
+  const out: LocalAlbum[] = [];
+  const artistCap = new Map<string, number>();
+  for (const row of scored) {
+    const artistKey = albumArtistKey(row.album);
+    const used = artistCap.get(artistKey) ?? 0;
+    if (used >= 2) continue;
+    artistCap.set(artistKey, used + 1);
+    out.push(row.album);
+    if (out.length >= 12) break;
+  }
+  return out;
+}
+
 /** Cold start / rede de segurança: mixes simples por gênero e artista. */
 function fallbackMixes(
   genreIdx: Map<string, GenreBucket>,
@@ -518,6 +628,14 @@ function fallbackMixes(
 let memoKey: { entries: unknown; day: number; historyLen: number; likedCount: number } | null =
   null;
 let memoResult: Recommendation[] = [];
+let memoAlbumsKey: {
+  entries: unknown;
+  albums: unknown;
+  day: number;
+  historyLen: number;
+  likedCount: number;
+} | null = null;
+let memoAlbumsResult: LocalAlbum[] = [];
 
 /**
  * Prateleiras de recomendação para a Home. Sem argumentos lê os módulos locais
@@ -546,4 +664,28 @@ export function buildRecommendations(inputs?: RecoInputs): Recommendation[] {
   memoResult = compute({ entries, history, liked: localLikes.list(), now });
   memoKey = { entries, day, historyLen: history.length, likedCount };
   return memoResult;
+}
+
+export function buildAlbumRecommendations(inputs?: AlbumRecoInputs): LocalAlbum[] {
+  if (inputs) return computeAlbumRecommendations(inputs);
+  const entries = localLibrary.list();
+  const albums = localLibrary.albumGroups();
+  const history = localHistory.listForCurrentUser();
+  const liked = localLikes.list();
+  const now = new Date();
+  const day = daySeed(now);
+  const likedCount = liked.length;
+  if (
+    memoAlbumsKey &&
+    memoAlbumsKey.entries === entries &&
+    memoAlbumsKey.albums === albums &&
+    memoAlbumsKey.day === day &&
+    memoAlbumsKey.historyLen === history.length &&
+    memoAlbumsKey.likedCount === likedCount
+  ) {
+    return memoAlbumsResult;
+  }
+  memoAlbumsResult = computeAlbumRecommendations({ entries, albums, history, liked, now });
+  memoAlbumsKey = { entries, albums, day, historyLen: history.length, likedCount };
+  return memoAlbumsResult;
 }

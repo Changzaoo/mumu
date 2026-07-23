@@ -175,6 +175,37 @@ export function removeTrack(id: string, trackId: string): void {
   pushPlaylist(id);
 }
 
+/**
+ * Remap playlist track ids after a library dedupe (loser -> winner), preserving
+ * order and removing duplicates created by the replacement.
+ */
+export function remapTrackIds(replace: ReadonlyMap<string, string>): number {
+  if (replace.size === 0) return 0;
+  const changed: string[] = [];
+  const next = readPlaylists().map((playlist) => {
+    let touched = false;
+    const seen = new Set<string>();
+    const remapped: string[] = [];
+    for (const id of playlist.trackIds) {
+      const target = replace.get(id) ?? id;
+      if (target !== id) touched = true;
+      if (seen.has(target)) {
+        touched = true;
+        continue;
+      }
+      seen.add(target);
+      remapped.push(target);
+    }
+    if (!touched) return playlist;
+    changed.push(playlist.id);
+    return { ...playlist, trackIds: remapped };
+  });
+  if (changed.length === 0) return 0;
+  writePlaylists(next);
+  for (const id of changed) pushPlaylist(id);
+  return changed.length;
+}
+
 // ── cross-device sync (Firestore) ───────────────────────────────
 const cloud = cloudCollection<PlaylistDocData>({
   name: 'playlists',
