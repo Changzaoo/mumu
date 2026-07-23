@@ -81,16 +81,13 @@ export function PlayerBar() {
               )}
             </span>
             <div className="min-w-0">
-              {track.album ? (
-                <Link
-                  to={`/album/${track.album.id}`}
-                  className="line-clamp-1 text-sm font-medium text-fg hover:underline"
-                >
-                  {track.title}
-                </Link>
-              ) : (
-                <p className="line-clamp-1 text-sm font-medium text-fg">{track.title}</p>
-              )}
+              <button
+                type="button"
+                onClick={toggle}
+                className="line-clamp-1 text-left text-sm font-medium text-fg hover:underline"
+              >
+                {track.title}
+              </button>
               <p className="line-clamp-1 text-[13px] text-fg-muted">
                 {track.artists.map((artist, i) => (
                   <Fragment key={artist.id}>

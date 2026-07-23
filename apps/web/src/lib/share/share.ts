@@ -36,6 +36,37 @@ export interface ShareDoc extends SharePayload {
   createdAt: string;
 }
 
+const INLINE_PREFIX = 'inline~';
+
+function base64UrlEncode(value: string): string {
+  const bytes = new TextEncoder().encode(value);
+  let binary = '';
+  for (const b of bytes) binary += String.fromCharCode(b);
+  return btoa(binary).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/g, '');
+}
+
+function base64UrlDecode(value: string): string | null {
+  try {
+    const padded = value + '='.repeat((4 - (value.length % 4 || 4)) % 4);
+    const binary = atob(padded.replace(/-/g, '+').replace(/_/g, '/'));
+    const bytes = Uint8Array.from(binary, (c) => c.charCodeAt(0));
+    return new TextDecoder().decode(bytes);
+  } catch {
+    return null;
+  }
+}
+
+function asInlineShare(payload: SharePayload): string {
+  const doc: ShareDoc = {
+    ...payload,
+    byUid: currentUser?.uid ?? 'public',
+    byName: currentUser?.displayName ?? null,
+    createdAt: new Date().toISOString(),
+  };
+  const token = base64UrlEncode(JSON.stringify(doc));
+  return `${window.location.origin}/s/${INLINE_PREFIX}${token}`;
+}
+
 let currentUser: User | null = null;
 subscribeAuth((user) => {
   currentUser = user;
@@ -54,7 +85,7 @@ export function tracksToShare(tracks: TrackDto[]): ShareTrack[] {
 
 /** Cria o doc público e devolve a URL compartilhável (null sem login/Firestore). */
 export async function createShare(payload: SharePayload): Promise<string | null> {
-  if (!db || !currentUser) return null;
+  if (!db || !currentUser) return asInlineShare(payload);
   try {
     const docRef = await addDoc(collection(db, 'shares'), {
       ...payload,
@@ -65,12 +96,21 @@ export async function createShare(payload: SharePayload): Promise<string | null>
     } satisfies ShareDoc);
     return `${window.location.origin}/s/${docRef.id}`;
   } catch {
-    return null;
+    return asInlineShare(payload);
   }
 }
 
 /** Carrega um compartilhamento público pelo id do link. */
 export async function fetchShare(id: string): Promise<ShareDoc | null> {
+  if (id.startsWith(INLINE_PREFIX)) {
+    const raw = base64UrlDecode(id.slice(INLINE_PREFIX.length));
+    if (!raw) return null;
+    try {
+      return JSON.parse(raw) as ShareDoc;
+    } catch {
+      return null;
+    }
+  }
   if (!db) return null;
   try {
     const snap = await getDoc(doc(db, 'shares', id));

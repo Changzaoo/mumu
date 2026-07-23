@@ -71,6 +71,16 @@ describe('TrackRow', () => {
     expect(onPlay).toHaveBeenCalledTimes(1);
   });
 
+  it('plays when clicking the track title', async () => {
+    const user = userEvent.setup();
+    const onPlay = vi.fn();
+    const track = makeTrack('t2b');
+    renderRow(<TrackRow track={track} index={0} onPlay={onPlay} />);
+
+    await user.click(screen.getByRole('button', { name: 'Track t2b' }));
+    expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
   it('marks the active row with accent styling and exposes the row label', () => {
     const track = makeTrack('t3');
     renderRow(<TrackRow track={track} index={0} active playing />);

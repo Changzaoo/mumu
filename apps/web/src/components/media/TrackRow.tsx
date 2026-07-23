@@ -202,7 +202,17 @@ export function TrackRow({
           </span>
         )}
         <div className="min-w-0">
-          <p className={cn('line-clamp-1 text-sm font-medium', active ? 'text-accent' : 'text-fg')}>
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation();
+              handlePlay();
+            }}
+            className={cn(
+              'line-clamp-1 text-left text-sm font-medium hover:underline',
+              active ? 'text-accent' : 'text-fg',
+            )}
+          >
             {track.title}
             {track.explicit && (
               <span
@@ -221,7 +231,7 @@ export function TrackRow({
                 30s
               </span>
             )}
-          </p>
+          </button>
           <p className="line-clamp-1 text-[13px] text-fg-muted">
             {track.artists.map((artist, i) => (
               <Fragment key={artist.id}>

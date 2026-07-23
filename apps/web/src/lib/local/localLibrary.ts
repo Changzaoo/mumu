@@ -1784,11 +1784,14 @@ async function healCoverFor(id: string): Promise<boolean> {
   const artistaDesconhecido =
     cur.track.artists.length === 0 ||
     cur.track.artists.every((a) => !a.name || a.name === 'Desconhecido');
+  // Sem pista de artista (fonte/lote), a busca por título serve para CAPA, não
+  // para reatribuir autoria — título genérico pode casar em artista errado.
+  const podePromoverArtista = artistaDesconhecido && Boolean(artist);
   const artists =
-    confirmed && artistaDesconhecido
+    confirmed && podePromoverArtista
       ? [{ id: `local-artist:${id}:0`, name: confirmed.artist, slug: '', imageUrl: null }]
       : cur.track.artists;
-  const title = confirmed && artistaDesconhecido ? confirmed.title : cur.track.title;
+  const title = confirmed && podePromoverArtista ? confirmed.title : cur.track.title;
   const album =
     confirmed?.album && !cur.track.album
       ? { id: `local-album:${id}`, title: confirmed.album, slug: '', coverUrl: null }

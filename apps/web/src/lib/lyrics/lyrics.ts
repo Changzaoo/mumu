@@ -20,6 +20,16 @@ export interface Lyrics {
   source: string | null;
 }
 
+interface CachedLyricsEntry {
+  lyrics: Lyrics;
+  /**
+   * Fingerprint da faixa usada para buscar essa letra.
+   * Quando título/artista mudam (ex.: metadado corrigido), uma letra antiga
+   * pode virar incorreta e precisa ser recarregada.
+   */
+  fingerprint: string;
+}
+
 const CACHE_KEY = 'aurial:lyrics-cache';
 const LRC_TIME = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
 const LRC_OFFSET = /\[offset:\s*([+-]?\d+)\s*\]/i;
@@ -106,25 +116,33 @@ function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
   return null;
 }
 
+function trackFingerprint(track: TrackDto): string {
+  const title = normLoose(track.title ?? '');
+  const artist = normLoose(track.artists[0]?.name ?? '');
+  const duration = track.previewOnly ? 0 : Math.round((track.durationMs || 0) / 1000);
+  return `${title}|${artist}|${duration}`;
+}
+
 // ── offline cache ───────────────────────────────────────────────
 // MEMOIZADO: o cache de letras chega a megabytes — fazer JSON.parse a cada
 // consulta (a busca por letra roda a cada tecla!) congelaria a página. O parse
 // acontece UMA vez; escrever atualiza a memória primeiro.
-let cacheMem: Record<string, Lyrics> | null = null;
+type LyricsCacheStore = Record<string, Lyrics | CachedLyricsEntry>;
+let cacheMem: LyricsCacheStore | null = null;
 
-function readCache(): Record<string, Lyrics> {
+function readCache(): LyricsCacheStore {
   if (cacheMem) return cacheMem;
   try {
     const raw = window.localStorage.getItem(CACHE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : {};
-    cacheMem = parsed && typeof parsed === 'object' ? (parsed as Record<string, Lyrics>) : {};
+    cacheMem = parsed && typeof parsed === 'object' ? (parsed as LyricsCacheStore) : {};
   } catch {
     cacheMem = {};
   }
   return cacheMem;
 }
 
-function writeCache(next: Record<string, Lyrics>): void {
+function writeCache(next: LyricsCacheStore): void {
   cacheMem = next;
   try {
     window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
@@ -134,7 +152,9 @@ function writeCache(next: Record<string, Lyrics>): void {
 }
 
 export function cachedLyrics(trackId: string): Lyrics | null {
-  return readCache()[trackId] ?? null;
+  const cached = readCache()[trackId];
+  if (!cached) return null;
+  return 'lyrics' in cached ? cached.lyrics : cached;
 }
 
 /**
@@ -142,12 +162,20 @@ export function cachedLyrics(trackId: string): Lyrics | null {
  * uma versão MELHOR da mesma letra, como a sincronizada a partir do áudio.
  */
 export function writeLyrics(trackId: string, lyrics: Lyrics): void {
-  writeCache({ ...readCache(), [trackId]: lyrics });
+  const current = readCache()[trackId];
+  const fingerprint = current && 'lyrics' in current ? current.fingerprint : '';
+  writeCache({
+    ...readCache(),
+    [trackId]: fingerprint ? ({ lyrics, fingerprint } satisfies CachedLyricsEntry) : lyrics,
+  });
 }
 
 /** Todas as letras em cache — combustível da busca por trecho de letra. */
 export function lyricsCacheEntries(): Array<[string, Lyrics]> {
-  return Object.entries(readCache());
+  return Object.entries(readCache()).map(([trackId, cached]) => [
+    trackId,
+    'lyrics' in cached ? cached.lyrics : cached,
+  ]);
 }
 
 // ── fetch ───────────────────────────────────────────────────────
@@ -185,7 +213,12 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     if (track.album?.title) url.searchParams.set('album_name', track.album.title);
     url.searchParams.set('duration', String(durationSec));
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-    return res.ok ? toLyrics((await res.json()) as LrclibRow) : null;
+    if (!res.ok) return null;
+    const row = (await res.json()) as LrclibRow;
+    // /api/get também pode devolver "melhor chute" errado; só aceita quando a
+    // linha realmente bate com título/artista/duração da faixa.
+    if (!rowMatches(row, title, names, durationSec)) return null;
+    return toLyrics(row);
   };
 
   // Exact get() across title × artist candidates — prefer a synced hit.
@@ -230,8 +263,19 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
  * nothing is found. Successful results are cached for offline reuse.
  */
 export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
-  const cached = cachedLyrics(track.id);
-  if (cached) return cached;
+  const fingerprint = trackFingerprint(track);
+  const rawCached = readCache()[track.id];
+  if (rawCached) {
+    if ('lyrics' in rawCached) {
+      if (rawCached.fingerprint === fingerprint) return rawCached.lyrics;
+      // Sem rede, usa o cache mesmo antigo em vez de falhar em branco.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return rawCached.lyrics;
+    } else {
+      // Cache legado (sem fingerprint): tenta renovar quando online para evitar
+      // manter letra de música errada após correção de metadados.
+      if (typeof navigator !== 'undefined' && !navigator.onLine) return rawCached;
+    }
+  }
   if (!track.title?.trim()) return null;
   try {
     let lyrics = await lrclibGet(track);
@@ -249,7 +293,12 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
         });
       }
     }
-    if (lyrics) writeCache({ ...readCache(), [track.id]: lyrics });
+    if (lyrics) {
+      writeCache({
+        ...readCache(),
+        [track.id]: { lyrics, fingerprint } satisfies CachedLyricsEntry,
+      });
+    }
     return lyrics;
   } catch {
     return null;

@@ -508,8 +508,9 @@ export class AudioEngine {
       html5: true, // stream instead of buffering the whole file
       preload: true,
       volume: this.ctx ? 1 : this.effectiveVolume(),
-      // Signed URLs may carry no extension — hint the container format.
-      format: extension ? [extension] : ['mp3'],
+      // URL assinada sem extensao nao garante MP3: sem esse cuidado,
+      // algumas faixas (AAC/Opus/FLAC) quebram enquanto outras tocam.
+      ...(extension ? { format: [extension] } : {}),
     });
     slot.source = { kind: 'howl', howl };
 
