@@ -10,8 +10,8 @@ import { syncLyricsFromAudio } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
-/** Acende a linha um pouco antes do timestamp — sensação de estar em sincronia. */
-const LEAD_MS = 180;
+/** Sem antecipação artificial: evita letra "adiantada" perceptivelmente. */
+const LEAD_MS = 0;
 
 export interface LyricsViewProps {
   track: TrackDto;

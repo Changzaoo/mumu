@@ -27,8 +27,10 @@ export function SeekSlider({
   className,
 }: SeekSliderProps) {
   const [dragValue, setDragValue] = useState<number | null>(null);
-  const max = Math.max(duration, 1);
-  const shown = dragValue ?? Math.min(value, max);
+  // Duração pode chegar atrasada em alguns streams; enquanto isso, não podemos
+  // truncar o relógio em 0:01.
+  const max = Math.max(duration, value + 1, 1);
+  const shown = dragValue ?? Math.max(0, value);
   const bufferedPct = Math.min(100, (buffered / max) * 100);
 
   return (

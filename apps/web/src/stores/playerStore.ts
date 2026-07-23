@@ -195,6 +195,7 @@ let playRecorded = false;
 let preloadRequested = false;
 let crossfadeTriggered = false;
 let lastProgressCommit = 0;
+let syntheticEndHandledTrackId: string | null = null;
 
 // ── fonte morta não mata a faixa ─────────────────────────────────
 // URLs já tentadas na carga ATUAL (a primeira falha entra aqui) + quantas
@@ -432,6 +433,7 @@ export const usePlayerStore = create<PlayerState>()(
         playRecorded = false;
         preloadRequested = false;
         crossfadeTriggered = false;
+        syntheticEndHandledTrackId = null;
         previewGateFired = false;
         pendingResumeSeek = null; // troca de faixa normal — sem seek de retomada
         lastProgressCommit = 0;
@@ -826,6 +828,26 @@ export function initPlayerEngine(): void {
   // OS lock-screen / notification controls + background-play signalling.
   initMediaSession();
 
+  const advanceFromTrackEnd = (): void => {
+    const state = store.getState();
+    syntheticEndHandledTrackId = null;
+    if (state.repeat === 'one') {
+      audioEngine.seek(0);
+      audioEngine.play();
+      playRecorded = false;
+      store.setState({ progress: 0, isPlaying: true });
+      return;
+    }
+    const nextIndex = state.queueIndex + 1;
+    if (nextIndex < state.queue.length) {
+      state.playAt(nextIndex);
+    } else if (state.repeat === 'all' && state.queue.length > 0) {
+      state.playAt(0);
+    } else {
+      store.setState({ isPlaying: false, progress: state.duration });
+    }
+  };
+
   // Restore persisted volume / apply audio settings.
   audioEngine.setVolume(store.getState().volume);
   const settings = useSettingsStore.getState();
@@ -889,6 +911,19 @@ export function initPlayerEngine(): void {
 
     const { gapless, crossfadeSeconds } = useSettingsStore.getState();
     const remaining = duration - position;
+
+    if (
+      state.isPlaying &&
+      state.currentTrack &&
+      duration > 0 &&
+      remaining <= 0.35 &&
+      audioEngine.isTrackEnded() &&
+      syntheticEndHandledTrackId !== state.currentTrack.id
+    ) {
+      syntheticEndHandledTrackId = state.currentTrack.id;
+      advanceFromTrackEnd();
+      return;
+    }
 
     // Gapless: preload the upcoming track near the end.
     if (gapless && !preloadRequested && duration > 0 && remaining <= 12) {
@@ -972,22 +1007,5 @@ export function initPlayerEngine(): void {
     void import('sonner').then(({ toast }) => toast.error(message));
   });
 
-  audioEngine.on('ended', () => {
-    const state = store.getState();
-    if (state.repeat === 'one') {
-      audioEngine.seek(0);
-      audioEngine.play();
-      playRecorded = false;
-      store.setState({ progress: 0, isPlaying: true });
-      return;
-    }
-    const nextIndex = state.queueIndex + 1;
-    if (nextIndex < state.queue.length) {
-      state.playAt(nextIndex);
-    } else if (state.repeat === 'all' && state.queue.length > 0) {
-      state.playAt(0);
-    } else {
-      store.setState({ isPlaying: false, progress: state.duration });
-    }
-  });
+  audioEngine.on('ended', advanceFromTrackEnd);
 }

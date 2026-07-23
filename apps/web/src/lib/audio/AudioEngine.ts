@@ -326,10 +326,24 @@ export class AudioEngine {
     let duration = 0;
     if (slot.source?.kind === 'howl') duration = slot.source.howl.duration();
     else if (slot.source) duration = slot.source.el.duration;
+    // Alguns navegadores só expõem a duração total no range "seekable",
+    // mantendo duration=Infinity/NaN por boa parte do stream.
+    if ((!Number.isFinite(duration) || duration <= 0) && slot.el && slot.el.seekable.length > 0) {
+      try {
+        duration = slot.el.seekable.end(slot.el.seekable.length - 1);
+      } catch {
+        /* range instável durante o carregamento */
+      }
+    }
     if (!Number.isFinite(duration) || duration <= 0) {
       duration = slot.track ? slot.track.durationMs / 1000 : 0;
     }
     return duration;
+  }
+
+  /** True when the underlying media element reached EOF. */
+  isTrackEnded(): boolean {
+    return this.active.el?.ended ?? false;
   }
 
   /** End of the buffered range containing the playhead (seconds) — seek-bar underlay. */

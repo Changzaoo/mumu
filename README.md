@@ -32,7 +32,7 @@ Web na edge (Vercel) + API em servidor próprio (Docker) = custo mínimo, contro
 - 🎚️ **Player pro**: crossfade e reprodução **gapless** (dual Howl + Web Audio), **EQ de 10 bandas**, **ReplayGain** (normalização para −14 LUFS), velocidade 0.5×–2×, visualizador de espectro, letras sincronizadas
 - ⬆️ **Uploads com pipeline FFmpeg**: ffprobe + validação por magic bytes → análise de loudness (LUFS/true peak) → ladder HLS AAC 96/160/320 kbps → waveform (1024 picos) → capas WebP em 3 tamanhos — tudo em fila durável (BullMQ + Redis)
 - 📡 **HLS adaptativo** com URLs assinadas (HMAC, curta duração) e cache de segmentos no nginx
-- 📱 **PWA offline**: instalável, shell offline, cache de capas, Media Session API (controles do SO), atalhos de teclado
+- 📱 **PWA + Android (APK)**: instalável, shell offline, cache de capas, Media Session API (controles do SO), atalhos de teclado e empacotamento nativo com Capacitor
 - 👥 **Social**: seguir usuários/artistas, feed de atividade, comentários em faixas, **listen-together** em tempo real (socket.io)
 - 🔎 Busca instantânea com autocomplete, home personalizada, recomendações (daily mix, discover, moods, track radio)
 - 📚 Biblioteca completa: playlists colaborativas com reordenação, curtidas, histórico ("continue ouvindo"), podcasts e rádios
@@ -144,17 +144,31 @@ pnpm dev
 
 ## Scripts
 
-| Comando                                       | Ação                               |
-| --------------------------------------------- | ---------------------------------- |
-| `pnpm dev`                                    | web + api em modo dev (paralelo)   |
-| `pnpm dev:web` / `pnpm dev:api`               | apenas um dos apps                 |
-| `pnpm build`                                  | build de todos os pacotes          |
-| `pnpm lint` / `pnpm lint:fix`                 | ESLint                             |
-| `pnpm format` / `pnpm format:check`           | Prettier                           |
-| `pnpm typecheck`                              | `tsc --noEmit` em todos os pacotes |
-| `pnpm test` / `pnpm test:coverage`            | Vitest em todos os pacotes         |
-| `pnpm e2e`                                    | Playwright (web)                   |
-| `pnpm db:generate` / `db:migrate` / `db:seed` | Prisma                             |
+| Comando                                       | Ação                                   |
+| --------------------------------------------- | -------------------------------------- |
+| `pnpm dev`                                    | web + api em modo dev (paralelo)       |
+| `pnpm dev:web` / `pnpm dev:api`               | apenas um dos apps                     |
+| `pnpm build`                                  | build de todos os pacotes              |
+| `pnpm lint` / `pnpm lint:fix`                 | ESLint                                 |
+| `pnpm format` / `pnpm format:check`           | Prettier                               |
+| `pnpm typecheck`                              | `tsc --noEmit` em todos os pacotes     |
+| `pnpm test` / `pnpm test:coverage`            | Vitest em todos os pacotes             |
+| `pnpm e2e`                                    | Playwright (web)                       |
+| `pnpm --filter @aurial/web android:apk`       | build web + sync Capacitor + APK debug |
+| `pnpm db:generate` / `db:migrate` / `db:seed` | Prisma                                 |
+
+### APK Android (app nativo)
+
+Pré-requisitos locais:
+
+- JDK 21 (`JAVA_HOME` configurado)
+- Android SDK (`ANDROID_HOME` ou `local.properties` em `apps/web/android`)
+
+```bash
+pnpm --filter @aurial/web android:apk
+```
+
+APK gerado em `apps/web/android/app/build/outputs/apk/debug/app-debug.apk`.
 
 ## Testes
 

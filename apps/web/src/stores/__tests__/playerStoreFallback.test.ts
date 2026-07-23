@@ -27,6 +27,7 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     getPosition: vi.fn(() => 0),
     getDuration: vi.fn(() => 0),
     getBufferedEnd: vi.fn(() => 0),
+    isTrackEnded: vi.fn(() => false),
     on: vi.fn((event: string, handler: Handler) => {
       const list = engineHandlers.get(event) ?? [];
       list.push(handler);
@@ -235,5 +236,25 @@ describe('fallback de fonte morta', () => {
 
     await vi.waitFor(() => expect(usePlayerStore.getState().isPlaying).toBe(false));
     expect(vi.mocked(audioEngine.load).mock.calls.length).toBe(loads);
+  });
+});
+
+describe('fim de faixa em lock-screen', () => {
+  it('avança para a próxima quando o elemento marca EOF sem evento ended', async () => {
+    const a = makeTrack('local:t1', { durationMs: 100_000, streamUrl: DEAD_BLOB });
+    const b = makeTrack('local:t2', {
+      durationMs: 120_000,
+      streamUrl: 'https://cdn.example/b.mp3',
+    });
+    usePlayerStore.getState().playQueue([a, b], 0);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+    vi.mocked(audioEngine.isTrackEnded).mockReturnValue(true);
+
+    emit('timeupdate', { position: 99.8, duration: 100 });
+
+    await vi.waitFor(() => {
+      expect(usePlayerStore.getState().currentTrack?.id).toBe('local:t2');
+    });
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
   });
 });

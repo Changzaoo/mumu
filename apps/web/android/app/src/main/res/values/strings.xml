@@ -1,0 +1,7 @@
+<?xml version='1.0' encoding='utf-8'?>
+<resources>
+    <string name="app_name">radinho.online</string>
+    <string name="title_activity_main">radinho.online</string>
+    <string name="package_name">online.radinho.app</string>
+    <string name="custom_url_scheme">online.radinho.app</string>
+</resources>

@@ -16,6 +16,7 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     getPosition: vi.fn(() => 0),
     getDuration: vi.fn(() => 0),
     getBufferedEnd: vi.fn(() => 0),
+    isTrackEnded: vi.fn(() => false),
     on: vi.fn(() => () => undefined),
     off: vi.fn(),
     destroy: vi.fn(),
