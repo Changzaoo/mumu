@@ -41,6 +41,12 @@ export const artistInclude = {
   _count: { select: { followers: true } },
 } satisfies Prisma.ArtistInclude;
 export type ArtistRow = Prisma.ArtistGetPayload<{ include: typeof artistInclude }>;
+export type ArtistRowWithExtras = ArtistRow & {
+  label: string | null;
+  artistLabel: string | null;
+  location: string | null;
+  externalLinks: Prisma.JsonValue | null;
+};
 
 export const albumInclude = {
   artists: {
@@ -125,10 +131,11 @@ export function toTrackDto(row: TrackRow, opts: TrackMapOptions = {}): TrackDto 
     // Offline download needs a single-file source (the kept original).
     downloadUrl: row.originalKey !== null && row.originalKey !== '' ? downloadUrlFor(row.id) : null,
     uploadedByUserId: row.uploadedByUserId,
+    label: row.label ?? null,
   };
 }
 
-export function toArtistDto(row: ArtistRow): ArtistDto {
+export function toArtistDto(row: ArtistRowWithExtras): ArtistDto {
   return {
     id: row.id,
     name: row.name,
@@ -140,6 +147,10 @@ export function toArtistDto(row: ArtistRow): ArtistDto {
     monthlyListeners: row.monthlyListeners,
     followersCount: row._count.followers,
     genres: row.genres.map((g) => g.genre.name),
+    label: row.label ?? null,
+    artistLabel: row.artistLabel ?? null,
+    location: row.location ?? null,
+    externalLinks: (row.externalLinks as Record<string, string> | null) ?? null,
   };
 }
 

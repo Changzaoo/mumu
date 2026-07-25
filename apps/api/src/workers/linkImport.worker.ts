@@ -39,7 +39,7 @@ function fileNameFromTitle(title: string): string {
 }
 
 async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
-  const { uploadId, userId, rawKey, url } = job.data;
+  const { uploadId, userId, rawKey, url, sourceUrl, lyricSyncFilePath } = job.data;
   const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
   if (!upload) {
     log.warn({ uploadId }, 'upload row vanished — skipping link import');
@@ -51,7 +51,7 @@ async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
 
   try {
     // 1) download + extract to mp3
-    const { filePath, title } = await downloadAudio({
+    const { filePath, title, artist, album, coverUrl, genre } = await downloadAudio({
       url,
       destDir: tmpDir,
       baseName: uploadId,
@@ -75,7 +75,22 @@ async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
     await setUploadProgress(uploadId, 0);
 
     // 4) hand off to the shared audio pipeline → lands as a catalog Track
-    await enqueueAudioProcess({ uploadId, userId, rawKey, fileName });
+    // Pass yt-dlp metadata as overrides so the pipeline uses the best available info
+    await enqueueAudioProcess({
+      uploadId,
+      userId,
+      rawKey,
+      fileName,
+      overrides: {
+        title: title || undefined,
+        artist: artist || undefined,
+        album: album || undefined,
+        coverUrl: coverUrl || undefined,
+        genre: genre || undefined,
+      },
+      sourceUrl: sourceUrl || url,
+      lyricSyncFilePath,
+    });
     log.info({ uploadId, title }, 'link import downloaded — queued for processing');
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Falha ao importar o link.';

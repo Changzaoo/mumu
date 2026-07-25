@@ -27,6 +27,7 @@ import { radiosRoutes } from './modules/radios/index.js';
 import { recommendationsRoutes } from './modules/recommendations/index.js';
 import { socialRoutes, registerFeedProjection } from './modules/social/index.js';
 import { adminRoutes } from './modules/admin/index.js';
+import { undergroundRoutes } from './modules/underground/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -91,6 +92,7 @@ export function createApp(): Express {
   api.use('/recs', recommendationsRoutes);
   api.use('/', socialRoutes); // /feed, /tracks/:id/comments, /comments/:id, /sessions
   api.use('/admin', adminRoutes);
+  api.use('/underground', undergroundRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());

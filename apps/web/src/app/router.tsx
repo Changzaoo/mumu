@@ -84,6 +84,7 @@ export const router = createBrowserRouter([
             element: <AuthorizedRoute>{page('UploadsPage', 'list')}</AuthorizedRoute>,
           },
           { path: '/discover', element: page('DiscoverPage', 'home') },
+          { path: '/underground', element: page('UndergroundPage', 'home') },
           {
             path: '/dispositivo',
             element: <AuthorizedRoute>{page('DevicePage', 'list')}</AuthorizedRoute>,

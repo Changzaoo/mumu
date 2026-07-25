@@ -9,6 +9,7 @@ import { parseFile } from 'music-metadata';
 import sharp from 'sharp';
 import { slugify, WAVEFORM_PEAKS } from '@aurial/shared';
 import type { Prisma, UploadStatus } from '@prisma/client';
+import type { UploadMetadataInput } from '@aurial/shared';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import type { Redis } from 'ioredis';
@@ -37,6 +38,8 @@ interface ResolvedMetadata {
   trackNumber: number | null;
   discNumber: number | null;
   picture: Buffer | null;
+  /** coverUrl from overrides (e.g. yt-dlp thumbnail), used as fallback when no embedded art. */
+  coverUrl: string | null;
 }
 
 async function setStatus(uploadId: string, status: UploadStatus): Promise<void> {
@@ -46,8 +49,11 @@ async function setStatus(uploadId: string, status: UploadStatus): Promise<void> 
 async function resolveMetadata(
   filePath: string,
   fileName: string,
-  overrides: AudioProcessJobData['overrides'],
+  overrides: UploadMetadataInput | undefined,
 ): Promise<ResolvedMetadata> {
+  // Normalize path for Unicode/CJK filenames — ensures the OS uses the
+  // correct normalization form (NFC on Windows, NFD on macOS).
+  const normalizedPath = path.normalize(filePath);
   let tags: ResolvedMetadata = {
     title: path.parse(fileName).name,
     artistName: 'Unknown Artist',
@@ -56,9 +62,10 @@ async function resolveMetadata(
     trackNumber: null,
     discNumber: null,
     picture: null,
+    coverUrl: null,
   };
   try {
-    const meta = await parseFile(filePath);
+    const meta = await parseFile(normalizedPath);
     const pic = meta.common.picture?.[0];
     tags = {
       title: meta.common.title?.trim() || tags.title,
@@ -68,6 +75,7 @@ async function resolveMetadata(
       trackNumber: meta.common.track.no ?? null,
       discNumber: meta.common.disk.no ?? null,
       picture: pic ? Buffer.from(pic.data) : null,
+      coverUrl: null,
     };
   } catch {
     // fall back to filename-derived metadata
@@ -77,6 +85,8 @@ async function resolveMetadata(
     title: overrides?.title?.trim() || tags.title,
     artistName: overrides?.artist?.trim() || tags.artistName,
     albumTitle: overrides?.album?.trim() ?? tags.albumTitle,
+    genreName: overrides?.genre?.trim() ?? tags.genreName,
+    coverUrl: overrides?.coverUrl?.trim() ?? null,
   };
 }
 
@@ -97,11 +107,34 @@ async function uploadDir(localDir: string, keyPrefix: string): Promise<void> {
 
 async function processCover(
   picture: Buffer | null,
+  coverUrl: string | null,
   sourcePath: string,
   tmpDir: string,
   trackId: string,
 ): Promise<{ coverUrl: string | null; dominantColor: string | null }> {
-  const buffer = picture ?? (await extractEmbeddedCover(sourcePath, tmpDir));
+  let buffer: Buffer | null = null;
+
+  // 1) Embedded picture from tags (highest priority)
+  buffer = picture;
+
+  // 2) Embedded cover via ffmpeg fallback (attached_pic stream)
+  if (!buffer) {
+    buffer = await extractEmbeddedCover(sourcePath, tmpDir);
+  }
+
+  // 3) Fallback cover URL from overrides (e.g. yt-dlp thumbnail)
+  if (!buffer && coverUrl) {
+    try {
+      const response = await fetch(coverUrl);
+      if (response.ok) {
+        const arrayBuf = await response.arrayBuffer();
+        buffer = Buffer.from(arrayBuf);
+      }
+    } catch {
+      log.warn({ coverUrl }, 'failed to download cover URL from overrides');
+    }
+  }
+
   if (!buffer) return { coverUrl: null, dominantColor: null };
   try {
     const storage = getStorage();
@@ -171,7 +204,7 @@ async function upsertCatalog(
 }
 
 async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
-  const { uploadId, userId, rawKey, fileName, overrides } = job.data;
+  const { uploadId, userId, rawKey, fileName, overrides, sourceUrl, lyricSyncFilePath } = job.data;
   const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
   if (!upload) {
     log.warn({ uploadId }, 'upload row vanished — skipping job');
@@ -213,7 +246,7 @@ async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
     await setUploadProgress(uploadId, 85);
 
     // 5) cover art
-    const cover = await processCover(meta.picture, sourcePath, tmpDir, trackId);
+    const cover = await processCover(meta.picture, meta.coverUrl, sourcePath, tmpDir, trackId);
     await setUploadProgress(uploadId, 92);
 
     // 6) catalog rows
@@ -238,6 +271,8 @@ async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
         albumId,
         artists: { create: { artistId } },
         ...(genreId ? { genres: { create: { genreId } } } : {}),
+        ...(sourceUrl ? { sourceUrl } : {}),
+        ...(lyricSyncFilePath ? { lyricSyncFilePath } : {}),
       },
     });
 

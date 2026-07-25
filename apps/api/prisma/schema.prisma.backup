@@ -101,15 +101,6 @@ model Artist {
   createdAt        DateTime @default(now())
   updatedAt        DateTime @updatedAt
 
-  /// Gravadora / selo com que o artista trabalha (a mais frequente no acervo).
-  label            String?
-  /// Artist-curated label e.g. "underground", "freestyle", "local artist"
-  artistLabel      String?
-  /// Short location string e.g. "São Paulo, BR", "Brooklyn, NY"
-  location         String?
-  /// Other platforms links (JSON: { soundcloud, bandcamp, instagram, twitter... })
-  externalLinks    Json?
-
   genres    ArtistGenre[]
   albums    AlbumArtist[]
   tracks    TrackArtist[]
@@ -213,10 +204,6 @@ model Track {
   originalKey String?
   sourceCodec String?
   sampleRate  Int?
-  sourceUrl   String?
-
-  /// User-curated label/catalog tag e.g. "underground", "indie", "freestyle"
-  label String?
 
   isPublic         Boolean @default(true)
   uploadedByUserId String?

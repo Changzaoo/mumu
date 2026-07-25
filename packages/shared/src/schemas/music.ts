@@ -13,6 +13,12 @@ export const artistSchema = z.object({
   genres: z.array(z.string()),
   /** Gravadora / selo com que o artista trabalha (a mais frequente no acervo). */
   label: z.string().nullable().optional(),
+  /** Artist-curated label e.g. "underground", "freestyle", "local artist". */
+  artistLabel: z.string().nullable().optional(),
+  /** Short location string e.g. "São Paulo, BR", "Brooklyn, NY". */
+  location: z.string().nullable().optional(),
+  /** Other platforms links (JSON: { soundcloud, bandcamp, instagram, twitter... }) */
+  externalLinks: z.record(z.string()).nullable().optional(),
   /** Present only when the request is authenticated. */
   isFollowing: z.boolean().optional(),
 });

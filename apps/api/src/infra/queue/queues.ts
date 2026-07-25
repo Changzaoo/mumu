@@ -15,6 +15,10 @@ export interface AudioProcessJobData {
   rawKey: string;
   fileName: string;
   overrides?: UploadMetadataInput;
+  /** Original download URL (e.g., YouTube URL) for re-download capability. */
+  sourceUrl?: string;
+  /** Path to Whisper-generated word timestamps JSON file for lyric synchronization. */
+  lyricSyncFilePath?: string;
 }
 
 export interface ImportSyncJobData {
@@ -33,6 +37,10 @@ export interface LinkImportJobData {
   /** Reserved storage key the downloaded audio will be written to. */
   rawKey: string;
   url: string;
+  /** Original download URL (e.g., YouTube URL) for re-download capability. */
+  sourceUrl?: string;
+  /** Path to Whisper-generated word timestamps JSON file for lyric synchronization. */
+  lyricSyncFilePath?: string;
 }
 
 export interface NotificationJobData {

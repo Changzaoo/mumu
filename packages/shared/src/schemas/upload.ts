@@ -28,6 +28,12 @@ export const uploadMetadataSchema = z.object({
   title: z.string().max(200).optional(),
   artist: z.string().max(200).optional(),
   album: z.string().max(200).optional(),
+  coverUrl: z.string().url().max(2048).optional(),
+  genre: z.string().max(200).optional(),
+  /** Original download URL (e.g., YouTube URL) for re-download capability. */
+  sourceUrl: z.string().url().max(2048).optional(),
+  /** Path to Whisper-generated word timestamps JSON file for lyric synchronization. */
+  lyricSyncFilePath: z.string().max(4096).optional(),
 });
 export type UploadMetadataInput = z.infer<typeof uploadMetadataSchema>;
 

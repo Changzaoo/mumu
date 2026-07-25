@@ -6,21 +6,58 @@ import {
   trackInclude,
   type AlbumRow,
   type ArtistRow,
+  type ArtistRowWithExtras,
   type TrackRow,
 } from '../shared/mappers.js';
 
 export const artistsRepository = {
-  list(cursor: string | undefined, limit: number): Promise<ArtistRow[]> {
+  list(cursor: string | undefined, limit: number): Promise<ArtistRowWithExtras[]> {
     return prisma.artist.findMany({
       where: cursorWhere(cursor),
-      include: artistInclude,
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        imageUrl: true,
+        bannerUrl: true,
+        bio: true,
+        verified: true,
+        monthlyListeners: true,
+        label: true,
+        artistLabel: true,
+        location: true,
+        externalLinks: true,
+        createdAt: true,
+        genres: { include: { genre: { select: { name: true } } } },
+        _count: { select: { followers: true } },
+      },
       orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
       take: limit + 1,
-    });
+    }) as Promise<ArtistRowWithExtras[]>;
   },
 
-  findById(id: string): Promise<ArtistRow | null> {
-    return prisma.artist.findUnique({ where: { id }, include: artistInclude });
+  findById(id: string): Promise<ArtistRowWithExtras | null> {
+    return prisma.artist.findUnique({
+      where: { id },
+      select: {
+        id: true,
+        name: true,
+        slug: true,
+        imageUrl: true,
+        bannerUrl: true,
+        bio: true,
+        verified: true,
+        monthlyListeners: true,
+        label: true,
+        artistLabel: true,
+        location: true,
+        externalLinks: true,
+        createdAt: true,
+        updatedAt: true,
+        genres: { include: { genre: { select: { name: true } } } },
+        _count: { select: { followers: true } },
+      },
+    });
   },
 
   async isFollowedBy(userId: string, artistId: string): Promise<boolean> {
