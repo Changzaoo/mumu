@@ -8,28 +8,10 @@ import { useEffect, useState } from 'react';
 import { Link } from 'react-router';
 import { motion } from 'framer-motion';
 import { Search, TrendingUp, MapPin, Music, Loader2, Sparkles, ChevronRight } from 'lucide-react';
-import { api, type ApiResult, type ApiError } from '@/lib/api';
+import { api, type ApiError } from '@/lib/api';
 import { EmptyState } from '@/components/media/EmptyState';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import type { ArtistDto, TrackDto } from '@aurial/shared';
-
-interface UndergroundArtistsResponse {
-  items: ArtistDto[];
-  nextCursor: string | null;
-}
-
-interface UndergroundTracksResponse {
-  items: TrackDto[];
-  nextCursor: string | null;
-}
-
-interface UndergroundGenresResponse {
-  items: string[];
-}
-
-interface UndergroundLocationsResponse {
-  items: string[];
-}
 
 export default function UndergroundPage() {
   const [artists, setArtists] = useState<ArtistDto[]>([]);
@@ -47,20 +29,21 @@ export default function UndergroundPage() {
       setLoading(true);
       setError(null);
 
+      // `api` already unwraps the `{ data, meta }` envelope, so `data` IS the list.
       const [artistsRes, tracksRes, genresRes, locationsRes] = await Promise.all([
-        api.get<UndergroundArtistsResponse>('/underground/artists', { anonymous: true }),
-        api.get<UndergroundTracksResponse>('/underground/trending', {
+        api.get<ArtistDto[]>('/underground/artists', { anonymous: true }),
+        api.get<TrackDto[]>('/underground/trending', {
           anonymous: true,
           query: { limit: 20 },
         }),
-        api.get<UndergroundGenresResponse>('/underground/genres', { anonymous: true }),
-        api.get<UndergroundLocationsResponse>('/underground/locations', { anonymous: true }),
+        api.get<string[]>('/underground/genres', { anonymous: true }),
+        api.get<string[]>('/underground/locations', { anonymous: true }),
       ]);
 
-      setArtists(artistsRes.data.items);
-      setTrendingTracks(tracksRes.data.items);
-      setGenres(genresRes.data.items);
-      setLocations(locationsRes.data.items);
+      setArtists(artistsRes.data);
+      setTrendingTracks(tracksRes.data);
+      setGenres(genresRes.data);
+      setLocations(locationsRes.data);
     } catch (err) {
       const apiError = err as ApiError;
       setError(apiError.message ?? 'Falha ao carregar catálogo underground');
@@ -77,11 +60,11 @@ export default function UndergroundPage() {
 
     try {
       setSearching(true);
-      const res = await api.get<{ items: ArtistDto[] }>('/underground/artists/search', {
+      const res = await api.get<ArtistDto[]>('/underground/artists/search', {
         anonymous: true,
         query: { q: searchQuery, limit: 20 },
       });
-      setSearchResults(res.data.items);
+      setSearchResults(res.data);
     } catch (err) {
       const apiError = err as ApiError;
       console.error('Search failed:', apiError.message);
@@ -354,9 +337,9 @@ function ArtistCard({ artist }: { artist: ArtistDto }) {
           {artist.name}
         </h3>
         <div className="mt-1 flex items-center gap-1.5 text-[12px] text-fg-muted">
-          {artist.artistLabel && (
+          {artist.catalogTag && (
             <span className="px-1.5 py-0.5 rounded text-[10px] bg-accent/15 text-accent font-medium">
-              {artist.artistLabel}
+              {artist.catalogTag}
             </span>
           )}
           {artist.location && (

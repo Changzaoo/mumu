@@ -1,106 +1,88 @@
 import type { ArtistDto, TrackDto } from '@aurial/shared';
+import {
+  encodeNumericCursor,
+  takePage,
+  takePageWith,
+  type CursorPage,
+} from '../../core/http/pagination.js';
 import { cache, cacheKeys, cacheTtl } from '../../infra/redis/cache.js';
-import { undergroundRepository } from './underground.repository.js';
 import { toArtistDto, toTrackDto } from '../shared/mappers.js';
-import type { TrackRow, ArtistRowWithExtras } from '../shared/mappers.js';
+import { DEFAULT_CATALOG_TAG, undergroundRepository } from './underground.repository.js';
 
 export const undergroundService = {
-  /**
-   * List underground artists with caching
-   */
   async listArtists(
     cursor: string | undefined,
     limit: number,
-    opts: { minListeners?: number; maxListeners?: number; label?: string } = {},
-  ): Promise<{ items: ArtistDto[]; nextCursor: string | null }> {
+    opts: { minListeners?: number; maxListeners?: number; catalogTag?: string } = {},
+  ): Promise<CursorPage<ArtistDto>> {
     const cacheKey = cacheKeys.undergroundArtists(cursor, limit, opts);
-    const cached = await cache.getJson<{ items: ArtistDto[]; nextCursor: string | null }>(cacheKey);
+    const cached = await cache.getJson<CursorPage<ArtistDto>>(cacheKey);
     if (cached) return cached;
 
-    const { items, nextCursor } = await undergroundRepository.listUndergroundArtists(
-      cursor,
-      limit,
-      opts,
-    );
-    const result = { items: items.map(toArtistDto), nextCursor };
+    const rows = await undergroundRepository.listArtists(cursor, limit, opts);
+    const page = takePageWith(rows, limit, (r) => encodeNumericCursor(r.monthlyListeners, r.id));
+    const result = { items: page.items.map(toArtistDto), meta: page.meta };
     await cache.setJson(cacheKey, result, cacheTtl.list);
     return result;
   },
 
-  /**
-   * Search underground artists
-   */
+  /** Uncached: free-text search has an unbounded key space. */
   async searchArtists(
     query: string,
     limit: number,
-    opts: { label?: string; location?: string } = {},
+    opts: { catalogTag?: string; location?: string } = {},
   ): Promise<ArtistDto[]> {
-    const rows = await undergroundRepository.searchUndergroundArtists(query, limit, opts);
+    const rows = await undergroundRepository.searchArtists(query, limit, opts);
     return rows.map(toArtistDto);
   },
 
-  /**
-   * Get underground tracks with caching
-   */
-  async getTracks(
+  async listTracks(
     cursor: string | undefined,
     limit: number,
-    opts: { label?: string; genre?: string } = {},
-  ): Promise<{ items: TrackDto[]; nextCursor: string | null }> {
-    const cacheKey = `underground:tracks:${cursor}:${limit}:${opts.label}:${opts.genre}`;
-    const cached = await cache.getJson<{ items: TrackDto[]; nextCursor: string | null }>(cacheKey);
+    opts: { catalogTag?: string; genre?: string } = {},
+  ): Promise<CursorPage<TrackDto>> {
+    const cacheKey = cacheKeys.undergroundTracks(cursor, limit, opts);
+    const cached = await cache.getJson<CursorPage<TrackDto>>(cacheKey);
     if (cached) return cached;
 
-    const { items, nextCursor } = await undergroundRepository.getUndergroundTracks(
-      cursor,
-      limit,
-      opts,
-    );
-    const result = { items: items.map((item) => toTrackDto(item)), nextCursor };
+    const rows = await undergroundRepository.listTracks(cursor, limit, opts);
+    const page = takePage(rows, limit, (r) => ({ date: r.createdAt, id: r.id }));
+    const result = { items: page.items.map((row) => toTrackDto(row)), meta: page.meta };
     await cache.setJson(cacheKey, result, cacheTtl.list);
     return result;
   },
 
-  /**
-   * Get genres from underground artists
-   */
-  async getGenres(label: string = 'underground'): Promise<string[]> {
-    const cacheKey = cacheKeys.undergroundGenres(label);
+  async listGenres(catalogTag: string = DEFAULT_CATALOG_TAG): Promise<string[]> {
+    const cacheKey = cacheKeys.undergroundGenres(catalogTag);
     const cached = await cache.getJson<string[]>(cacheKey);
     if (cached) return cached;
 
-    const genres = await undergroundRepository.getUndergroundGenres(label);
+    const genres = await undergroundRepository.listGenres(catalogTag);
     await cache.setJson(cacheKey, genres, cacheTtl.short);
     return genres;
   },
 
-  /**
-   * Get locations from underground artists
-   */
-  async getLocations(label: string = 'underground'): Promise<string[]> {
-    const cacheKey = cacheKeys.undergroundLocations(label);
+  async listLocations(catalogTag: string = DEFAULT_CATALOG_TAG): Promise<string[]> {
+    const cacheKey = cacheKeys.undergroundLocations(catalogTag);
     const cached = await cache.getJson<string[]>(cacheKey);
     if (cached) return cached;
 
-    const locations = await undergroundRepository.getUndergroundLocations(label);
+    const locations = await undergroundRepository.listLocations(catalogTag);
     await cache.setJson(cacheKey, locations, cacheTtl.short);
     return locations;
   },
 
-  /**
-   * Get trending underground tracks
-   */
-  async getTrendingTracks(
+  async listTrendingTracks(
     limit: number,
-    label: string = 'underground',
+    catalogTag: string = DEFAULT_CATALOG_TAG,
     days: number = 7,
   ): Promise<TrackDto[]> {
-    const cacheKey = cacheKeys.undergroundTrending(limit, label, days);
+    const cacheKey = cacheKeys.undergroundTrending(limit, catalogTag, days);
     const cached = await cache.getJson<TrackDto[]>(cacheKey);
     if (cached) return cached;
 
-    const tracks = await undergroundRepository.getTrendingUndergroundTracks(limit, label, days);
-    const result = tracks.map((track) => toTrackDto(track));
+    const rows = await undergroundRepository.listTrendingTracks(limit, catalogTag, days);
+    const result = rows.map((row) => toTrackDto(row));
     await cache.setJson(cacheKey, result, cacheTtl.short);
     return result;
   },

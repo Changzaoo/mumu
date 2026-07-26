@@ -56,8 +56,6 @@ export interface DownloadedAudio {
   genre?: string;
   /** Original video URL that was downloaded. */
   url: string;
-  /** Path to the Whisper-generated word timestamps JSON file, if generated. */
-  lyricSyncFilePath?: string;
 }
 
 export interface DownloadOptions {
@@ -123,115 +121,6 @@ async function findOutputMp3(destDir: string, baseName: string): Promise<string 
   }
 }
 
-import { access, constants } from 'node:fs/promises';
-
-/**
- * Run Whisper on audio file to generate word-level timestamps.
- * Returns path to JSON output file on success, null on failure.
- */
-async function runWhisperOnAudio(filePath: string): Promise<string | null> {
-  const dir = path.dirname(filePath);
-  const baseName = path.basename(filePath, path.extname(filePath));
-
-  try {
-    // Try whisper.cpp first (if installed)
-    const whisperResult = await runWhisperCommand(filePath, dir, baseName, 'whisper');
-    if (whisperResult) return whisperResult;
-
-    // Fallback to Python whisper module
-    return await runWhisperCommand(filePath, dir, baseName, 'python', '-m', 'whisper');
-  } catch (err) {
-    logger.warn(
-      { filePath, error: err instanceof Error ? err.message : String(err) },
-      'Whisper processing failed; lyric synchronization will be skipped',
-    );
-    return null;
-  }
-}
-
-/**
- * Helper to run a Whisper command and return output path on success.
- */
-async function runWhisperCommand(
-  filePath: string,
-  dir: string,
-  baseName: string,
-  command: string,
-  ...args: string[]
-): Promise<string | null> {
-  return new Promise<string>((resolve, reject) => {
-    // Build arguments depending on the command
-    let whisperArgs: string[];
-    if (command === 'whisper') {
-      // whisper.cpp binary
-      whisperArgs = [
-        filePath,
-        '--model',
-        'tiny',
-        '--language',
-        'pt',
-        '--output-format',
-        'json',
-        '--output-dir',
-        dir,
-        ...args,
-      ];
-    } else {
-      // python -m whisper
-      whisperArgs = [
-        '-m',
-        'whisper',
-        filePath,
-        '--model',
-        'tiny',
-        '--language',
-        'pt',
-        '--output_format',
-        'json',
-        '--output_dir',
-        dir,
-        ...args,
-      ];
-    }
-
-    const child = spawn(command, whisperArgs, { windowsHide: true });
-
-    let stderr = '';
-    child.stderr.setEncoding('utf8');
-    child.stderr.on('data', (chunk) => {
-      stderr += chunk;
-      if (stderr.length > 8192) stderr = stderr.slice(-8192);
-    });
-
-    child.on('close', async (code) => {
-      if (code !== 0) {
-        reject(new Error(`Whisper command failed with code ${code}: ${stderr.slice(-500)}`));
-        return;
-      }
-      // Whisper outputs <basename>.json in output_dir with --output_format json
-      const outputPath = path.join(dir, `${baseName}.json`);
-      // Verify file was created
-      try {
-        await access(outputPath, constants.F_OK);
-        resolve(outputPath);
-      } catch {
-        // Try alternative output path (some versions write to filePath.json)
-        const altPath = `${filePath}.json`;
-        try {
-          await access(altPath, constants.F_OK);
-          resolve(altPath);
-        } catch {
-          reject(new Error('Whisper output file not found'));
-        }
-      }
-    });
-
-    child.on('error', (err) => {
-      reject(err);
-    });
-  });
-}
-
 /**
  * Download the best audio for `url` and extract it to MP3 in `destDir`.
  * Rejects with a friendly (pt-BR) message on any failure.
@@ -246,7 +135,7 @@ export function downloadAudio(opts: DownloadOptions): Promise<DownloadedAudio> {
     '--no-warnings',
     '-f',
     'bestaudio/best',
-    '--x',
+    '-x',
     '--audio-format',
     'mp3',
     // 320 kbps CBR — Spotify's "Muito alta" tier; avoids a second lossy
@@ -293,7 +182,7 @@ export function downloadAudio(opts: DownloadOptions): Promise<DownloadedAudio> {
     child.on('close', (code) => {
       void (async () => {
         if (code !== 0) {
-          logger.warn({ url, code, stderr: stderr.slice(-500) }, 'yt-dlp exited non-zero');
+          log.warn({ url, code, stderr: stderr.slice(-500) }, 'yt-dlp exited non-zero');
           reject(new Error(interpretStderr(stderr)));
           return;
         }
@@ -307,37 +196,16 @@ export function downloadAudio(opts: DownloadOptions): Promise<DownloadedAudio> {
           );
           return;
         }
-        // Read metadata from info.json for better title/artist/cover
+        // info.json carries better title/artist/album/cover than the filename.
         const metadata = await readInfoMetadata(destDir, baseName);
-        const title = metadata.title ?? path.parse(filePath).name;
-        const artist = metadata.artist ?? undefined;
-        const album = metadata.album ?? undefined;
-        const coverUrl = metadata.coverUrl ?? undefined;
-        const genre = metadata.genre ?? undefined;
-
-        // Run Whisper for lyric synchronization (optional)
-        let lyricSyncFilePath: string | undefined;
-        try {
-          const whisperResult = await runWhisperOnAudio(filePath);
-          if (whisperResult) {
-            lyricSyncFilePath = whisperResult;
-          }
-        } catch (err) {
-          logger.warn(
-            { filePath, error: err instanceof Error ? err.message : String(err) },
-            'Whisper processing failed; continuing without lyric sync',
-          );
-        }
-
         resolve({
           filePath,
-          title,
-          artist,
-          album,
-          coverUrl,
-          genre,
-          url, // Save the original URL for potential re-download
-          lyricSyncFilePath,
+          title: metadata.title ?? path.parse(filePath).name,
+          artist: metadata.artist,
+          album: metadata.album,
+          coverUrl: metadata.coverUrl,
+          genre: metadata.genre,
+          url, // kept so the track can be re-downloaded later
         });
       })();
     });

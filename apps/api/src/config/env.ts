@@ -55,6 +55,33 @@ const envSchema = z
     /** Path to the yt-dlp binary; falls back to `yt-dlp` on PATH. */
     YTDLP_PATH: optionalString,
 
+    /**
+     * Automatic lyric transcription (OpenAI Whisper CLI). OFF by default:
+     * it needs the `whisper` python package installed on the worker host and
+     * costs minutes of CPU per track. Runs on its own queue, so a slow or
+     * missing Whisper never blocks an upload from going READY.
+     */
+    WHISPER_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('false')
+      .transform((v) => v === 'true'),
+    /** Path to the whisper binary; falls back to `whisper` on PATH. */
+    WHISPER_PATH: optionalString,
+    /** Whisper model size. `small` is the accuracy/speed sweet spot for lyrics. */
+    WHISPER_MODEL: z.string().default('small'),
+    /** Force a language (ISO 639-1). Empty = let Whisper auto-detect. */
+    WHISPER_LANGUAGE: optionalString,
+    /** Hard wall-clock cap per transcription; the child is killed past it. */
+    WHISPER_TIMEOUT_MS: z.coerce
+      .number()
+      .int()
+      .min(30_000)
+      .max(3 * 3600_000)
+      .default(900_000),
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {

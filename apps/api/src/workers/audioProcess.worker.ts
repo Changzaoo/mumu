@@ -15,10 +15,13 @@ import { prisma } from '../infra/db/prisma.js';
 import type { Redis } from 'ioredis';
 import { cache, cacheKeys } from '../infra/redis/cache.js';
 import {
+  enqueueLyricSync,
   enqueueNotification,
   QUEUE_NAMES,
   type AudioProcessJobData,
 } from '../infra/queue/queues.js';
+import { fetchRemoteImage } from '../infra/http/remoteImage.js';
+import { isWhisperEnabled } from '../infra/whisper/whisper.js';
 import { setUploadProgress } from '../infra/queue/uploadProgress.js';
 import { getStorage } from '../infra/storage/index.js';
 import { analyzeLoudness } from '../infra/ffmpeg/loudness.js';
@@ -51,9 +54,6 @@ async function resolveMetadata(
   fileName: string,
   overrides: UploadMetadataInput | undefined,
 ): Promise<ResolvedMetadata> {
-  // Normalize path for Unicode/CJK filenames — ensures the OS uses the
-  // correct normalization form (NFC on Windows, NFD on macOS).
-  const normalizedPath = path.normalize(filePath);
   let tags: ResolvedMetadata = {
     title: path.parse(fileName).name,
     artistName: 'Unknown Artist',
@@ -65,7 +65,7 @@ async function resolveMetadata(
     coverUrl: null,
   };
   try {
-    const meta = await parseFile(normalizedPath);
+    const meta = await parseFile(filePath);
     const pic = meta.common.picture?.[0];
     tags = {
       title: meta.common.title?.trim() || tags.title,
@@ -112,28 +112,11 @@ async function processCover(
   tmpDir: string,
   trackId: string,
 ): Promise<{ coverUrl: string | null; dominantColor: string | null }> {
-  let buffer: Buffer | null = null;
-
-  // 1) Embedded picture from tags (highest priority)
-  buffer = picture;
-
-  // 2) Embedded cover via ffmpeg fallback (attached_pic stream)
-  if (!buffer) {
-    buffer = await extractEmbeddedCover(sourcePath, tmpDir);
-  }
-
-  // 3) Fallback cover URL from overrides (e.g. yt-dlp thumbnail)
-  if (!buffer && coverUrl) {
-    try {
-      const response = await fetch(coverUrl);
-      if (response.ok) {
-        const arrayBuf = await response.arrayBuffer();
-        buffer = Buffer.from(arrayBuf);
-      }
-    } catch {
-      log.warn({ coverUrl }, 'failed to download cover URL from overrides');
-    }
-  }
+  // Preference order: embedded tag art, then ffmpeg's attached_pic stream,
+  // then a remote URL from overrides (e.g. a yt-dlp thumbnail).
+  let buffer: Buffer | null = picture;
+  if (!buffer) buffer = await extractEmbeddedCover(sourcePath, tmpDir);
+  if (!buffer && coverUrl) buffer = await fetchRemoteImage(coverUrl);
 
   if (!buffer) return { coverUrl: null, dominantColor: null };
   try {
@@ -204,7 +187,7 @@ async function upsertCatalog(
 }
 
 async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
-  const { uploadId, userId, rawKey, fileName, overrides, sourceUrl, lyricSyncFilePath } = job.data;
+  const { uploadId, userId, rawKey, fileName, overrides, sourceUrl } = job.data;
   const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
   if (!upload) {
     log.warn({ uploadId }, 'upload row vanished — skipping job');
@@ -272,7 +255,6 @@ async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
         artists: { create: { artistId } },
         ...(genreId ? { genres: { create: { genreId } } } : {}),
         ...(sourceUrl ? { sourceUrl } : {}),
-        ...(lyricSyncFilePath ? { lyricSyncFilePath } : {}),
       },
     });
 
@@ -296,6 +278,12 @@ async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
       body: `"${meta.title}" was processed and is ready to play.`,
       linkUrl: `/track/${trackId}`,
     }).catch(() => undefined);
+
+    // Transcription runs on its own queue: the track is already playable, and
+    // lyrics show up whenever Whisper gets to it.
+    if (isWhisperEnabled()) {
+      await enqueueLyricSync({ trackId, sourceKey: rawKey }).catch(() => undefined);
+    }
 
     log.info({ uploadId, trackId, title: meta.title }, 'upload processed');
   } catch (err) {

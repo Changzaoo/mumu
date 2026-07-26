@@ -7,6 +7,7 @@ import { closeQueues } from '../infra/queue/queues.js';
 import { createAudioProcessWorker } from './audioProcess.worker.js';
 import { createImportSyncWorker } from './importSync.worker.js';
 import { createLinkImportWorker } from './linkImport.worker.js';
+import { createLyricSyncWorker } from './lyricSync.worker.js';
 import { createNotificationsWorker } from './notifications.worker.js';
 
 const connection = createBullConnection();
@@ -17,6 +18,8 @@ const workers: Worker[] = [
   createNotificationsWorker(connection),
   // Only spin up the link-import consumer where the operator enabled it.
   ...(env.LINK_IMPORT_ENABLED ? [createLinkImportWorker(connection)] : []),
+  // Same for transcription: it needs Whisper installed on this host.
+  ...(env.WHISPER_ENABLED ? [createLyricSyncWorker(connection)] : []),
 ];
 
 for (const worker of workers) {

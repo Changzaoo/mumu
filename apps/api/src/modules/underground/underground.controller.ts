@@ -1,73 +1,49 @@
-import type { Request, Response } from 'express';
-import { cursorQuerySchema } from '@aurial/shared';
-import { limitQuerySchema } from '../shared/querySchemas.js';
+import { asyncHandler } from '../../core/http/asyncHandler.js';
+import { ok } from '../../core/http/respond.js';
+import type {
+  UndergroundArtistsQuery,
+  UndergroundSearchQuery,
+  UndergroundTagQuery,
+  UndergroundTracksQuery,
+  UndergroundTrendingQuery,
+} from './underground.schemas.js';
 import { undergroundService } from './underground.service.js';
-import { validate } from '../../middlewares/validate.js';
-
-// Extended limit query schema for underground endpoints
-const undergroundLimitQuerySchema = limitQuerySchema.extend({
-  label: z.string().optional(),
-  days: z.coerce.number().int().min(1).max(365).optional(),
-});
-
-import { z } from 'zod';
 
 export const undergroundController = {
-  async listArtists(req: Request, res: Response) {
-    const { cursor, limit } = cursorQuerySchema.parse(req.query);
-    const { minListeners, maxListeners, label } = req.query;
-
-    const result = await undergroundService.listArtists(cursor, limit, {
-      minListeners: minListeners ? Number(minListeners) : undefined,
-      maxListeners: maxListeners ? Number(maxListeners) : undefined,
-      label: label as string | undefined,
+  listArtists: asyncHandler(async (req, res) => {
+    const { cursor, limit, catalogTag, minListeners, maxListeners } = req.valid
+      .query as UndergroundArtistsQuery;
+    const page = await undergroundService.listArtists(cursor, limit, {
+      catalogTag,
+      minListeners,
+      maxListeners,
     });
+    ok(res, page.items, page.meta);
+  }),
 
-    res.json(result);
-  },
+  searchArtists: asyncHandler(async (req, res) => {
+    const { q, limit, catalogTag, location } = req.valid.query as UndergroundSearchQuery;
+    ok(res, await undergroundService.searchArtists(q, limit, { catalogTag, location }));
+  }),
 
-  async searchArtists(req: Request, res: Response) {
-    const { q: query, limit, label, location } = req.query;
+  listTracks: asyncHandler(async (req, res) => {
+    const { cursor, limit, catalogTag, genre } = req.valid.query as UndergroundTracksQuery;
+    const page = await undergroundService.listTracks(cursor, limit, { catalogTag, genre });
+    ok(res, page.items, page.meta);
+  }),
 
-    if (!query || typeof query !== 'string') {
-      return res.status(400).json({ error: 'Query parameter "q" is required' });
-    }
+  listGenres: asyncHandler(async (req, res) => {
+    const { catalogTag } = req.valid.query as UndergroundTagQuery;
+    ok(res, await undergroundService.listGenres(catalogTag));
+  }),
 
-    const artists = await undergroundService.searchArtists(query, limit ? Number(limit) : 20, {
-      label: label as string | undefined,
-      location: location as string | undefined,
-    });
+  listLocations: asyncHandler(async (req, res) => {
+    const { catalogTag } = req.valid.query as UndergroundTagQuery;
+    ok(res, await undergroundService.listLocations(catalogTag));
+  }),
 
-    res.json({ items: artists });
-  },
-
-  async getTracks(req: Request, res: Response) {
-    const { cursor, limit } = cursorQuerySchema.parse(req.query);
-    const { label, genre } = req.query;
-
-    const result = await undergroundService.getTracks(cursor, limit, {
-      label: label as string | undefined,
-      genre: genre as string | undefined,
-    });
-
-    res.json(result);
-  },
-
-  async getGenres(req: Request, res: Response) {
-    const { label } = req.query;
-    const genres = await undergroundService.getGenres(label as string | undefined);
-    res.json({ items: genres });
-  },
-
-  async getLocations(req: Request, res: Response) {
-    const { label } = req.query;
-    const locations = await undergroundService.getLocations(label as string | undefined);
-    res.json({ items: locations });
-  },
-
-  async getTrending(req: Request, res: Response) {
-    const { limit, label, days } = undergroundLimitQuerySchema.parse(req.query);
-    const tracks = await undergroundService.getTrendingTracks(limit, label, days);
-    res.json({ items: tracks });
-  },
+  listTrending: asyncHandler(async (req, res) => {
+    const { limit, catalogTag, days } = req.valid.query as UndergroundTrendingQuery;
+    ok(res, await undergroundService.listTrendingTracks(limit, catalogTag, days));
+  }),
 };

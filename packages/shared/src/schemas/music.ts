@@ -13,8 +13,11 @@ export const artistSchema = z.object({
   genres: z.array(z.string()),
   /** Gravadora / selo com que o artista trabalha (a mais frequente no acervo). */
   label: z.string().nullable().optional(),
-  /** Artist-curated label e.g. "underground", "freestyle", "local artist". */
-  artistLabel: z.string().nullable().optional(),
+  /**
+   * Operator-curated catalog tag e.g. "underground", "freestyle", "local
+   * artist". Distinct from `label`, which is the record company.
+   */
+  catalogTag: z.string().nullable().optional(),
   /** Short location string e.g. "São Paulo, BR", "Brooklyn, NY". */
   location: z.string().nullable().optional(),
   /** Other platforms links (JSON: { soundcloud, bandcamp, instagram, twitter... }) */
@@ -73,6 +76,10 @@ export const trackSchema = z.object({
   label: z.string().nullable().optional(),
   /** Ano de lançamento — usado para ordenar e exibir na ficha da faixa. */
   releaseYear: z.number().int().nullable().optional(),
+  /** Where this track was imported from, when it came from a link import. */
+  sourceUrl: z.string().nullable().optional(),
+  /** Operator-curated catalog tag e.g. "underground". NOT the record company. */
+  catalogTag: z.string().nullable().optional(),
   uploadedByUserId: z.string().nullable(),
 });
 export type TrackDto = z.infer<typeof trackSchema>;

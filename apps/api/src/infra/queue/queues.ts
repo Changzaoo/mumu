@@ -7,6 +7,7 @@ export const QUEUE_NAMES = {
   importSync: 'import-sync',
   linkImport: 'link-import',
   notifications: 'notifications',
+  lyricSync: 'lyric-sync',
 } as const;
 
 export interface AudioProcessJobData {
@@ -15,10 +16,14 @@ export interface AudioProcessJobData {
   rawKey: string;
   fileName: string;
   overrides?: UploadMetadataInput;
-  /** Original download URL (e.g., YouTube URL) for re-download capability. */
+  /** Original download URL (e.g., YouTube URL) so the track can be re-fetched. */
   sourceUrl?: string;
-  /** Path to Whisper-generated word timestamps JSON file for lyric synchronization. */
-  lyricSyncFilePath?: string;
+}
+
+export interface LyricSyncJobData {
+  trackId: string;
+  /** Storage key of a single-file source Whisper can read (the kept original). */
+  sourceKey: string;
 }
 
 export interface ImportSyncJobData {
@@ -37,10 +42,6 @@ export interface LinkImportJobData {
   /** Reserved storage key the downloaded audio will be written to. */
   rawKey: string;
   url: string;
-  /** Original download URL (e.g., YouTube URL) for re-download capability. */
-  sourceUrl?: string;
-  /** Path to Whisper-generated word timestamps JSON file for lyric synchronization. */
-  lyricSyncFilePath?: string;
 }
 
 export interface NotificationJobData {
@@ -56,6 +57,7 @@ interface QueueSet {
   importSync: Queue<ImportSyncJobData>;
   linkImport: Queue<LinkImportJobData>;
   notifications: Queue<NotificationJobData>;
+  lyricSync: Queue<LyricSyncJobData>;
 }
 
 let queues: QueueSet | null = null;
@@ -95,6 +97,12 @@ export function getQueues(): QueueSet {
           backoff: { type: 'exponential', delay: 5_000 },
         },
       }),
+      lyricSync: new Queue(QUEUE_NAMES.lyricSync, {
+        connection,
+        // Transcription is a nice-to-have: one attempt, and a failure must
+        // never look like a broken upload.
+        defaultJobOptions: { ...defaultJobOptions, attempts: 1 },
+      }),
     };
   }
   return queues;
@@ -116,6 +124,11 @@ export async function enqueueNotification(data: NotificationJobData): Promise<vo
   await getQueues().notifications.add('notify', data);
 }
 
+/** One job per track — re-queueing the same track replaces the pending job. */
+export async function enqueueLyricSync(data: LyricSyncJobData): Promise<void> {
+  await getQueues().lyricSync.add('transcribe', data, { jobId: `lyrics:${data.trackId}` });
+}
+
 export async function closeQueues(): Promise<void> {
   if (!queues) return;
   await Promise.allSettled([
@@ -123,6 +136,7 @@ export async function closeQueues(): Promise<void> {
     queues.importSync.close(),
     queues.linkImport.close(),
     queues.notifications.close(),
+    queues.lyricSync.close(),
   ]);
   queues = null;
 }

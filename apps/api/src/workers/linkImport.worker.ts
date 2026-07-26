@@ -39,7 +39,7 @@ function fileNameFromTitle(title: string): string {
 }
 
 async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
-  const { uploadId, userId, rawKey, url, sourceUrl, lyricSyncFilePath } = job.data;
+  const { uploadId, userId, rawKey, url } = job.data;
   const upload = await prisma.upload.findUnique({ where: { id: uploadId } });
   if (!upload) {
     log.warn({ uploadId }, 'upload row vanished — skipping link import');
@@ -74,22 +74,16 @@ async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
     });
     await setUploadProgress(uploadId, 0);
 
-    // 4) hand off to the shared audio pipeline → lands as a catalog Track
-    // Pass yt-dlp metadata as overrides so the pipeline uses the best available info
+    // 4) hand off to the shared audio pipeline → lands as a catalog Track.
+    // yt-dlp's info.json beats anything we could guess from the filename, so it
+    // rides along as overrides. `sourceUrl` is what makes re-download possible.
     await enqueueAudioProcess({
       uploadId,
       userId,
       rawKey,
       fileName,
-      overrides: {
-        title: title || undefined,
-        artist: artist || undefined,
-        album: album || undefined,
-        coverUrl: coverUrl || undefined,
-        genre: genre || undefined,
-      },
-      sourceUrl: sourceUrl || url,
-      lyricSyncFilePath,
+      overrides: { title, artist, album, coverUrl, genre },
+      sourceUrl: url,
     });
     log.info({ uploadId, title }, 'link import downloaded — queued for processing');
   } catch (err) {

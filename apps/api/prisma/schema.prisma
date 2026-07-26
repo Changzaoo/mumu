@@ -103,8 +103,9 @@ model Artist {
 
   /// Gravadora / selo com que o artista trabalha (a mais frequente no acervo).
   label            String?
-  /// Artist-curated label e.g. "underground", "freestyle", "local artist"
-  artistLabel      String?
+  /// Operator-curated catalog tag e.g. "underground", "freestyle", "local
+  /// artist". Distinct from `label`, which is the record company.
+  catalogTag       String?
   /// Short location string e.g. "São Paulo, BR", "Brooklyn, NY"
   location         String?
   /// Other platforms links (JSON: { soundcloud, bandcamp, instagram, twitter... })
@@ -116,6 +117,8 @@ model Artist {
   followers ArtistFollow[]
 
   @@index([name])
+  /// Serves the underground shelves: filter by tag, order by listeners.
+  @@index([catalogTag, monthlyListeners])
 }
 
 model ArtistGenre {
@@ -213,10 +216,13 @@ model Track {
   originalKey String?
   sourceCodec String?
   sampleRate  Int?
+  /// Original URL this track was imported from, so it can be re-downloaded.
   sourceUrl   String?
 
-  /// User-curated label/catalog tag e.g. "underground", "indie", "freestyle"
-  label String?
+  /// Operator-curated catalog tag e.g. "underground", "indie", "freestyle".
+  /// Deliberately NOT named `label`: on a track, "label" already means the
+  /// releasing record company (see `trackSchema.label`).
+  catalogTag String?
 
   isPublic         Boolean @default(true)
   uploadedByUserId String?

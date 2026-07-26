@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest';
 import { ValidationError } from '../errors/index.js';
-import { cursorWhere, decodeCursor, encodeCursor, takePage } from './pagination.js';
+import {
+  cursorWhere,
+  decodeCursor,
+  decodeNumericCursor,
+  encodeCursor,
+  encodeNumericCursor,
+  numericCursorWhere,
+  takePage,
+  takePageWith,
+} from './pagination.js';
 
 describe('cursor encode/decode', () => {
   it('round-trips date + id', () => {
@@ -68,6 +77,54 @@ describe('takePage', () => {
   it('handles empty input', () => {
     const page = takePage([], 10, pointOf);
     expect(page.items).toEqual([]);
+    expect(page.meta).toEqual({ nextCursor: null, hasMore: false });
+  });
+});
+
+describe('numeric cursor', () => {
+  it('round-trips value + id', () => {
+    const decoded = decodeNumericCursor(encodeNumericCursor(0, 'artist-1'));
+    expect(decoded).toEqual({ value: 0, id: 'artist-1' });
+  });
+
+  it('throws ValidationError on garbage', () => {
+    expect(() => decodeNumericCursor('nope')).toThrow(ValidationError);
+    expect(() => decodeNumericCursor(Buffer.from('x|id').toString('base64url'))).toThrow(
+      ValidationError,
+    );
+  });
+
+  it('returns undefined without a cursor', () => {
+    expect(numericCursorWhere(undefined, 'monthlyListeners')).toBeUndefined();
+  });
+
+  /**
+   * The bug this guards: paginating on `id` alone silently skips rows whenever
+   * the numeric key ties — and for listener counts, ties are the norm.
+   */
+  it('breaks ties on id so equal values are not skipped', () => {
+    const where = numericCursorWhere(encodeNumericCursor(0, 'id-5'), 'monthlyListeners');
+    expect(where).toEqual({
+      OR: [
+        { monthlyListeners: { gt: 0 } },
+        { AND: [{ monthlyListeners: 0 }, { id: { lt: 'id-5' } }] },
+      ],
+    });
+  });
+});
+
+describe('takePageWith', () => {
+  const rows = Array.from({ length: 5 }, (_, i) => ({ id: `id-${i}`, listeners: i * 10 }));
+
+  it('mints the next cursor from the last returned row', () => {
+    const page = takePageWith(rows, 3, (r) => encodeNumericCursor(r.listeners, r.id));
+    expect(page.items).toHaveLength(3);
+    expect(page.meta.hasMore).toBe(true);
+    expect(decodeNumericCursor(page.meta.nextCursor ?? '')).toEqual({ value: 20, id: 'id-2' });
+  });
+
+  it('reports the end of the list', () => {
+    const page = takePageWith(rows, 5, (r) => encodeNumericCursor(r.listeners, r.id));
     expect(page.meta).toEqual({ nextCursor: null, hasMore: false });
   });
 });

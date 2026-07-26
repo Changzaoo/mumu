@@ -1,5 +1,8 @@
 # Dependencies
-node_modules/
+node_modules
+
+# Editor/tool scratch copies — never commit a schema snapshot
+*.backup/
 .pnpm-store/
 
 # Builds
