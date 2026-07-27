@@ -8,27 +8,56 @@ export { aiChat };
 export type { AiMessage };
 
 /**
- * Modelo por CASO DE USO (NVIDIA NIM, endpoints gratuitos).
+ * Modelo dos agentes de metadata (NVIDIA NIM).
  *
- * Antes tudo caía no default do servidor (llama-3.1-8b) — barato, mas fraco em
- * conhecimento de mundo. Identificar de quem é uma música, separar "Tyler, The
- * Creator" de "Beyoncé, Jay-Z" ou auditar uma atribuição são tarefas de
- * CONHECIMENTO, não de formatação: com 8B elas erram e a metadata da
- * biblioteca inteira herda o erro. Já classificar num rótulo fixo e limpar um
- * título de YouTube são tarefas mecânicas, onde o 8B acerta e é ~10× mais
- * barato — e rodam em lote sobre a biblioteca toda.
+ * Antes isto era dividido por tarefa: 70B para conhecimento (identificar de
+ * quem é a música, separar "Tyler, The Creator" de "Beyoncé, Jay-Z") e 8B para
+ * as mecânicas (limpar título, rotular gênero), que rodam em LOTE sobre a
+ * biblioteca toda. Agora todos usam o Nemotron Ultra por decisão sua.
+ *
+ * O mapa continua por caso de uso de propósito: se o consumo do lote pesar, dá
+ * para baixar só `genre` e `cleanTitle` sem tocar nas tarefas de conhecimento.
  */
+const NEMOTRON_ULTRA = 'nvidia/nemotron-3-ultra-550b-a55b';
+
 export const AI_MODELS = {
   /** Conhecimento musical + JSON estrito. A autoridade sobre "de quem é". */
-  identity: 'meta/llama-3.3-70b-instruct',
+  identity: NEMOTRON_ULTRA,
   /** Nomes de grupos com vírgula/& são conhecimento de mundo, não regex. */
-  splitArtists: 'meta/llama-3.3-70b-instruct',
+  splitArtists: NEMOTRON_ULTRA,
   /** Auditoria de atribuição: saída de 1 palavra, decisão de conhecimento. */
-  verify: 'meta/llama-3.3-70b-instruct',
-  /** Rótulo de uma lista fixa, em lote na biblioteca → o menor que resolve. */
-  genre: 'meta/llama-3.1-8b-instruct',
-  /** Extração de string, sem conhecimento de mundo → o menor que resolve. */
-  cleanTitle: 'meta/llama-3.1-8b-instruct',
+  verify: NEMOTRON_ULTRA,
+  /** Rótulo de uma lista fixa, em lote na biblioteca. */
+  genre: NEMOTRON_ULTRA,
+  /** Extração de string, sem conhecimento de mundo. */
+  cleanTitle: NEMOTRON_ULTRA,
+} as const;
+
+/**
+ * Orçamento de tokens por tarefa.
+ *
+ * O Nemotron Ultra é um modelo de RACIOCÍNIO: ele gasta tokens pensando antes
+ * de responder, e esse gasto sai do mesmo `max_tokens` da resposta. Os valores
+ * antigos foram dimensionados para modelos diretos (5 tokens bastavam para
+ * "SIM") e com este modelo eles truncam no meio do raciocínio — a resposta
+ * nunca chega e o parse devolve null.
+ *
+ * Verificado contra a API: pedir o gênero de "Evidências" com 12 tokens
+ * devolve `finish_reason: length` e o texto do raciocínio; com 1024 devolve
+ * "Sertanejo". Por isso os tetos abaixo são generosos mesmo para respostas de
+ * uma palavra — o custo real é o raciocínio, não o tamanho da saída.
+ */
+const AI_BUDGET = {
+  /** Uma palavra de saída, mas precisa raciocinar sobre a atribuição. */
+  verify: 1024,
+  /** Um rótulo da taxonomia, idem. */
+  genre: 1024,
+  /** JSON curto {artist,title}. */
+  cleanTitle: 1536,
+  /** Array de nomes. */
+  splitArtists: 1536,
+  /** JSON com título, todos os artistas, álbum e gênero — o maior de todos. */
+  identity: 2048,
 } as const;
 
 /**
@@ -53,7 +82,7 @@ export async function aiCleanSongTitle(
         content: `Texto: "${raw}"${artistHint ? `\nDica de artista: ${artistHint}` : ''}`,
       },
     ],
-    { model: AI_MODELS.cleanTitle, maxTokens: 120, temperature: 0 },
+    { model: AI_MODELS.cleanTitle, maxTokens: AI_BUDGET.cleanTitle, temperature: 0 },
   );
   if (!content) return null;
   try {
@@ -117,7 +146,7 @@ export async function aiClassifyGenre(title: string, artist?: string): Promise<s
       },
       { role: 'user', content: `Música: "${title}"${artist ? ` — Artista: ${artist}` : ''}` },
     ],
-    { model: AI_MODELS.genre, maxTokens: 12, temperature: 0 },
+    { model: AI_MODELS.genre, maxTokens: AI_BUDGET.genre, temperature: 0 },
   );
   if (!content) return null;
   const answer = content.trim().replace(/["'.]/g, '').toLowerCase();
@@ -142,7 +171,7 @@ export async function aiVerifyArtist(title: string, artist: string): Promise<boo
       },
       { role: 'user', content: `A música "${title}" é de "${artist}"?` },
     ],
-    { model: AI_MODELS.verify, maxTokens: 5, temperature: 0 },
+    { model: AI_MODELS.verify, maxTokens: AI_BUDGET.verify, temperature: 0 },
   );
   if (!content) return null;
   const a = content.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
@@ -191,7 +220,7 @@ export async function aiIdentifyTrack(
         content: `Título: "${rawTitle}"${currentArtist ? `\nArtista atual (pode estar errado): ${currentArtist}` : ''}`,
       },
     ],
-    { model: AI_MODELS.identity, maxTokens: 220, temperature: 0 },
+    { model: AI_MODELS.identity, maxTokens: AI_BUDGET.identity, temperature: 0 },
   );
   if (!content) return null;
   try {
@@ -238,7 +267,7 @@ export async function aiSplitArtists(credit: string, title?: string): Promise<st
       },
       { role: 'user', content: `Crédito: "${credit}"${title ? `\nTítulo: ${title}` : ''}` },
     ],
-    { model: AI_MODELS.splitArtists, maxTokens: 100, temperature: 0 },
+    { model: AI_MODELS.splitArtists, maxTokens: AI_BUDGET.splitArtists, temperature: 0 },
   );
   if (!content) return null;
   try {

@@ -447,7 +447,7 @@ const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.co
   /\/$/,
   '',
 );
-const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'meta/llama-3.1-8b-instruct';
+const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b';
 // Embeddings multilíngues (26 idiomas, inclui pt-BR) — 2048 dims, contexto 8k.
 const NVIDIA_EMBED_MODEL =
   process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/llama-nemotron-embed-1b-v2';
@@ -1662,7 +1662,9 @@ async function main() {
             body: JSON.stringify({
               model: typeof body.model === 'string' ? body.model : NVIDIA_MODEL,
               messages,
-              max_tokens: Math.min(Number(body.max_tokens) || 512, 4096),
+              // O Nemotron gasta tokens raciocinando antes de responder, e esse
+              // gasto sai do mesmo teto. 512 truncava no meio do raciocínio.
+              max_tokens: Math.min(Number(body.max_tokens) || 2048, 4096),
               temperature: typeof body.temperature === 'number' ? body.temperature : 0.2,
               stream: false,
             }),
