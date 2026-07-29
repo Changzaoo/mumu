@@ -82,6 +82,34 @@ const envSchema = z
       .max(3 * 3600_000)
       .default(900_000),
 
+    /**
+     * Curadoria de metadata 24/7 (worker `curation`). Sem a chave da NVIDIA o
+     * worker nem sobe — corrigir nome de artista exige o modelo.
+     */
+    CURATION_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('false')
+      .transform((v) => v === 'true'),
+    NVIDIA_API_KEY: optionalString,
+    NVIDIA_BASE: z.string().default('https://integrate.api.nvidia.com/v1'),
+    NVIDIA_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b'),
+    /** Chamadas em voo simultâneas. São ligadas em rede, não em CPU. */
+    NVIDIA_CONCURRENCY: z.coerce.number().int().min(1).max(32).default(4),
+    NVIDIA_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(120_000),
+    /** Faixas auditadas por volta, por usuário. */
+    CURATION_BATCH: z.coerce.number().int().min(1).max(500).default(40),
+    /** Intervalo entre voltas. */
+    CURATION_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(60_000)
+      .default(15 * 60_000),
+    /** Só re-audita uma faixa depois disso (evita reprocessar a mesma sempre). */
+    CURATION_RECHECK_DAYS: z.coerce.number().int().min(1).default(30),
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {

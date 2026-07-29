@@ -11,3 +11,4 @@ export * from './schemas/home.js';
 export * from './schemas/admin.js';
 export * from './schemas/p2p.js';
 export * from './utils/format.js';
+export * from './ai/curation.js';

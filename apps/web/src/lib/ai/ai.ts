@@ -1,10 +1,26 @@
 /**
  * AI helpers (NVIDIA, via the importer's server-side proxy — the key never
  * reaches the browser). Reuse `aiChat` for any future AI feature.
+ *
+ * Os prompts e os parsers vivem em `@aurial/shared` porque o worker de
+ * curadoria do servidor roda os MESMOS agentes 24/7. Duas cópias divergiriam, e
+ * a mesma faixa passaria a receber respostas diferentes conforme quem a
+ * processou.
  */
+import {
+  AI_BUDGET,
+  GENRE_TAXONOMY,
+  genreMessages,
+  identityMessages,
+  parseGenre,
+  parseIdentity,
+  parseVerify,
+  verifyMessages,
+  type TrackIdentity,
+} from '@aurial/shared';
 import { aiChat, type AiMessage } from '@/lib/local/importerHelper';
 
-export { aiChat };
+export { aiChat, GENRE_TAXONOMY };
 export type { AiMessage };
 
 /**
@@ -31,33 +47,6 @@ export const AI_MODELS = {
   genre: NEMOTRON_ULTRA,
   /** Extração de string, sem conhecimento de mundo. */
   cleanTitle: NEMOTRON_ULTRA,
-} as const;
-
-/**
- * Orçamento de tokens por tarefa.
- *
- * O Nemotron Ultra é um modelo de RACIOCÍNIO: ele gasta tokens pensando antes
- * de responder, e esse gasto sai do mesmo `max_tokens` da resposta. Os valores
- * antigos foram dimensionados para modelos diretos (5 tokens bastavam para
- * "SIM") e com este modelo eles truncam no meio do raciocínio — a resposta
- * nunca chega e o parse devolve null.
- *
- * Verificado contra a API: pedir o gênero de "Evidências" com 12 tokens
- * devolve `finish_reason: length` e o texto do raciocínio; com 1024 devolve
- * "Sertanejo". Por isso os tetos abaixo são generosos mesmo para respostas de
- * uma palavra — o custo real é o raciocínio, não o tamanho da saída.
- */
-const AI_BUDGET = {
-  /** Uma palavra de saída, mas precisa raciocinar sobre a atribuição. */
-  verify: 1024,
-  /** Um rótulo da taxonomia, idem. */
-  genre: 1024,
-  /** JSON curto {artist,title}. */
-  cleanTitle: 1536,
-  /** Array de nomes. */
-  splitArtists: 1536,
-  /** JSON com título, todos os artistas, álbum e gênero — o maior de todos. */
-  identity: 2048,
 } as const;
 
 /**
@@ -103,54 +92,16 @@ export async function aiCleanSongTitle(
   return null;
 }
 
-/** Fixed genre taxonomy the AI must classify into (pt-BR labels). */
-export const GENRE_TAXONOMY = [
-  'Pop',
-  'Hip-Hop/Rap',
-  'Trap',
-  'Funk',
-  'Sertanejo',
-  'MPB',
-  'Pagode',
-  'Forró',
-  'Gospel',
-  'Rock',
-  'R&B/Soul',
-  'Eletrônica',
-  'Dance',
-  'Reggae',
-  'Reggaeton',
-  'Country',
-  'Jazz',
-  'Blues',
-  'Clássica',
-  'Metal',
-  'Indie',
-  'Lo-Fi',
-  'Latina',
-] as const;
-
 /**
  * Classify a track into ONE genre from GENRE_TAXONOMY using the AI. Used to
  * categorize imported tracks the catalog couldn't tag. Returns null if unsure.
  */
 export async function aiClassifyGenre(title: string, artist?: string): Promise<string | null> {
-  const content = await aiChat(
-    [
-      {
-        role: 'system',
-        content:
-          'Você classifica uma música em UM gênero musical desta lista EXATA: ' +
-          `${GENRE_TAXONOMY.join(', ')}. ` +
-          'Responda SOMENTE com o nome do gênero, exatamente como está na lista — sem texto extra.',
-      },
-      { role: 'user', content: `Música: "${title}"${artist ? ` — Artista: ${artist}` : ''}` },
-    ],
-    { model: AI_MODELS.genre, maxTokens: AI_BUDGET.genre, temperature: 0 },
-  );
-  if (!content) return null;
-  const answer = content.trim().replace(/["'.]/g, '').toLowerCase();
-  return GENRE_TAXONOMY.find((g) => g.toLowerCase() === answer) ?? null;
+  const content = await aiChat(genreMessages(title, artist), {
+    model: AI_MODELS.genre,
+    maxTokens: AI_BUDGET.genre,
+  });
+  return content ? parseGenre(content) : null;
 }
 
 /**
@@ -160,33 +111,14 @@ export async function aiClassifyGenre(title: string, artist?: string): Promise<s
  * (uncertain / unavailable — treat as "leave it alone").
  */
 export async function aiVerifyArtist(title: string, artist: string): Promise<boolean | null> {
-  const content = await aiChat(
-    [
-      {
-        role: 'system',
-        content:
-          'Você confere se a atribuição de uma música está correta na vida real. ' +
-          'Responda com UMA palavra apenas: SIM (a música é realmente desse(s) artista(s)), ' +
-          'NAO (claramente NÃO é), ou INCERTO (sem certeza). Sem nada além da palavra.',
-      },
-      { role: 'user', content: `A música "${title}" é de "${artist}"?` },
-    ],
-    { model: AI_MODELS.verify, maxTokens: AI_BUDGET.verify, temperature: 0 },
-  );
-  if (!content) return null;
-  const a = content.trim().toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  if (a.startsWith('sim')) return true;
-  if (a.startsWith('nao')) return false;
-  return null;
+  const content = await aiChat(verifyMessages(title, artist), {
+    model: AI_MODELS.verify,
+    maxTokens: AI_BUDGET.verify,
+  });
+  return content ? parseVerify(content) : null;
 }
 
-export interface AiTrackIdentity {
-  title: string;
-  /** All distinct artists (primary first, then features) — never merged. */
-  artists: string[];
-  album: string | null;
-  genre: string | null;
-}
+export type AiTrackIdentity = TrackIdentity;
 
 /**
  * The metadata "identity agent" (NVIDIA LLM via the importer proxy). Given a
@@ -199,51 +131,11 @@ export async function aiIdentifyTrack(
   rawTitle: string,
   currentArtist?: string,
 ): Promise<AiTrackIdentity | null> {
-  const content = await aiChat(
-    [
-      {
-        role: 'system',
-        content:
-          'Você é um especialista em identificar músicas com precisão. Dado um título (às vezes ' +
-          'bagunçado, de vídeo do YouTube) e possivelmente um artista (que pode estar errado), ' +
-          'identifique a MÚSICA REAL e responda SOMENTE com JSON: ' +
-          '{"title":"...","artists":["principal","participação",...],"album":null,"genre":null}. ' +
-          'REGRAS OBRIGATÓRIAS: (1) liste TODOS os artistas distintos como itens SEPARADOS do array, ' +
-          'na ordem correta (principal primeiro, depois feats/participações); NUNCA junte dois ' +
-          'artistas num nome só. (2) Mantenha grupos/duplas reais como UM item ("AC/DC", ' +
-          '"Tyler, The Creator", "Simon & Garfunkel"). (3) "title" limpo, sem "(Official Video)" etc. ' +
-          `(4) "genre" deve ser um destes ou null: ${GENRE_TAXONOMY.join(', ')}. ` +
-          '(5) Se não tiver certeza do álbum ou gênero, use null. Sem markdown, sem texto extra.',
-      },
-      {
-        role: 'user',
-        content: `Título: "${rawTitle}"${currentArtist ? `\nArtista atual (pode estar errado): ${currentArtist}` : ''}`,
-      },
-    ],
-    { model: AI_MODELS.identity, maxTokens: AI_BUDGET.identity, temperature: 0 },
-  );
-  if (!content) return null;
-  try {
-    const json = JSON.parse(content.replace(/```json|```/gi, '').trim()) as {
-      title?: unknown;
-      artists?: unknown;
-      album?: unknown;
-      genre?: unknown;
-    };
-    const title = typeof json.title === 'string' ? json.title.trim() : '';
-    if (!title) return null;
-    const artists = Array.isArray(json.artists)
-      ? json.artists
-          .filter((a): a is string => typeof a === 'string' && a.trim().length > 0)
-          .map((a) => a.trim())
-      : [];
-    const album = typeof json.album === 'string' && json.album.trim() ? json.album.trim() : null;
-    const genreRaw = typeof json.genre === 'string' ? json.genre.trim().toLowerCase() : '';
-    const genre = GENRE_TAXONOMY.find((g) => g.toLowerCase() === genreRaw) ?? null;
-    return { title, artists, album, genre };
-  } catch {
-    return null;
-  }
+  const content = await aiChat(identityMessages(rawTitle, currentArtist), {
+    model: AI_MODELS.identity,
+    maxTokens: AI_BUDGET.identity,
+  });
+  return content ? parseIdentity(content) : null;
 }
 
 /**

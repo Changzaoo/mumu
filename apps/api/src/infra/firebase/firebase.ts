@@ -18,6 +18,11 @@ export function isFirebaseEnabled(): boolean {
   return Boolean(env.FIREBASE_PROJECT_ID && env.FIREBASE_CLIENT_EMAIL && env.FIREBASE_PRIVATE_KEY);
 }
 
+/** Exposto para o worker de curadoria, que lê a biblioteca no Firestore. */
+export function getFirebaseApp(): App {
+  return getApp();
+}
+
 function getApp(): App {
   if (!app) {
     const existing = getApps();

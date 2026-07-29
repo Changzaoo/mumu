@@ -9,6 +9,7 @@ import { createImportSyncWorker } from './importSync.worker.js';
 import { createLinkImportWorker } from './linkImport.worker.js';
 import { createLyricSyncWorker } from './lyricSync.worker.js';
 import { createNotificationsWorker } from './notifications.worker.js';
+import { startCurationWorker } from './curation.worker.js';
 
 const connection = createBullConnection();
 
@@ -31,7 +32,14 @@ for (const worker of workers) {
   });
 }
 
-logger.info({ queues: workers.map((w) => w.name) }, 'Aurial workers started');
+// A curadoria não é uma fila BullMQ: é um laço próprio sobre o Firestore, que
+// não depende de ninguém enfileirar nada — é o que a torna 24/7.
+const stopCuration = env.CURATION_ENABLED ? startCurationWorker() : () => undefined;
+
+logger.info(
+  { queues: workers.map((w) => w.name), curadoria: env.CURATION_ENABLED },
+  'Aurial workers started',
+);
 
 let shuttingDown = false;
 
@@ -42,6 +50,8 @@ async function shutdown(signal: string): Promise<void> {
 
   const forceExit = setTimeout(() => process.exit(1), 30_000);
   forceExit.unref();
+
+  stopCuration();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));
