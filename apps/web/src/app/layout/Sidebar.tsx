@@ -45,13 +45,10 @@ interface NavEntry {
   iconActive?: IconType;
 }
 
-import { Sparkles } from 'lucide-react';
-
 const MAIN_NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: IoHomeOutline, iconActive: IoHome },
   { to: '/search', label: 'Buscar', icon: IoSearchOutline, iconActive: IoSearch },
   { to: '/discover', label: 'Descobrir', icon: IoCompassOutline, iconActive: IoCompass },
-  { to: '/underground', label: 'Underground', icon: Sparkles, iconActive: Sparkles },
 ];
 
 /** Device/management entries restricted to authorized users. */

@@ -49,10 +49,7 @@ interface MenuGroup {
 const MENU: MenuGroup[] = [
   {
     heading: 'Descobrir',
-    items: [
-      { to: '/discover', label: 'Descobrir', icon: IoCompassOutline },
-      { to: '/underground', label: 'Underground', icon: IoPulseOutline },
-    ],
+    items: [{ to: '/discover', label: 'Descobrir', icon: IoCompassOutline }],
   },
   {
     heading: 'Meu espaço',
