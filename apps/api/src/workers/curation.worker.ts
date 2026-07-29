@@ -186,7 +186,19 @@ export function startCurationWorker(): () => void {
     return () => undefined;
   }
 
-  const db = getFirestore(getFirebaseApp());
+  // `isFirebaseEnabled()` só olha se as três variáveis estão preenchidas — não
+  // se a chave presta. Com o placeholder do .env.example, `cert()` estoura AQUI,
+  // fora de qualquer try, e o processo inteiro morre em laço de restart: as
+  // filas de transcode, waveform e import caem junto, sem ter nada com Firebase.
+  // A curadoria pode ficar desligada; a fila de upload, não.
+  let db: Firestore;
+  try {
+    db = getFirestore(getFirebaseApp());
+  } catch (err) {
+    log.error({ err }, 'curadoria desligada: credencial do Firebase não carrega');
+    return () => undefined;
+  }
+
   let stopped = false;
   let timer: NodeJS.Timeout | null = null;
 
