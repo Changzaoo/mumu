@@ -13,7 +13,7 @@
  */
 import { env } from '../../config/index.js';
 import { logger } from '../../core/logger.js';
-import type { AiMessage } from '@aurial/shared';
+import { EMBED_MODEL, type AiMessage } from '@aurial/shared';
 
 const log = logger.child({ infra: 'nvidia' });
 
@@ -122,4 +122,71 @@ async function once(
   }
 
   return typeof content === 'string' && content.trim() ? content : null;
+}
+
+// ── Embeddings ──────────────────────────────────────────────────────────────
+
+/**
+ * Vetoriza textos em lote. Devolve `null` na falha — quem chama trata a
+ * ausência de DNA como "essa faixa ainda não entrou na busca semântica", não
+ * como erro fatal.
+ *
+ * `input_type` NÃO é enfeite: os modelos de recuperação são treinados com
+ * prefixos diferentes para o que está no acervo (`passage`) e para o que o
+ * usuário digitou (`query`). Vetorizar a busca como se fosse acervo piora o
+ * casamento sem dar erro nenhum.
+ */
+export async function nvidiaEmbed(
+  inputs: string[],
+  opts: { inputType?: 'passage' | 'query'; model?: string } = {},
+): Promise<number[][] | null> {
+  if (!isNvidiaConfigured() || inputs.length === 0) return null;
+
+  await acquire();
+  try {
+    const response = await fetch(`${BASE}/embeddings`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${env.NVIDIA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: opts.model ?? EMBED_MODEL,
+        input: inputs,
+        input_type: opts.inputType ?? 'passage',
+        encoding_format: 'float',
+      }),
+      signal: AbortSignal.timeout(env.NVIDIA_TIMEOUT_MS),
+    });
+
+    if (!response.ok) {
+      log.warn({ status: response.status }, 'NVIDIA recusou o embedding');
+      return null;
+    }
+
+    const data = (await response.json()) as {
+      data?: { embedding?: unknown; index?: unknown }[];
+    };
+    const rows = data.data;
+    if (!Array.isArray(rows) || rows.length !== inputs.length) {
+      log.warn({ pedidos: inputs.length, recebidos: rows?.length }, 'embedding veio incompleto');
+      return null;
+    }
+
+    // A API devolve `index` — respeitar a ordem dela em vez da ordem do array,
+    // senão o vetor de uma faixa acaba gravado em outra.
+    const ordered: number[][] = new Array(inputs.length);
+    for (let i = 0; i < rows.length; i += 1) {
+      const row = rows[i]!;
+      const at = typeof row.index === 'number' ? row.index : i;
+      if (!Array.isArray(row.embedding) || at < 0 || at >= inputs.length) return null;
+      ordered[at] = row.embedding as number[];
+    }
+    return ordered.every(Array.isArray) ? ordered : null;
+  } catch (err) {
+    log.warn({ err }, 'chamada de embedding falhou');
+    return null;
+  } finally {
+    release();
+  }
 }

@@ -22,31 +22,41 @@
  * é pior que deixar como está.
  */
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
-import {
-  AI_BUDGET,
-  identityMessages,
-  parseIdentity,
-  parseVerify,
-  verifyMessages,
-} from '@aurial/shared';
+import { EMBED_DIMS } from '@aurial/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { getFirebaseApp, isFirebaseEnabled } from '../infra/firebase/firebase.js';
-import { isNvidiaConfigured, nvidiaChat } from '../infra/ai/nvidia.js';
+import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
+import { auditor, dna, generista, identificador, type TrackFacts } from './agents.js';
 
 const log = logger.child({ worker: 'curation' });
 
 /** Marca gravada na entrada para não re-auditar a mesma faixa toda volta. */
 const AUDIT_FIELD = 'curatedAt';
+/** Vetor de significado da faixa, gravado uma vez e reusado pela busca. */
+const DNA_FIELD = 'dna';
 
 interface LibraryTrack {
   id?: unknown;
   title?: unknown;
   artists?: unknown;
+  album?: unknown;
+  genre?: unknown;
 }
 interface LibraryEntry {
   track?: LibraryTrack;
   [AUDIT_FIELD]?: unknown;
+  [DNA_FIELD]?: unknown;
+}
+
+/** Extrai os fatos que os agentes consomem. */
+function factsOf(track: LibraryTrack): TrackFacts {
+  return {
+    title: typeof track.title === 'string' ? track.title.trim() : '',
+    artists: artistNames(track),
+    album: typeof track.album === 'string' ? track.album : null,
+    genre: typeof track.genre === 'string' ? track.genre : null,
+  };
 }
 
 function artistNames(track: LibraryTrack): string[] {
@@ -83,38 +93,28 @@ async function auditTrack(entry: LibraryEntry): Promise<Record<string, unknown> 
   const title = (track.title as string).trim();
   const names = artistNames(track);
   const current = names.join(', ');
+  const facts = { title, artists: names };
 
   if (names.length > 0) {
-    const verdict = parseVerify(
-      (await nvidiaChat(verifyMessages(title, current), {
-        maxTokens: AI_BUDGET.verify,
-      })) ?? '',
-    );
     // `true` (confirmado) e `null` (incerto) param aqui: só marcamos a data.
-    if (verdict !== false) return { [AUDIT_FIELD]: Date.now() };
+    if ((await auditor(facts)) !== false) return { [AUDIT_FIELD]: Date.now() };
   }
 
-  const identity = parseIdentity(
-    (await nvidiaChat(identityMessages(title, current || undefined), {
-      maxTokens: AI_BUDGET.identity,
-    })) ?? '',
-  );
+  const identity = await identificador(facts);
   if (!identity) return { [AUDIT_FIELD]: Date.now() };
 
-  // Se o identificador chegou nos mesmos nomes, não há correção a fazer.
-  const same =
+  const patch: Record<string, unknown> = { [AUDIT_FIELD]: Date.now() };
+
+  const mesmosArtistas =
     identity.artists.length === names.length &&
     identity.artists.every((a, i) => a.toLowerCase() === names[i]?.toLowerCase());
-  if (same) return { [AUDIT_FIELD]: Date.now() };
 
-  log.info(
-    { title, de: current || '(vazio)', para: identity.artists.join(', ') },
-    'atribuição corrigida',
-  );
-
-  return {
-    [AUDIT_FIELD]: Date.now(),
-    'track.artists': identity.artists.map((name, i) => ({
+  if (!mesmosArtistas) {
+    log.info(
+      { title, de: current || '(vazio)', para: identity.artists.join(', ') },
+      'atribuição corrigida',
+    );
+    patch['track.artists'] = identity.artists.map((name, i) => ({
       id: `ai:${name.toLowerCase().replace(/\s+/g, '-')}`,
       name,
       slug: name
@@ -123,9 +123,49 @@ async function auditTrack(entry: LibraryEntry): Promise<Record<string, unknown> 
         .replace(/^-|-$/g, ''),
       imageUrl: null,
       order: i,
-    })),
-    ...(identity.genre ? { 'track.genre': identity.genre } : {}),
-  };
+    }));
+  }
+
+  const tituloNovo = tituloMelhor(title, identity.title);
+  if (tituloNovo) {
+    log.info({ de: title, para: tituloNovo }, 'título corrigido');
+    patch['track.title'] = tituloNovo;
+  }
+
+  if (identity.genre) patch['track.genre'] = identity.genre;
+
+  return patch;
+}
+
+/**
+ * Decide se vale trocar o título. Devolve o novo, ou `null` para deixar como está.
+ *
+ * ISSO EXISTE PORQUE o worker corrigia só o artista: uma entrada com título
+ * "GERALDO AZEVEDO" e artista "Desconhecido" ganhava o artista certo e
+ * continuava com o nome do artista no lugar do nome da música. Metade do
+ * conserto parece conserto até você olhar a prateleira.
+ *
+ * O corte é conservador: título diferente de verdade, troca; diferença só de
+ * caixa, troca apenas quando o atual está GRITANDO — porque aí o "igual" é o
+ * mesmo texto, e o que muda é a apresentação.
+ */
+function tituloMelhor(atual: string, sugerido: string): string | null {
+  const limpo = sugerido.trim();
+  if (!limpo) return null;
+
+  const norm = (s: string): string =>
+    s
+      .toLowerCase()
+      .normalize('NFD')
+      .replace(/[̀-ͯ]/g, '')
+      .replace(/[^a-z0-9]+/g, ' ')
+      .trim();
+
+  if (norm(atual) === norm(limpo)) {
+    const gritando = atual === atual.toUpperCase() && /[A-ZÀ-Ú]{4,}/.test(atual);
+    return gritando && limpo !== limpo.toUpperCase() ? limpo : null;
+  }
+  return limpo;
 }
 
 /** Uma volta sobre a biblioteca de um usuário. Devolve quantas corrigiu. */
@@ -141,26 +181,107 @@ async function curateUser(db: Firestore, uid: string): Promise<number> {
   const due = snapshot.docs
     .filter((d) => isDue(d.data() as LibraryEntry, now))
     .slice(0, env.CURATION_BATCH);
-  if (due.length === 0) return 0;
 
-  log.info({ uid: uid.slice(0, 8), pendentes: due.length }, 'auditando');
+  let corrigidas = 0;
 
-  // Todas de uma vez: o pool em nvidia.ts é quem segura o ritmo real.
-  const results = await Promise.all(
-    due.map(async (doc) => {
-      try {
-        const patch = await auditTrack(doc.data() as LibraryEntry);
-        if (!patch) return false;
-        await doc.ref.update(patch);
-        return Object.keys(patch).length > 1; // mais que só a data = corrigiu
-      } catch (err) {
-        log.warn({ err, doc: doc.id }, 'falha ao auditar faixa');
-        return false;
-      }
-    }),
-  );
+  if (due.length > 0) {
+    log.info({ uid: uid.slice(0, 8), pendentes: due.length }, 'auditando');
 
-  return results.filter(Boolean).length;
+    // Todas de uma vez: o pool em nvidia.ts é quem segura o ritmo real.
+    const results = await Promise.all(
+      due.map(async (doc) => {
+        try {
+          const patch = await auditTrack(doc.data() as LibraryEntry);
+          if (!patch) return false;
+          await doc.ref.update(patch);
+          return Object.keys(patch).length > 1; // mais que só a data = corrigiu
+        } catch (err) {
+          log.warn({ err, doc: doc.id }, 'falha ao auditar faixa');
+          return false;
+        }
+      }),
+    );
+    corrigidas = results.filter(Boolean).length;
+  }
+
+  // As duas passagens abaixo rodam sobre o snapshot INTEIRO, não só sobre o que
+  // estava vencido: gênero e DNA não expiram, ou a faixa tem ou não tem. Uma
+  // faixa correta há dois anos nunca entraria na fila de auditoria e ficaria
+  // fora da busca semântica para sempre.
+  corrigidas += await preencherGeneros(snapshot.docs);
+  await gravarDna(snapshot.docs);
+
+  return corrigidas;
+}
+
+type LibraryDoc = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
+
+/**
+ * Preenche o gênero de quem está sem. Alimenta as prateleiras por gênero da
+ * Home — faixa sem gênero simplesmente não aparece em nenhuma delas.
+ */
+async function preencherGeneros(docs: LibraryDoc[]): Promise<number> {
+  const semGenero = docs
+    .map((doc) => ({ doc, facts: factsOf((doc.data() as LibraryEntry).track ?? {}) }))
+    .filter(({ facts }) => facts.title && facts.artists.length > 0 && !facts.genre)
+    .slice(0, env.CURATION_BATCH);
+
+  if (semGenero.length === 0) return 0;
+
+  const generos = await generista(semGenero.map((x) => x.facts));
+
+  let gravados = 0;
+  for (let i = 0; i < semGenero.length; i += 1) {
+    const genero = generos[i];
+    if (!genero) continue;
+    try {
+      await semGenero[i]!.doc.ref.update({ 'track.genre': genero });
+      gravados += 1;
+    } catch (err) {
+      log.warn({ err, doc: semGenero[i]!.doc.id }, 'falha ao gravar gênero');
+    }
+  }
+
+  if (gravados > 0) log.info({ gravados, pendentes: semGenero.length }, 'gêneros atribuídos');
+  return gravados;
+}
+
+/**
+ * Grava o vetor de significado de quem ainda não tem.
+ *
+ * O DNA é recalculado quando o auditor mexeu no título ou nos artistas — o
+ * vetor descreve a faixa que ele viu, e uma faixa renomeada tem outro
+ * significado. Por isso a passagem confere o tamanho: vetor de dimensão
+ * diferente é de outro modelo e não pode ser comparado com os demais.
+ */
+async function gravarDna(docs: LibraryDoc[]): Promise<void> {
+  const semDna = docs
+    .map((doc) => ({ doc, entry: doc.data() as LibraryEntry }))
+    .filter(({ entry }) => {
+      const atual = entry[DNA_FIELD];
+      return !Array.isArray(atual) || atual.length !== EMBED_DIMS;
+    })
+    .map(({ doc, entry }) => ({ doc, facts: factsOf(entry.track ?? {}) }))
+    .filter(({ facts }) => facts.title.length > 0)
+    .slice(0, env.CURATION_BATCH);
+
+  if (semDna.length === 0) return;
+
+  const vetores = await dna(semDna.map((x) => x.facts));
+
+  let gravados = 0;
+  for (let i = 0; i < semDna.length; i += 1) {
+    const vetor = vetores[i];
+    if (!vetor || vetor.length !== EMBED_DIMS) continue;
+    try {
+      await semDna[i]!.doc.ref.update({ [DNA_FIELD]: vetor });
+      gravados += 1;
+    } catch (err) {
+      log.warn({ err, doc: semDna[i]!.doc.id }, 'falha ao gravar DNA');
+    }
+  }
+
+  if (gravados > 0) log.info({ gravados, pendentes: semDna.length }, 'DNA vetorizado');
 }
 
 /** Uma passada por todos os usuários. */
