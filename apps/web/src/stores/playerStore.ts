@@ -197,6 +197,38 @@ let crossfadeTriggered = false;
 let lastProgressCommit = 0;
 let syntheticEndHandledTrackId: string | null = null;
 
+// ── avanço de faixa com a tela apagada ───────────────────────────
+// O avanço tinha DUAS pernas, e as duas dependem de o navegador nos dar
+// atenção: o evento 'ended' do elemento e o polling de `timeupdate`. Com a
+// tela desligada o Android estrangula temporizador repetido — o heartbeat de
+// 1s vira um a cada minuto ou some — e o fim da faixa passava batido: a música
+// acabava e ficava tudo em silêncio até o usuário acender a tela.
+//
+// Esta é a terceira perna: UM temporizador só, armado quando a faixa carrega e
+// mirado no instante em que ela deve acabar. Timer único e distante sobrevive
+// ao estrangulamento muito melhor que polling de 1s, e o navegador mantém
+// temporizadores de página com áudio audível.
+//
+// Ele nunca é a via principal — só age se as outras duas não agiram, e a
+// guarda por id de faixa impede pular duas vezes a mesma.
+let endTimer: ReturnType<typeof setTimeout> | null = null;
+let endTimerTrackId: string | null = null;
+/** Folga depois do fim teórico: o 'ended' de verdade tem preferência. */
+const END_TIMER_SLACK_MS = 1200;
+
+function clearEndTimer(): void {
+  if (endTimer !== null) clearTimeout(endTimer);
+  endTimer = null;
+  endTimerTrackId = null;
+}
+
+/**
+ * Ponte para as ações da store, que são criadas ANTES de `initPlayerEngine`
+ * existir. Fica nula até o engine subir — nos testes que não inicializam o
+ * engine, buscar simplesmente não remarca nada.
+ */
+let rearmEndTimer: (() => void) | null = null;
+
 // ── fonte morta não mata a faixa ─────────────────────────────────
 // URLs já tentadas na carga ATUAL (a primeira falha entra aqui) + quantas
 // alternativas já foram atrás. Zerado a cada troca de faixa (loadIndex).
@@ -360,6 +392,10 @@ function armLoadWatchdog(trackId: string, delayMs = LOAD_WATCHDOG_MS): void {
     // ── já tocou: vigia TRAVAMENTO no meio da faixa ────────────────
     if (pos > 0) {
       if (!state.isPlaying) return; // pausado de propósito — nada a vigiar
+      // Segunda trava contra briga por áudio: se o engine já sabe que não está
+      // tocando, quem parou foi o sistema. O watchdog existe para destravar
+      // buffer preso, nunca para tomar o alto-falante de volta de outro app.
+      if (!audioEngine.isPlaying) return;
       if (pos !== lastWatchdogPos) {
         lastWatchdogPos = pos; // playhead andando: saudável
         stallStrikes = 0;
@@ -616,6 +652,9 @@ export const usePlayerStore = create<PlayerState>()(
           const target = clamp(seconds, 0, get().duration || 0);
           audioEngine.seek(target);
           set({ progress: target });
+          // Buscar muda o quanto falta — o temporizador de fim tem que mirar
+          // no lugar novo, senão dispara cedo (ou tarde) com a tela apagada.
+          rearmEndTimer?.();
         },
 
         setVolume: (volume) => {
@@ -969,9 +1008,54 @@ export function initPlayerEngine(): void {
     }
   });
 
+  /**
+   * (Re)arma o temporizador de fim da faixa. Chamado quando ela carrega e
+   * sempre que o playhead se move (seek, retomada), porque o alvo é sempre
+   * "quanto falta a partir de AGORA".
+   */
+  const armEndTimer = (): void => {
+    clearEndTimer();
+    if (typeof window === 'undefined') return;
+    const s = store.getState();
+    const track = s.currentTrack;
+    if (!track || !s.isPlaying) return;
+
+    const duration = audioEngine.getDuration();
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    const restante = duration - audioEngine.getPosition();
+    if (restante <= 0) return;
+
+    endTimerTrackId = track.id;
+    endTimer = setTimeout(
+      () => {
+        endTimer = null;
+        const atual = store.getState();
+        // A faixa mudou no caminho, ou alguém já pausou: nada a fazer.
+        if (atual.currentTrack?.id !== endTimerTrackId || !atual.isPlaying) return;
+        // O 'ended' de verdade chegou primeiro e já tratou esta faixa.
+        if (syntheticEndHandledTrackId === endTimerTrackId) return;
+        // Ainda está tocando de verdade (a duração era estimada para baixo):
+        // não corta a música, só remarca.
+        if (audioEngine.isPlaying && !audioEngine.isTrackEnded()) {
+          armEndTimer();
+          return;
+        }
+        syntheticEndHandledTrackId = endTimerTrackId;
+        advanceFromTrackEnd();
+      },
+      restante * 1000 + END_TIMER_SLACK_MS,
+    );
+  };
+  rearmEndTimer = armEndTimer;
+
   audioEngine.on('loaded', ({ duration }) => {
     clearLoadWatchdog();
-    consecutiveDeadTracks = 0; // uma faixa carregou — a fila está saudável
+    // NÃO zerar `consecutiveDeadTracks` aqui. 'loaded' significa "os metadados
+    // chegaram", não "está saindo som": uma URL de /stream morta responde o
+    // cabeçalho, dispara 'loaded' e só então falha. Zerar neste ponto fazia o
+    // contador voltar a zero a CADA faixa da cascata, então o teto de 3 nunca
+    // era alcançado e o player pulava a fila inteira, faixa após faixa, até
+    // acabar. Quem zera é o 'timeupdate' com posição > 0 — som de verdade.
     if (duration > 0 && Number.isFinite(duration)) store.setState({ duration });
     // Carregou, mas ainda pode travar no meio — segue vigiando o playhead.
     const loadedId = store.getState().currentTrack?.id;
@@ -983,6 +1067,7 @@ export function initPlayerEngine(): void {
       audioEngine.seek(at);
       store.setState({ progress: at });
     }
+    armEndTimer();
   });
 
   audioEngine.on('buffering', ({ buffering }) => {
@@ -1007,5 +1092,33 @@ export function initPlayerEngine(): void {
     void import('sonner').then(({ toast }) => toast.error(message));
   });
 
-  audioEngine.on('ended', advanceFromTrackEnd);
+  /**
+   * Outro app tomou o áudio (ou chegou ligação, ou o fone saiu). A única
+   * resposta certa é aceitar: acertar o estado para "pausado" e parar de
+   * vigiar. Nada de retomar sozinho.
+   *
+   * Antes disto o player não ficava sabendo da pausa — `isPlaying` seguia
+   * `true`, o watchdog via o playhead congelado e chamava `play()` a cada 10s,
+   * roubando o alto-falante de volta do outro app, em loop.
+   */
+  audioEngine.on('interrupted', () => {
+    clearLoadWatchdog();
+    clearEndTimer();
+    store.setState({ isPlaying: false, isBuffering: false });
+    saveResume(true);
+  });
+
+  audioEngine.on('ended', () => {
+    clearEndTimer();
+    advanceFromTrackEnd();
+  });
+
+  // Play/pause e seek mudam o "quanto falta": o alvo do temporizador tem que
+  // acompanhar, senão ele dispara no meio da música depois de uma pausa longa.
+  store.subscribe((state, prev) => {
+    if (state.isPlaying !== prev.isPlaying || state.currentTrack?.id !== prev.currentTrack?.id) {
+      if (state.isPlaying) armEndTimer();
+      else clearEndTimer();
+    }
+  });
 }

@@ -43,6 +43,12 @@ export interface AudioEngineEventMap {
   ended: { track: TrackDto | null };
   error: { message: string; track: TrackDto | null; kind: PlaybackErrorKind };
   buffering: { buffering: boolean };
+  /**
+   * O sistema pausou por fora: outro app pegou o áudio, chegou ligação, o
+   * fone saiu. NÃO é o usuário apertando pause — e não é convite para voltar
+   * a tocar. Quem ouve isto acerta o estado e fica quieto.
+   */
+  interrupted: { track: TrackDto | null };
 }
 
 export interface LoadOptions {
@@ -160,6 +166,7 @@ export class AudioEngine {
     loaded: new Set(),
     ended: new Set(),
     error: new Set(),
+    interrupted: new Set(),
     buffering: new Set(),
   };
 
@@ -535,6 +542,7 @@ export class AudioEngine {
       if (el) {
         this.connectSlotElement(slot, el);
         this.attachBufferingEvents(slot, el, seq);
+        this.attachInterruptionEvents(slot, el, seq);
         // Duração tardia (stream sem Content-Length / chunked): reemite quando
         // o elemento finalmente souber o tamanho real da faixa.
         const onDurationChange = (): void => {
@@ -621,6 +629,7 @@ export class AudioEngine {
       el.load();
     });
     this.attachBufferingEvents(slot, el, seq);
+    this.attachInterruptionEvents(slot, el, seq);
     this.connectSlotElement(slot, el);
 
     if (el.canPlayType('application/vnd.apple.mpegurl')) {
@@ -647,6 +656,33 @@ export class AudioEngine {
     } catch {
       el.src = url;
     }
+  }
+
+  /**
+   * Distingue "o usuário pausou" de "o sistema tirou o áudio de nós".
+   *
+   * O ELEMENTO pausar sem que a gente tenha pedido só acontece por um motivo:
+   * outra coisa assumiu o áudio do aparelho — outro app tocando, uma ligação,
+   * o fone desconectado. Sem escutar isto, `this.playing` continuava `true`
+   * para sempre, o watchdog do player via o playhead parado e chamava `play()`
+   * de volta a cada 10s: o Aurial ficava brigando com o outro app pelo alto-
+   * falante, e ganhava. Isso nunca pode acontecer.
+   *
+   * Como distinguir: `pause()` nosso já zerou `this.playing` antes de o evento
+   * chegar (o 'pause' do elemento é assíncrono). Então evento com
+   * `this.playing === true` é interrupção de fora, e ponto.
+   */
+  private attachInterruptionEvents(slot: Slot, el: HTMLAudioElement, seq: number): void {
+    const onPause = (): void => {
+      if (slot.seq !== seq || slot !== this.active) return;
+      if (!this.playing) return; // pausa nossa — já contabilizada
+      if (el.ended) return; // fim da faixa, não interrupção
+      this.playing = false;
+      this.syncTicker();
+      this.emit('interrupted', { track: slot.track });
+    };
+    el.addEventListener('pause', onPause);
+    slot.cleanup.push(() => el.removeEventListener('pause', onPause));
   }
 
   private attachBufferingEvents(slot: Slot, el: HTMLAudioElement, seq: number): void {

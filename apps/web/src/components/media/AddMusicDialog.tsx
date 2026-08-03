@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { isPlaylistUrl } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { useIsAuthorized } from '@/lib/auth/roles';
 
 /**
  * Common-user "add music" — a hardened way to import by link (incl. YouTube
@@ -29,6 +30,7 @@ export function AddMusicDialog({
   const [url, setUrl] = useState('');
   const [busy, setBusy] = useState(false);
   const fileRef = useRef<HTMLInputElement>(null);
+  const podeEnviarArquivo = useIsAuthorized();
 
   const addLink = async (): Promise<void> => {
     const link = url.trim();
@@ -85,8 +87,8 @@ export function AddMusicDialog({
         <DialogHeader>
           <DialogTitle>Adicionar música</DialogTitle>
           <DialogDescription>
-            Cole o link de uma música ou playlist (YouTube, SoundCloud, Vimeo, Bandcamp) ou envie um
-            arquivo de áudio do seu aparelho.
+            Cole o link de uma música ou playlist (YouTube, SoundCloud, Vimeo, Bandcamp)
+            {podeEnviarArquivo ? ' ou envie um arquivo de áudio do seu aparelho.' : '.'}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -103,31 +105,39 @@ export function AddMusicDialog({
               {busy ? <Loader2 className="animate-spin" /> : 'Adicionar'}
             </Button>
           </div>
-          <div className="flex items-center gap-3 text-[11px] text-fg-subtle">
-            <span className="h-px flex-1 bg-border" /> ou <span className="h-px flex-1 bg-border" />
-          </div>
-          <Button
-            variant="outline"
-            className="w-full"
-            disabled={busy}
-            onClick={() => fileRef.current?.click()}
-          >
-            <Upload /> Enviar arquivo de áudio
-          </Button>
-          <input
-            ref={fileRef}
-            type="file"
-            accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac"
-            multiple
-            hidden
-            onChange={(e) => {
-              void addFiles(Array.from(e.target.files ?? []));
-              e.target.value = '';
-            }}
-          />
-          <p className="text-[11px] leading-relaxed text-fg-subtle">
-            Apenas áudio (MP3, M4A, FLAC, WAV, OGG…). Arquivos são verificados antes de entrar.
-          </p>
+          {/* Enviar arquivo é coisa de administrador: o arquivo fica no
+              aparelho e é publicado no cofre para os outros, então quem envia
+              responde pelo que entrou. Link continua aberto a todo mundo. */}
+          {podeEnviarArquivo && (
+            <>
+              <div className="flex items-center gap-3 text-[11px] text-fg-subtle">
+                <span className="h-px flex-1 bg-border" /> ou{' '}
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                variant="outline"
+                className="w-full"
+                disabled={busy}
+                onClick={() => fileRef.current?.click()}
+              >
+                <Upload /> Enviar arquivo de áudio
+              </Button>
+              <input
+                ref={fileRef}
+                type="file"
+                accept="audio/*,.mp3,.m4a,.flac,.wav,.ogg,.opus,.aac"
+                multiple
+                hidden
+                onChange={(e) => {
+                  void addFiles(Array.from(e.target.files ?? []));
+                  e.target.value = '';
+                }}
+              />
+              <p className="text-[11px] leading-relaxed text-fg-subtle">
+                Apenas áudio (MP3, M4A, FLAC, WAV, OGG…). Arquivos são verificados antes de entrar.
+              </p>
+            </>
+          )}
         </div>
       </DialogContent>
     </Dialog>

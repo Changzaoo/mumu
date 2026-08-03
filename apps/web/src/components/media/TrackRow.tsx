@@ -19,7 +19,7 @@ import { toast } from 'sonner';
 import type { TrackDto } from '@aurial/shared';
 import { LikeButton } from '@/components/media/LikeButton';
 import { openShare } from '@/components/media/ShareDialog';
-import { sourceUrlFor } from '@/lib/local/localLibrary';
+import { albumKeyForTrack, sourceUrlFor } from '@/lib/local/localLibrary';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -35,6 +35,28 @@ import {
 import { useDownloadState } from '@/features/downloads/useDownloads';
 import { formatDuration, cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
+
+/**
+ * Para onde o nome do artista leva.
+ *
+ * ISSO EXISTE PORQUE `/artist/:id` e `/album/:id` consultam a API central, que
+ * NÃO está no ar: tocar no nome do artista de qualquer faixa da biblioteca
+ * caía numa tela de erro. Faixa da biblioteca vai para as páginas locais, que
+ * são as que têm dados de verdade; só o catálogo (Audius) usa as rotas por id.
+ */
+function artistHref(track: TrackDto, artist: TrackDto['artists'][number]): string {
+  if (track.id.startsWith('local:')) return `/artista/${encodeURIComponent(artist.name)}`;
+  return `/artist/${artist.id}`;
+}
+
+/** Idem para o álbum. `null` = não há para onde ir; o nome vira texto simples. */
+function albumHref(track: TrackDto): string | null {
+  if (track.id.startsWith('local:')) {
+    const key = albumKeyForTrack(track);
+    return key ? `/disco/${encodeURIComponent(key)}` : null;
+  }
+  return track.album ? `/album/${track.album.id}` : null;
+}
 
 /** Animated "now playing" bars (pauses with playback). */
 function EqBars({ playing }: { playing: boolean }) {
@@ -118,8 +140,6 @@ export function TrackRow({
       handlePlay();
     }
   };
-
-  const primaryArtistId = track.artists[0]?.id;
 
   return (
     <div
@@ -237,7 +257,7 @@ export function TrackRow({
               <Fragment key={artist.id}>
                 {i > 0 && ', '}
                 <Link
-                  to={`/artist/${artist.id}`}
+                  to={artistHref(track, artist)}
                   className="hover:text-fg hover:underline"
                   onClick={(e) => e.stopPropagation()}
                 >
@@ -252,15 +272,18 @@ export function TrackRow({
       {/* album (hidden on small screens) */}
       {showAlbum && (
         <span className="hidden min-w-0 md:block">
-          {track.album && (
-            <Link
-              to={`/album/${track.album.id}`}
-              className="line-clamp-1 text-[13px] text-fg-muted hover:text-fg hover:underline"
-              onClick={(e) => e.stopPropagation()}
-            >
-              {track.album.title}
-            </Link>
-          )}
+          {track.album &&
+            (albumHref(track) ? (
+              <Link
+                to={albumHref(track)!}
+                className="line-clamp-1 text-[13px] text-fg-muted hover:text-fg hover:underline"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {track.album.title}
+              </Link>
+            ) : (
+              <span className="line-clamp-1 text-[13px] text-fg-muted">{track.album.title}</span>
+            ))}
         </span>
       )}
 
@@ -377,13 +400,15 @@ export function TrackRow({
             >
               <Share2 /> Compartilhar
             </DropdownMenuItem>
-            {track.album && (
-              <DropdownMenuItem onSelect={() => void navigate(`/album/${track.album?.id}`)}>
+            {track.album && albumHref(track) && (
+              <DropdownMenuItem onSelect={() => void navigate(albumHref(track)!)}>
                 <Disc3 /> Ir para o álbum
               </DropdownMenuItem>
             )}
-            {primaryArtistId && (
-              <DropdownMenuItem onSelect={() => void navigate(`/artist/${primaryArtistId}`)}>
+            {track.artists[0] && (
+              <DropdownMenuItem
+                onSelect={() => void navigate(artistHref(track, track.artists[0]!))}
+              >
                 <MicVocal /> Ir para o artista
               </DropdownMenuItem>
             )}

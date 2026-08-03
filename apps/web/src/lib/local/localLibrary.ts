@@ -1079,6 +1079,19 @@ const albumKey = (title: string, artist: string): string =>
   `${normName(title)}|${normName(artist)}`;
 
 /**
+ * A chave de `/disco/:key` para uma faixa da biblioteca.
+ *
+ * Exportada porque quem monta link (TrackRow, por exemplo) precisa chegar
+ * EXATAMENTE nesta chave — mandar o `album.id` para `/album/:id` cai na API
+ * central, que não está no ar, e o usuário vê uma página de erro.
+ */
+export function albumKeyForTrack(track: TrackDto): string | null {
+  const title = track.album?.title?.trim();
+  if (!title) return null;
+  return albumKey(title, track.artists[0]?.name?.trim() || 'Desconhecido');
+}
+
+/**
  * Group library tracks into real albums. A track counts as an album only when
  * its album has 2+ tracks OR the album name differs from the track name (a
  * genuine release, not an auto "Title - Single"). Everything else is a single.
