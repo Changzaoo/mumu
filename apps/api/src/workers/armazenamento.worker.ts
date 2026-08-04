@@ -34,6 +34,24 @@ export interface EstadoDoDisco {
   usadoFracao: number;
 }
 
+/**
+ * Onde medir.
+ *
+ * `STORAGE_LOCAL_PATH` vem do template como `./storage` — RELATIVO, e dentro do
+ * container esse caminho não existe: a primeira versão deste agente passou o
+ * valor cru para o `statfs` e só sabia dizer "não foi possível medir o disco",
+ * o que é o pior tipo de monitor: um que fica quieto achando que está vigiando.
+ *
+ * Só um caminho ABSOLUTO vale como alvo; qualquer outra coisa cai na raiz, que
+ * dentro do container é o mesmo volume do host onde as imagens e os volumes do
+ * Docker vivem — que é justamente o disco que enche.
+ */
+function alvoDeMedicao(): string[] {
+  const configurado = env.STORAGE_LOCAL_PATH?.trim();
+  const absoluto = configurado && configurado.startsWith('/') ? [configurado] : [];
+  return [...absoluto, '/'];
+}
+
 /** Quanto o volume que hospeda o caminho tem de espaço. */
 export async function medirDisco(caminho = '/'): Promise<EstadoDoDisco | null> {
   try {
@@ -77,10 +95,22 @@ async function recolherLixoSeguro(): Promise<void> {
   }
 }
 
+/** Primeira medição que der certo entre os alvos possíveis. */
+async function medirPrimeiroQueDer(): Promise<EstadoDoDisco | null> {
+  for (const caminho of alvoDeMedicao()) {
+    const estado = await medirDisco(caminho);
+    if (estado) return estado;
+  }
+  return null;
+}
+
 /** Uma medição, com aviso proporcional ao aperto. */
 export async function verificarArmazenamento(): Promise<EstadoDoDisco | null> {
-  const estado = await medirDisco(env.STORAGE_LOCAL_PATH || '/');
-  if (!estado) return null;
+  const estado = await medirPrimeiroQueDer();
+  if (!estado) {
+    log.warn('nenhum caminho pôde ser medido — o agente está cego');
+    return null;
+  }
 
   const pct = Math.round(estado.usadoFracao * 100);
   const dados = { usado: `${pct}%`, livre: gb(estado.livreBytes), total: gb(estado.totalBytes) };
@@ -88,7 +118,7 @@ export async function verificarArmazenamento(): Promise<EstadoDoDisco | null> {
   if (estado.usadoFracao >= CRITICO) {
     log.error(dados, 'disco crítico — recolhendo lixo seguro');
     await recolherLixoSeguro();
-    const depois = await medirDisco(env.STORAGE_LOCAL_PATH || '/');
+    const depois = await medirPrimeiroQueDer();
     if (depois) {
       log.warn({ antes: dados.livre, depois: gb(depois.livreBytes) }, 'espaço depois da limpeza');
     }

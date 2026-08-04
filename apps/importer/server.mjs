@@ -504,9 +504,35 @@ async function blobStoreReady() {
   return false;
 }
 
+/**
+ * Há quanto tempo o cofre está fora do ar, para não repetir o mesmo grito a
+ * cada varredura — mas repetir de hora em hora, porque disco desmontado não se
+ * conserta sozinho e um aviso único no boot ninguém lê.
+ */
+let cofreForaDesde = null;
+
 async function sweepBlobStore() {
   try {
-    if (!(await blobStoreReady())) return;
+    if (!(await blobStoreReady())) {
+      // ISSO PRECISA GRITAR. O cofre caiu em 3 de agosto e o único registro
+      // disso foi uma linha no boot seguinte: a varredura simplesmente
+      // retornava em silêncio. Enquanto ele está fora, TODA reprodução entre
+      // aparelhos cai para streaming ao vivo (10 a 40s até o primeiro byte) e
+      // todo upload é recusado — sem nada no log dizendo por quê.
+      if (cofreForaDesde === null) cofreForaDesde = Date.now();
+      const horas = ((Date.now() - cofreForaDesde) / 3600_000).toFixed(1);
+      log(
+        `ALERTA: cofre de blobs INDISPONÍVEL há ${horas}h (${BLOB_DIR}). ` +
+          'O disco externo provavelmente desmontou. Enquanto isso: uploads recusados ' +
+          'e reprodução entre aparelhos só por streaming ao vivo. ' +
+          'Conserto: sudo mount /mnt/cartaosd',
+      );
+      return;
+    }
+    if (cofreForaDesde !== null) {
+      log(`cofre de blobs VOLTOU depois de ${((Date.now() - cofreForaDesde) / 3600_000).toFixed(1)}h`);
+      cofreForaDesde = null;
+    }
     const names = await readdir(BLOB_DIR);
     const bins = [];
     let total = 0;
