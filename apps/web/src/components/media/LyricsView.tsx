@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { fetchLyrics } from '@/lib/lyrics/lyrics';
-import { syncLyricsFromAudio } from '@/lib/lyrics/syncFromAudio';
+import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -37,6 +37,14 @@ export function LyricsView({ track, className }: LyricsViewProps) {
       if (found && !found.synced) {
         const synced = await syncLyricsFromAudio(track).catch(() => null);
         if (synced) return synced;
+      }
+      // Nenhuma letra publicada — o caso da maioria das músicas pouco
+      // conhecidas, em que esta tela ficava simplesmente vazia. Transcreve o
+      // áudio e mostra o resultado rotulado como transcrição. Texto com erro
+      // declarado serve mais que tela em branco.
+      if (!found) {
+        const transcrita = await transcribeToLyrics(track).catch(() => null);
+        if (transcrita) return transcrita;
       }
       return found;
     },

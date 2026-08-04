@@ -18,8 +18,14 @@
  */
 import type { TrackDto } from '@aurial/shared';
 import { alignLyrics } from '@/lib/lyrics/align';
-import { cachedLyrics, fetchLyrics, writeLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
-import { aiTranscribe } from '@/lib/local/importerHelper';
+import {
+  cachedLyrics,
+  fetchLyrics,
+  writeLyrics,
+  type Lyrics,
+  type LyricLine,
+} from '@/lib/lyrics/lyrics';
+import { aiTranscribe, type TranscribedWord } from '@/lib/local/importerHelper';
 import { getAudioBlob } from '@/lib/offline/audioCache';
 import { blobFor as localLibraryBlob } from '@/lib/local/localLibrary';
 
@@ -37,6 +43,89 @@ async function localAudio(track: TrackDto): Promise<Blob | null> {
   const fromLibrary = await localLibraryBlob(track.id).catch(() => null);
   if (fromLibrary) return fromLibrary;
   return getAudioBlob(track.id).catch(() => null);
+}
+
+/**
+ * Agrupa as palavras transcritas em LINHAS de letra.
+ *
+ * O ASR devolve palavra a palavra com carimbo de tempo; letra se lê em versos.
+ * O corte é por respiro: pausa longa entre palavras é onde o verso acaba de
+ * verdade. O limite de palavras existe para o caso de canto contínuo, em que
+ * ninguém respira e a linha viraria um parágrafo.
+ */
+export function palavrasEmLinhas(words: TranscribedWord[]): LyricLine[] {
+  const PAUSA_MS = 700;
+  const MAX_PALAVRAS = 9;
+  const linhas: LyricLine[] = [];
+  let atual: TranscribedWord[] = [];
+
+  const fechar = (): void => {
+    if (atual.length === 0) return;
+    const texto = atual
+      .map((w) => w.text.trim())
+      .filter(Boolean)
+      .join(' ');
+    if (texto) linhas.push({ timeMs: atual[0]!.startMs, text: texto });
+    atual = [];
+  };
+
+  for (let i = 0; i < words.length; i += 1) {
+    const w = words[i]!;
+    const anterior = words[i - 1];
+    const respiro = anterior ? w.startMs - anterior.startMs : 0;
+    if (atual.length >= MAX_PALAVRAS || (anterior && respiro >= PAUSA_MS)) fechar();
+    atual.push(w);
+  }
+  fechar();
+  return linhas;
+}
+
+/**
+ * Letra vinda da TRANSCRIÇÃO, para quando não existe letra publicada.
+ *
+ * A regra desta casa sempre foi "o texto nunca vem do ASR", porque transcrição
+ * de canto erra e a letra do LRCLIB não. Ela continua valendo enquanto HOUVER
+ * letra publicada. Mas para música pouco conhecida o LRCLIB não tem nada, e a
+ * regra deixava o usuário com a tela vazia — que é pior que um texto com erro
+ * declarado. Então: só quando não há alternativa, e sempre rotulada como
+ * transcrição, para ninguém confundir com a letra oficial.
+ */
+export async function transcribeToLyrics(track: TrackDto): Promise<Lyrics | null> {
+  if (inFlight.has(track.id) || failed.has(track.id)) return null;
+  if (track.previewOnly) return null;
+  if (cachedLyrics(track.id)) return null; // já há letra: não é caso para ASR
+
+  inFlight.add(track.id);
+  try {
+    const audio = await localAudio(track);
+    if (!audio) return null;
+
+    const words = await aiTranscribe(audio);
+    if (!words || words.length === 0) {
+      failed.add(track.id);
+      return null;
+    }
+
+    const linhas = palavrasEmLinhas(words);
+    // Punhado de palavras soltas não é letra — é ruído de fundo transcrito.
+    if (linhas.length < 4) {
+      failed.add(track.id);
+      return null;
+    }
+
+    const lyrics: Lyrics = {
+      synced: true,
+      lines: linhas,
+      source: 'Transcrição automática',
+    };
+    writeLyrics(track.id, lyrics);
+    return lyrics;
+  } catch {
+    failed.add(track.id);
+    return null;
+  } finally {
+    inFlight.delete(track.id);
+  }
 }
 
 /**
@@ -99,6 +188,8 @@ export async function syncLyricsFromAudio(track: TrackDto): Promise<Lyrics | nul
 // reprodução: sincronizar letra é enfeite, tocar música é o serviço.
 const queue: TrackDto[] = [];
 const queued = new Set<string>();
+/** Faixas que furaram a fila por estarem tocando agora. */
+const urgente = new Set<string>();
 let draining = false;
 
 /** Respiro entre transcrições — mantém o aparelho e o servidor confortáveis. */
@@ -112,6 +203,7 @@ async function drain(): Promise<void> {
       const track = queue.shift();
       if (!track) continue;
       queued.delete(track.id);
+      urgente.delete(track.id);
       // Offline não adianta: nem letra nem transcrição. Devolve à fila e para.
       if (typeof navigator !== 'undefined' && !navigator.onLine) {
         queue.unshift(track);
@@ -119,14 +211,24 @@ async function drain(): Promise<void> {
         break;
       }
       try {
-        // 1) garante o TEXTO (LRCLIB) — sem ele não há o que sincronizar;
+        // 1) garante o TEXTO (LRCLIB) — a letra publicada é sempre preferida;
         const lyrics = cachedLyrics(track.id) ?? (await fetchLyrics(track));
-        // 2) já veio com tempo? nada a fazer.
-        if (lyrics && !lyrics.synced) await syncLyricsFromAudio(track);
+        if (!lyrics) {
+          // 2) não existe letra publicada: transcrever é a única saída, e é
+          //    melhor que a tela vazia que o usuário via até aqui.
+          await transcribeToLyrics(track);
+        } else if (!lyrics.synced) {
+          // 3) tem texto, falta tempo: usa o áudio só para cronometrar.
+          await syncLyricsFromAudio(track);
+        }
       } catch {
         /* faixa problemática não pode travar a fila */
       }
-      if (queue.length > 0) await new Promise((r) => setTimeout(r, GAP_MS));
+      // Pausa só entre faixas de fundo. Se alguém furou a fila pedindo a letra
+      // do que está tocando AGORA, esperar 4s é justamente o que não pode.
+      if (queue.length > 0 && !urgente.has(queue[0]!.id)) {
+        await new Promise((r) => setTimeout(r, GAP_MS));
+      }
     }
   } finally {
     draining = false;
@@ -138,14 +240,32 @@ async function drain(): Promise<void> {
  * fica disponível no aparelho (download concluído ou import). Não bloqueia
  * quem chamou e nunca lança.
  */
-export function queueLyricsSync(track: TrackDto): void {
+export function queueLyricsSync(track: TrackDto, opts: { agora?: boolean } = {}): void {
   if (typeof window === 'undefined') return;
   if (track.previewOnly) return; // prévia de 30s não casa com a letra inteira
-  if (queued.has(track.id) || inFlight.has(track.id) || failed.has(track.id)) return;
+  if (inFlight.has(track.id) || failed.has(track.id)) return;
   // Já tem letra COM tempo: não há o que ganhar.
   if (cachedLyrics(track.id)?.synced) return;
+
+  if (queued.has(track.id)) {
+    // Já estava na fila, mas agora é o que está tocando: promove para a frente
+    // em vez de ignorar — era isso que fazia a letra da faixa atual esperar a
+    // transcrição de uma playlist inteira baixada meia hora antes.
+    if (opts.agora && !urgente.has(track.id)) {
+      const at = queue.findIndex((t) => t.id === track.id);
+      if (at > 0) queue.unshift(...queue.splice(at, 1));
+      urgente.add(track.id);
+    }
+    return;
+  }
+
   queued.add(track.id);
-  queue.push(track);
+  if (opts.agora) {
+    urgente.add(track.id);
+    queue.unshift(track);
+  } else {
+    queue.push(track);
+  }
   void drain();
 }
 

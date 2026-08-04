@@ -497,6 +497,13 @@ export const usePlayerStore = create<PlayerState>()(
           duration: track.durationMs / 1000,
         });
 
+        // A letra da faixa que está começando fura a fila de transcrição. Sem
+        // isto, quem abrisse a letra do que está tocando esperava atrás da
+        // playlist inteira que foi baixada meia hora antes.
+        void import('@/lib/lyrics/syncFromAudio')
+          .then((m) => m.queueLyricsSync(track, { agora: true }))
+          .catch(() => undefined);
+
         // Local audio already resolvable THIS instant → play with zero network.
         const localNow = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
         if (localNow) {
