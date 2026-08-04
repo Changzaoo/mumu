@@ -108,8 +108,11 @@ export async function generista(tracks: TrackFacts[]): Promise<(string | null)[]
       batchGenreMessages(
         fatia.map((t) => ({ title: t.title, artist: t.artists.join(', ') || 'desconhecido' })),
       ),
-      // O orçamento cresce com o lote: são N rótulos, mais o raciocínio.
-      { model: modelFor('genre'), maxTokens: AI_BUDGET.genre + fatia.length * 24 },
+      // O orçamento cresce com o lote — e cresce pelo RACIOCÍNIO, não pelo
+      // rótulo: cada faixa a mais é mais uma decisão a tomar antes de escrever
+      // o array. 24 tokens por item cobria só a saída e o teto estourava no
+      // meio do pensamento.
+      { model: modelFor('genre'), maxTokens: AI_BUDGET.genre + fatia.length * 80 },
     );
 
     if (!resposta) continue;

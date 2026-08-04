@@ -57,13 +57,24 @@ export interface TrackIdentity {
  * Modelos de raciocínio (Nemotron) gastam tokens pensando antes de responder,
  * e esse gasto sai do mesmo teto da resposta. Por isso os orçamentos são
  * generosos mesmo para saídas de uma palavra — o custo é o raciocínio.
+ *
+ * MEDIDO em produção (2026-08-03), e o número é contraintuitivo: o
+ * `nemotron-3-nano-30b` gastou 875 tokens de raciocínio para responder "SIM",
+ * enquanto o `super-120b` resolveu o mesmo caso em 412. Modelo menor pensa MAIS
+ * alto, não menos — ele precisa de mais passos para chegar onde o grande chega
+ * direto.
+ *
+ * Com `verify` em 1024 o teto estourava no meio do raciocínio: a resposta vinha
+ * truncada, era descartada (certo — meia conclusão não vira metadata) e a faixa
+ * ficava sem auditoria nenhuma. Foram 13 descartes numa hora de operação.
+ * Teto alto não custa: só se paga o token que o modelo realmente gerou.
  */
 export const AI_BUDGET = {
-  verify: 1024,
-  genre: 1024,
-  cleanTitle: 1536,
-  splitArtists: 1536,
-  identity: 2048,
+  verify: 2048,
+  genre: 2048,
+  cleanTitle: 2048,
+  splitArtists: 2048,
+  identity: 3072,
 } as const;
 
 // ── Limpeza de resposta ─────────────────────────────────────────────────────
