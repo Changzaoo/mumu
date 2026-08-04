@@ -101,6 +101,10 @@ const IS_IOS =
 
 const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 
+/** Teto para o slot de saída seguir vivo (mudo) esperando o novo pegar. */
+const RETIRE_MAX_MS = 10_000;
+const RETIRE_POLL_MS = 200;
+
 function createSlot(): Slot {
   return {
     source: null,
@@ -157,6 +161,8 @@ export class AudioEngine {
   private rafId: number | null = null;
   private hiddenTicker: ReturnType<typeof setInterval> | null = null;
   private fadeTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Cancela as esperas de `retireSlot` ainda pendentes. */
+  private retireCancels = new Set<() => void>();
   private destroyed = false;
 
   private listeners: {
@@ -226,6 +232,7 @@ export class AudioEngine {
   load(track: TrackDto, options: LoadOptions = {}): void {
     if (this.destroyed) return;
     const { autoplay = true, crossfadeSeconds = 0 } = options;
+    const wasPlaying = this.playing;
     const source = this.sourceFor(track);
     if (!source) {
       this.emit('error', { message: 'Faixa indisponível para reprodução.', track, kind: 'source' });
@@ -274,10 +281,11 @@ export class AudioEngine {
       this.fadeTimers.add(timer);
       this.playing = true;
     } else {
-      this.resetSlot(from);
       this.setFade(to, 1);
       if (autoplay) this.startSlot(to);
       this.playing = autoplay;
+      // Depois de começar a nova, nunca antes — ver `retireSlot`.
+      this.retireSlot(from, to, wasPlaying && autoplay);
     }
 
     this.applyRate(to);
@@ -292,7 +300,6 @@ export class AudioEngine {
 
   play(): void {
     if (this.destroyed || !this.active.source) return;
-    void this.ctx?.resume().catch(() => undefined);
     this.startSlot(this.active);
     this.playing = true;
     this.syncTicker();
@@ -421,6 +428,7 @@ export class AudioEngine {
     this.destroyed = true;
     for (const timer of this.fadeTimers) clearTimeout(timer);
     this.fadeTimers.clear();
+    for (const cancel of [...this.retireCancels]) cancel();
     for (const slot of this.slots) this.resetSlot(slot);
     this.stopTicker();
     if (typeof document !== 'undefined') {
@@ -703,6 +711,10 @@ export class AudioEngine {
 
   private startSlot(slot: Slot): void {
     if (!slot.source) return;
+    // O navegador suspende o contexto quando a página passa um tempo sem som —
+    // e uma troca de faixa com a tela apagada é exatamente isso. Sem retomar
+    // AQUI, o elemento toca e não sai áudio nenhum.
+    void this.ctx?.resume().catch(() => undefined);
     if (slot.source.kind === 'howl') {
       const { howl } = slot.source;
       if (!howl.playing()) howl.play();
@@ -731,6 +743,61 @@ export class AudioEngine {
         });
       });
     }
+  }
+
+  /**
+   * Aposenta o slot que sai SEM deixar a página um só instante sem mídia tocando.
+   *
+   * A ordem antiga era: matar a faixa velha, depois começar a nova. Entre uma
+   * coisa e outra cabe TODO o carregamento da faixa nova — segundos, numa rede
+   * de celular. Com a tela acesa ninguém nota. Com a tela apagada, esse silêncio
+   * é o app dizendo ao Android "não estou mais tocando nada": o sistema encerra
+   * a sessão de mídia da página, e quando o áudio novo finalmente começa ele é
+   * pausado logo em seguida. É exatamente o "toca um pouco e para" ao trocar de
+   * faixa com a tela desligada.
+   *
+   * Agora a faixa velha some do alto-falante na hora (ganho a zero em 120ms),
+   * mas o ELEMENTO continua tocando até o novo pegar no tranco. Para o sistema
+   * a página nunca parou; para o ouvido, a troca é seca como antes.
+   *
+   * `keepAlive` falso (estava pausado, ou carga sem autoplay) = nada a preservar,
+   * derruba na hora. Sem grafo Web Audio (iOS, ou elemento sem CORS que não pôde
+   * entrar no grafo) também: lá o elemento É a saída, e calá-lo sem pausar é
+   * impossível — deixar tocando seriam DUAS faixas ao mesmo tempo.
+   */
+  private retireSlot(from: Slot, to: Slot, keepAlive: boolean): void {
+    if (!from.source) return;
+    if (!keepAlive || !this.ctx || !from.mediaSource) {
+      this.resetSlot(from);
+      return;
+    }
+    this.rampFade(from, 0, 0.12);
+
+    const fromSeq = from.seq;
+    const deadline = Date.now() + RETIRE_MAX_MS;
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const cancel = (): void => {
+      if (timer !== null) clearTimeout(timer);
+      timer = null;
+      this.retireCancels.delete(cancel);
+    };
+    const check = (): void => {
+      timer = null;
+      if (from.seq !== fromSeq) {
+        this.retireCancels.delete(cancel); // slot já foi reaproveitado por outra carga
+        return;
+      }
+      const el = to.el;
+      const started = el !== null && !el.paused && el.currentTime > 0;
+      if (started || Date.now() >= deadline) {
+        this.retireCancels.delete(cancel);
+        this.resetSlot(from);
+        return;
+      }
+      timer = setTimeout(check, RETIRE_POLL_MS);
+    };
+    timer = setTimeout(check, RETIRE_POLL_MS);
+    this.retireCancels.add(cancel);
   }
 
   private resetSlot(slot: Slot): void {

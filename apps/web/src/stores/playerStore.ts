@@ -1038,6 +1038,12 @@ export function initPlayerEngine(): void {
     const s = store.getState();
     const track = s.currentTrack;
     if (!track || !s.isPlaying) return;
+    // A store troca de faixa antes do áudio: numa troca, o engine ainda está na
+    // faixa ANTERIOR por um instante. Mirar o timer com a duração e a posição
+    // da faixa velha marca o fim no lugar errado — e o alvo é o id da faixa
+    // NOVA, então o disparo cairia no meio dela. Quem rearma com os números
+    // certos é o 'loaded', que sempre vem.
+    if (audioEngine.currentTrack?.id !== track.id) return;
 
     const duration = audioEngine.getDuration();
     if (!Number.isFinite(duration) || duration <= 0) return;
