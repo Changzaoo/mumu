@@ -17,7 +17,7 @@ describe('relatório de sincronia', () => {
   });
 
   it('sem login, separa a biblioteca pessoal do acervo do app', () => {
-    const texto = status.relatorioSyncTexto(12);
+    const texto = status.relatorioSyncTexto({ total: 12, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('Ninguém logado');
     // O acervo é o que o visitante TEM para ouvir — não pode ser confundido
     // com a biblioteca pessoal, que essa sim depende de conta.
@@ -27,7 +27,7 @@ describe('relatório de sincronia', () => {
   it('acervo vazio aponta o suspeito nº 1: regras não publicadas', () => {
     status.registrarSnapshot('catalogo', 0, 'servidor');
 
-    const texto = status.relatorioSyncTexto(0);
+    const texto = status.relatorioSyncTexto({ total: 0, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('Acervo do app: 0 faixas');
     expect(texto).toContain('regras do Firestore');
   });
@@ -35,7 +35,7 @@ describe('relatório de sincronia', () => {
   it('acervo que nem chegou aparece com o erro que foi engolido', () => {
     status.registrarErro('catalogo', new Error('Missing or insufficient permissions.'));
 
-    const texto = status.relatorioSyncTexto(0);
+    const texto = status.relatorioSyncTexto({ total: 0, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('Acervo do app: não chegou');
     expect(texto).toContain('insufficient permissions');
   });
@@ -44,7 +44,7 @@ describe('relatório de sincronia', () => {
     status.registrarUsuario('library', 'uid-julio');
     status.registrarErro('library', new Error('Missing or insufficient permissions.'));
 
-    const texto = status.relatorioSyncTexto(0);
+    const texto = status.relatorioSyncTexto({ total: 0, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('nenhum snapshot chegou');
     expect(texto).toContain('insufficient permissions');
   });
@@ -53,7 +53,7 @@ describe('relatório de sincronia', () => {
     status.registrarUsuario('library', 'uid-julio');
     status.registrarSnapshot('library', 300, 'servidor');
 
-    const texto = status.relatorioSyncTexto(40);
+    const texto = status.relatorioSyncTexto({ total: 40, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('A nuvem tem 300 faixas e este aparelho mostra 40');
   });
 
@@ -62,11 +62,22 @@ describe('relatório de sincronia', () => {
     status.registrarSnapshot('library', 300, 'servidor');
     status.registrarSnapshot('catalogo', 120, 'servidor');
 
-    const texto = status.relatorioSyncTexto(300);
+    const texto = status.relatorioSyncTexto({ total: 300, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('✓ Acervo do app: 120 faixas');
     expect(texto).toContain('✓ library: 300 na nuvem');
     expect(texto).not.toContain('⚠');
     expect(texto).not.toContain('✗');
+  });
+
+  it('faixa que aparece mas não toca é denunciada — chegar ≠ tocar', () => {
+    status.registrarUsuario('library', 'uid-julio');
+    status.registrarSnapshot('library', 300, 'servidor');
+    status.registrarSnapshot('catalogo', 300, 'servidor');
+
+    const texto = status.relatorioSyncTexto({ total: 300, doAcervo: 300, semFonteRemota: 12 });
+    expect(texto).toContain('12 faixa(s) sem cópia no importador');
+    expect(texto).toContain('NÃO tocam fora do aparelho');
+    expect(texto).toContain('300 já nesta biblioteca');
   });
 
   it('cota do navegador estourada avisa que a biblioteca não sobrevive à recarga', () => {
@@ -74,7 +85,7 @@ describe('relatório de sincronia', () => {
     status.registrarSnapshot('library', 300, 'servidor');
     status.registrarFalhaDePersistencia(new Error('QuotaExceededError'));
 
-    const texto = status.relatorioSyncTexto(300);
+    const texto = status.relatorioSyncTexto({ total: 300, doAcervo: 0, semFonteRemota: 0 });
     expect(texto).toContain('perde a biblioteca a cada recarga');
     expect(texto).toContain('QuotaExceededError');
   });
@@ -83,6 +94,8 @@ describe('relatório de sincronia', () => {
     status.registrarUsuario('library', 'uid-julio');
     status.registrarSnapshot('library', 300, 'cache');
 
-    expect(status.relatorioSyncTexto(300)).toContain('cache do aparelho');
+    expect(status.relatorioSyncTexto({ total: 300, doAcervo: 0, semFonteRemota: 0 })).toContain(
+      'cache do aparelho',
+    );
   });
 });

@@ -107,6 +107,22 @@ export function relatorioSync(): RelatorioSync {
   };
 }
 
+/** Foto da biblioteca deste aparelho, medida por quem a conhece (a página). */
+export interface ResumoBiblioteca {
+  /** Faixas na biblioteca deste aparelho. */
+  total: number;
+  /** Quantas vieram do acervo do app (emprestadas). */
+  doAcervo: number;
+  /**
+   * Faixas que NÃO tocam em nenhum aparelho além do que as importou: sem cópia
+   * no importador (`remoteUrl`) e sem link de origem (`sourceUrl`). No acervo
+   * elas aparecem na tela de todo mundo e não tocam para ninguém — é o segundo
+   * jeito de "as músicas não chegaram", e o único que sobra depois de a
+   * sincronia estar certa.
+   */
+  semFonteRemota: number;
+}
+
 /**
  * O mesmo relatório em TEXTO, para a página /diagnostico.
  *
@@ -115,11 +131,12 @@ export function relatorioSync(): RelatorioSync {
  * aparelho que está bom não diagnostica nada — a mesma lição do diagnóstico de
  * reprodução, aplicada aqui.
  *
- * `itensLocais` é passado de fora (a página conhece a biblioteca) para este
- * módulo não depender da loja que ele mede.
+ * O resumo é passado de fora (a página conhece a biblioteca) para este módulo
+ * não depender da loja que ele mede.
  */
-export function relatorioSyncTexto(itensLocais: number): string {
+export function relatorioSyncTexto(resumo: ResumoBiblioteca): string {
   const r = relatorioSync();
+  const itensLocais = resumo.total;
   const linhas: string[] = ['SINCRONIA ENTRE APARELHOS', ''];
 
   // O ACERVO vem primeiro, e é reportado mesmo sem login: ele é o que o app
@@ -134,6 +151,20 @@ export function relatorioSyncTexto(itensLocais: number): string {
       linhas.push('  Vazio. Se o admin já adicionou músicas, as regras do Firestore');
       linhas.push('  (coleção `catalogo`) provavelmente não foram publicadas.');
     }
+    if (resumo.doAcervo > 0) linhas.push(`  ${resumo.doAcervo} já nesta biblioteca`);
+  }
+
+  // Chegar na tela e tocar são coisas diferentes. Uma faixa importada de
+  // ARQUIVO guarda o áudio só no aparelho que a importou; nos outros ela depende
+  // da cópia enviada ao importador. Sem essa cópia ela aparece para todo mundo e
+  // não toca para ninguém — e o sintoma ("as músicas não chegaram") é o mesmo
+  // de sincronia quebrada, por isso é dito aqui e não escondido.
+  if (resumo.semFonteRemota > 0) {
+    linhas.push('');
+    linhas.push(`⚠ ${resumo.semFonteRemota} faixa(s) sem cópia no importador nem link de origem.`);
+    linhas.push('  Elas aparecem na lista mas NÃO tocam fora do aparelho que as importou.');
+    linhas.push('  O envio roda sozinho em segundo plano; se persistir, o importador');
+    linhas.push('  estava fora do ar quando elas foram adicionadas.');
   }
   linhas.push('');
 

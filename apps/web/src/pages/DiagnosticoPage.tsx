@@ -31,7 +31,14 @@ export default function DiagnosticoPage(): React.ReactElement {
       // costuma ser a de cima: conta diferente, snapshot que nunca chegou, cota
       // do navegador estourada. Sem isto aqui, a pessoa lia o diagnóstico de
       // reprodução inteiro para descobrir que o problema era outro.
-      const sincronia = relatorioSyncTexto(listarBiblioteca().length);
+      const entradas = listarBiblioteca();
+      const sincronia = relatorioSyncTexto({
+        total: entradas.length,
+        doAcervo: entradas.filter((e) => e.origem === 'catalogo').length,
+        // Sem cópia no importador E sem link de origem = só toca no aparelho
+        // que importou. Ver ResumoBiblioteca.
+        semFonteRemota: entradas.filter((e) => !e.remoteUrl && !e.sourceUrl).length,
+      });
       setRelatorio(`${sincronia}\n\n${'─'.repeat(48)}\n\n${await relatorioDeReproducao()}`);
     } catch (err) {
       setRelatorio(`O diagnóstico falhou: ${(err as Error).message}`);
