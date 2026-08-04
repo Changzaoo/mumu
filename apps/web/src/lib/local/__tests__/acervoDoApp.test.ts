@@ -114,6 +114,21 @@ describe('acervo do app na biblioteca local', () => {
     expect(lib.list()).toBe(antes);
   });
 
+  it('alimenta "Adicionadas recentemente" de quem nunca importou nada', async () => {
+    const lib = await montar([]); // usuário comum: biblioteca zerada
+
+    lib.aplicarCatalogo([
+      entrada('local:velha', { addedAt: '2026-01-01T00:00:00.000Z' }),
+      entrada('local:nova', { addedAt: '2026-08-01T00:00:00.000Z' }),
+    ]);
+
+    // É EXATAMENTE o cálculo da Home: ordena por addedAt, mais novas primeiro.
+    const recentes = [...lib.list()]
+      .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
+      .map((e) => e.track.id);
+    expect(recentes).toEqual(['local:nova', 'local:velha']);
+  });
+
   it('apagar faixa emprestada não mexe na cópia que serve todo mundo', async () => {
     const lib = await montar([
       entrada('local:emprestada', { origem: 'catalogo', remoteUrl: 'https://cofre/a.mp3' }),

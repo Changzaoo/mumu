@@ -44,6 +44,17 @@ function souAdmin(): boolean {
  * for adulterado.
  */
 export function publicarNoCatalogo(entry: LibraryEntry): void {
+  // SEM ROTA PARA O ÁUDIO, NÃO ENTRA NO ACERVO.
+  //
+  // O catálogo é o índice; quem serve a música é o servidor Linux. A entrada só
+  // vale se apontar para lá — `remoteUrl` (a cópia no cofre) ou `sourceUrl` (o
+  // link, que o importador transmite ao vivo). Publicar antes disso colocava a
+  // faixa na tela de todo mundo por alguns segundos sem nada para tocar, que é
+  // o pior estado possível: parece que chegou e não toca.
+  //
+  // Não é perda: assim que o upload termina, `patchEntry` republica com a rota
+  // pronta. O acervo só mostra o que dá para ouvir.
+  if (!entry.remoteUrl && !entry.sourceUrl) return;
   void (async () => {
     await firebaseReady();
     if (!db || !souAdmin()) return;
@@ -76,6 +87,7 @@ export async function publicarAcervoDoAdmin(entradas: LibraryEntry[]): Promise<n
   const { doc, setDoc } = await firestore();
   let publicadas = 0;
   for (const entry of entradas) {
+    if (!entry.remoteUrl && !entry.sourceUrl) continue; // sem rota para o áudio
     try {
       await setDoc(doc(db, COLECAO, entry.track.id), entry);
       publicadas += 1;
