@@ -5,10 +5,34 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
+    // Quem administra o acervo do app. MESMA lista do cliente
+    // (apps/web/src/lib/auth/roles.ts) — as duas precisam andar juntas.
+    function ehAdmin() {
+      return request.auth != null
+        && request.auth.token.email in [
+          'perdibitcoin@gmail.com',
+          'redcanidsvinicius@gmail.com'
+        ];
+    }
+
     // Per-user private data (likes, playlists, library). Only the owner may
     // read or write their own space.
     match /users/{uid}/{document=**} {
       allow read, write: if request.auth != null && request.auth.uid == uid;
+    }
+
+    // ACERVO DO APP — o que o admin adiciona, todo mundo ouve.
+    //
+    // Sem isto, "as músicas do app" eram na verdade a biblioteca PRIVADA de
+    // quem as importou (users/{uid}/library, que só o dono lê). O usuário comum
+    // abria o app e via a própria biblioteca vazia, porque não existia nenhum
+    // acervo compartilhado — só a vitrine da comunidade, limitada e escondida.
+    //
+    // Leitura aberta de propósito: o app funciona para visitante (prévia de
+    // 30s), e é o acervo que dá o que ouvir antes de criar conta.
+    match /catalogo/{trackId} {
+      allow read: if true;
+      allow write: if ehAdmin();
     }
 
     // Community trending: public to read (the "em alta" feed); any signed-in

@@ -122,11 +122,26 @@ export function relatorioSyncTexto(itensLocais: number): string {
   const r = relatorioSync();
   const linhas: string[] = ['SINCRONIA ENTRE APARELHOS', ''];
 
+  // O ACERVO vem primeiro, e é reportado mesmo sem login: ele é o que o app
+  // tem para oferecer a quem só escuta. Acervo vazio aqui e cheio no aparelho
+  // do admin significa que as regras do Firestore não foram publicadas.
+  const acervo = r.colecoes.find((c) => c.nome === 'catalogo');
+  if (!acervo?.assinou) {
+    linhas.push(`✗ Acervo do app: não chegou. ${acervo?.ultimoErro ?? '(sem erro registrado)'}`);
+  } else {
+    linhas.push(`✓ Acervo do app: ${acervo.docsNaNuvem} faixas`);
+    if (acervo.docsNaNuvem === 0) {
+      linhas.push('  Vazio. Se o admin já adicionou músicas, as regras do Firestore');
+      linhas.push('  (coleção `catalogo`) provavelmente não foram publicadas.');
+    }
+  }
+  linhas.push('');
+
   const biblioteca = r.colecoes.find((c) => c.nome === 'library');
   if (!biblioteca || !biblioteca.uid) {
     linhas.push('✗ Ninguém logado neste aparelho.');
-    linhas.push('  Sem conta, nada sincroniza: a biblioteca daqui fica só aqui.');
-    linhas.push('  Entre com a MESMA conta usada nos outros aparelhos.');
+    linhas.push('  Sem conta, a biblioteca PESSOAL daqui fica só aqui.');
+    linhas.push('  O acervo do app acima independe de login.');
     return linhas.join('\n');
   }
 

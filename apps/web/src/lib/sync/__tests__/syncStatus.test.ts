@@ -6,19 +6,38 @@
  * deste módulo existir.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
+import type * as SyncStatus from '@/lib/sync/syncStatus';
 
 describe('relatório de sincronia', () => {
-  let status: typeof import('@/lib/sync/syncStatus');
+  let status: typeof SyncStatus;
 
   beforeEach(async () => {
     vi.resetModules(); // o estado vive no módulo: cada teste começa limpo
     status = await import('@/lib/sync/syncStatus');
   });
 
-  it('sem login, diz que nada sincroniza e o que fazer', () => {
+  it('sem login, separa a biblioteca pessoal do acervo do app', () => {
     const texto = status.relatorioSyncTexto(12);
     expect(texto).toContain('Ninguém logado');
-    expect(texto).toContain('MESMA conta');
+    // O acervo é o que o visitante TEM para ouvir — não pode ser confundido
+    // com a biblioteca pessoal, que essa sim depende de conta.
+    expect(texto).toContain('independe de login');
+  });
+
+  it('acervo vazio aponta o suspeito nº 1: regras não publicadas', () => {
+    status.registrarSnapshot('catalogo', 0, 'servidor');
+
+    const texto = status.relatorioSyncTexto(0);
+    expect(texto).toContain('Acervo do app: 0 faixas');
+    expect(texto).toContain('regras do Firestore');
+  });
+
+  it('acervo que nem chegou aparece com o erro que foi engolido', () => {
+    status.registrarErro('catalogo', new Error('Missing or insufficient permissions.'));
+
+    const texto = status.relatorioSyncTexto(0);
+    expect(texto).toContain('Acervo do app: não chegou');
+    expect(texto).toContain('insufficient permissions');
   });
 
   it('snapshot que nunca chegou aparece com o erro que foi engolido', () => {
@@ -41,8 +60,10 @@ describe('relatório de sincronia', () => {
   it('aparelho em dia não inventa alarme', () => {
     status.registrarUsuario('library', 'uid-julio');
     status.registrarSnapshot('library', 300, 'servidor');
+    status.registrarSnapshot('catalogo', 120, 'servidor');
 
     const texto = status.relatorioSyncTexto(300);
+    expect(texto).toContain('✓ Acervo do app: 120 faixas');
     expect(texto).toContain('✓ library: 300 na nuvem');
     expect(texto).not.toContain('⚠');
     expect(texto).not.toContain('✗');

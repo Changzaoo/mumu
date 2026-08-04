@@ -22,6 +22,7 @@ import {
   putCover,
 } from '@/lib/offline/audioCache';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { publicarNoCatalogo, removerDoCatalogo } from '@/lib/sync/catalogo';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
@@ -92,6 +93,14 @@ export interface LibraryEntry {
   remoteUrl?: string;
   /** SHA-256 of the audio bytes — catches identical files imported twice. */
   contentHash?: string;
+  /**
+   * Veio do ACERVO DO APP (curado pelo admin), não deste aparelho.
+   *
+   * Marca o que é emprestado: não sobe para a nuvem privada do usuário, não
+   * some quando ele apaga, e apagar NUNCA toca na cópia que o importador serve
+   * para todo mundo. Entrada sem esta marca é do próprio usuário.
+   */
+  origem?: 'catalogo';
 }
 
 // ── in-memory state ─────────────────────────────────────────────
@@ -468,6 +477,9 @@ function addEntry(entry: LibraryEntry, blob: Blob): void {
   // viraria uma capa morta que ainda por cima BLOQUEIA a reidratação (a
   // restauração pula quem já tem coverUrl não-nulo).
   cloud.push(entry.track.id, storableEntry(entry));
+  // Admin importou → vai para o acervo do app e chega em todo mundo.
+  // No aparelho de usuário comum isto não faz nada (ver publicarNoCatalogo).
+  publicarNoCatalogo(storableEntry(entry));
 }
 
 /**
@@ -519,7 +531,13 @@ export function reportDeadRemote(id: string, deadUrl: string): void {
 // its file is re-imported/received (the user opted for library-only sync).
 const cloud = cloudCollection<LibraryEntry>({
   name: 'library',
-  localItems: () => read().map((e): [string, LibraryEntry] => [e.track.id, e]),
+  // O que é do ACERVO fica de fora: subir faixa emprestada para a nuvem privada
+  // do usuário a transformaria em cópia dele, que sobreviveria ao admin tirar a
+  // faixa do ar e ainda inflaria a cota de quem nunca importou nada.
+  localItems: () =>
+    read()
+      .filter((e) => e.origem !== 'catalogo')
+      .map((e): [string, LibraryEntry] => [e.track.id, e]),
   onRemoteUpsert: (id, entry) => applyRemoteUpsert(id, entry),
   onRemoteDelete: (id) => applyRemoteDelete(id),
   onRemoteBatch: (upserts, deletes) => applyRemoteBatch(upserts, deletes),
@@ -588,6 +606,51 @@ function applyRemoteBatch(upserts: Array<[string, LibraryEntry]>, deletes: strin
   }
   write([...porId.values(), ...atualizados]);
   marcarBoot('nuvem-primeiro-snapshot');
+}
+
+/**
+ * Aplica o ACERVO DO APP na biblioteca deste aparelho.
+ *
+ * Duas regras que não podem ser quebradas:
+ *
+ * 1. O QUE É DO USUÁRIO NUNCA É TOCADO. Uma faixa que ele importou e que por
+ *    acaso também está no acervo continua sendo dele — não recebe a marca, não
+ *    some se o admin tirar a dele do ar. É por isso que o casamento é por id e
+ *    só entra quem está faltando. No aparelho do PRÓPRIO admin isso significa
+ *    que nada é marcado: o acervo já é a biblioteca dele.
+ *
+ * 2. O ACERVO MANDA NO ACERVO. Faixa marcada que sumiu do catálogo sai daqui
+ *    também — senão o app acumularia para sempre tudo que já foi publicado, e
+ *    tirar uma faixa do ar não teria efeito nenhum.
+ */
+export function aplicarCatalogo(entradas: LibraryEntry[]): void {
+  const doCatalogo = new Map(entradas.map((e) => [e.track.id, e]));
+  const atuais = read();
+  const idsLocais = new Set(atuais.map((e) => e.track.id));
+
+  const mantidas = atuais.filter((e) => e.origem !== 'catalogo' || doCatalogo.has(e.track.id));
+
+  // O snapshot do Firestore repete inteiro a cada reconexão. Sem comparar
+  // CONTEÚDO — e não só presença — cada repetição criava objetos novos, e o
+  // app repintava a biblioteca toda de graça, várias vezes por sessão.
+  let alterou = false;
+  const atualizadas = mantidas.map((e) => {
+    if (e.origem !== 'catalogo') return e; // do usuário: intocada
+    const nova = doCatalogo.get(e.track.id);
+    if (!nova) return e;
+    const candidata = { ...nova, origem: 'catalogo' as const };
+    if (JSON.stringify(candidata) === JSON.stringify(e)) return e;
+    alterou = true;
+    return candidata;
+  });
+
+  const novas = entradas
+    .filter((e) => !idsLocais.has(e.track.id))
+    .map((e) => ({ ...e, origem: 'catalogo' as const }));
+
+  const removidas = atuais.length - mantidas.length;
+  if (!alterou && novas.length === 0 && removidas === 0) return;
+  write([...novas, ...atualizadas]);
 }
 
 function applyRemoteDelete(id: string): void {
@@ -708,7 +771,12 @@ export async function saveReceivedTrack(meta: SharedTrackMeta, blob: Blob): Prom
 /** Replace a registry entry in place, preserving its list position. */
 function patchEntry(id: string, next: LibraryEntry): void {
   write(read().map((e) => (e.track.id === id ? next : e)));
+  if (next.origem === 'catalogo') return; // emprestada: não é nossa para sincronizar
   cloud.push(id, storableEntry(next)); // nunca sincronizar object URL — ver addEntry
+  // A curadoria (capa, artista, álbum) roda no aparelho do admin; sem espelhar
+  // aqui, o acervo dos usuários ficaria congelado na metadata torta do momento
+  // da importação, e a correção nunca chegaria neles.
+  publicarNoCatalogo(storableEntry(next));
 }
 
 /**
@@ -1336,6 +1404,23 @@ export async function blobFor(id: string): Promise<Blob | null> {
 }
 
 export async function remove(id: string): Promise<void> {
+  const alvo = read().find((e) => e.track.id === id);
+  // FAIXA EMPRESTADA DO ACERVO: some da tela deste usuário e para por aí.
+  //
+  // O caminho normal apaga a cópia que o importador serve (`deleteTrackBlob`),
+  // e essa cópia é a mesma para TODO MUNDO. Um usuário comum limpando a
+  // biblioteca dele arrancaria a faixa do acervo do app inteiro. Some daqui,
+  // some do cofre daqui, e nada além disso.
+  if (alvo?.origem === 'catalogo') {
+    await deleteBlob(id).catch(() => undefined);
+    const objectUrl = blobUrls.get(id);
+    if (objectUrl) {
+      URL.revokeObjectURL(objectUrl);
+      blobUrls.delete(id);
+    }
+    write(read().filter((e) => e.track.id !== id));
+    return;
+  }
   await deleteBlob(id).catch(() => undefined);
   void deleteTrackBlob(id); // best-effort remove the uploaded cross-device copy
   const url = blobUrls.get(id);
@@ -1352,6 +1437,7 @@ export async function remove(id: string): Promise<void> {
   }
   write(read().filter((e) => e.track.id !== id));
   cloud.remove(id);
+  removerDoCatalogo(id); // admin apagou: sai do acervo de todo mundo
 }
 
 /** Remove several tracks at once (multi-select delete). */

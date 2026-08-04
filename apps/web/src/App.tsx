@@ -52,8 +52,9 @@ export default function App() {
     let pararPesquisador: (() => void) | null = null;
     let cancelado = false;
     void (async () => {
-      const [sync, fila, telemetria, presenca, genero, pesquisador] = await Promise.all([
+      const [sync, catalogo, fila, telemetria, presenca, genero, pesquisador] = await Promise.all([
         import('@/lib/sync/syncManager'),
+        import('@/lib/sync/catalogoBoot'),
         import('@/lib/local/importQueue'),
         import('@/lib/telemetry/telemetry'),
         import('@/lib/devices/presence'),
@@ -62,6 +63,7 @@ export default function App() {
       ]);
       if (cancelado) return;
       sync.initCloudSync();
+      catalogo.initCatalogo(); // acervo do app: o que o admin adiciona chega em todos
       fila.init(); // resume any downloads queued before a reload
       telemetria.initTelemetry(); // usage metrics for the admin /telemetria page
       presenca.initPresence(); // "tocando em {aparelho}" entre dispositivos da conta

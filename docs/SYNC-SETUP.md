@@ -19,6 +19,36 @@ Firestore Database → **Rules** tab → paste the contents of
 These allow each user to read/write only their own `users/{uid}/…` space, make
 the `trending` feed publicly readable, and let signed-in users contribute likes.
 
+> **Republique as regras ao atualizar para a versão do ACERVO DO APP.** A
+> coleção `catalogo` é nova; sem ela publicada, o admin não consegue escrever no
+> acervo e os usuários comuns abrem o app sem música nenhuma — que era
+> exatamente o sintoma relatado. A lista de admins nas regras
+> (`ehAdmin()`) precisa bater com `AUTHORIZED_EMAILS` em
+> [`apps/web/src/lib/auth/roles.ts`](../apps/web/src/lib/auth/roles.ts).
+>
+> Para conferir num aparelho qualquer: abra **/diagnostico**. A primeira linha
+> diz quantas faixas o acervo tem naquele aparelho.
+
+## 2.1 O acervo do app (o que o admin adiciona, todo mundo ouve)
+
+A biblioteca de cada conta é **privada** (`users/{uid}/library`) — é assim que
+deve ser para a biblioteca pessoal, e é por isso que ela **não** serve de
+catálogo. O acervo curado vive em `catalogo/{trackId}`: só admin escreve,
+qualquer um lê (inclusive visitante sem conta).
+
+- O admin importa → a faixa é espelhada no acervo automaticamente.
+- Toda correção de metadata feita pela curadoria também é espelhada.
+- No aparelho do usuário, as faixas do acervo entram na biblioteca local
+  marcadas com `origem: 'catalogo'`: aparecem na Home, na busca, em artistas,
+  gêneros e álbuns, sem UI nova.
+- Faixa emprestada **não** sobe para a nuvem privada do usuário, e apagá-la lá
+  **não** remove a cópia que o importador serve para todo mundo.
+
+Para tocar em outro aparelho, a faixa precisa de `remoteUrl` (cópia enviada ao
+importador) ou `sourceUrl` (link original). Faixa importada de arquivo que nunca
+subiu ao importador aparece no acervo mas não toca fora do aparelho do admin —
+a varredura `backfillRemote` faz esse upload em segundo plano.
+
 ## 3. Create the trending index
 
 The per-genre trending query needs one composite index. Either:
