@@ -105,7 +105,18 @@ interface TelemetryDoc {
    *  sentido lidos aqui, aparelho a aparelho. */
   devices?: Record<
     string,
-    { name?: string; lastSeenAt?: string; seconds?: number; plays?: number; libraryCount?: number }
+    {
+      name?: string;
+      lastSeenAt?: string;
+      seconds?: number;
+      plays?: number;
+      libraryCount?: number;
+      /** Modelo real quando o sistema expõe (Android sim, iOS não). */
+      model?: string;
+      isPlaying?: boolean;
+      nowPlaying?: string | null;
+      online?: boolean;
+    }
   >;
   // Campos novos (coleta em andamento) — SEMPRE opcionais: docs antigos não têm.
   gpu?: string;
@@ -156,6 +167,30 @@ function formatWhen(iso?: string): string {
   const hours = Math.round(minutes / 60);
   if (hours < 24) return `há ${hours}h`;
   return new Date(iso).toLocaleDateString('pt-BR', { day: '2-digit', month: 'short' });
+}
+
+/**
+ * Aparelho conectado agora.
+ *
+ * A telemetria é gravada a cada 2 minutos, então "visto há menos de 5" é o
+ * mais perto de "está aberto neste instante" que este dado permite dizer. A
+ * folga de 5 cobre uma gravação perdida sem passar a impressão de que alguém
+ * está online quando fechou o app faz tempo.
+ */
+const CONECTADO_MS = 5 * 60_000;
+
+function conectado(lastSeenAt?: string): boolean {
+  if (!lastSeenAt) return false;
+  const t = new Date(lastSeenAt).getTime();
+  return Number.isFinite(t) && Date.now() - t < CONECTADO_MS;
+}
+
+function contagemAparelhos(devices: Record<string, { lastSeenAt?: string }>): string {
+  const total = Object.keys(devices).length;
+  const online = Object.values(devices).filter((d) => conectado(d.lastSeenAt)).length;
+  return online > 0
+    ? `${online} de ${total} conectado${online > 1 ? 's' : ''}`
+    : `${total} no total`;
 }
 
 function formatClock(iso: string): string {
@@ -913,18 +948,41 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           local é do device, compartilhado entre contas no mesmo navegador). */}
       {t.devices && Object.keys(t.devices).length > 0 && (
         <div>
-          <SectionTitle icon={MonitorSmartphone}>Aparelhos desta conta</SectionTitle>
-          <ul className="space-y-1 text-[12px] text-fg-muted">
+          <SectionTitle icon={MonitorSmartphone}>
+            {`Aparelhos desta conta — ${contagemAparelhos(t.devices)}`}
+          </SectionTitle>
+          <ul className="space-y-1.5 text-[12px] text-fg-muted">
             {Object.entries(t.devices)
-              .sort((a, b) => (b[1].lastSeenAt ?? '').localeCompare(a[1].lastSeenAt ?? ''))
+              // Conectados primeiro: a pergunta "em quantos aparelhos ele está
+              // agora" tem que se responder sem procurar na lista.
+              .sort(
+                (a, b) =>
+                  Number(conectado(b[1].lastSeenAt)) - Number(conectado(a[1].lastSeenAt)) ||
+                  (b[1].lastSeenAt ?? '').localeCompare(a[1].lastSeenAt ?? ''),
+              )
               .map(([id, d]) => (
                 <li key={id} className="flex flex-wrap items-baseline justify-between gap-x-3">
-                  <span className="font-medium text-fg">
-                    {d.name ?? `Aparelho ${id.slice(0, 6)}`}
+                  <span className="flex items-center gap-1.5">
+                    <span
+                      aria-hidden
+                      className={cn(
+                        'size-1.5 rounded-full',
+                        conectado(d.lastSeenAt) ? 'bg-emerald-500' : 'bg-fg/25',
+                      )}
+                    />
+                    <span className="font-medium text-fg">
+                      {d.name ?? `Aparelho ${id.slice(0, 6)}`}
+                    </span>
+                    {d.model && <span className="text-fg-subtle">{d.model}</span>}
+                    {d.isPlaying && d.nowPlaying && (
+                      <span className="text-accent">▶ {d.nowPlaying}</span>
+                    )}
                   </span>
                   <span>
                     {formatHours(d.seconds)} · {d.plays ?? 0} plays · {d.libraryCount ?? 0} faixas ·{' '}
-                    <span className="text-fg-subtle">{formatWhen(d.lastSeenAt)}</span>
+                    <span className="text-fg-subtle">
+                      {conectado(d.lastSeenAt) ? 'conectado agora' : formatWhen(d.lastSeenAt)}
+                    </span>
                   </span>
                 </li>
               ))}

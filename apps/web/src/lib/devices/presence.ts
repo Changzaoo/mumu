@@ -32,8 +32,9 @@ import {
 } from 'firebase/firestore';
 import type { Timestamp } from 'firebase/firestore';
 import type { User } from 'firebase/auth';
+import type { TrackDto } from '@aurial/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
-import { usePlayerStore } from '@/stores/playerStore';
+import { resumeAt, usePlayerStore } from '@/stores/playerStore';
 
 const DEVICE_ID_KEY = 'aurial:deviceId';
 const HEARTBEAT_MS = 25_000;
@@ -114,9 +115,13 @@ export interface DeviceInfo {
   isActive: boolean;
   online: boolean;
   track: { title: string; artist: string; coverUrl: string | null } | null;
+  /** Id da faixa — é por ele que "trazer para cá" acha o que carregar. */
+  trackId: string | null;
   volume: number;
   progress: number;
   duration: number;
+  /** Quando este estado foi publicado (ms). A posição envelhece a partir daqui. */
+  seenAt: number;
 }
 
 /** Outro aparelho da MESMA conta tocando agora (para o banner). */
@@ -215,6 +220,25 @@ export function isActiveDevice(): boolean {
   return activeDeviceId === null || activeDeviceId === getDeviceId();
 }
 
+/**
+ * O aparelho para onde os controles devem apontar, ou `null` quando é aqui
+ * mesmo.
+ *
+ * ISSO EXISTE PORQUE o volume da barra do player mexia SEMPRE no alto-falante
+ * local. Com a música tocando na sala e o controle na mão, abaixar o volume não
+ * abaixava nada que se pudesse ouvir — mexia num áudio mudo neste aparelho.
+ * Controle remoto que não controla o remoto não é controle.
+ *
+ * A condição é estrita de propósito: só desvia quando o outro aparelho está
+ * online, tocando, E este aqui não está. Se os dois tocam, cada um cuida do
+ * próprio volume — desviar aí faria o usuário abaixar o alto-falante errado.
+ */
+export function remoteControlTarget(): DeviceInfo | null {
+  if (usePlayerStore.getState().isPlaying) return null;
+  const me = getDeviceId();
+  return deviceState.find((d) => d.id !== me && d.online && d.isPlaying) ?? null;
+}
+
 /** Quando foi visto pela última vez, preferindo o relógio do servidor. */
 function seenMillis(p: DevicePresence): number {
   const server = p.seenAt;
@@ -290,9 +314,34 @@ export async function sendCommand(
 }
 
 /**
+ * Onde a faixa do outro aparelho está AGORA.
+ *
+ * A posição publicada é uma foto: o aparelho remoto escreve no máximo a cada
+ * 2s, e em faixa parada só a cada 25s do heartbeat. Usar esse número cru fazia
+ * "trazer para cá" voltar até meio minuto no tempo — a música recomeçava num
+ * trecho que o usuário já tinha ouvido. Se ele estava TOCANDO, o relógio andou
+ * junto: some o tempo desde a publicação.
+ */
+function posicaoAtualDe(device: DeviceInfo): number {
+  if (!device.isPlaying) return device.progress;
+  const decorrido = Math.max(0, (Date.now() - device.seenAt) / 1000);
+  const estimada = device.progress + decorrido;
+  // Nunca passar do fim: com sinal velho a conta pode estourar a duração, e
+  // buscar além do fim faz a faixa acabar na hora em que ela chega.
+  const teto = device.duration > 0 ? Math.max(0, device.duration - 1) : Infinity;
+  return Math.min(estimada, teto);
+}
+
+/**
  * Traz a reprodução para ESTE aparelho: pausa o outro, assume a posse e
- * continua a MESMA faixa na MESMA posição. Precisa ter vindo de um clique —
+ * continua a MESMA faixa de onde ela estava. Precisa ter vindo de um clique —
  * é o gesto que autoriza o navegador a tocar.
+ *
+ * ANTES isto só funcionava quando a faixa por acaso já estava carregada aqui.
+ * Abrir o app no computador com o celular tocando e pedir "ouvir aqui" chamava
+ * `play()` num player vazio: nada acontecia, sem erro nenhum. Agora a faixa é
+ * procurada pelo id (a biblioteca inteira sincroniza via Firestore) e carregada
+ * na posição certa.
  */
 export async function transferPlaybackHere(fromDeviceId?: string): Promise<void> {
   const source = fromDeviceId ?? remoteState?.deviceId;
@@ -301,11 +350,42 @@ export async function transferPlaybackHere(fromDeviceId?: string): Promise<void>
   claimPlayback();
 
   const player = usePlayerStore.getState();
-  // Mesma faixa já carregada aqui: só retoma na posição do outro aparelho.
-  if (device?.track && player.currentTrack) {
-    if (device.progress > 0) player.seek(device.progress);
+  const posicao = device ? posicaoAtualDe(device) : 0;
+
+  // Mesma faixa já carregada aqui: só reposiciona e segue.
+  if (device?.trackId && player.currentTrack?.id === device.trackId) {
+    if (posicao > 0) player.seek(posicao);
+    player.play();
+    return;
   }
+
+  // Faixa diferente (ou nenhuma): procura pelo id na fila atual e depois na
+  // biblioteca deste aparelho, carrega e já nasce na posição do outro.
+  const alvo = device?.trackId ? await acharFaixa(device.trackId) : null;
+  if (alvo) {
+    player.playTrack(alvo);
+    resumeAt(posicao);
+    return;
+  }
+
   player.play();
+}
+
+/**
+ * Procura uma faixa pelo id: primeiro na fila carregada, depois na biblioteca
+ * local (que espelha o Firestore, então a faixa do outro aparelho está aqui
+ * mesmo que o áudio não esteja — o player resolve a fonte sozinho).
+ */
+async function acharFaixa(trackId: string): Promise<TrackDto | null> {
+  const naFila = usePlayerStore.getState().queue.find((t) => t.id === trackId);
+  if (naFila) return naFila;
+  try {
+    const { list, hydrate } = await import('@/lib/local/localLibrary');
+    await hydrate().catch(() => undefined);
+    return list().find((e) => e.track.id === trackId)?.track ?? null;
+  } catch {
+    return null;
+  }
 }
 
 /** Aplica um comando recebido no player LOCAL. */
@@ -402,7 +482,8 @@ function start(user: User): void {
       let found: RemotePlayback | null = null;
       for (const d of snap.docs) {
         const p = d.data() as DevicePresence;
-        const online = now - seenMillis(p) < FRESH_MS;
+        const seenAt = seenMillis(p);
+        const online = now - seenAt < FRESH_MS;
         devices.push({
           id: d.id,
           name: p.name,
@@ -411,9 +492,11 @@ function start(user: User): void {
           isActive: activeDeviceId === d.id,
           online,
           track: p.track ?? null,
+          trackId: p.trackId ?? null,
           volume: typeof p.volume === 'number' ? p.volume : 1,
           progress: typeof p.progress === 'number' ? p.progress : 0,
           duration: typeof p.duration === 'number' ? p.duration : 0,
+          seenAt,
         });
         if (d.id !== me && online && p.isPlaying && p.track) {
           found ??= {

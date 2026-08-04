@@ -24,6 +24,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
+import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -45,12 +46,17 @@ export function PlayerBar() {
   const progress = usePlayerStore((s) => s.progress);
   const duration = usePlayerStore((s) => s.duration);
   const buffered = usePlayerStore((s) => s.buffered);
-  const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const repeat = usePlayerStore((s) => s.repeat);
   const shuffle = usePlayerStore((s) => s.shuffle);
-  const { toggle, next, prev, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat } =
+  const { toggle, next, prev, seek, toggleMute, toggleShuffle, cycleRepeat } =
     usePlayerStore.getState();
+
+  // Com a música tocando em OUTRO aparelho, este controle passa a valer para
+  // lá. Mexer no volume mudo daqui não abaixava nada que se pudesse ouvir.
+  const remoto = useRemoteControl();
+  const volume = remoto.volume;
+  const setVolume = remoto.setVolume;
 
   const queueOpen = useUiStore((s) => s.queueOpen);
   const toggleQueue = useUiStore((s) => s.toggleQueue);

@@ -20,6 +20,7 @@ import { measureNetworkSpeed } from '@/lib/local/importerHelper';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
+import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
 
@@ -478,6 +479,13 @@ function flush(): void {
       ...(seconds > 0 ? { seconds: increment(seconds) } : {}),
       plays: localHistory.list().length,
       libraryCount: localLibrary.list().length,
+      // Sinais que respondem "que aparelho é esse e o que ele está fazendo
+      // AGORA" — sem eles a lista era um punhado de nomes iguais ("Chrome ·
+      // Android") sem como distinguir um do outro nem saber quais estão de pé.
+      ...(deviceModelCache ? { model: deviceModelCache } : {}),
+      isPlaying: usePlayerStore.getState().isPlaying,
+      nowPlaying: usePlayerStore.getState().currentTrack?.title ?? null,
+      online: !document.hidden,
     },
   };
 

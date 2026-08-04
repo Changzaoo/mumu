@@ -287,6 +287,18 @@ let lastResumeSave = 0;
 /** Posição a buscar assim que o engine carregar a faixa restaurada. */
 let pendingResumeSeek: number | null = null;
 
+/**
+ * "Quando esta faixa terminar de carregar, comece nesta posição."
+ *
+ * Precisa ser assim, e não um `seek()` logo depois do `playTrack()`: enquanto o
+ * áudio não carregou não existe linha do tempo para buscar, e o seek se perde
+ * em silêncio. É o que faz "trazer a reprodução para cá" cair no segundo certo
+ * em vez de recomeçar a música.
+ */
+export function resumeAt(seconds: number): void {
+  pendingResumeSeek = seconds > 0 ? seconds : null;
+}
+
 function saveResume(force = false): void {
   const s = usePlayerStore.getState();
   if (!s.currentTrack || s.progress <= 0) return;
