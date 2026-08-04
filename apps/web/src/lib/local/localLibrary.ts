@@ -39,6 +39,7 @@ import {
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
 import { marcarBoot } from '@/lib/telemetry/bootPerf';
+import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
 import { artistFromSource } from '@/lib/local/sourceArtist';
@@ -168,8 +169,12 @@ function flushWrite(): void {
   }
   try {
     window.localStorage.setItem(STORAGE_KEY, JSON.stringify((cache ?? []).map(storableEntry)));
-  } catch {
+  } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
+    // Registrado, não engolido: um aparelho nesta situação parece normal na
+    // sessão e volta VAZIO (ou velho) na recarga seguinte, para sempre. Sem o
+    // recibo, o sintoma é "esse celular não atualiza" e a causa é invisível.
+    registrarFalhaDePersistencia(erro);
   }
   emit();
 }

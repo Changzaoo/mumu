@@ -14,6 +14,8 @@
  */
 import { useCallback, useEffect, useState } from 'react';
 import { relatorioDeReproducao } from '@/lib/local/playbackDiagnosis';
+import { list as listarBiblioteca } from '@/lib/local/localLibrary';
+import { relatorioSyncTexto } from '@/lib/sync/syncStatus';
 
 export default function DiagnosticoPage(): React.ReactElement {
   const [relatorio, setRelatorio] = useState<string>('Verificando…');
@@ -24,7 +26,13 @@ export default function DiagnosticoPage(): React.ReactElement {
     setRodando(true);
     setCopiado(false);
     try {
-      setRelatorio(await relatorioDeReproducao());
+      // A SINCRONIA VEM PRIMEIRO. "Este aparelho está desatualizado" e "esta
+      // faixa não toca" chegam como a mesma reclamação, e a resposta certa
+      // costuma ser a de cima: conta diferente, snapshot que nunca chegou, cota
+      // do navegador estourada. Sem isto aqui, a pessoa lia o diagnóstico de
+      // reprodução inteiro para descobrir que o problema era outro.
+      const sincronia = relatorioSyncTexto(listarBiblioteca().length);
+      setRelatorio(`${sincronia}\n\n${'─'.repeat(48)}\n\n${await relatorioDeReproducao()}`);
     } catch (err) {
       setRelatorio(`O diagnóstico falhou: ${(err as Error).message}`);
     } finally {
@@ -50,10 +58,10 @@ export default function DiagnosticoPage(): React.ReactElement {
   return (
     <div className="mx-auto flex max-w-3xl flex-col gap-4 p-4">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">Diagnóstico de reprodução</h1>
+        <h1 className="text-2xl font-semibold">Diagnóstico</h1>
         <p className="text-sm opacity-70">
-          Mostra, passo a passo, por que uma faixa não toca neste aparelho. Rode no aparelho com
-          problema — o resultado é diferente em cada um.
+          Mostra, passo a passo, por que este aparelho está desatualizado e por que uma faixa não
+          toca. Rode no aparelho com problema — o resultado é diferente em cada um.
         </p>
       </header>
 

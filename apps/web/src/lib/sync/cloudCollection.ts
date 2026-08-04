@@ -18,6 +18,12 @@
 import type { DocumentData, Unsubscribe } from 'firebase/firestore';
 import { db, firebaseReady } from '@/lib/firebase';
 import { firestore } from '@/lib/sync/firestoreLazy';
+import {
+  registrarErro,
+  registrarSnapshot,
+  registrarUniao,
+  registrarUsuario,
+} from '@/lib/sync/syncStatus';
 
 export interface CloudCollection<T extends DocumentData> {
   /** Upsert an item to the cloud (no-op when not syncing). */
@@ -63,7 +69,7 @@ export function cloudCollection<T extends DocumentData>(
       const fs = await firestore();
       if (!db || uid !== alvo) return; // deslogou (ou trocou de conta) no caminho
       await fs.setDoc(fs.doc(fs.collection(db, 'users', alvo, config.name), id), data);
-    })().catch(() => undefined);
+    })().catch((erro) => registrarErro(config.name, erro));
   };
 
   const remove = (id: string): void => {
@@ -73,7 +79,7 @@ export function cloudCollection<T extends DocumentData>(
       const fs = await firestore();
       if (!db || uid !== alvo) return;
       await fs.deleteDoc(fs.doc(fs.collection(db, 'users', alvo, config.name), id));
-    })().catch(() => undefined);
+    })().catch((erro) => registrarErro(config.name, erro));
   };
 
   const setUser = (next: string | null): void => {
@@ -82,6 +88,7 @@ export function cloudCollection<T extends DocumentData>(
     unsub = null;
     seeded = false;
     uid = next;
+    registrarUsuario(config.name, uid);
     if (!uid) return;
 
     const alvo = uid;
@@ -93,13 +100,19 @@ export function cloudCollection<T extends DocumentData>(
       unsub = fs.onSnapshot(
         fs.collection(db, 'users', alvo, config.name),
         (snap) => {
+          registrarSnapshot(config.name, snap.size, snap.metadata.fromCache ? 'cache' : 'servidor');
           // First snapshot: union — push local-only items up, apply remote down.
           if (!seeded) {
             seeded = true;
             const remoteIds = new Set(snap.docs.map((d) => d.id));
+            let enviados = 0;
             for (const [id, data] of config.localItems()) {
-              if (!remoteIds.has(id)) push(id, data);
+              if (!remoteIds.has(id)) {
+                push(id, data);
+                enviados += 1;
+              }
             }
+            registrarUniao(config.name, enviados);
           }
           const upserts: Array<[string, T]> = [];
           const deletes: string[] = [];
@@ -115,9 +128,12 @@ export function cloudCollection<T extends DocumentData>(
           for (const id of deletes) config.onRemoteDelete(id);
           for (const [id, data] of upserts) config.onRemoteUpsert(id, data);
         },
-        () => undefined, // permission/offline errors: stay local-only
+        // Regra negando leitura, projeto errado, rede morta: o app segue
+        // local-only (é o certo), mas o motivo NÃO pode mais sumir — era
+        // exatamente assim que um aparelho ficava para trás sem sintoma.
+        (erro) => registrarErro(config.name, erro),
       );
-    })().catch(() => undefined);
+    })().catch((erro) => registrarErro(config.name, erro));
   };
 
   return { push, remove, setUser };
