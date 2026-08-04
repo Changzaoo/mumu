@@ -19,16 +19,113 @@ import { RootLayout } from '@/app/RootLayout';
 
 const pageModules = import.meta.glob<{ default: ComponentType }>('/src/pages/*.tsx');
 
-// Warm every lazy page chunk during idle time so switching pages NEVER waits
-// on the network — navigation renders instantly instead of flashing a skeleton.
-if (typeof window !== 'undefined') {
-  const idle: (cb: () => void) => void =
-    'requestIdleCallback' in window
-      ? (cb) => window.requestIdleCallback(cb, { timeout: 4000 })
-      : (cb) => void setTimeout(cb, 1500);
-  idle(() => {
-    for (const load of Object.values(pageModules)) void load().catch(() => undefined);
+/**
+ * Prefixo de rota → nome do arquivo da página, para saber QUAL chunk aquecer
+ * quando o dedo encosta num link.
+ *
+ * A ordem importa: o mais específico primeiro, senão `/album` casaria antes de
+ * `/album-apple`. A tabela de rotas de verdade continua sendo a de baixo — esta
+ * aqui só serve para adivinhar o chunk antes do clique, e errar aqui não quebra
+ * navegação nenhuma, só perde o aquecimento.
+ */
+const ROTA_POR_PREFIXO: [string, string][] = [
+  ['/catalogo/playlist', 'CatalogPlaylistPage'],
+  ['/catalogo/artista', 'CatalogArtistPage'],
+  ['/album-apple', 'AppleAlbumPage'],
+  ['/artista', 'ArtistLocalPage'],
+  ['/gravadora', 'LabelLocalPage'],
+  ['/gravadoras', 'LabelsPage'],
+  ['/genero', 'GenreLocalPage'],
+  ['/disco', 'AlbumLocalPage'],
+  ['/artistas', 'ArtistsPage'],
+  ['/artist', 'ArtistPage'],
+  ['/album', 'AlbumPage'],
+  ['/playlist', 'PlaylistPage'],
+  ['/podcasts', 'PodcastsPage'],
+  ['/podcast', 'PodcastPage'],
+  ['/profile', 'ProfilePage'],
+  ['/telemetria', 'TelemetryPage'],
+  ['/dispositivo', 'DevicePage'],
+  ['/diagnostico', 'DiagnosticoPage'],
+  ['/compartilhar', 'SharePage'],
+  ['/downloads', 'DownloadsPage'],
+  ['/uploads', 'UploadsPage'],
+  ['/discover', 'DiscoverPage'],
+  ['/settings', 'SettingsPage'],
+  ['/recentes', 'RecentPage'],
+  ['/history', 'HistoryPage'],
+  ['/library', 'LibraryPage'],
+  ['/search', 'SearchPage'],
+  ['/radios', 'RadiosPage'],
+  ['/liked', 'LikedPage'],
+  ['/login', 'LoginPage'],
+  ['/admin', 'AdminPage'],
+  ['/mix', 'MixPage'],
+  ['/s', 'SharedPage'],
+  ['/', 'HomePage'],
+];
+
+/** Chunks já pedidos — pedir de novo é barato, mas não é de graça. */
+const warmed = new Set<string>();
+
+function warm(path: string): void {
+  if (warmed.has(path)) return;
+  warmed.add(path);
+  void pageModules[path]?.().catch(() => {
+    warmed.delete(path); // falhou (offline?): pode tentar de novo depois
   });
+}
+
+/**
+ * Aquece os chunks das páginas para que trocar de página não espere a rede.
+ *
+ * Antes isto rodava numa única volta de `requestIdleCallback` com folga de 4s.
+ * Num app com música tocando, fila importando e biblioteca grande, a ociosidade
+ * demora a chegar — o usuário trocava de página antes do aquecimento e pagava o
+ * download do chunk na hora, com esqueleto na tela.
+ *
+ * Agora são duas frentes:
+ *  1. POR INTENÇÃO — o ponteiro encostou num link, o dedo tocou: aquece ANTES
+ *     do clique. É o que faz a navegação parecer instantânea de verdade, porque
+ *     entre encostar e soltar cabe o download inteiro de um chunk.
+ *  2. EM SEGUNDO PLANO — o resto, em lotes pequenos, para não disputar banda
+ *     com o áudio que está tocando.
+ */
+if (typeof window !== 'undefined') {
+  const pathFor = (href: string): string | null => {
+    try {
+      const { pathname, origin } = new URL(href, window.location.href);
+      if (origin !== window.location.origin) return null;
+      const rota = ROTA_POR_PREFIXO.find(
+        ([prefixo]) => pathname === prefixo || pathname.startsWith(`${prefixo}/`),
+      );
+      return rota ? `/src/pages/${rota[1]}.tsx` : null;
+    } catch {
+      return null;
+    }
+  };
+
+  const aoEncostar = (event: Event): void => {
+    const link = (event.target as HTMLElement | null)?.closest?.('a[href]');
+    if (!(link instanceof HTMLAnchorElement)) return;
+    const path = pathFor(link.getAttribute('href') ?? '');
+    if (path) warm(path);
+  };
+  // `pointerenter` não borbulha; `pointerover` sim, e cobre mouse e toque.
+  document.addEventListener('pointerover', aoEncostar, { passive: true });
+  document.addEventListener('focusin', aoEncostar, { passive: true });
+
+  // Aquecimento de fundo em lotes, começando logo depois da primeira pintura.
+  const restantes = Object.keys(pageModules);
+  const proximoLote = (): void => {
+    for (let i = 0; i < 3; i += 1) {
+      const path = restantes.shift();
+      if (!path) return;
+      warm(path);
+    }
+    if (restantes.length > 0) setTimeout(proximoLote, 250);
+  };
+  requestAnimationFrame(() => setTimeout(proximoLote, 300));
 }
 
 function Placeholder() {

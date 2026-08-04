@@ -77,6 +77,50 @@ export function localAudioUrl(trackId: string): string | null {
 const MAX_DOWNLOAD_TRIES = 3;
 const DOWNLOAD_TIMEOUT_MS = 90_000;
 
+/**
+ * Quantos downloads correm ao mesmo tempo.
+ *
+ * Antes não havia teto: mandar baixar uma prateleira inteira abria uma
+ * requisição por faixa DE UMA VEZ. O navegador enfileira o excedente e a banda
+ * se divide entre todas — ninguém termina, a barra de todo mundo rasteja, e no
+ * servidor doméstico (que ainda serve o /stream da música que está tocando) o
+ * resultado é timeout. Poucas em paralelo terminam MAIS rápido que muitas:
+ * cada uma pega banda inteira e sai da fila.
+ *
+ * Três é o ponto onde a rede doméstica satura sem prejudicar a reprodução.
+ */
+const MAX_DOWNLOADS_PARALELOS = 3;
+
+let baixandoAgora = 0;
+const esperando: (() => void)[] = [];
+
+async function pegarVaga(): Promise<void> {
+  if (baixandoAgora < MAX_DOWNLOADS_PARALELOS) {
+    baixandoAgora += 1;
+    return;
+  }
+  await new Promise<void>((resolve) => esperando.push(resolve));
+  baixandoAgora += 1;
+}
+
+function devolverVaga(): void {
+  baixandoAgora -= 1;
+  esperando.shift()?.();
+}
+
+/**
+ * Pede persistência UMA vez para o app inteiro, não a cada faixa.
+ *
+ * Isto estava na frente de cada download, e `navigator.storage.persist()` pode
+ * consultar heurística do navegador (ou abrir prompt): toda faixa pagava essa
+ * espera ANTES de o primeiro byte ser pedido. A garantia é do armazenamento
+ * como um todo, então uma vez basta.
+ */
+let persistenciaPedida: Promise<unknown> | null = null;
+function garantirPersistencia(): Promise<unknown> {
+  return (persistenciaPedida ??= requestPersistentStorage().catch(() => undefined));
+}
+
 function isQuotaError(err: unknown): boolean {
   return (
     err instanceof DOMException &&
@@ -119,22 +163,35 @@ async function fetchAudioBlob(
 }
 
 export async function downloadTrack(track: TrackDto): Promise<void> {
-  if (!track.downloadUrl || !cacheSupported()) return;
+  const downloadUrl = track.downloadUrl;
+  if (!downloadUrl || !cacheSupported()) return;
   if (inFlight.has(track.id) || isDownloaded(track.id)) return;
 
   failed.delete(track.id);
-  inFlight.set(track.id, 0);
+  // -1 = indeterminado: a UI já mostra "na fila" enquanto a vaga não sai, em
+  // vez de uma barra parada em 0% que parece travamento.
+  inFlight.set(track.id, -1);
   emit();
 
-  // Persistência ANTES de escrever: sem isso o browser pode evictar o áudio sob
-  // pressão enquanto o registro (localStorage) sobrevive — faixa "some" no boot.
-  await requestPersistentStorage().catch(() => undefined);
+  await pegarVaga();
+  try {
+    await baixarComVaga(track, downloadUrl);
+  } finally {
+    devolverVaga();
+  }
+}
+
+async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void> {
+  // Persistência garante que o browser não evicte o áudio sob pressão enquanto
+  // o registro (localStorage) sobrevive — faixa "some" no boot. Pedida uma vez
+  // para o app todo, e sem segurar o primeiro byte: o download já pode começar.
+  void garantirPersistencia();
 
   // Only send the Firebase token to our own API. Catalog tracks download
   // straight from the third-party Audius CDN — an Authorization header there
   // leaks the token and trips a CORS preflight the CDN rejects.
   const headers: Record<string, string> = {};
-  if (isFirstPartyUrl(track.downloadUrl)) {
+  if (isFirstPartyUrl(downloadUrl)) {
     const token = await getIdToken().catch(() => null);
     if (token) headers.Authorization = `Bearer ${token}`;
   }
@@ -148,7 +205,7 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_TRIES; attempt++) {
     try {
-      const blob = await fetchAudioBlob(track.downloadUrl, headers, setProgress);
+      const blob = await fetchAudioBlob(downloadUrl, headers, setProgress);
       // putAudio só resolve quando a transação COMMITA (ver audioCache.tx) — um
       // abort de quota rejeita aqui e nunca registramos uma faixa fantasma.
       await putAudio(track.id, blob);

@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
 import { Outlet, useLocation } from 'react-router';
-import { motion } from 'framer-motion';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { RemotePlaybackBanner } from '@/components/media/RemotePlaybackBanner';
 import { ShareDialogHost } from '@/components/media/ShareDialog';
@@ -111,16 +110,15 @@ export function AppShell() {
                   : 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8',
               )}
             >
-              {/* Instant-feel navigation (Spotify-like): no exit animation, no
-                  layout pop — just a 120ms opacity ease-in on the new page. */}
-              <motion.div
-                key={location.pathname}
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ duration: 0.12, ease: 'linear' }}
-              >
+              {/* Navegação sem animação nenhuma.
+                  O fade de 120ms parecia sofisticado e custava caro: a página
+                  nova nascia invisível, então TODA troca de página começava com
+                  um piscar de conteúdo faltando antes de aparecer. Sem ele, o
+                  conteúdo entra no primeiro quadro. A chave por pathname fica —
+                  é ela que garante que a página nova começa do zero. */}
+              <div key={location.pathname}>
                 <Outlet />
-              </motion.div>
+              </div>
             </div>
           </main>
 
