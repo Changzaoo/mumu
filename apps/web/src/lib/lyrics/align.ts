@@ -19,9 +19,24 @@ export interface AsrWord {
   startMs: number;
 }
 
+/** Uma palavra da letra com o instante em que ela é CANTADA. */
+export interface TimedWord {
+  text: string;
+  timeMs: number;
+}
+
 export interface AlignedLine {
   timeMs: number;
   text: string;
+  /**
+   * Tempo de CADA palavra da linha.
+   *
+   * Sem isto o karaokê acende a linha inteira de uma vez e fica sempre um pouco
+   * atrás ou à frente do que está sendo cantado — a linha dura 4 segundos e o
+   * destaque não diz onde a voz está dentro dela. Com o tempo por palavra o
+   * destaque anda junto com a voz, que é o que "sincronizada" quer dizer.
+   */
+  words?: TimedWord[];
 }
 
 /** Normalização agressiva: só o que importa para comparar duas palavras. */
@@ -124,15 +139,26 @@ export function alignLyrics(
   // Casou pouco = não é a mesma música (ou o ASR não entendeu nada).
   if (pairs.length / lyricTokens.length < minMatchRatio) return null;
 
-  // Cada linha herda o tempo da PRIMEIRA palavra dela que foi reconhecida.
+  // Cada linha herda o tempo da PRIMEIRA palavra dela que foi reconhecida, e
+  // guardamos também o tempo de CADA token casado — é isso que permite o
+  // destaque andar palavra a palavra em vez de acender a linha toda.
   const lineStart = new Map<number, number>();
+  const tempoDoToken = new Map<number, number>();
   for (const [lyricIndex, asrIndex] of pairs) {
     const line = tokenLine[lyricIndex];
     const word = words[asrIndex];
     if (line === undefined || !word) continue;
+    tempoDoToken.set(lyricIndex, word.startMs);
     if (!lineStart.has(line)) lineStart.set(line, word.startMs);
   }
   if (lineStart.size === 0) return null;
+
+  // Índice do primeiro token de cada linha, para recortar as palavras depois.
+  const primeiroToken = new Map<number, number>();
+  for (let i = 0; i < tokenLine.length; i += 1) {
+    const linha = tokenLine[i]!;
+    if (!primeiroToken.has(linha)) primeiroToken.set(linha, i);
+  }
 
   // Linhas sem nenhuma palavra reconhecida (refrão comido pelo ASR) ficam sem
   // âncora — interpolamos entre as vizinhas conhecidas para não colapsarem
@@ -165,5 +191,47 @@ export function alignLyrics(
     if (line.timeMs < last) line.timeMs = last;
     last = line.timeMs;
   }
+
+  // Tempo por palavra. Palavra que o ASR reconheceu tem tempo real; as que ele
+  // comeu (rima virando outra coisa, "yeah" fantasma) são distribuídas entre as
+  // vizinhas reconhecidas — melhor uma estimativa dentro do intervalo certo que
+  // todas empilhadas no começo da linha.
+  for (let i = 0; i < out.length; i += 1) {
+    const linha = out[i]!;
+    const inicio = primeiroToken.get(i);
+    if (inicio === undefined) continue;
+
+    const palavrasDoTexto = (lines[i] ?? '').split(/\s+/).filter(Boolean);
+    const tokensDaLinha: number[] = [];
+    for (let k = inicio; k < tokenLine.length && tokenLine[k] === i; k += 1) tokensDaLinha.push(k);
+    // Pontuação faz o texto ter mais "palavras" que tokens; sem 1-para-1 o
+    // mapeamento seria chute, então nem tenta.
+    if (tokensDaLinha.length !== palavrasDoTexto.length || tokensDaLinha.length === 0) continue;
+
+    const fim = out[i + 1]?.timeMs ?? linha.timeMs + palavrasDoTexto.length * 400;
+    const tempos: number[] = tokensDaLinha.map((t) => tempoDoToken.get(t) ?? -1);
+
+    // Interpola os buracos entre âncoras conhecidas.
+    for (let k = 0; k < tempos.length; k += 1) {
+      if (tempos[k]! >= 0) continue;
+      let antes = k - 1;
+      while (antes >= 0 && tempos[antes]! < 0) antes -= 1;
+      let depois = k + 1;
+      while (depois < tempos.length && tempos[depois]! < 0) depois += 1;
+      const tAntes = antes >= 0 ? tempos[antes]! : linha.timeMs;
+      const tDepois = depois < tempos.length ? tempos[depois]! : fim;
+      const vao = depois - antes;
+      tempos[k] = Math.round(tAntes + ((tDepois - tAntes) * (k - antes)) / Math.max(1, vao));
+    }
+
+    // Não-decrescente também dentro da linha.
+    let anterior = linha.timeMs;
+    linha.words = palavrasDoTexto.map((texto, k) => {
+      const t = Math.max(tempos[k]!, anterior);
+      anterior = t;
+      return { text: texto, timeMs: t };
+    });
+  }
+
   return out;
 }

@@ -124,7 +124,29 @@ export function LyricsView({ track, className }: LyricsViewProps) {
               active ? 'text-fg' : 'text-fg-muted/60',
             )}
           >
-            {line.text || '♪'}
+            {/* Linha ativa COM tempo por palavra: o destaque anda junto com a
+                voz. Sem isso a linha inteira acende de uma vez e fica quatro
+                segundos parada, sempre um pouco fora do que está sendo cantado.
+                As demais linhas seguem como texto simples — animar o que não
+                está sendo cantado só custa renderização. */}
+            {active && line.words && line.words.length > 0 ? (
+              <span>
+                {line.words.map((palavra, i) => (
+                  <span
+                    key={`${palavra.timeMs}-${i}`}
+                    className={cn(
+                      'transition-colors duration-150',
+                      positionMs >= palavra.timeMs ? 'text-fg' : 'text-fg-muted/50',
+                    )}
+                  >
+                    {palavra.text}
+                    {i < line.words!.length - 1 ? ' ' : ''}
+                  </span>
+                ))}
+              </span>
+            ) : (
+              line.text || '♪'
+            )}
           </button>
         );
       })}

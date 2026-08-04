@@ -18,8 +18,47 @@ describe('alignLyrics', () => {
       ),
     );
     expect(result).not.toBeNull();
-    expect(result?.[0]).toEqual({ timeMs: 1000, text: 'Hello darkness my old friend' });
-    expect(result?.[1]).toEqual({ timeMs: 5000, text: 'I have come to talk again' });
+    expect(result?.[0]).toMatchObject({ timeMs: 1000, text: 'Hello darkness my old friend' });
+    expect(result?.[1]).toMatchObject({ timeMs: 5000, text: 'I have come to talk again' });
+  });
+
+  it('carimba CADA palavra, não só a linha — é o que o karaokê segue', () => {
+    const result = alignLyrics(
+      ['Hello darkness my old friend'],
+      words('hello@1000 darkness@1400 my@1800 old@2000 friend@2300'),
+    );
+    expect(result?.[0]?.words).toEqual([
+      { text: 'Hello', timeMs: 1000 },
+      { text: 'darkness', timeMs: 1400 },
+      { text: 'my', timeMs: 1800 },
+      { text: 'old', timeMs: 2000 },
+      { text: 'friend', timeMs: 2300 },
+    ]);
+  });
+
+  it('palavra que o ASR comeu ganha tempo interpolado entre as vizinhas', () => {
+    // O ASR não ouviu "my": ela não pode empilhar no começo da linha nem
+    // herdar o tempo da seguinte — cai no meio, onde de fato foi cantada.
+    const result = alignLyrics(
+      ['Hello darkness my old friend'],
+      words('hello@1000 darkness@1400 old@2000 friend@2300'),
+    );
+    const palavras = result?.[0]?.words;
+    expect(palavras?.map((w) => w.text)).toEqual(['Hello', 'darkness', 'my', 'old', 'friend']);
+    const my = palavras?.[2]?.timeMs ?? 0;
+    expect(my).toBeGreaterThan(1400);
+    expect(my).toBeLessThan(2000);
+  });
+
+  it('o tempo das palavras nunca anda para trás dentro da linha', () => {
+    const result = alignLyrics(
+      ['uma duas tres quatro cinco'],
+      words('uma@1000 duas@900 tres@1200 quatro@1100 cinco@1500'),
+    );
+    const tempos = result?.[0]?.words?.map((w) => w.timeMs) ?? [];
+    for (let i = 1; i < tempos.length; i += 1) {
+      expect(tempos[i]!).toBeGreaterThanOrEqual(tempos[i - 1]!);
+    }
   });
 
   it('mantém o TEXTO da letra, não o que o ASR ouviu errado', () => {

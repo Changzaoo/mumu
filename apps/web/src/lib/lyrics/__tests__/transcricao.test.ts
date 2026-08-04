@@ -35,9 +35,20 @@ describe('palavrasEmLinhas', () => {
       p('mas', 3000),
       p('volto', 3200),
     ]);
-    expect(linhas).toEqual([
+    expect(linhas).toMatchObject([
       { timeMs: 1000, text: 'eu vou embora' },
       { timeMs: 3000, text: 'mas volto' },
+    ]);
+  });
+
+  it('cada palavra guarda o tempo EXATO do ASR — sem interpolação', () => {
+    // Aqui o tempo não é estimado: veio direto do reconhecedor. É a sincronia
+    // mais precisa que o app consegue.
+    const linhas = palavrasEmLinhas([p('eu', 1000), p('vou', 1200), p('embora', 1400)]);
+    expect(linhas[0]!.words).toEqual([
+      { text: 'eu', timeMs: 1000 },
+      { text: 'vou', timeMs: 1200 },
+      { text: 'embora', timeMs: 1400 },
     ]);
   });
 

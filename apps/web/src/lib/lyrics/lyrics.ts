@@ -12,6 +12,12 @@ import { aiCleanSongTitle } from '@/lib/ai/ai';
 export interface LyricLine {
   timeMs: number;
   text: string;
+  /**
+   * Tempo de cada palavra, quando conhecido (alinhamento forçado ou
+   * transcrição). É o que faz o destaque andar JUNTO com a voz em vez de
+   * acender a linha inteira e ficar quatro segundos parado nela.
+   */
+  words?: { text: string; timeMs: number }[];
 }
 
 export interface Lyrics {

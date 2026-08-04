@@ -61,11 +61,13 @@ export function palavrasEmLinhas(words: TranscribedWord[]): LyricLine[] {
 
   const fechar = (): void => {
     if (atual.length === 0) return;
-    const texto = atual
-      .map((w) => w.text.trim())
-      .filter(Boolean)
-      .join(' ');
-    if (texto) linhas.push({ timeMs: atual[0]!.startMs, text: texto });
+    const palavras = atual
+      .map((w) => ({ text: w.text.trim(), timeMs: w.startMs }))
+      .filter((w) => w.text.length > 0);
+    const texto = palavras.map((w) => w.text).join(' ');
+    // Na transcrição o tempo por palavra é EXATO — veio direto do ASR, não de
+    // interpolação. É a fonte mais precisa de sincronia que o app tem.
+    if (texto) linhas.push({ timeMs: palavras[0]!.timeMs, text: texto, words: palavras });
     atual = [];
   };
 
