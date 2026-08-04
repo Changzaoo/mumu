@@ -10,6 +10,7 @@ import { createLinkImportWorker } from './linkImport.worker.js';
 import { createLyricSyncWorker } from './lyricSync.worker.js';
 import { createNotificationsWorker } from './notifications.worker.js';
 import { startCurationWorker } from './curation.worker.js';
+import { startArmazenamentoWorker } from './armazenamento.worker.js';
 
 const connection = createBullConnection();
 
@@ -36,8 +37,13 @@ for (const worker of workers) {
 // não depende de ninguém enfileirar nada — é o que a torna 24/7.
 const stopCuration = env.CURATION_ENABLED ? startCurationWorker() : () => undefined;
 
+// O agente de armazenamento roda SEMPRE, independente de curadoria e de IA:
+// ele não depende de chave nenhuma, e disco cheio derruba tudo o mais. As duas
+// vezes em que este servidor encheu, o sintoma não pareceu disco.
+const stopArmazenamento = startArmazenamentoWorker();
+
 logger.info(
-  { queues: workers.map((w) => w.name), curadoria: env.CURATION_ENABLED },
+  { queues: workers.map((w) => w.name), curadoria: env.CURATION_ENABLED, armazenamento: true },
   'Aurial workers started',
 );
 
@@ -52,6 +58,7 @@ async function shutdown(signal: string): Promise<void> {
   forceExit.unref();
 
   stopCuration();
+  stopArmazenamento();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

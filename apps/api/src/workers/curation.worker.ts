@@ -22,12 +22,12 @@
  * é pior que deixar como está.
  */
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
-import { EMBED_DIMS } from '@aurial/shared';
+import { EMBED_DIMS, type FaixaComparavel } from '@aurial/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { getFirebaseApp, isFirebaseEnabled } from '../infra/firebase/firebase.js';
 import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
-import { auditor, dna, generista, identificador, type TrackFacts } from './agents.js';
+import { auditor, dna, faxineiro, generista, identificador, type TrackFacts } from './agents.js';
 
 const log = logger.child({ worker: 'curation' });
 
@@ -42,9 +42,13 @@ interface LibraryTrack {
   artists?: unknown;
   album?: unknown;
   genre?: unknown;
+  /** Usados pelo faxineiro: duração confirma a gravação, capa desempata. */
+  durationMs?: unknown;
+  coverUrl?: unknown;
 }
 interface LibraryEntry {
   track?: LibraryTrack;
+  addedAt?: unknown;
   [AUDIT_FIELD]?: unknown;
   [DNA_FIELD]?: unknown;
 }
@@ -210,8 +214,74 @@ async function curateUser(db: Firestore, uid: string): Promise<number> {
   // fora da busca semântica para sempre.
   corrigidas += await preencherGeneros(snapshot.docs);
   await gravarDna(snapshot.docs);
+  corrigidas += await fundirDuplicatas(snapshot.docs);
 
   return corrigidas;
+}
+
+/**
+ * Funde as duplicatas: a mesma música que entrou duas vezes com títulos
+ * diferentes vira uma entrada só.
+ *
+ * A DECISÃO de fundir é do `faxineiro` (regra pura, testada em shared). Aqui só
+ * se executa — e a execução é conservadora de propósito:
+ *
+ *  - marca a sobrevivente com `duplicatasFundidas`, para o cliente saber que a
+ *    entrada absorveu outras (e para dar rastro se algo der errado);
+ *  - apaga as demais entradas da BIBLIOTECA, não o áudio: o arquivo no cofre
+ *    pode estar sendo servido para outro aparelho, e o cofre tem LRU própria;
+ *  - um teto por volta, para que um erro de regra não varra uma biblioteca
+ *    inteira antes de alguém perceber.
+ */
+const MAX_FUSOES_POR_VOLTA = 10;
+
+async function fundirDuplicatas(docs: LibraryDoc[]): Promise<number> {
+  const porId = new Map<string, LibraryDoc>();
+  const faixas: FaixaComparavel[] = [];
+
+  for (const doc of docs) {
+    const entry = doc.data() as LibraryEntry;
+    const track = entry.track;
+    if (!track || typeof track.title !== 'string' || !track.title.trim()) continue;
+    porId.set(doc.id, doc);
+    const dnaBruto = entry[DNA_FIELD];
+    faixas.push({
+      id: doc.id,
+      title: track.title,
+      artists: artistNames(track),
+      durationMs: typeof track.durationMs === 'number' ? track.durationMs : null,
+      dna:
+        Array.isArray(dnaBruto) && dnaBruto.length === EMBED_DIMS ? (dnaBruto as number[]) : null,
+      coverUrl: typeof track.coverUrl === 'string' ? track.coverUrl : null,
+      album: typeof track.album === 'string' ? track.album : null,
+      addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : null,
+    });
+  }
+
+  const grupos = faxineiro(faixas).slice(0, MAX_FUSOES_POR_VOLTA);
+  if (grupos.length === 0) return 0;
+
+  let fundidas = 0;
+  for (const grupo of grupos) {
+    const sobrevivente = porId.get(grupo.manter.id);
+    if (!sobrevivente) continue;
+    try {
+      await sobrevivente.ref.update({
+        duplicatasFundidas: grupo.remover.map((r) => r.title),
+        [AUDIT_FIELD]: Date.now(),
+      });
+      for (const morta of grupo.remover) {
+        const doc = porId.get(morta.id);
+        if (doc) await doc.ref.delete();
+      }
+      fundidas += grupo.remover.length;
+    } catch (err) {
+      log.warn({ err, manter: grupo.manter.id }, 'falha ao fundir duplicatas');
+    }
+  }
+
+  if (fundidas > 0) log.info({ fundidas, grupos: grupos.length }, 'duplicatas fundidas');
+  return fundidas;
 }
 
 type LibraryDoc = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;

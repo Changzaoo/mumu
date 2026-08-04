@@ -10,6 +10,7 @@ import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/sto
 import { initCloudSync } from '@/lib/sync/syncManager';
 import { init as initImportQueue } from '@/lib/local/importQueue';
 import { initTelemetry } from '@/lib/telemetry/telemetry';
+import { iniciarPesquisador } from '@/lib/local/pesquisador';
 import { initPresence } from '@/lib/devices/presence';
 import { initGenreAgent } from '@/lib/local/genreAgent';
 import { router } from '@/app/router';
@@ -40,6 +41,9 @@ export default function App() {
     initTelemetry(); // usage metrics for the admin /telemetria page
     initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
     initGenreAgent(); // plantão que categoriza a biblioteca por gênero (IA)
+    // Agente pesquisador: DESLIGADO por padrão. Ele confere o interruptor a
+    // cada rodada, então desligar nas configurações para o agente na hora.
+    const pararPesquisador = iniciarPesquisador(() => useSettingsStore.getState().pesquisadorAtivo);
 
     // App de verdade no celular: sem menu de long-press do navegador (abrir em
     // nova aba, salvar imagem…). Só em telas de toque — o desktop mantém o
@@ -51,6 +55,7 @@ export default function App() {
 
     const cleanupSettings = initSettings();
     return () => {
+      pararPesquisador();
       document.removeEventListener('contextmenu', blockContextMenu);
       cleanupSettings?.();
     };

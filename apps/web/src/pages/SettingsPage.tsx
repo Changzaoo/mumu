@@ -14,6 +14,7 @@ import {
   Info,
   Loader2,
   Lock,
+  Search,
   LogOut,
   Monitor,
   Moon,
@@ -420,6 +421,25 @@ export default function SettingsPage() {
           <Button variant="outline" size="sm" onClick={() => void requestPush()}>
             Permitir push
           </Button>
+        </Row>
+      </SettingsCard>
+
+      {/* Agente pesquisador — desligado por padrão: ele gasta internet e disco
+          sozinho, então tem que ser escolha explícita, nunca surpresa. */}
+      <SettingsCard icon={Search} title="Agente pesquisador">
+        <Row
+          label="Buscar música dos artistas que você ouve"
+          hint="Procura no YouTube e põe na fila de download. Usa internet e espaço."
+          htmlFor="st-pesquisador"
+        >
+          <Switch
+            id="st-pesquisador"
+            checked={settings.pesquisadorAtivo}
+            onCheckedChange={(checked) => {
+              settings.setPesquisadorAtivo(checked);
+              saved();
+            }}
+          />
         </Row>
       </SettingsCard>
 

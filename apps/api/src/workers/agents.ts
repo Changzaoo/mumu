@@ -12,9 +12,12 @@
  * sozinho — ele nem fica sabendo que mudou.
  */
 import {
+  agruparDuplicatas,
   AI_BUDGET,
   batchGenreMessages,
   cosineSimilarity,
+  type FaixaComparavel,
+  type GrupoDuplicado,
   genreMessages,
   identityMessages,
   modelFor,
@@ -164,6 +167,33 @@ export async function dna(tracks: TrackFacts[]): Promise<(number[] | null)[]> {
   }
 
   return out;
+}
+
+// ── Agente 5: FAXINEIRO — a mesma música com dois nomes vira uma ──────────
+
+/**
+ * Acha grupos de duplicatas na biblioteca de um usuário.
+ *
+ * A lógica de decisão vive em `@aurial/shared` (`duplicatas.ts`) e é pura —
+ * aqui só entra a colheita dos dados. Isso importa: fundir é destrutivo e
+ * acontece sem o usuário ver, então a regra tem que ser testável sem Firestore.
+ *
+ * O DNA gravado pelo agente 4 entra como sinal: dois vetores quase idênticos
+ * são a mesma gravação mesmo quando os títulos não se parecem em nada.
+ */
+export function faxineiro(faixas: FaixaComparavel[]): GrupoDuplicado[] {
+  const grupos = agruparDuplicatas(faixas);
+  for (const g of grupos) {
+    log.info(
+      {
+        fica: g.manter.title,
+        somem: g.remover.map((r) => r.title),
+        motivo: g.motivo,
+      },
+      'duplicatas encontradas',
+    );
+  }
+  return grupos;
 }
 
 /** Reexportado para quem for ranquear "parecidas" a partir do DNA gravado. */

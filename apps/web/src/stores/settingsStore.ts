@@ -39,9 +39,19 @@ export interface SettingsState {
   notifications: boolean;
   /** When true, plays are not recorded to the local history. */
   privateSession: boolean;
+  /**
+   * Agente pesquisador: procura no YouTube música dos artistas que você anda
+   * ouvindo e enfileira para download.
+   *
+   * DESLIGADO por padrão, e essa é a decisão importante: ele gasta internet e
+   * disco por conta própria. Um agente que baixa sem ninguém pedir tem que ser
+   * escolha explícita, não surpresa.
+   */
+  pesquisadorAtivo: boolean;
 
   setTheme: (theme: ThemeSetting) => void;
   setLanguage: (language: string) => void;
+  setPesquisadorAtivo: (ativo: boolean) => void;
   setAudioQuality: (quality: AudioQuality) => void;
   setCrossfadeSeconds: (seconds: number) => void;
   setGapless: (enabled: boolean) => void;
@@ -96,6 +106,7 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'dark',
       language: 'pt-BR',
       audioQuality: 'high',
+      pesquisadorAtivo: false,
       crossfadeSeconds: 0,
       gapless: true,
       normalizeVolume: true,
@@ -112,6 +123,7 @@ export const useSettingsStore = create<SettingsState>()(
         applyDomSettings(get());
       },
       setLanguage: (language) => set({ language }),
+      setPesquisadorAtivo: (pesquisadorAtivo) => set({ pesquisadorAtivo }),
       setAudioQuality: (audioQuality) => set({ audioQuality }),
       setCrossfadeSeconds: (seconds) => set({ crossfadeSeconds: clamp(seconds, 0, 12) }),
       setGapless: (gapless) => set({ gapless }),

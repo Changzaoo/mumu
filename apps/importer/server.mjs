@@ -1596,6 +1596,43 @@ async function main() {
         return;
       }
 
+      // ── Busca no YouTube (agente pesquisador) ─────────────────────────
+      // Devolve LINKS, nunca baixa. Quem decide o que entra na biblioteca é o
+      // cliente, que já tem a fila com pausa, teto e deduplicação — deixar o
+      // servidor baixar por conta própria tiraria o usuário da decisão e
+      // furaria todos esses controles de uma vez.
+      if (req.method === 'POST' && pathname === '/search') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          const query = typeof body.query === 'string' ? body.query.trim() : '';
+          if (!query) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Busca vazia.' }));
+            return;
+          }
+          // Teto duplo: o que o cliente pediu e o que aceitamos. Uma busca
+          // aberta de mil resultados viraria mil downloads.
+          const limit = Math.min(Math.max(Number(body.limit) || 10, 1), 25);
+          log('search:', query, `(${limit})`);
+          // `ytsearchN:` é a própria busca do YouTube — mesmo caminho de código
+          // de uma playlist, então herda o --flat-playlist e os limites dele.
+          const result = await listPlaylist(ytdlp, `ytsearch${limit}:${query}`);
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ query, entries: result.entries ?? [] }));
+        } catch (err) {
+          const message = err instanceof Error ? err.message : 'Falha na busca.';
+          log('search error:', message);
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: message }));
+        }
+        return;
+      }
+
       // Real song metadata for a link WITHOUT downloading — to re-identify tracks.
       if (req.method === 'POST' && pathname === '/meta') {
         if (!(await authorize(req))) {

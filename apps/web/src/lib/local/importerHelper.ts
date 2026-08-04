@@ -704,6 +704,36 @@ export async function deleteTrackBlob(id: string): Promise<void> {
 }
 
 /** Ask the helper to enumerate a playlist's entries (no download). */
+/**
+ * Busca no YouTube pelo importer (agente pesquisador).
+ *
+ * Devolve só LINKS — nada é baixado aqui. Quem decide o que entra é a fila de
+ * import, que tem pausa, teto e deduplicação; buscar e baixar no mesmo passo
+ * furaria os três de uma vez.
+ *
+ * Nunca lança: pesquisar é um extra, e um extra não pode quebrar a sessão.
+ */
+export async function aiSearchYouTube(query: string, limit = 10): Promise<PlaylistEntry[] | null> {
+  try {
+    const res = await fetch(`${helperUrl()}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ query, limit }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { entries?: unknown };
+    if (!Array.isArray(data.entries)) return null;
+    return data.entries.filter(
+      (e): e is PlaylistEntry =>
+        Boolean(e) &&
+        typeof (e as PlaylistEntry).url === 'string' &&
+        (e as PlaylistEntry).url.length > 0,
+    );
+  } catch {
+    return null;
+  }
+}
+
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {
   let res: Response;
   try {
