@@ -25,6 +25,8 @@ import {
   daySeed,
   seededShuffle,
 } from '@/lib/reco/recommend';
+import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
+import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
 import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
 import { trackArtistNames } from '@/lib/utils';
@@ -194,6 +196,22 @@ export default function HomePage() {
     [entries, albums, history, likedCount],
   );
 
+  // Time de agentes (lib/reco/agents): relógio (hora × tipo de dia),
+  // calendário (semana vs. fim de semana), singles e letras. Cada um responde
+  // uma pergunta diferente e some quando não tem sinal — prateleira vazia é
+  // pior que prateleira ausente.
+  const prateleirasDeAgentes = useMemo(() => {
+    const letras = new Map(lyricsCacheEntries());
+    return construirPrateleirasDeAgentes(
+      { entries, history, liked: localLikes.list(), now: new Date() },
+      (trackId) => {
+        const l = letras.get(trackId);
+        return l ? l.lines.map((x) => x.text).join(' ') : null;
+      },
+    );
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+  }, [entries, history, likedCount]);
+
   // ── prateleiras semânticas (embeddings) ─────────────────────────
   // Aditivas: se a IA não estiver disponível, `ready` nunca sobe e a Home
   // fica exatamente como era. A vetorização roda em segundo plano, com teto
@@ -313,6 +331,24 @@ export default function HomePage() {
                   sourceId: rec.key,
                 })
               }
+            />
+          ))}
+        </SectionCarousel>
+      )}
+
+      {/* Time de agentes: cada cartão responde uma pergunta diferente sobre o
+          gosto (hora do dia × tipo de dia, rotina da semana, faixa avulsa,
+          assunto das letras). Agente sem sinal não aparece. */}
+      {prateleirasDeAgentes.length > 0 && (
+        <SectionCarousel title="Seus momentos" subtitle="Cada um pega um lado do seu gosto">
+          {prateleirasDeAgentes.map((p) => (
+            <MediaCard
+              key={p.key}
+              title={p.title}
+              subtitle={p.subtitle}
+              imageUrl={p.tracks[0]?.coverUrl ?? null}
+              imageUrls={capasDaPrateleira(p.tracks)}
+              onPlay={() => playQueue(p.tracks, 0, { source: 'library', sourceId: p.key })}
             />
           ))}
         </SectionCarousel>
