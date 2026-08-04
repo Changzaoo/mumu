@@ -11,7 +11,7 @@
  * Tudo best-effort: sem Firestore/login, nada roda; falhas são silenciosas.
  * As regras do Firestore limitam a leitura aos admins (ver firestore.rules).
  */
-import { doc, increment, setDoc } from 'firebase/firestore';
+import { firestore, type FirestoreModule } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import { getDownloads } from '@/features/downloads/registry';
 import { deviceLabel, getDeviceId } from '@/lib/devices/presence';
@@ -385,10 +385,35 @@ function listeningStats(): {
 async function push(data: Record<string, unknown>): Promise<void> {
   if (!db || !currentUser) return;
   try {
+    const { doc, setDoc } = await firestore();
     await setDoc(doc(db, 'telemetry', currentUser.uid), data, { merge: true });
   } catch {
     /* offline / rules not published yet — silent */
   }
+}
+
+/**
+ * `increment` do Firestore, buscado na primeira necessidade.
+ *
+ * Este arquivo é alcançado pelo AppShell (`recordNavigation`), então um import
+ * estático de `firebase/firestore` aqui devolveria os ~250 kB dele ao chunk de
+ * entrada — o oposto do que `lib/firebase.ts` faz. Como `flush` monta o payload
+ * de forma síncrona, a função fica guardada numa variável assim que o módulo
+ * chega; o flush que descobrir que ela ainda não chegou apenas adia (sem
+ * consumir contador nenhum — ver `flush`).
+ */
+let inc: FirestoreModule['increment'] | null = null;
+let buscandoInc = false;
+function garantirIncrement(): void {
+  if (inc || buscandoInc) return;
+  buscandoInc = true;
+  void firestore()
+    .then((fs) => {
+      inc = fs.increment;
+    })
+    .catch(() => {
+      buscandoInc = false; // tenta de novo no próximo flush
+    });
 }
 
 function snapshot(): Record<string, unknown> {
@@ -438,6 +463,13 @@ function snapshot(): Record<string, unknown> {
 
 function flush(): void {
   if (!currentUser) return;
+  // ANTES de drenar qualquer contador: sem `increment` não há o que montar, e
+  // zerar os pendentes aqui perderia a medição de vez. Adia inteiro.
+  if (!inc) {
+    garantirIncrement();
+    return;
+  }
+  const increment = inc;
   const seconds = pendingSeconds;
   pendingSeconds = 0;
 
@@ -521,7 +553,10 @@ function start(user: User): void {
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);
-  void push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });
+  void firestore().then(({ increment }) => {
+    inc ??= increment;
+    return push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });
+  });
 
   heartbeat ??= setInterval(() => {
     if (document.hidden) return;
@@ -568,9 +603,10 @@ function stop(): void {
   window.removeEventListener('error', onWindowError);
 }
 
-/** Boot telemetry once (App). Follows auth: starts on sign-in, stops on out. */
+/** Boot telemetry once (App). Follows auth: starts on sign-in, stops on out.
+ *  Sem guarda por `db` — ele só existe depois do boot agora; ver initPresence. */
 export function initTelemetry(): void {
-  if (initialized || typeof window === 'undefined' || !db) return;
+  if (initialized || typeof window === 'undefined') return;
   initialized = true;
   subscribeAuth((user) => {
     stop();

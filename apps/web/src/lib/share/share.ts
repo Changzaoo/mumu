@@ -4,7 +4,7 @@
  * cai direto no conteúdo — logado ouve completo (stream via importer), sem
  * login ouve prévias de 30s e é convidado a registrar.
  */
-import { addDoc, collection, doc, getDoc } from 'firebase/firestore';
+import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import type { TrackDto } from '@aurial/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
@@ -87,6 +87,7 @@ export function tracksToShare(tracks: TrackDto[]): ShareTrack[] {
 export async function createShare(payload: SharePayload): Promise<string | null> {
   if (!db || !currentUser) return asInlineShare(payload);
   try {
+    const { addDoc, collection } = await firestore();
     const docRef = await addDoc(collection(db, 'shares'), {
       ...payload,
       tracks: payload.tracks.slice(0, 50),
@@ -113,6 +114,7 @@ export async function fetchShare(id: string): Promise<ShareDoc | null> {
   }
   if (!db) return null;
   try {
+    const { doc, getDoc } = await firestore();
     const snap = await getDoc(doc(db, 'shares', id));
     return snap.exists() ? (snap.data() as ShareDoc) : null;
   } catch {

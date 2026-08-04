@@ -9,20 +9,11 @@
  *   trending/{trackId}                     { track, genre, genreKey, likeCount }
  *   trending/{trackId}/voters/{uid}        { at }   (one per user who liked it)
  */
-import {
-  collection,
-  doc,
-  getDoc,
-  getDocs,
-  increment,
-  limit as fsLimit,
-  orderBy,
-  query,
-  where,
-  writeBatch,
-} from 'firebase/firestore';
 import type { TrackDto } from '@aurial/shared';
 import { auth, db } from '@/lib/firebase';
+// Firestore por import DINÂMICO: `recordLike` é alcançado pela API de
+// biblioteca, que está no caminho crítico — ver lib/sync/firestoreLazy.ts.
+import { firestore } from '@/lib/sync/firestoreLazy';
 
 interface TrendingDoc {
   track: TrackDto;
@@ -39,6 +30,7 @@ function genreKeyOf(track: TrackDto): string {
 export async function recordLike(track: TrackDto, liked: boolean): Promise<void> {
   const user = auth?.currentUser;
   if (!db || !user) return;
+  const { doc, getDoc, increment, writeBatch } = await firestore();
   const trendRef = doc(db, 'trending', track.id);
   const voterRef = doc(db, 'trending', track.id, 'voters', user.uid);
   try {
@@ -72,6 +64,7 @@ function readTracks(docs: Array<{ data: () => unknown }>): TrackDto[] {
 export async function topTrending(n = 12): Promise<TrackDto[]> {
   if (!db) return [];
   try {
+    const { collection, getDocs, limit: fsLimit, orderBy, query } = await firestore();
     const snap = await getDocs(
       query(collection(db, 'trending'), orderBy('likeCount', 'desc'), fsLimit(n)),
     );
@@ -87,6 +80,7 @@ export async function topByGenre(genre: string, n = 12): Promise<TrackDto[]> {
   const key = genre.trim().toLowerCase();
   if (!key) return [];
   try {
+    const { collection, getDocs, limit: fsLimit, orderBy, query, where } = await firestore();
     const snap = await getDocs(
       query(
         collection(db, 'trending'),

@@ -6,6 +6,13 @@ import '@/styles/globals.css';
 import App from '@/App';
 import { initPwaUpdater } from '@/pwa';
 import { instalarDiagnostico } from '@/lib/local/playbackDiagnosis';
+import { instalarBootPerf, marcarBoot } from '@/lib/telemetry/bootPerf';
+
+// Primeira linha executável do app: daqui para trás é download + parse do
+// bundle, e é isso que esta marca mede. `radinhoPerf()` imprime a linha do
+// tempo inteira — sem ela, "está lento no boot" não aponta para lugar nenhum.
+marcarBoot('bundle');
+instalarBootPerf();
 
 // Register the service worker + auto-updater as early as possible.
 initPwaUpdater();

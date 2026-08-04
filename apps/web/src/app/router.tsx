@@ -115,17 +115,28 @@ if (typeof window !== 'undefined') {
   document.addEventListener('pointerover', aoEncostar, { passive: true });
   document.addEventListener('focusin', aoEncostar, { passive: true });
 
-  // Aquecimento de fundo em lotes, começando logo depois da primeira pintura.
+  // Aquecimento de fundo, POR OCIOSIDADE.
+  //
+  // Antes era um lote a cada 250ms começando 300ms depois da primeira pintura —
+  // ou seja, ~35 chunks baixando em cima do boot, disputando banda com o que o
+  // usuário está de fato esperando (a biblioteca, as capas, o primeiro
+  // snapshot da nuvem). O aquecimento existe para a navegação FUTURA; ele pode
+  // esperar o navegador ficar sem nada melhor para fazer.
+  //
+  // O aquecimento por intenção (acima) continua imediato — é ele que faz a
+  // navegação parecer instantânea, e ele só custa o chunk que o dedo apontou.
   const restantes = Object.keys(pageModules);
+  const idle = (window as unknown as { requestIdleCallback?: typeof requestIdleCallback })
+    .requestIdleCallback;
   const proximoLote = (): void => {
-    for (let i = 0; i < 3; i += 1) {
-      const path = restantes.shift();
-      if (!path) return;
-      warm(path);
-    }
-    if (restantes.length > 0) setTimeout(proximoLote, 250);
+    const path = restantes.shift();
+    if (path) warm(path);
+    if (restantes.length === 0) return;
+    if (typeof idle === 'function') idle(() => proximoLote(), { timeout: 10_000 });
+    else setTimeout(proximoLote, 400);
   };
-  requestAnimationFrame(() => setTimeout(proximoLote, 300));
+  // 1,5s de folga: tempo de a primeira tela pintar e a biblioteca aparecer.
+  setTimeout(proximoLote, 1_500);
 }
 
 function Placeholder() {

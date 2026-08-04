@@ -38,6 +38,7 @@ import {
   verificadorConfirma,
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
+import { marcarBoot } from '@/lib/telemetry/bootPerf';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
 import { artistFromSource } from '@/lib/local/sourceArtist';
@@ -516,27 +517,72 @@ const cloud = cloudCollection<LibraryEntry>({
   localItems: () => read().map((e): [string, LibraryEntry] => [e.track.id, e]),
   onRemoteUpsert: (id, entry) => applyRemoteUpsert(id, entry),
   onRemoteDelete: (id) => applyRemoteDelete(id),
+  onRemoteBatch: (upserts, deletes) => applyRemoteBatch(upserts, deletes),
 });
 
 /** Start/stop cross-device sync (called on auth change). */
 export const setUser = cloud.setUser;
 
+/**
+ * A entrada remota não conhece a capa DESTE aparelho (a imagem embutida mora no
+ * IndexedDB local e nunca é sincronizada). Sem preservar a capa já restaurada,
+ * cada eco da nuvem apagaria a capa da tela — o sintoma clássico de "a capa
+ * aparece no boot e some sozinha depois".
+ */
+function comCapaLocal(id: string, entry: LibraryEntry): LibraryEntry {
+  const localCover = coverUrls.get(id);
+  return localCover && !entry.track.coverUrl
+    ? { ...entry, track: { ...entry.track, coverUrl: localCover } }
+    : entry;
+}
+
 function applyRemoteUpsert(id: string, entry: LibraryEntry): void {
   const existing = read();
-  // A entrada remota não conhece a capa DESTE aparelho (a imagem embutida
-  // mora no IndexedDB local e nunca é sincronizada). Sem preservar a capa já
-  // restaurada, cada eco da nuvem apagaria a capa da tela — o sintoma clássico
-  // de "a capa aparece no boot e some sozinha depois".
-  const localCover = coverUrls.get(id);
-  const merged =
-    localCover && !entry.track.coverUrl
-      ? { ...entry, track: { ...entry.track, coverUrl: localCover } }
-      : entry;
+  const merged = comCapaLocal(id, entry);
   write(
     existing.some((e) => e.track.id === id)
       ? existing.map((e) => (e.track.id === id ? merged : e))
       : [merged, ...existing],
   );
+}
+
+/**
+ * O primeiro snapshot da nuvem traz a biblioteca INTEIRA de uma vez.
+ *
+ * Aplicando faixa a faixa, cada uma reconstruía o array completo e invalidava
+ * álbuns/artistas/gêneros — 300 faixas viravam 300 cópias de um array de 300 e
+ * 300 recálculos, justamente enquanto o usuário espera a tela. Em lote é uma
+ * varredura só: um índice por id, uma escrita, um recálculo.
+ *
+ * A ordem preserva o comportamento antigo: quem já existe é substituído no
+ * lugar, quem é novo entra na frente (mais recente primeiro).
+ */
+function applyRemoteBatch(upserts: Array<[string, LibraryEntry]>, deletes: string[]): void {
+  const porId = new Map(upserts.map(([id, entry]) => [id, comCapaLocal(id, entry)]));
+  const removidos = new Set(deletes);
+
+  for (const id of removidos) {
+    const url = blobUrls.get(id);
+    if (url) {
+      URL.revokeObjectURL(url);
+      blobUrls.delete(id);
+    }
+  }
+
+  const atualizados: LibraryEntry[] = [];
+  for (const entry of read()) {
+    const id = entry.track.id;
+    if (removidos.has(id)) continue;
+    const remoto = porId.get(id);
+    if (remoto) {
+      porId.delete(id); // consumido: não entra de novo como "novo"
+      atualizados.push(remoto);
+    } else {
+      atualizados.push(entry);
+    }
+  }
+  write([...porId.values(), ...atualizados]);
+  marcarBoot('nuvem-primeiro-snapshot');
 }
 
 function applyRemoteDelete(id: string): void {
@@ -1490,6 +1536,7 @@ export function hydrate(): Promise<void> {
     // instantânea). Não há motivo para segurar a tela até o último arquivo de
     // áudio ser aberto.
     emit();
+    marcarBoot('biblioteca-local');
 
     // UMA pergunta para o cofre inteiro, não uma por faixa.
     //
@@ -1693,9 +1740,35 @@ function normalizeAlbumCasing(): number {
  * the network — offline it must not run at all (playback stays 100% local);
  * it waits for the connection to come back instead.
  */
+/**
+ * Espera a página ficar ociosa antes de soltar a curadoria.
+ *
+ * Ela começava no instante em que a biblioteca hidratava — ou seja, no meio do
+ * boot, disputando CPU e banda com o que o usuário está esperando ver: o bundle
+ * terminando de executar, o primeiro snapshot da nuvem, as capas da tela. São
+ * varreduras longas de rede (catálogo, capas, upload, auditoria por IA) e
+ * nenhuma delas é urgente; qualquer uma pode começar alguns segundos depois sem
+ * o usuário notar. O que ele NOTA é a lista demorando a aparecer.
+ *
+ * Teto de 8s porque `requestIdleCallback` pode nunca disparar num app com
+ * música tocando e fila importando — a curadoria não pode ficar refém disso.
+ */
+const OCIOSIDADE_MAX_MS = 8_000;
+
+function quandoOcioso(acao: () => void): void {
+  const idle = (window as unknown as { requestIdleCallback?: typeof requestIdleCallback })
+    .requestIdleCallback;
+  if (typeof idle === 'function') {
+    idle(() => acao(), { timeout: OCIOSIDADE_MAX_MS });
+    return;
+  }
+  setTimeout(acao, 3_000);
+}
+
 function scheduleBackgroundCuration(): void {
   const run = (): void =>
     void (async () => {
+      marcarBoot('curadoria-inicio');
       // CAPAS PRIMEIRO. Antes esta era a ÚLTIMA de cinco varreduras em série, e
       // a primeira delas (backfillRemote) percorre a biblioteca inteira fazendo
       // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
@@ -1720,10 +1793,10 @@ function scheduleBackgroundCuration(): void {
       await auditAttributions().catch(() => undefined); // AI spot-checks a few
     })();
   if (typeof navigator !== 'undefined' && !navigator.onLine) {
-    window.addEventListener('online', run, { once: true });
+    window.addEventListener('online', () => quandoOcioso(run), { once: true });
     return;
   }
-  run();
+  quandoOcioso(run);
 }
 
 /** Respiro entre itens dos passes de fundo — sem isso, centenas de iterações

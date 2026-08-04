@@ -7,18 +7,12 @@
  * with the stored `sourceUrl`. Deduped by a key derived from that URL, so the
  * same video shared by many people is a single entry.
  */
-import {
-  collection,
-  doc,
-  getDoc,
-  limit as fsLimit,
-  onSnapshot,
-  orderBy,
-  query,
-  setDoc,
-} from 'firebase/firestore';
 import type { TrackDto } from '@aurial/shared';
-import { auth, db } from '@/lib/firebase';
+import { auth, db, firebaseReady } from '@/lib/firebase';
+
+// Import dinâmico pelo mesmo motivo do cloudCollection: a biblioteca local
+// alcança este módulo, e ela está no caminho crítico do boot.
+import { firestore } from '@/lib/sync/firestoreLazy';
 
 export interface SharedTrack {
   track: TrackDto;
@@ -46,8 +40,11 @@ function keyFor(sourceUrl: string): string {
  * and even then the order (sharedAt) is preserved.
  */
 export async function publishSharedTrack(track: TrackDto, sourceUrl: string): Promise<void> {
+  if (!sourceUrl) return;
+  await firebaseReady();
+  const { doc, getDoc, setDoc } = await firestore();
   const user = auth?.currentUser;
-  if (!db || !user || !sourceUrl) return;
+  if (!db || !user) return;
   const ref = doc(db, 'sharedTracks', keyFor(sourceUrl));
   try {
     const snap = await getDoc(ref);
@@ -72,14 +69,25 @@ export async function publishSharedTrack(track: TrackDto, sourceUrl: string): Pr
 
 /** Realtime subscription to the newest shared tracks. Returns an unsubscribe. */
 export function subscribeSharedTracks(callback: (items: SharedTrack[]) => void): () => void {
-  if (!db) {
-    callback([]);
-    return () => undefined;
-  }
-  const q = query(collection(db, 'sharedTracks'), orderBy('sharedAt', 'desc'), fsLimit(60));
-  return onSnapshot(
-    q,
-    (snap) => callback(snap.docs.map((d) => d.data() as SharedTrack)),
-    () => callback([]),
-  );
+  let cancelado = false;
+  let desligar: (() => void) | null = null;
+  void (async () => {
+    await firebaseReady();
+    const { collection, limit: fsLimit, onSnapshot, orderBy, query } = await firestore();
+    if (cancelado) return;
+    if (!db) {
+      callback([]);
+      return;
+    }
+    const q = query(collection(db, 'sharedTracks'), orderBy('sharedAt', 'desc'), fsLimit(60));
+    desligar = onSnapshot(
+      q,
+      (snap) => callback(snap.docs.map((d) => d.data() as SharedTrack)),
+      () => callback([]),
+    );
+  })().catch(() => callback([]));
+  return () => {
+    cancelado = true;
+    desligar?.();
+  };
 }

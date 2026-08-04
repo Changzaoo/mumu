@@ -75,6 +75,41 @@ export default defineConfig({
   },
   build: {
     target: 'es2022',
+    rollupOptions: {
+      output: {
+        /**
+         * Vendors em chunks próprios.
+         *
+         * Antes tudo caía num único `index.js` de ~1,5 MB: qualquer mudança de
+         * uma linha nossa trocava o hash do arquivo inteiro e o usuário
+         * rebaixava React, Firebase e companhia a cada deploy. Separados, o
+         * navegador baixa em paralelo e — o que mais importa — REAPROVEITA os
+         * pedaços que não mudaram entre uma versão e outra.
+         *
+         * Só bibliotecas com peso próprio ganham chunk; o resto continua junto,
+         * porque dezenas de arquivinhos custam mais em requisições do que
+         * economizam em bytes.
+         */
+        manualChunks(id) {
+          const caminho = id.split('\\').join('/');
+          if (!caminho.includes('/node_modules/')) return;
+          if (caminho.includes('/firebase/') || caminho.includes('/@firebase/')) return 'firebase';
+          if (/\/(react|react-dom|scheduler)\//.test(caminho)) return 'react';
+          if (caminho.includes('/react-router')) return 'router';
+          if (caminho.includes('/framer-motion/') || caminho.includes('/motion-dom/')) {
+            return 'motion';
+          }
+          if (caminho.includes('/@tanstack/')) return 'query';
+          if (caminho.includes('/zod/')) return 'zod';
+          if (caminho.includes('/howler/')) return 'howler';
+          if (caminho.includes('/lucide-react/') || caminho.includes('/react-icons/')) {
+            return 'icons';
+          }
+          if (caminho.includes('/@radix-ui/')) return 'radix';
+          return;
+        },
+      },
+    },
   },
   server: {
     proxy: {

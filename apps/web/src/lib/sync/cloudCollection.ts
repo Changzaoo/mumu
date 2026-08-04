@@ -9,17 +9,15 @@
  *
  * Everything is best-effort and guarded — if Firestore is unavailable or a
  * write fails, the local experience is untouched.
+ *
+ * As funções do `firebase/firestore` entram por `import()` dinâmico de
+ * propósito: este módulo é alcançado a partir da biblioteca local, que está no
+ * caminho crítico do boot. Com o import estático, os ~250 kB do Firestore
+ * voltavam para o chunk de entrada e anulavam o carregamento tardio do SDK.
  */
-import {
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  setDoc,
-  type DocumentData,
-  type Unsubscribe,
-} from 'firebase/firestore';
-import { db } from '@/lib/firebase';
+import type { DocumentData, Unsubscribe } from 'firebase/firestore';
+import { db, firebaseReady } from '@/lib/firebase';
+import { firestore } from '@/lib/sync/firestoreLazy';
 
 export interface CloudCollection<T extends DocumentData> {
   /** Upsert an item to the cloud (no-op when not syncing). */
@@ -39,6 +37,16 @@ export interface CloudCollectionConfig<T extends DocumentData> {
   onRemoteUpsert: (id: string, data: T) => void;
   /** Apply a remote delete to the local store — must NOT re-push. */
   onRemoteDelete: (id: string) => void;
+  /**
+   * Aplica um LOTE de mudanças remotas de uma vez.
+   *
+   * O primeiro snapshot traz a coleção INTEIRA, e entregá-la item a item fazia
+   * a loja local reconstruir o array a cada faixa — O(n²) de cópia e um
+   * recálculo de álbuns/artistas/gêneros por item, no exato momento em que o
+   * usuário está esperando a tela. Quem não implementa cai no caminho item a
+   * item, que continua correto.
+   */
+  onRemoteBatch?: (upserts: Array<[string, T]>, deletes: string[]) => void;
 }
 
 export function cloudCollection<T extends DocumentData>(
@@ -48,16 +56,24 @@ export function cloudCollection<T extends DocumentData>(
   let unsub: Unsubscribe | null = null;
   let seeded = false;
 
-  const colRef = () => collection(db!, 'users', uid!, config.name);
-
   const push = (id: string, data: T): void => {
-    if (!db || !uid) return;
-    void setDoc(doc(colRef(), id), data).catch(() => undefined);
+    if (!uid) return;
+    const alvo = uid;
+    void (async () => {
+      const fs = await firestore();
+      if (!db || uid !== alvo) return; // deslogou (ou trocou de conta) no caminho
+      await fs.setDoc(fs.doc(fs.collection(db, 'users', alvo, config.name), id), data);
+    })().catch(() => undefined);
   };
 
   const remove = (id: string): void => {
-    if (!db || !uid) return;
-    void deleteDoc(doc(colRef(), id)).catch(() => undefined);
+    if (!uid) return;
+    const alvo = uid;
+    void (async () => {
+      const fs = await firestore();
+      if (!db || uid !== alvo) return;
+      await fs.deleteDoc(fs.doc(fs.collection(db, 'users', alvo, config.name), id));
+    })().catch(() => undefined);
   };
 
   const setUser = (next: string | null): void => {
@@ -66,26 +82,42 @@ export function cloudCollection<T extends DocumentData>(
     unsub = null;
     seeded = false;
     uid = next;
-    if (!db || !uid) return;
+    if (!uid) return;
 
-    unsub = onSnapshot(
-      colRef(),
-      (snap) => {
-        // First snapshot: union — push local-only items up, apply remote down.
-        if (!seeded) {
-          seeded = true;
-          const remoteIds = new Set(snap.docs.map((d) => d.id));
-          for (const [id, data] of config.localItems()) {
-            if (!remoteIds.has(id)) push(id, data);
+    const alvo = uid;
+    void (async () => {
+      await firebaseReady();
+      const fs = await firestore();
+      if (!db || uid !== alvo) return;
+
+      unsub = fs.onSnapshot(
+        fs.collection(db, 'users', alvo, config.name),
+        (snap) => {
+          // First snapshot: union — push local-only items up, apply remote down.
+          if (!seeded) {
+            seeded = true;
+            const remoteIds = new Set(snap.docs.map((d) => d.id));
+            for (const [id, data] of config.localItems()) {
+              if (!remoteIds.has(id)) push(id, data);
+            }
           }
-        }
-        for (const change of snap.docChanges()) {
-          if (change.type === 'removed') config.onRemoteDelete(change.doc.id);
-          else config.onRemoteUpsert(change.doc.id, change.doc.data() as T);
-        }
-      },
-      () => undefined, // permission/offline errors: stay local-only
-    );
+          const upserts: Array<[string, T]> = [];
+          const deletes: string[] = [];
+          for (const change of snap.docChanges()) {
+            if (change.type === 'removed') deletes.push(change.doc.id);
+            else upserts.push([change.doc.id, change.doc.data() as T]);
+          }
+          if (upserts.length === 0 && deletes.length === 0) return;
+          if (config.onRemoteBatch) {
+            config.onRemoteBatch(upserts, deletes);
+            return;
+          }
+          for (const id of deletes) config.onRemoteDelete(id);
+          for (const [id, data] of upserts) config.onRemoteUpsert(id, data);
+        },
+        () => undefined, // permission/offline errors: stay local-only
+      );
+    })().catch(() => undefined);
   };
 
   return { push, remove, setUser };

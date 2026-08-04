@@ -21,16 +21,11 @@
  * pulo de faixa morta). Uma trava ali quebraria o avanço automático. Em vez
  * disso o enforcement é reativo: quem não tem a posse e está tocando, se pausa.
  */
-import {
-  addDoc,
-  collection,
-  deleteDoc,
-  doc,
-  onSnapshot,
-  serverTimestamp,
-  setDoc,
-} from 'firebase/firestore';
 import type { Timestamp } from 'firebase/firestore';
+// Firestore por import DINÂMICO: este módulo é alcançado pelo AppShell (banner
+// de "tocando em outro aparelho"), e um import estático traria os ~250 kB dele
+// para o chunk de entrada — ver lib/sync/firestoreLazy.ts.
+import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import type { TrackDto } from '@aurial/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
@@ -258,22 +253,25 @@ function publish(force = false): void {
   if (!force && now - lastWriteAt < 2_000) return;
   lastSignature = signature;
   lastWriteAt = now;
-  const payload: DevicePresence = {
-    name: deviceLabel(),
-    lastSeenAt: new Date().toISOString(),
-    seenAt: serverTimestamp() as unknown as Timestamp,
-    isPlaying: state.isPlaying,
-    track: track
-      ? { title: track.title, artist: track.artists[0]?.name ?? '', coverUrl: track.coverUrl }
-      : null,
-    trackId: track?.id ?? null,
-    volume: state.volume,
-    progress: state.progress,
-    duration: state.duration,
-  };
-  void setDoc(doc(db, 'users', currentUser.uid, 'devices', getDeviceId()), payload).catch(
-    () => undefined,
-  );
+  const uid = currentUser.uid;
+  void (async () => {
+    const { doc, serverTimestamp, setDoc } = await firestore();
+    if (!db) return;
+    const payload: DevicePresence = {
+      name: deviceLabel(),
+      lastSeenAt: new Date().toISOString(),
+      seenAt: serverTimestamp() as unknown as Timestamp,
+      isPlaying: state.isPlaying,
+      track: track
+        ? { title: track.title, artist: track.artists[0]?.name ?? '', coverUrl: track.coverUrl }
+        : null,
+      trackId: track?.id ?? null,
+      volume: state.volume,
+      progress: state.progress,
+      duration: state.duration,
+    };
+    await setDoc(doc(db, 'users', uid, 'devices', getDeviceId()), payload);
+  })().catch(() => undefined);
 }
 
 // ── posse da reprodução ─────────────────────────────────────────
@@ -287,11 +285,16 @@ export function claimPlayback(): void {
   lastClaimAt = Date.now(); // abre a carência ANTES de qualquer await
   if (!db || !currentUser) return;
   activeDeviceId = getDeviceId(); // otimista: a UI reage na hora
-  void setDoc(doc(db, 'users', currentUser.uid, 'state', 'activeDevice'), {
-    deviceId: getDeviceId(),
-    name: deviceLabel(),
-    at: serverTimestamp(),
-  }).catch(() => undefined);
+  const uid = currentUser.uid;
+  void (async () => {
+    const { doc, serverTimestamp, setDoc } = await firestore();
+    if (!db) return;
+    await setDoc(doc(db, 'users', uid, 'state', 'activeDevice'), {
+      deviceId: getDeviceId(),
+      name: deviceLabel(),
+      at: serverTimestamp(),
+    });
+  })().catch(() => undefined);
 }
 
 /** Manda um comando para OUTRO aparelho. */
@@ -308,6 +311,7 @@ export async function sendCommand(
     at: new Date().toISOString(),
     ...(value !== undefined ? { value } : {}),
   };
+  const { addDoc, collection } = await firestore();
   await addDoc(collection(db, 'users', currentUser.uid, 'commands'), payload).catch(
     () => undefined,
   );
@@ -433,124 +437,130 @@ function start(user: User): void {
     publish();
   });
 
-  if (!db) return;
+  // Os três ouvintes abaixo dependem do Firestore, que chega por import
+  // dinâmico. `stop()` continua correto no meio do caminho: ele zera
+  // `currentUser`, e a guarda logo abaixo desiste de assinar.
+  void (async () => {
+    const { collection, deleteDoc, doc, onSnapshot } = await firestore();
+    if (!db || currentUser?.uid !== user.uid) return;
 
-  // ── posse ────────────────────────────────────────────────────
-  unsubActive = onSnapshot(
-    doc(db, 'users', user.uid, 'state', 'activeDevice'),
-    (snap) => {
-      const data = snap.data() as { deviceId?: string; name?: string } | undefined;
-      activeDeviceId = data?.deviceId ?? null;
+    // ── posse ────────────────────────────────────────────────────
+    unsubActive = onSnapshot(
+      doc(db, 'users', user.uid, 'state', 'activeDevice'),
+      (snap) => {
+        const data = snap.data() as { deviceId?: string; name?: string } | undefined;
+        activeDeviceId = data?.deviceId ?? null;
 
-      // SILENCIAR O USUÁRIO É O PIOR ERRO POSSÍVEL AQUI.
-      //
-      // A primeira versão pausava sempre que o documento apontava para outro
-      // aparelho — sem olhar se aquele aparelho existe ainda. Bastava ter
-      // tocado no celular ontem: hoje, no computador, o play morria na hora,
-      // porque a posse antiga continuava gravada. Era exatamente o "não
-      // reproduz" relatado.
-      //
-      // Agora só pausamos diante de um conflito REAL: o outro aparelho está
-      // online E tocando agora. Em qualquer dúvida — presença desconhecida,
-      // posse velha, reivindicação nossa ainda em trânsito — a música
-      // continua. Dois aparelhos tocando por alguns segundos é um incômodo;
-      // o app emudecer sozinho é um defeito.
-      if (activeDeviceId && activeDeviceId !== getDeviceId()) {
-        const player = usePlayerStore.getState();
-        const dono = deviceState.find((d) => d.id === activeDeviceId);
-        const conflitoReal = Boolean(dono?.online && dono.isPlaying);
-        const reivindicacaoRecente = Date.now() - lastClaimAt < CLAIM_GRACE_MS;
-        if (player.isPlaying && conflitoReal && !reivindicacaoRecente) {
-          player.pause();
-          void import('sonner').then(({ toast }) =>
-            toast(`Reprodução movida para ${data?.name ?? 'outro aparelho'}`),
-          );
+        // SILENCIAR O USUÁRIO É O PIOR ERRO POSSÍVEL AQUI.
+        //
+        // A primeira versão pausava sempre que o documento apontava para outro
+        // aparelho — sem olhar se aquele aparelho existe ainda. Bastava ter
+        // tocado no celular ontem: hoje, no computador, o play morria na hora,
+        // porque a posse antiga continuava gravada. Era exatamente o "não
+        // reproduz" relatado.
+        //
+        // Agora só pausamos diante de um conflito REAL: o outro aparelho está
+        // online E tocando agora. Em qualquer dúvida — presença desconhecida,
+        // posse velha, reivindicação nossa ainda em trânsito — a música
+        // continua. Dois aparelhos tocando por alguns segundos é um incômodo;
+        // o app emudecer sozinho é um defeito.
+        if (activeDeviceId && activeDeviceId !== getDeviceId()) {
+          const player = usePlayerStore.getState();
+          const dono = deviceState.find((d) => d.id === activeDeviceId);
+          const conflitoReal = Boolean(dono?.online && dono.isPlaying);
+          const reivindicacaoRecente = Date.now() - lastClaimAt < CLAIM_GRACE_MS;
+          if (player.isPlaying && conflitoReal && !reivindicacaoRecente) {
+            player.pause();
+            void import('sonner').then(({ toast }) =>
+              toast(`Reprodução movida para ${data?.name ?? 'outro aparelho'}`),
+            );
+          }
         }
-      }
-      emitDevices(deviceState); // reavalia quem está marcado como ativo
-    },
-    () => undefined,
-  );
+        emitDevices(deviceState); // reavalia quem está marcado como ativo
+      },
+      () => undefined,
+    );
 
-  // ── lista de aparelhos + banner ──────────────────────────────
-  unsubRemote = onSnapshot(
-    collection(db, 'users', user.uid, 'devices'),
-    (snap) => {
-      const me = getDeviceId();
-      const now = Date.now();
-      const devices: DeviceInfo[] = [];
-      let found: RemotePlayback | null = null;
-      for (const d of snap.docs) {
-        const p = d.data() as DevicePresence;
-        const seenAt = seenMillis(p);
-        const online = now - seenAt < FRESH_MS;
-        devices.push({
-          id: d.id,
-          name: p.name,
-          isSelf: d.id === me,
-          isPlaying: Boolean(p.isPlaying),
-          isActive: activeDeviceId === d.id,
-          online,
-          track: p.track ?? null,
-          trackId: p.trackId ?? null,
-          volume: typeof p.volume === 'number' ? p.volume : 1,
-          progress: typeof p.progress === 'number' ? p.progress : 0,
-          duration: typeof p.duration === 'number' ? p.duration : 0,
-          seenAt,
-        });
-        if (d.id !== me && online && p.isPlaying && p.track) {
-          found ??= {
-            deviceId: d.id,
-            deviceName: p.name,
-            title: p.track.title,
-            artist: p.track.artist,
-            coverUrl: p.track.coverUrl,
-            isPlaying: true,
-          };
+    // ── lista de aparelhos + banner ──────────────────────────────
+    unsubRemote = onSnapshot(
+      collection(db, 'users', user.uid, 'devices'),
+      (snap) => {
+        const me = getDeviceId();
+        const now = Date.now();
+        const devices: DeviceInfo[] = [];
+        let found: RemotePlayback | null = null;
+        for (const d of snap.docs) {
+          const p = d.data() as DevicePresence;
+          const seenAt = seenMillis(p);
+          const online = now - seenAt < FRESH_MS;
+          devices.push({
+            id: d.id,
+            name: p.name,
+            isSelf: d.id === me,
+            isPlaying: Boolean(p.isPlaying),
+            isActive: activeDeviceId === d.id,
+            online,
+            track: p.track ?? null,
+            trackId: p.trackId ?? null,
+            volume: typeof p.volume === 'number' ? p.volume : 1,
+            progress: typeof p.progress === 'number' ? p.progress : 0,
+            duration: typeof p.duration === 'number' ? p.duration : 0,
+            seenAt,
+          });
+          if (d.id !== me && online && p.isPlaying && p.track) {
+            found ??= {
+              deviceId: d.id,
+              deviceName: p.name,
+              title: p.track.title,
+              artist: p.track.artist,
+              coverUrl: p.track.coverUrl,
+              isPlaying: true,
+            };
+          }
         }
-      }
-      // Online primeiro, depois quem está tocando, depois nome.
-      devices.sort(
-        (a, b) =>
-          Number(b.online) - Number(a.online) ||
-          Number(b.isPlaying) - Number(a.isPlaying) ||
-          a.name.localeCompare(b.name),
-      );
-      emitDevices(devices);
-      emitRemote(found);
-    },
-    () => {
-      emitRemote(null);
-      emitDevices([]);
-    },
-  );
+        // Online primeiro, depois quem está tocando, depois nome.
+        devices.sort(
+          (a, b) =>
+            Number(b.online) - Number(a.online) ||
+            Number(b.isPlaying) - Number(a.isPlaying) ||
+            a.name.localeCompare(b.name),
+        );
+        emitDevices(devices);
+        emitRemote(found);
+      },
+      () => {
+        emitRemote(null);
+        emitDevices([]);
+      },
+    );
 
-  // ── comandos endereçados a MIM ───────────────────────────────
-  unsubCommands = onSnapshot(
-    collection(db, 'users', user.uid, 'commands'),
-    (snap) => {
-      const me = getDeviceId();
-      for (const change of snap.docChanges()) {
-        if (change.type !== 'added') continue;
-        const command = change.doc.data() as DeviceCommand;
-        if (command.to !== me) continue;
-        // Comando velho = eco de quando este aparelho estava offline.
-        const age = Date.now() - new Date(command.at).getTime();
-        if (!Number.isFinite(age) || age > COMMAND_TTL_MS) {
+    // ── comandos endereçados a MIM ───────────────────────────────
+    unsubCommands = onSnapshot(
+      collection(db, 'users', user.uid, 'commands'),
+      (snap) => {
+        const me = getDeviceId();
+        for (const change of snap.docChanges()) {
+          if (change.type !== 'added') continue;
+          const command = change.doc.data() as DeviceCommand;
+          if (command.to !== me) continue;
+          // Comando velho = eco de quando este aparelho estava offline.
+          const age = Date.now() - new Date(command.at).getTime();
+          if (!Number.isFinite(age) || age > COMMAND_TTL_MS) {
+            void deleteDoc(change.doc.ref).catch(() => undefined);
+            continue;
+          }
+          try {
+            applyCommand(command);
+          } catch {
+            /* um comando ruim não pode derrubar o listener */
+          }
+          // Apagar é o que garante idempotência: ninguém reaplica.
           void deleteDoc(change.doc.ref).catch(() => undefined);
-          continue;
         }
-        try {
-          applyCommand(command);
-        } catch {
-          /* um comando ruim não pode derrubar o listener */
-        }
-        // Apagar é o que garante idempotência: ninguém reaplica.
-        void deleteDoc(change.doc.ref).catch(() => undefined);
-      }
-    },
-    () => undefined,
-  );
+      },
+      () => undefined,
+    );
+  })().catch(() => undefined);
 }
 
 function stop(): void {
@@ -566,9 +576,12 @@ function stop(): void {
   unsubActive = null;
   // Some da lista de aparelhos dos outros devices ao sair da conta.
   if (db && currentUser) {
-    void deleteDoc(doc(db, 'users', currentUser.uid, 'devices', getDeviceId())).catch(
-      () => undefined,
-    );
+    const uid = currentUser.uid;
+    void (async () => {
+      const { deleteDoc, doc } = await firestore();
+      if (!db) return;
+      await deleteDoc(doc(db, 'users', uid, 'devices', getDeviceId()));
+    })().catch(() => undefined);
   }
   currentUser = null;
   activeDeviceId = null;
@@ -577,9 +590,14 @@ function stop(): void {
   emitDevices([]);
 }
 
-/** Liga a presença uma única vez (App); segue o login/logout sozinha. */
+/** Liga a presença uma única vez (App); segue o login/logout sozinha.
+ *
+ *  Sem guarda por `db`: o SDK do Firebase agora sobe DEPOIS do boot, então
+ *  perguntar por ele aqui desligaria a presença para sempre. Quem decide é o
+ *  `subscribeAuth` abaixo — ele só dispara com o SDK pronto, e `publish`/`start`
+ *  já se protegem sozinhos. */
 export function initPresence(): void {
-  if (initialized || typeof window === 'undefined' || !db) return;
+  if (initialized || typeof window === 'undefined') return;
   initialized = true;
   subscribeAuth((user) => {
     stop();
