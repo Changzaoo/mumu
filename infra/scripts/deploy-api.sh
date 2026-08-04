@@ -3,9 +3,9 @@
 # Aurial — build & deploy the API stack (docker compose) on the server.
 #
 # Run ON the server:
-#   cd /opt/aurial && ./infra/scripts/deploy-api.sh
+#   cd /opt/radinho && ./infra/scripts/deploy-api.sh
 # or remotely (what deploy-from-windows.ps1 and the GitHub workflow do):
-#   ssh v@192.168.0.100 "cd /opt/aurial && ./infra/scripts/deploy-api.sh"
+#   ssh v@192.168.0.100 "cd /opt/radinho && ./infra/scripts/deploy-api.sh"
 #
 # Steps: git pull → build images → run migrations → up -d → health check
 # → prune dangling images. Fails fast; prints a rollback hint on failure.
@@ -42,7 +42,7 @@ else
   echo "not a git checkout — skipping pull."
   # rsync fallback: push the tree from the dev machine instead, e.g.
   #   rsync -az --delete --exclude node_modules --exclude .env \
-  #     ./ v@192.168.0.100:/opt/aurial/
+  #     ./ v@192.168.0.100:/opt/radinho/
 fi
 
 step "2/6 Build images (worker reuses aurial-api image tag)"
@@ -81,7 +81,7 @@ Rollback to the previous version (was ${PREV_SHA}):
   git checkout ${PREV_SHA}
   ./infra/scripts/deploy-api.sh
 (Migrations are forward-only — if the failing release migrated the schema,
-restore the latest dump from /opt/aurial/backups first. See docs/DEPLOY.md.)
+restore the latest dump from /opt/radinho/backups first. See docs/DEPLOY.md.)
 ROLLBACK
   exit 1
 fi

@@ -477,7 +477,15 @@ const MAX_BLOB = 140 * 1024 * 1024; // 140 MB per file (matches the client cap)
 // se o USB cair, o mountpoint vira um diretório vazio no disco RAIZ — sem o
 // marcador, gravações são recusadas (503) em vez de encher a raiz de novo.
 const BLOB_DIR_EXTERNAL = Boolean(process.env.BLOB_DIR);
-const BLOB_MARKER = path.join(BLOB_DIR, '.aurial-blobs');
+// DOIS nomes aceitos: o app se chamava Aurial e virou radinho, e o marcador
+// mora DENTRO do cofre, no disco externo. Aceitar só o nome novo transformaria
+// a renomeação num apagão: o cofre existente ficaria "não pronto", todo upload
+// viraria 503 e toda reprodução cairia para streaming ao vivo. Aceitar só o
+// antigo travaria o nome velho para sempre. Os dois convivem.
+const BLOB_MARKERS = [
+  path.join(BLOB_DIR, '.radinho-blobs'),
+  path.join(BLOB_DIR, '.aurial-blobs'),
+];
 // Teto do cofre (LRU): ao passar, os blobs MAIS ANTIGOS saem primeiro. São
 // cópias para streaming entre aparelhos — o original continua no aparelho do
 // dono e a faixa segue tocável via streaming ao vivo da fonte.
@@ -485,12 +493,15 @@ const MAX_BLOB_BYTES = Number(process.env.MAX_BLOB_GB ?? 15) * 1024 ** 3;
 
 async function blobStoreReady() {
   if (!BLOB_DIR_EXTERNAL) return true;
-  try {
-    await stat(BLOB_MARKER);
-    return true;
-  } catch {
-    return false;
+  for (const marcador of BLOB_MARKERS) {
+    try {
+      await stat(marcador);
+      return true;
+    } catch {
+      /* tenta o próximo nome */
+    }
   }
+  return false;
 }
 
 async function sweepBlobStore() {

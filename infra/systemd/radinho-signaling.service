@@ -9,7 +9,7 @@ After=network.target
 [Service]
 Type=simple
 User=v
-WorkingDirectory=/opt/aurial/apps/signaling
+WorkingDirectory=/opt/radinho/apps/signaling
 ExecStart=/usr/bin/node dist/server.js
 Restart=on-failure
 RestartSec=3

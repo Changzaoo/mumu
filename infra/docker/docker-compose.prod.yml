@@ -2,13 +2,13 @@
 # Aurial — production stack (runs on the LAN server, e.g. 192.168.0.100).
 #
 # Expected layout on the server:
-#   /opt/aurial              → git checkout of this repo (DEPLOY_PATH)
-#   /opt/aurial/.env         → production env file (copied from .env.example)
+#   /opt/radinho              → git checkout of this repo (DEPLOY_PATH)
+#   /opt/radinho/.env         → production env file (copied from .env.example)
 #
 # NOTE on relative paths: everything below is resolved relative to THIS
-# file's directory (infra/docker/), so `../../` = repo root (/opt/aurial).
+# file's directory (infra/docker/), so `../../` = repo root (/opt/radinho).
 #
-# Usage (from /opt/aurial — or just run infra/scripts/deploy-api.sh):
+# Usage (from /opt/radinho — or just run infra/scripts/deploy-api.sh):
 #   docker compose -f infra/docker/docker-compose.prod.yml build api worker
 #   docker compose -f infra/docker/docker-compose.prod.yml --profile tools run --rm migrate
 #   docker compose -f infra/docker/docker-compose.prod.yml up -d
@@ -21,7 +21,7 @@ services:
     restart: unless-stopped
     environment:
       # Not published outside the docker network. If you ever expose it,
-      # change the password here AND in DATABASE_URL inside /opt/aurial/.env
+      # change the password here AND in DATABASE_URL inside /opt/radinho/.env
       # (prod DATABASE_URL host is `postgres`, not localhost):
       #   postgresql://aurial:aurial@postgres:5432/aurial?schema=public
       POSTGRES_USER: aurial
@@ -73,7 +73,7 @@ services:
     image: aurial-api:latest
     restart: unless-stopped
     env_file:
-      - ../../.env # = /opt/aurial/.env
+      - ../../.env # = /opt/radinho/.env
     environment:
       NODE_ENV: production
       PORT: '4000'

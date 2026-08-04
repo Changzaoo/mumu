@@ -10,7 +10,7 @@
     1. -DeployHost / -DeployUser / -DeployPath parameters
     2. DEPLOY_HOST / DEPLOY_USER / DEPLOY_PATH environment variables
     3. the repo root .env file (same keys)
-    4. defaults from .env.example (192.168.0.100 / v / /opt/aurial)
+    4. defaults from .env.example (192.168.0.100 / v / /opt/radinho)
 
   Uses your SSH key if configured (run setup-ssh-key.ps1 once), otherwise
   ssh will prompt for the password interactively — never stored.
@@ -50,7 +50,7 @@ function Resolve-Setting([string]$Param, [string]$EnvName, [string]$Default) {
 
 $DeployHost = Resolve-Setting $DeployHost 'DEPLOY_HOST' '192.168.0.100'
 $DeployUser = Resolve-Setting $DeployUser 'DEPLOY_USER' 'v'
-$DeployPath = Resolve-Setting $DeployPath 'DEPLOY_PATH' '/opt/aurial'
+$DeployPath = Resolve-Setting $DeployPath 'DEPLOY_PATH' '/opt/radinho'
 
 if (-not (Get-Command ssh -ErrorAction SilentlyContinue)) {
     Write-Host 'error: ssh.exe not found. Install the "OpenSSH Client" optional feature.' -ForegroundColor Red

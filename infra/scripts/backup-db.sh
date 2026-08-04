@@ -3,17 +3,17 @@
 # Aurial — PostgreSQL backup (pg_dump from the postgres container).
 #
 # Run ON the server:
-#   /opt/aurial/infra/scripts/backup-db.sh
+#   /opt/radinho/infra/scripts/backup-db.sh
 #
-# Writes gzipped dumps to /opt/aurial/backups (BACKUP_DIR to override)
+# Writes gzipped dumps to /opt/radinho/backups (BACKUP_DIR to override)
 # and keeps the newest 14 (KEEP to override).
 #
 # Cron (daily at 03:00) — crontab -e as the deploy user:
-#   0 3 * * * /opt/aurial/infra/scripts/backup-db.sh >> /opt/aurial/backups/backup.log 2>&1
+#   0 3 * * * /opt/radinho/infra/scripts/backup-db.sh >> /opt/radinho/backups/backup.log 2>&1
 #
 # Restore example:
-#   gunzip -c /opt/aurial/backups/aurial-YYYYMMDD-HHMMSS.sql.gz | \
-#     docker compose -f /opt/aurial/infra/docker/docker-compose.prod.yml \
+#   gunzip -c /opt/radinho/backups/aurial-YYYYMMDD-HHMMSS.sql.gz | \
+#     docker compose -f /opt/radinho/infra/docker/docker-compose.prod.yml \
 #       exec -T postgres psql -U aurial -d aurial
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
@@ -21,7 +21,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 REPO_ROOT="$(cd "${SCRIPT_DIR}/../.." && pwd)"
 COMPOSE_FILE="${REPO_ROOT}/infra/docker/docker-compose.prod.yml"
-BACKUP_DIR="${BACKUP_DIR:-/opt/aurial/backups}"
+BACKUP_DIR="${BACKUP_DIR:-/opt/radinho/backups}"
 KEEP="${KEEP:-14}"
 
 step() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }

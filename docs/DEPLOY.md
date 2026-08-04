@@ -26,7 +26,7 @@
 Internet ──> Vercel (apps/web — SPA estática)
                  │  REST /api/v1 · WebSocket /ws
                  ▼
-LAN 192.168.0.0/24 ──> servidor Ubuntu 192.168.0.100 (/opt/aurial)
+LAN 192.168.0.0/24 ──> servidor Ubuntu 192.168.0.100 (/opt/radinho)
     docker compose (projeto "aurial"):
       nginx :80/:443 ── proxy, rate limit, cache HLS (volume media-cache)
       api   :4000    ── Express 5 + socket.io (imagem aurial-api)
@@ -36,12 +36,12 @@ LAN 192.168.0.0/24 ──> servidor Ubuntu 192.168.0.100 (/opt/aurial)
       migrate        ── one-shot (profile "tools"): prisma migrate deploy
 ```
 
-- Valores padrão (de `.env.example`): `DEPLOY_HOST=192.168.0.100`, `DEPLOY_USER=v`, `DEPLOY_PATH=/opt/aurial`.
+- Valores padrão (de `.env.example`): `DEPLOY_HOST=192.168.0.100`, `DEPLOY_USER=v`, `DEPLOY_PATH=/opt/radinho`.
 - A porta **4000** é publicada para acesso direto na LAN (o ufw a restringe à subnet); **80/443** são o caminho via nginx.
 
 ## 2. Preparar o servidor
 
-O script é **idempotente** — pode rodar de novo sem medo. Instala Docker + compose plugin, git, ffmpeg e ufw; habilita o firewall (22/80/443 + 4000 apenas LAN); cria `/opt/aurial`.
+O script é **idempotente** — pode rodar de novo sem medo. Instala Docker + compose plugin, git, ffmpeg e ufw; habilita o firewall (22/80/443 + 4000 apenas LAN); cria `/opt/radinho`.
 
 Da máquina Windows (antes mesmo de o repo existir no servidor):
 
@@ -56,8 +56,8 @@ Depois, clone o repo no servidor:
 
 ```bash
 ssh v@192.168.0.100
-git clone <URL-do-repo> /opt/aurial
-chmod +x /opt/aurial/infra/scripts/*.sh
+git clone <URL-do-repo> /opt/radinho
+chmod +x /opt/radinho/infra/scripts/*.sh
 ```
 
 > Sem acesso git no servidor? Use rsync a partir da máquina dev (comentário no topo de `deploy-api.sh` mostra o comando).
@@ -83,10 +83,10 @@ Get-Content $env:USERPROFILE\.ssh\aurial-ci.pub | ssh v@192.168.0.100 "cat >> ~/
 
 ## 4. .env de produção
 
-O compose lê `env_file: /opt/aurial/.env` (a partir de `.env.example`):
+O compose lê `env_file: /opt/radinho/.env` (a partir de `.env.example`):
 
 ```bash
-cd /opt/aurial
+cd /opt/radinho
 cp .env.example .env
 nano .env
 ```
@@ -110,7 +110,7 @@ Diferenças obrigatórias em relação ao dev (hosts passam a ser os **nomes dos
 ## 5. Primeira subida da API
 
 ```bash
-cd /opt/aurial
+cd /opt/radinho
 ./infra/scripts/deploy-api.sh
 ```
 
@@ -182,7 +182,7 @@ Quando quiser expor a API na internet:
 
 ```bash
 sudo apt-get install -y certbot
-cd /opt/aurial
+cd /opt/radinho
 docker compose -f infra/docker/docker-compose.prod.yml stop nginx
 sudo certbot certonly --standalone -d api.seudominio.com
 sudo cp /etc/letsencrypt/live/api.seudominio.com/fullchain.pem infra/nginx/certs/
@@ -194,28 +194,28 @@ sudo chown v:v infra/nginx/certs/*.pem
 4. **Renovação** (certificados Let's Encrypt duram 90 dias) — cron mensal:
 
 ```
-0 4 1 * * certbot renew --pre-hook "docker compose -f /opt/aurial/infra/docker/docker-compose.prod.yml stop nginx" --post-hook "cp /etc/letsencrypt/live/api.seudominio.com/*.pem /opt/aurial/infra/nginx/certs/ && docker compose -f /opt/aurial/infra/docker/docker-compose.prod.yml start nginx"
+0 4 1 * * certbot renew --pre-hook "docker compose -f /opt/radinho/infra/docker/docker-compose.prod.yml stop nginx" --post-hook "cp /etc/letsencrypt/live/api.seudominio.com/*.pem /opt/radinho/infra/nginx/certs/ && docker compose -f /opt/radinho/infra/docker/docker-compose.prod.yml start nginx"
 ```
 
 5. Atualize `API_BASE_URL`/`WEB_ORIGIN` no `.env` do servidor e `VITE_API_URL`/`VITE_WS_URL` na Vercel.
 
 ## 9. Backups
 
-`infra/scripts/backup-db.sh` faz `pg_dump` (gzip) do container postgres para `/opt/aurial/backups`, valida o tamanho e mantém os **14** mais recentes.
+`infra/scripts/backup-db.sh` faz `pg_dump` (gzip) do container postgres para `/opt/radinho/backups`, valida o tamanho e mantém os **14** mais recentes.
 
 ```bash
 # manual
-/opt/aurial/infra/scripts/backup-db.sh
+/opt/radinho/infra/scripts/backup-db.sh
 
 # cron diário às 03:00 (crontab -e como usuário v)
-0 3 * * * /opt/aurial/infra/scripts/backup-db.sh >> /opt/aurial/backups/backup.log 2>&1
+0 3 * * * /opt/radinho/infra/scripts/backup-db.sh >> /opt/radinho/backups/backup.log 2>&1
 ```
 
 Restore (instruções também no cabeçalho do script):
 
 ```bash
-gunzip -c /opt/aurial/backups/aurial-YYYYMMDD-HHMMSS.sql.gz | \
-  docker compose -f /opt/aurial/infra/docker/docker-compose.prod.yml exec -T postgres psql -U aurial -d aurial
+gunzip -c /opt/radinho/backups/aurial-YYYYMMDD-HHMMSS.sql.gz | \
+  docker compose -f /opt/radinho/infra/docker/docker-compose.prod.yml exec -T postgres psql -U aurial -d aurial
 ```
 
 > Backups ficam no mesmo disco do banco — copie periodicamente para fora (rsync para a máquina dev, R2, etc.). Mídia em R2/Supabase já está fora do servidor; se `STORAGE_DRIVER=local`, inclua o volume de storage na rotina.
@@ -239,7 +239,7 @@ docker compose -f infra/docker/docker-compose.prod.yml logs -f nginx   # inclui 
 Sem Docker para o app (Postgres/Redis ainda precisam existir — nativos ou via compose):
 
 ```bash
-cd /opt/aurial
+cd /opt/radinho
 pnpm install --frozen-lockfile
 pnpm --filter @aurial/shared build && pnpm --filter @aurial/api build
 cp .env.example apps/api/.env   # valores de produção (hosts localhost neste modo)
@@ -255,7 +255,7 @@ Processos: `aurial-api` (`dist/main.js`) e `aurial-worker` (`dist/workers/index.
 | Sintoma                                          | Causa provável / correção                                                                                                                                                   |
 | ------------------------------------------------ | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
 | `permission denied ... docker.sock`              | usuário fora do grupo docker — relogue após o `setup-server.sh` (ou `newgrp docker`)                                                                                        |
-| `error: /opt/aurial/.env not found` no deploy    | seção 4 — `cp .env.example .env` e preencha                                                                                                                                 |
+| `error: /opt/radinho/.env not found` no deploy   | seção 4 — `cp .env.example .env` e preencha                                                                                                                                 |
 | `bash\r: bad interpreter` ao rodar `*.sh`        | script chegou com CRLF — `infra/.gitattributes` força LF; corrija clones antigos com `git checkout -- infra/` ou `sed -i 's/\r$//' infra/scripts/*.sh`                      |
 | API nunca fica healthy no deploy                 | `docker compose ... logs --tail 100 api` — causas comuns: `DATABASE_URL` apontando para `localhost` (deve ser `postgres`), credenciais Firebase inválidas, migration falhou |
 | `migrate` falha com P1001 (can't reach database) | postgres ainda subindo — rode o deploy de novo; o healthcheck do compose normalmente previne isso                                                                           |
@@ -264,4 +264,4 @@ Processos: `aurial-api` (`dist/main.js`) e `aurial-worker` (`dist/workers/index.
 | Site Vercel não chama a API                      | mixed content (seção 6) ou `WEB_ORIGIN` errado no `.env` do servidor (CORS)                                                                                                 |
 | Porta 80/443/4000 já em uso                      | `sudo ss -ltnp                                                                                                                                                              | grep -E ':80 | :443 | :4000'` — pare o serviço conflitante (apache/nginx nativo) |
 | Upload grande falha em ~1 min                    | `proxy_read_timeout`/`client_max_body_size` no `nginx.conf` (512m padrão) — aumente se enviar arquivos maiores                                                              |
-| Disco cheio                                      | `docker system prune -f` (o deploy já faz prune de imagens), confira `/opt/aurial/backups` e o volume `media-cache`                                                         |
+| Disco cheio                                      | `docker system prune -f` (o deploy já faz prune de imagens), confira `/opt/radinho/backups` e o volume `media-cache`                                                        |

@@ -3,7 +3,7 @@
 # Aurial — Ubuntu server bootstrap (idempotent — safe to re-run).
 #
 # Installs Docker Engine + compose plugin, git, ffmpeg and ufw;
-# opens the firewall; creates /opt/aurial.
+# opens the firewall; creates /opt/radinho.
 #
 # Run ON the server as root:
 #   sudo bash infra/scripts/setup-server.sh
@@ -12,12 +12,12 @@
 #     ssh -t v@192.168.0.100 "sudo bash /tmp/setup-server.sh"
 #
 # Overridable env vars:
-#   DEPLOY_PATH  (default /opt/aurial)
+#   DEPLOY_PATH  (default /opt/radinho)
 #   LAN_SUBNET   (default 192.168.0.0/24 — used to restrict port 4000)
 # ──────────────────────────────────────────────────────────────
 set -euo pipefail
 
-DEPLOY_PATH="${DEPLOY_PATH:-/opt/aurial}"
+DEPLOY_PATH="${DEPLOY_PATH:-/opt/radinho}"
 LAN_SUBNET="${LAN_SUBNET:-192.168.0.0/24}"
 # When run with sudo, grant docker access to the invoking user (e.g. "v").
 TARGET_USER="${SUDO_USER:-${USER}}"

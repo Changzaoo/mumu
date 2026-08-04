@@ -11,7 +11,7 @@
 #     credentials are provided (env.ts requires them when NODE_ENV=production).
 #
 # Docker data-root is /mnt/cartaosd/docker (SD card) — configured on the host.
-# Usage from /opt/aurial:
+# Usage from /opt/radinho:
 #   docker compose -f infra/docker/docker-compose.server.yml build api
 #   docker compose -f infra/docker/docker-compose.server.yml --profile tools run --rm migrate
 #   docker compose -f infra/docker/docker-compose.server.yml --profile tools run --rm seed
@@ -43,7 +43,15 @@ services:
     image: redis:7-alpine
     restart: unless-stopped
     command:
-      ['redis-server', '--appendonly', 'yes', '--maxmemory', '192mb', '--maxmemory-policy', 'noeviction']
+      [
+        'redis-server',
+        '--appendonly',
+        'yes',
+        '--maxmemory',
+        '192mb',
+        '--maxmemory-policy',
+        'noeviction',
+      ]
     volumes:
       - redis-data:/data
     healthcheck:

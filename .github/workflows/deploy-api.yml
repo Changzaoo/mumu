@@ -51,5 +51,5 @@ jobs:
           command_timeout: 25m
           script: |
             set -euo pipefail
-            cd /opt/aurial
+            cd /opt/radinho
             ./infra/scripts/deploy-api.sh
