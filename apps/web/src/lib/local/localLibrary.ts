@@ -177,7 +177,15 @@ function flushWrite(): void {
     writeTimer = null;
   }
   try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify((cache ?? []).map(storableEntry)));
+    // O ACERVO NÃO É GRAVADO AQUI. Ele é do servidor, chega pelo Firestore (que
+    // tem cache próprio em disco) e volta inteiro em toda abertura. Gravá-lo
+    // junto DOBRAVA o registro dentro de uma cota de ~5 MB — e quando o
+    // `setItem` estoura, ele falha por INTEIRO: a biblioteca do próprio usuário
+    // para de persistir junto. Era isto que fazia a faixa recém-adicionada
+    // aparecer na sessão e sumir na recarga, inclusive para o admin, que é
+    // quem tem a maior biblioteca e portanto estoura primeiro.
+    const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
+    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(proprias.map(storableEntry)));
   } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
     // Registrado, não engolido: um aparelho nesta situação parece normal na
@@ -628,7 +636,17 @@ export function aplicarCatalogo(entradas: LibraryEntry[]): void {
   const atuais = read();
   const idsLocais = new Set(atuais.map((e) => e.track.id));
 
-  const mantidas = atuais.filter((e) => e.origem !== 'catalogo' || doCatalogo.has(e.track.id));
+  // ACERVO VAZIO NÃO APAGA NADA.
+  //
+  // "Nenhuma faixa" e "ainda não sei" chegam aqui iguais: erro de regra, cache
+  // frio, rede caindo no meio. Tratar os dois como "o admin esvaziou o acervo"
+  // significa varrer a biblioteca de todo mundo por causa de um snapshot ruim —
+  // um estrago grande para atender um caso raro. Esvaziar o acervo de propósito
+  // volta a valer na próxima carga com dados.
+  const mantidas =
+    entradas.length === 0
+      ? atuais
+      : atuais.filter((e) => e.origem !== 'catalogo' || doCatalogo.has(e.track.id));
 
   // O snapshot do Firestore repete inteiro a cada reconexão. Sem comparar
   // CONTEÚDO — e não só presença — cada repetição criava objetos novos, e o

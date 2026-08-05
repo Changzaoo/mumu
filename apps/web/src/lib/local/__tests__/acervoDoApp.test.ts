@@ -87,10 +87,13 @@ describe('acervo do app na biblioteca local', () => {
       entrada('local:emprestada', { origem: 'catalogo' }),
     ]);
 
-    lib.aplicarCatalogo([]); // admin esvaziou o acervo
+    // O admin tirou `local:emprestada` do ar; o acervo segue com outras.
+    lib.aplicarCatalogo([entrada('local:outra')]);
 
     const ids = lib.list().map((e) => e.track.id);
-    expect(ids).toEqual(['local:minha']);
+    expect(ids).toContain('local:minha');
+    expect(ids).toContain('local:outra');
+    expect(ids).not.toContain('local:emprestada');
   });
 
   it('correção de metadata do admin chega em quem já tinha a faixa emprestada', async () => {
@@ -127,6 +130,49 @@ describe('acervo do app na biblioteca local', () => {
       .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
       .map((e) => e.track.id);
     expect(recentes).toEqual(['local:nova', 'local:velha']);
+  });
+
+  // ── as duas formas de o acervo QUEBRAR a biblioteca ──────────────────────
+  // As duas saíram para produção e derrubaram o app: a faixa recém-adicionada
+  // sumia na recarga, inclusive para o admin.
+
+  it('o acervo não é gravado no localStorage — ele volta do servidor sozinho', async () => {
+    const lib = await montar([entrada('local:minha')]);
+
+    lib.aplicarCatalogo([entrada('local:doAcervo')]);
+    vi.advanceTimersByTime(500); // vence o debounce da persistência
+
+    const gravado = JSON.parse(
+      window.localStorage.getItem('aurial:library') ?? '[]',
+    ) as LibraryEntry[];
+    // Só a faixa DO USUÁRIO foi para o disco. Gravar o acervo junto dobrava o
+    // registro dentro de uma cota de ~5 MB e derrubava a gravação INTEIRA —
+    // levando junto a biblioteca do próprio usuário.
+    expect(gravado.map((e) => e.track.id)).toEqual(['local:minha']);
+    // Mas na tela as duas continuam lá.
+    expect(lib.list()).toHaveLength(2);
+  });
+
+  it('faixa nova do usuário sobrevive à recarga com o acervo carregado', async () => {
+    const lib = await montar([entrada('local:minha')]);
+    lib.aplicarCatalogo([entrada('local:doAcervo')]);
+    vi.advanceTimersByTime(500);
+
+    // Recarrega o app: só o que foi gravado volta.
+    vi.resetModules();
+    const depois = await import('@/lib/local/localLibrary');
+    expect(depois.list().map((e) => e.track.id)).toEqual(['local:minha']);
+  });
+
+  it('acervo vazio NÃO apaga a biblioteca — erro de regra chega igual a "vazio"', async () => {
+    const lib = await montar([
+      entrada('local:minha'),
+      entrada('local:emprestada', { origem: 'catalogo' }),
+    ]);
+
+    lib.aplicarCatalogo([]); // snapshot ruim: regra negada, cache frio, rede caída
+
+    expect(lib.list().map((e) => e.track.id)).toEqual(['local:minha', 'local:emprestada']);
   });
 
   it('apagar faixa emprestada não mexe na cópia que serve todo mundo', async () => {
