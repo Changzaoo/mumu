@@ -142,6 +142,19 @@ export function relatorioSyncTexto(resumo: ResumoBiblioteca): string {
   // O ACERVO vem primeiro, e é reportado mesmo sem login: ele é o que o app
   // tem para oferecer a quem só escuta. Acervo vazio aqui e cheio no aparelho
   // do admin significa que as regras do Firestore não foram publicadas.
+  // COTA ESTOURADA derruba o projeto INTEIRO — acervo, biblioteca pessoal,
+  // "em alta", compartilhamentos. Como o sintoma é "sumiu tudo", e não "o
+  // Firebase está fora do ar", ela precisa ser dita pelo nome e antes de todo
+  // o resto: sem isso, se procura o defeito no lugar errado por horas.
+  const cota = r.colecoes.find((c) => /RESOURCE_EXHAUSTED|quota/i.test(c.ultimoErro ?? ''));
+  if (cota) {
+    linhas.push('✗✗ COTA DIÁRIA DO FIRESTORE ESGOTADA.');
+    linhas.push('   Nada é gravado nem lido até a virada do dia (meia-noite no Pacífico).');
+    linhas.push('   Não é defeito de sincronia: o projeto inteiro para, todas as coleções.');
+    linhas.push(`   ${cota.ultimoErro}`);
+    linhas.push('');
+  }
+
   const acervo = r.colecoes.find((c) => c.nome === 'catalogo');
   if (!acervo?.assinou) {
     linhas.push(`✗ Acervo do app: não chegou. ${acervo?.ultimoErro ?? '(sem erro registrado)'}`);

@@ -48,8 +48,52 @@ describe('publicar no acervo do app', () => {
 
   beforeEach(async () => {
     setDoc.mockClear();
+    window.localStorage.clear(); // as impressões digitais vivem aqui
     vi.resetModules();
     catalogo = await import('@/lib/sync/catalogo');
+  });
+
+  // ── a cota que derrubou o app ────────────────────────────────────────────
+  // Escrever a cada remendo e reescrever a biblioteca inteira a cada abertura
+  // esgotou a cota DIÁRIA do projeto — e com ela pararam também a biblioteca
+  // pessoal, o "em alta" e os compartilhamentos.
+
+  it('republicar a mesma faixa não gasta escrita', async () => {
+    const faixa = entrada({ remoteUrl: 'https://cofre/a.mp3' });
+
+    catalogo.publicarNoCatalogo(faixa);
+    await assentar();
+    catalogo.publicarNoCatalogo(faixa); // a curadoria remenda a mesma faixa
+    catalogo.publicarNoCatalogo(faixa); // muitas vezes por sessão
+    await assentar();
+
+    expect(setDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('mudança de verdade volta a gastar escrita', async () => {
+    catalogo.publicarNoCatalogo(entrada({ remoteUrl: 'https://cofre/a.mp3' }));
+    await assentar();
+
+    const comCapa = entrada({ remoteUrl: 'https://cofre/a.mp3' });
+    comCapa.track = { ...comCapa.track, coverUrl: 'https://capa/nova.jpg' };
+    catalogo.publicarNoCatalogo(comCapa);
+    await assentar();
+
+    expect(setDoc).toHaveBeenCalledTimes(2);
+  });
+
+  it('a migração não reescreve a biblioteca a cada abertura do app', async () => {
+    const acervo = [
+      entrada({ remoteUrl: 'https://cofre/a.mp3' }),
+      { ...entrada({ remoteUrl: 'https://cofre/b.mp3' }), track: makeTrack('local:b') },
+    ];
+
+    expect(await catalogo.publicarAcervoDoAdmin(acervo)).toBe(2);
+    setDoc.mockClear();
+
+    // Segunda abertura: nada mudou, nada sobe.
+    expect(await catalogo.publicarAcervoDoAdmin(acervo)).toBe(0);
+    expect(setDoc).not.toHaveBeenCalled();
   });
 
   it('faixa com cópia no cofre entra', async () => {
