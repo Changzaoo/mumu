@@ -21,7 +21,7 @@
  * (`false`), nunca no "incerto". Escrever palpite por cima de metadata correta
  * é pior que deixar como está.
  */
-import { getFirestore, type Firestore } from 'firebase-admin/firestore';
+import { FieldPath, getFirestore, type Firestore } from 'firebase-admin/firestore';
 import {
   aceitarSugestao,
   EMBED_DIMS,
@@ -189,14 +189,47 @@ function tituloMelhor(atual: string, sugerido: string): string | null {
   return limpo;
 }
 
-/** Uma volta sobre a biblioteca de um usuário. Devolve quantas corrigiu. */
+/**
+ * A JANELA PRECISA ANDAR — senão ela lê as mesmas faixas para sempre.
+ *
+ * A consulta era `.limit(CURATION_BATCH * 4)` e mais nada. Sem `orderBy`, o
+ * Firestore devolve por ID de documento, sempre na mesma ordem: a volta lia
+ * EXATAMENTE as mesmas 160 primeiras faixas, de quinze em quinze minutos, para
+ * sempre. Duas consequências, e a segunda é a que explica o relato:
+ *
+ *  - CUSTO: 160 leituras × 96 voltas por dia = ~15 mil leituras por usuário, por
+ *    dia, relendo o que já estava em dia. O limite grátis do projeto é 50 mil, e
+ *    ele estourou de novo hoje (429 RESOURCE_EXHAUSTED na coleção inteira).
+ *  - COBERTURA: quem estava DEPOIS da 160ª faixa nunca foi curado. Nem auditado,
+ *    nem categorizado, nem vetorizado. Um worker "24/7" que nunca chegava na
+ *    metade de baixo da biblioteca — e é justamente lá que sobrou o trap no
+ *    sertanejo.
+ *
+ * O cursor abaixo faz a janela andar: cada volta continua de onde a anterior
+ * parou e volta ao começo ao chegar no fim. Mesmo custo por volta, biblioteca
+ * inteira coberta em poucas voltas. Ele vive em memória de propósito — reiniciar
+ * o worker recomeça do início, que é o comportamento certo depois de um deploy.
+ */
+const cursorPorUsuario = new Map<string, string>();
+
 async function curateUser(db: Firestore, uid: string): Promise<number> {
-  const snapshot = await db
-    .collection('users')
-    .doc(uid)
-    .collection('library')
-    .limit(env.CURATION_BATCH * 4) // folga: a maioria já estará em dia
-    .get();
+  const colecao = db.collection('users').doc(uid).collection('library');
+  const janela = env.CURATION_BATCH * 4; // folga: a maioria já estará em dia
+  const desde = cursorPorUsuario.get(uid);
+
+  let consulta = colecao.orderBy(FieldPath.documentId()).limit(janela);
+  if (desde) consulta = colecao.orderBy(FieldPath.documentId()).startAfter(desde).limit(janela);
+  const snapshot = await consulta.get();
+
+  // Chegou ao fim da coleção: recomeça do início na PRÓXIMA volta (não agora —
+  // reler tudo de uma vez é justamente o desperdício que estamos cortando).
+  if (snapshot.empty && desde) {
+    cursorPorUsuario.delete(uid);
+    return 0;
+  }
+  const ultimo = snapshot.docs.at(-1);
+  if (ultimo && snapshot.size === janela) cursorPorUsuario.set(uid, ultimo.id);
+  else cursorPorUsuario.delete(uid); // página final: próxima volta começa do topo
 
   const now = Date.now();
   const due = snapshot.docs

@@ -101,12 +101,24 @@ const envSchema = z
     NVIDIA_TIMEOUT_MS: z.coerce.number().int().min(5_000).max(600_000).default(120_000),
     /** Faixas auditadas por volta, por usuário. */
     CURATION_BATCH: z.coerce.number().int().min(1).max(500).default(40),
-    /** Intervalo entre voltas. */
+    /**
+     * Intervalo entre voltas — DE HORA EM HORA, e o número tem conta atrás.
+     *
+     * Cada volta lê `CURATION_BATCH * 4` documentos por usuário. Com 15 minutos
+     * isso dava 96 voltas por dia = ~15 mil leituras por usuário, por dia, só
+     * para descobrir que quase tudo já estava em dia. O limite diário grátis do
+     * projeto é 50 mil leituras, compartilhado com o app inteiro — e ele
+     * estourou, derrubando acervo, sincronia e curtidas de todo mundo junto.
+     *
+     * De hora em hora o custo cai para um quarto e não se perde nada: a
+     * curadoria é faxina de fundo, e com a janela deslizante (ver `curateUser`)
+     * uma biblioteca de trezentas faixas é coberta inteira em duas voltas.
+     */
     CURATION_INTERVAL_MS: z.coerce
       .number()
       .int()
       .min(60_000)
-      .default(15 * 60_000),
+      .default(60 * 60_000),
     /** Só re-audita uma faixa depois disso (evita reprocessar a mesma sempre). */
     CURATION_RECHECK_DAYS: z.coerce.number().int().min(1).default(30),
 
