@@ -15,6 +15,7 @@
  */
 import { aiClassifyGenre } from '@/lib/ai/ai';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 const ATTEMPTS_KEY = 'aurial:genreAgentAttempts';
 const MAX_ATTEMPTS = 3;
@@ -50,12 +51,10 @@ function readAttempts(): Record<string, number> {
 }
 
 function writeAttempts(attempts: Record<string, number>): void {
-  try {
-    window.localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
-  } catch {
-    /* quota */
-  }
+  gravarCache(ATTEMPTS_KEY, JSON.stringify(attempts), 200_000); // ver lib/local/cofreLocal.ts
 }
+
+registrarDescartavel(ATTEMPTS_KEY, 10, () => undefined);
 
 /** Faixas ainda sem categoria (elegíveis ou não para nova tentativa). */
 export function pendingCount(): number {

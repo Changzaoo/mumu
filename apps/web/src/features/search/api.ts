@@ -9,6 +9,7 @@ import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react
 import { useCallback, useSyncExternalStore } from 'react';
 import type { SearchResultsDto, SearchType, SuggestionDto } from '@aurial/shared';
 import { api } from '@/lib/api';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 export function useSearch(q: string, type: SearchType = 'all'): UseQueryResult<SearchResultsDto> {
   const query = q.trim();
@@ -62,13 +63,13 @@ function readRecent(): string[] {
 
 function writeRecent(items: string[]): void {
   recentCache = items;
-  try {
-    window.localStorage.setItem(RECENT_KEY, JSON.stringify(items));
-  } catch {
-    // Private mode — keep in memory only.
-  }
+  gravarCache(RECENT_KEY, JSON.stringify(items), 50_000); // ver lib/local/cofreLocal.ts
   for (const notify of recentListeners) notify();
 }
+
+registrarDescartavel(RECENT_KEY, 10, () => {
+  recentCache = null;
+});
 
 function subscribeRecent(listener: () => void): () => void {
   recentListeners.add(listener);

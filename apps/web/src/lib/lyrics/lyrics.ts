@@ -8,6 +8,7 @@
  */
 import type { TrackDto } from '@aurial/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 export interface LyricLine {
   timeMs: number;
@@ -148,14 +149,55 @@ function readCache(): LyricsCacheStore {
   return cacheMem;
 }
 
-function writeCache(next: LyricsCacheStore): void {
-  cacheMem = next;
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-  } catch {
-    /* quota — ignore */
+/**
+ * TETO DO CACHE DE LETRAS — este era o cache que enchia o cofre inteiro.
+ *
+ * Está escrito aqui em cima que ele "chega a megabytes", e ele crescia SEM
+ * LIMITE nenhum, com um `catch {}` mudo. O localStorage tem ~5 MB para o app
+ * todo, então em algum momento ele tomava o espaço da biblioteca do usuário (que
+ * parava de persistir e sumia na recarga) e o do Firestore (que quebrava o
+ * cliente no meio da reprodução — ver lib/local/cofreLocal.ts).
+ *
+ * 1,5 MB dá conta de centenas de letras sincronizadas e deixa folga de sobra
+ * para o resto. Passou do teto, as MAIS ANTIGAS saem: as chaves de um objeto
+ * JSON preservam a ordem de inserção, então cortar pela frente é cortar o que
+ * foi buscado há mais tempo — e letra descartada volta do LRCLIB na próxima vez
+ * que a faixa tocar.
+ */
+const TETO_LETRAS = 1_500_000;
+
+function podarAntigas(store: LyricsCacheStore): { store: LyricsCacheStore; texto: string } {
+  let atual = store;
+  let texto = JSON.stringify(atual);
+  while (texto.length > TETO_LETRAS) {
+    const chaves = Object.keys(atual);
+    if (chaves.length <= 1) break; // nada mais a cortar
+    // Corta um quarto das mais antigas por vez: reserializar a cada letra
+    // removida custaria mais que o próprio despejo.
+    const sobrevivem = chaves.slice(Math.max(1, Math.ceil(chaves.length / 4)));
+    const podado: LyricsCacheStore = {};
+    for (const k of sobrevivem) {
+      const v = atual[k];
+      if (v) podado[k] = v;
+    }
+    atual = podado;
+    texto = JSON.stringify(atual);
   }
+  return { store: atual, texto };
 }
+
+function writeCache(next: LyricsCacheStore): void {
+  const { store, texto } = podarAntigas(next);
+  cacheMem = store;
+  gravarCache(CACHE_KEY, texto, TETO_LETRAS);
+}
+
+// Sob pressão de cota este é o ÚLTIMO cache a ser sacrificado (prioridade 40):
+// é o mais caro de perder — uma letra sincronizada custa uma busca e, quando
+// vem do alinhamento por áudio, uma decodificação inteira da faixa.
+registrarDescartavel(CACHE_KEY, 40, () => {
+  cacheMem = null;
+});
 
 export function cachedLyrics(trackId: string): Lyrics | null {
   const cached = readCache()[trackId];

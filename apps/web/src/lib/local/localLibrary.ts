@@ -40,6 +40,7 @@ import {
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
 import { marcarBoot } from '@/lib/telemetry/bootPerf';
+import { gravarLocal } from '@/lib/local/cofreLocal';
 import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
@@ -185,7 +186,12 @@ function flushWrite(): void {
     // aparecer na sessão e sumir na recarga, inclusive para o admin, que é
     // quem tem a maior biblioteca e portanto estoura primeiro.
     const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(proprias.map(storableEntry)));
+    // `gravarLocal` ABRE ESPAÇO se preciso: a biblioteca do usuário tem
+    // precedência sobre TODO cache de enfeite (letra, biografia, top de
+    // artista…). Antes disto o cofre lotava com cache refazível e era a
+    // biblioteca — a única coisa insubstituível ali — que parava de gravar, em
+    // silêncio. Ver lib/local/cofreLocal.ts.
+    gravarLocal(STORAGE_KEY, JSON.stringify(proprias.map(storableEntry)));
   } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
     // Registrado, não engolido: um aparelho nesta situação parece normal na

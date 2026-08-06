@@ -2,6 +2,7 @@ import { useSyncExternalStore } from 'react';
 import type { TrackDto } from '@aurial/shared';
 import { fetchArtistTop } from '@/lib/local/importerHelper';
 import { normTitle } from '@/lib/artistTop';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 const CACHE_KEY = 'aurial:label-top';
 const TTL_MS = 7 * 24 * 60 * 60_000;
@@ -36,13 +37,13 @@ function read(): Cache {
 
 function write(next: Cache): void {
   cache = next;
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode */
-  }
+  gravarCache(CACHE_KEY, JSON.stringify(next), 200_000); // ver lib/local/cofreLocal.ts
   emit();
 }
+
+registrarDescartavel(CACHE_KEY, 20, () => {
+  cache = null;
+});
 
 function subscribe(listener: () => void): () => void {
   listeners.add(listener);

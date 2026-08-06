@@ -80,16 +80,36 @@ const readyPromise: Promise<void> = authDisabled
  * aparecer na tela — e offline não aparecia nunca. Com o cache persistente, o
  * primeiro snapshot sai do IndexedDB na hora e a rede vira só o delta.
  *
- * `persistentMultipleTabManager` porque o app abre em várias abas com
- * frequência (e o gerente de aba única derruba a persistência na segunda).
- * Navegador que não suporta cai no Firestore comum — pior desempenho, mesmo
- * comportamento.
+ * ABA ÚNICA, DE PROPÓSITO — o gerente MULTI-ABA usa o localStorage.
+ *
+ * Ele parecia a escolha óbvia (o app abre em várias abas com frequência) e foi
+ * o que estourou na cara do usuário, POR CIMA DA MÚSICA TOCANDO:
+ *
+ *   FIRESTORE (11.10.0) INTERNAL ASSERTION FAILED: Unexpected state (ID: b815)
+ *   CONTEXT: {"hc":"The quota has been exceeded.\nsetItem@[native code]…
+ *             addPendingMutation@…"}
+ *
+ * O cache em si mora no IndexedDB, que tem cota de gigabytes. Mas o gerente
+ * multi-aba avisa as outras abas pelo localStorage e grava uma marca A CADA
+ * MUTAÇÃO (`addPendingMutation`). O localStorage tem ~5 MB e estava cheio de
+ * cache de letra — então esse `setItem` falhava, e o SDK trata falha ali como
+ * estado impossível: dispara a asserção interna e DERRUBA O CLIENTE. Curtir uma
+ * faixa, registrar uma escuta, qualquer escrita virava esse despejo de pilha.
+ *
+ * O gerente de aba única não encosta no localStorage — usa memória para
+ * coordenar. O preço é conhecido e pequeno: numa SEGUNDA aba a persistência não
+ * é assumida e ela roda com cache de memória (busca da rede, funciona igual).
+ * Trocar uma aba secundária mais lenta por um cliente que não quebra no meio da
+ * reprodução não é uma decisão difícil.
+ *
+ * O cofre cheio também foi tapado na origem — ver lib/local/cofreLocal.ts — mas
+ * essa correção depende do cofre; esta aqui não depende de nada.
  */
 function criarFirestore(app: FirebaseApp, mod: FirestoreModule): Firestore {
   try {
     return mod.initializeFirestore(app, {
       localCache: mod.persistentLocalCache({
-        tabManager: mod.persistentMultipleTabManager(),
+        tabManager: mod.persistentSingleTabManager({ forceOwnership: false }),
       }),
     });
   } catch {

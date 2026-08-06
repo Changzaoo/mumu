@@ -5,6 +5,7 @@
 import type { HistoryEntryDto, PlaySource, TrackDto } from '@aurial/shared';
 import { isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { subscribeAuth } from '@/lib/firebase';
+import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const HISTORY_KEY = 'aurial:local-history';
 const MAX_ENTRIES = 200;
@@ -49,13 +50,11 @@ function read(): LocalHistoryEntry[] {
   return cache;
 }
 
+// O histórico alimenta a recomendação: perdê-lo é perder o gosto aprendido.
+// Ver lib/local/cofreLocal.ts.
 function write(next: LocalHistoryEntry[]): void {
   cache = next;
-  try {
-    window.localStorage.setItem(HISTORY_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode — stays in memory */
-  }
+  gravarLocal(HISTORY_KEY, JSON.stringify(next));
   emit();
 }
 

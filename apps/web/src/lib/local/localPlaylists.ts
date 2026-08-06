@@ -15,6 +15,7 @@
 import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
 import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
 const TRACKS_KEY = 'aurial:local-playlist-tracks';
@@ -74,23 +75,16 @@ function readTracks(): Record<string, TrackDto> {
   return tracksCache;
 }
 
+// Playlist é trabalho do usuário — insubstituível. Ver lib/local/cofreLocal.ts.
 function writePlaylists(next: LocalPlaylist[]): void {
   playlistsCache = next;
-  try {
-    window.localStorage.setItem(PLAYLISTS_KEY, JSON.stringify(next));
-  } catch {
-    // Quota / private mode — stays in memory for the session.
-  }
+  gravarLocal(PLAYLISTS_KEY, JSON.stringify(next));
   emit();
 }
 
 function writeTracks(next: Record<string, TrackDto>): void {
   tracksCache = next;
-  try {
-    window.localStorage.setItem(TRACKS_KEY, JSON.stringify(next));
-  } catch {
-    // Quota / private mode — stays in memory for the session.
-  }
+  gravarLocal(TRACKS_KEY, JSON.stringify(next));
 }
 
 /** Merge tracks into the companion map (id → TrackDto), keyed by track id. */

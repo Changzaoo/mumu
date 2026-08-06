@@ -5,6 +5,7 @@
  */
 import type { TrackDto } from '@aurial/shared';
 import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const LIKES_KEY = 'aurial:local-likes'; // string[] of track ids, newest-first
 const TRACKS_KEY = 'aurial:local-liked-tracks'; // Record<trackId, TrackDto>
@@ -53,23 +54,17 @@ function readTracks(): Record<string, TrackDto> {
   return tracksCache;
 }
 
+// O que o usuário curtiu é escolha dele, não cache: sob pressão de cota abre
+// espaço sacrificando enfeite. Ver lib/local/cofreLocal.ts.
 function writeIds(next: string[]): void {
   idsCache = next;
-  try {
-    window.localStorage.setItem(LIKES_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode — stays in memory */
-  }
+  gravarLocal(LIKES_KEY, JSON.stringify(next));
   emit();
 }
 
 function writeTracks(next: Record<string, TrackDto>): void {
   tracksCache = next;
-  try {
-    window.localStorage.setItem(TRACKS_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode — stays in memory */
-  }
+  gravarLocal(TRACKS_KEY, JSON.stringify(next));
 }
 
 export function has(id: string): boolean {

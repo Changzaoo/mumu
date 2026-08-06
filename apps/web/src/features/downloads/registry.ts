@@ -7,6 +7,7 @@
  * library stays browsable while offline.
  */
 import type { TrackDto } from '@aurial/shared';
+import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const STORAGE_KEY = 'aurial:downloads';
 
@@ -33,13 +34,11 @@ function read(): DownloadEntry[] {
   return cache;
 }
 
+// O índice dos downloads é o mapa dos bytes que JÁ estão no aparelho: perdê-lo
+// deixa áudio baixado órfão, ocupando espaço sem tocar. Ver lib/local/cofreLocal.ts.
 function write(entries: DownloadEntry[]): void {
   cache = entries;
-  try {
-    window.localStorage.setItem(STORAGE_KEY, JSON.stringify(entries));
-  } catch {
-    // Quota exceeded / private mode — registry stays in memory.
-  }
+  gravarLocal(STORAGE_KEY, JSON.stringify(entries));
   for (const notify of listeners) notify();
 }
 

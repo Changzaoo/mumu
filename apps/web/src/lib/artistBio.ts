@@ -13,6 +13,7 @@
  * funcionar offline e não repetir a busca a cada visita.
  */
 import { useSyncExternalStore } from 'react';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 const CACHE_KEY = 'aurial:artist-bios';
 // Verbete de artista muda pouco; 30 dias evita refetch sem congelar para sempre.
@@ -77,13 +78,15 @@ function read(): Cache {
 
 function write(next: Cache): void {
   cache = next;
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode */
-  }
+  // Enfeite com teto e sacrificável: uma biografia volta numa chamada, a
+  // biblioteca do usuário não volta de lugar nenhum. Ver lib/local/cofreLocal.ts.
+  gravarCache(CACHE_KEY, JSON.stringify(next), 300_000);
   emit();
 }
+
+registrarDescartavel(CACHE_KEY, 20, () => {
+  cache = null;
+});
 
 const normKey = (name: string): string => name.trim().toLowerCase();
 

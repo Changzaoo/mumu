@@ -12,6 +12,7 @@
  * novo".
  */
 import type { TrackDto } from '@aurial/shared';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 /** Depois de 3 tentativas sem achar, a faixa sai da varredura automática. */
 export const MAX_COVER_ATTEMPTS = 3;
@@ -204,12 +205,12 @@ export function readCoverAttempts(): Record<string, number> {
 }
 
 function writeCoverAttempts(attempts: Record<string, number>): void {
-  try {
-    window.localStorage.setItem(ATTEMPTS_KEY, JSON.stringify(attempts));
-  } catch {
-    /* cota / modo privado — a varredura só perde a memória entre sessões */
-  }
+  // Contador de controle: o primeiro a ser sacrificado quando falta espaço —
+  // perdê-lo custa, no máximo, uma varredura repetida. Ver lib/local/cofreLocal.ts.
+  gravarCache(ATTEMPTS_KEY, JSON.stringify(attempts), 200_000);
 }
+
+registrarDescartavel(ATTEMPTS_KEY, 10, () => undefined);
 
 /** Marca uma tentativa (some do controle assim que a capa é encontrada). */
 export function bumpCoverAttempt(id: string, found: boolean): void {

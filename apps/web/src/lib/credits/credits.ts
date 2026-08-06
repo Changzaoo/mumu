@@ -7,6 +7,7 @@
  * that's fine — we prefer "accurate but incomplete" over "full but wrong".
  */
 import type { TrackDto } from '@aurial/shared';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 export interface Credits {
   performers: string[];
@@ -53,12 +54,11 @@ function readCache(): Record<string, Credits> {
 }
 
 function writeCache(next: Record<string, Credits>): void {
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-  } catch {
-    /* quota — ignore */
-  }
+  gravarCache(CACHE_KEY, JSON.stringify(next), 400_000); // ver lib/local/cofreLocal.ts
 }
+
+// Sem cópia em memória para esquecer: este cache relê do cofre a cada consulta.
+registrarDescartavel(CACHE_KEY, 20, () => undefined);
 
 export function cachedCredits(trackId: string): Credits | null {
   return readCache()[trackId] ?? null;

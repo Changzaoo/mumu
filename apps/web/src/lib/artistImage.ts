@@ -6,6 +6,7 @@
  */
 import { useSyncExternalStore } from 'react';
 import { fetchArtistImage } from '@/lib/local/importerHelper';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 const CACHE_KEY = 'aurial:artist-images';
 
@@ -33,13 +34,13 @@ function read(): Cache {
 
 function write(next: Cache): void {
   cache = next;
-  try {
-    window.localStorage.setItem(CACHE_KEY, JSON.stringify(next));
-  } catch {
-    /* quota / private mode */
-  }
+  gravarCache(CACHE_KEY, JSON.stringify(next), 200_000); // ver lib/local/cofreLocal.ts
   emit();
 }
+
+registrarDescartavel(CACHE_KEY, 30, () => {
+  cache = null;
+});
 
 const normKey = (name: string): string => name.trim().toLowerCase();
 

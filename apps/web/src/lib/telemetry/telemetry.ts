@@ -23,6 +23,7 @@ import * as localLikes from '@/lib/local/localLikes';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 const HEARTBEAT_MS = 30_000;
 const FLUSH_MS = 120_000;
@@ -137,12 +138,10 @@ function readSessionLog(): SessionLogEntry[] {
 }
 
 function writeSessionLog(log: SessionLogEntry[]): void {
-  try {
-    window.localStorage.setItem(SESSIONS_KEY, JSON.stringify(log.slice(-15)));
-  } catch {
-    /* quota */
-  }
+  gravarCache(SESSIONS_KEY, JSON.stringify(log.slice(-15)), 100_000); // ver lib/local/cofreLocal.ts
 }
+
+registrarDescartavel(SESSIONS_KEY, 10, () => undefined);
 
 /** Marca a duração atual na última sessão do registro e devolve o log. */
 function updateSessionLog(): SessionLogEntry[] {

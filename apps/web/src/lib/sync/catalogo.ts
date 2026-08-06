@@ -27,6 +27,7 @@ import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { auth, db, firebaseReady } from '@/lib/firebase';
 import { firestore } from '@/lib/sync/firestoreLazy';
 import { isAuthorizedEmail } from '@/lib/auth/roles';
+import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { registrarErro, registrarSnapshot, registrarUsuario } from '@/lib/sync/syncStatus';
 
 const COLECAO = 'catalogo';
@@ -50,14 +51,58 @@ function talvezAdmin(): boolean {
   return isAuthorizedEmail(auth?.currentUser?.email);
 }
 
+/**
+ * O AVISO É PARA SER LIDO POR UMA PESSOA, NÃO COPIADO DE UM CONSOLE.
+ *
+ * A versão anterior colava a mensagem crua do erro na tela. Num caso real isso
+ * virou dez linhas de despejo de pilha do SDK, com URLs de bundle e offsets de
+ * byte, EM CIMA DO PLAYER, enquanto a música tocava:
+ *
+ *   Acervo: não consegui publicar — FIRESTORE (11.10.0) INTERNAL ASSERTION
+ *   FAILED: Unexpected state (ID: b815) CONTEXT: {"hc":"The quota has been
+ *   exceeded.\nsetItem@[native code]\nsetItem@https://…/firebase-gIWye2uh.js:
+ *   3540:4679\nlo@…\naddPendingMutation@…"}
+ *
+ * Nada ali é acionável, e o pior: o assunto real era o armazenamento do
+ * navegador estar cheio — não o acervo. Aqui cada falha conhecida vira uma
+ * frase curta que diz O QUE FAZER, e o texto cru fica onde ele serve: no
+ * relatório do /diagnostico, via `registrarErro`.
+ *
+ * O mesmo aviso também não se repete: a curadoria remenda faixas em rajada, e
+ * sem trava a mesma falha empilhava um toast por faixa.
+ */
+let ultimoAviso = '';
+
+function traduzirFalha(erro: unknown): string {
+  const cru = erro instanceof Error ? erro.message : String(erro);
+  // Cofre do navegador cheio. Chega aqui disfarçado de erro do Firestore porque
+  // o SDK estoura por dentro quando não consegue gravar — ver cofreLocal.ts.
+  if (/quota has been exceeded|QuotaExceededError/i.test(cru)) {
+    return 'O armazenamento deste navegador encheu. Liberei espaço automaticamente — se voltar a aparecer, limpe os dados do site.';
+  }
+  if (/RESOURCE_EXHAUSTED|Quota exceeded/i.test(cru)) {
+    return 'A cota diária do Firestore acabou. O acervo volta a publicar sozinho amanhã.';
+  }
+  if (/permission|PERMISSION_DENIED|insufficient/i.test(cru)) {
+    return 'As regras do Firestore recusaram a escrita no acervo. Confira em /diagnostico com qual conta você está.';
+  }
+  if (/offline|unavailable|network/i.test(cru)) {
+    return 'Sem conexão com o servidor agora — o acervo publica sozinho quando a rede voltar.';
+  }
+  // Desconhecido: uma linha só, cortada. O texto inteiro está no /diagnostico.
+  return `Não consegui publicar no acervo (${cru.split('\n')[0]?.slice(0, 90) ?? 'erro'}). Detalhes em /diagnostico.`;
+}
+
 /** Avisa o admin quando o acervo recusa uma escrita — silêncio aqui foi o que
  *  custou dias de procura no lugar errado. */
 function avisarFalha(erro: unknown): void {
-  registrarErro(COLECAO, erro);
+  registrarErro(COLECAO, erro); // o texto CRU vive aqui, para o /diagnostico
   if (!talvezAdmin()) return;
-  const texto = erro instanceof Error ? erro.message : String(erro);
+  const mensagem = traduzirFalha(erro);
+  if (mensagem === ultimoAviso) return; // uma rajada de falhas = um aviso
+  ultimoAviso = mensagem;
   void import('sonner')
-    .then(({ toast }) => toast.error(`Acervo: não consegui publicar — ${texto}`))
+    .then(({ toast }) => toast.error(mensagem, { duration: 6000 }))
     .catch(() => undefined);
 }
 
@@ -95,12 +140,14 @@ function lerImpressoes(): Record<string, string> {
 }
 
 function gravarImpressoes(): void {
-  try {
-    window.localStorage.setItem(IMPRESSOES_KEY, JSON.stringify(impressoes ?? {}));
-  } catch {
-    /* cota cheia: no pior caso reescrevemos o acervo uma vez a mais */
-  }
+  // Cota cheia: no pior caso reescrevemos o acervo uma vez a mais — e é por
+  // isso que estas impressões são sacrificáveis. Ver lib/local/cofreLocal.ts.
+  gravarCache(IMPRESSOES_KEY, JSON.stringify(impressoes ?? {}), 300_000);
 }
+
+registrarDescartavel(IMPRESSOES_KEY, 30, () => {
+  impressoes = null;
+});
 
 /** O que o acervo REALMENTE mostra. Mudou algo fora daqui, não vale escrita. */
 function impressaoDigital(entry: LibraryEntry): string {
