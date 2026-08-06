@@ -33,6 +33,46 @@ const log = logger.child({ script: 'resgate' });
 /** Grava em blocos: uma transação com milhares de upserts derruba a conexão. */
 const LOTE = 200;
 
+/**
+ * A COTA DO FIRESTORE PODE ESTAR ESGOTADA — E ESPERAR É A RESPOSTA CERTA.
+ *
+ * O plano gratuito dá 50 mil leituras por dia para o projeto inteiro, e a cota
+ * zera à meia-noite do Pacífico (~4h no horário de Brasília). Se o resgate
+ * simplesmente falhasse com `RESOURCE_EXHAUSTED`, alguém teria que lembrar de
+ * rodar de novo na hora certa — e "alguém lembrar" não é um plano quando o que
+ * está em jogo é a biblioteca inteira de uma pessoa.
+ *
+ * Então ele espera. Tenta, apanha, dorme dez minutos, tenta de novo, por até
+ * doze horas. É a janela que garante pegar a virada do dia venha ela quando
+ * vier. Não custa nada além do processo ficar de pé.
+ */
+const ESPERA_MS = 10 * 60_000;
+const PACIENCIA_MS = 12 * 3600_000;
+
+function ehCotaEsgotada(erro: unknown): boolean {
+  const texto = erro instanceof Error ? erro.message : String(erro);
+  return /RESOURCE_EXHAUSTED|Quota exceeded|429/i.test(texto);
+}
+
+/** Roda `tentativa` até dar certo ou a paciência acabar; só espera por COTA. */
+async function insistindo<T>(rotulo: string, tentativa: () => Promise<T>): Promise<T> {
+  const limite = Date.now() + PACIENCIA_MS;
+  for (;;) {
+    try {
+      return await tentativa();
+    } catch (erro) {
+      // Qualquer outra falha sobe na hora: insistir contra credencial errada ou
+      // rede morta só atrasaria o diagnóstico.
+      if (!ehCotaEsgotada(erro) || Date.now() > limite) throw erro;
+      log.warn(
+        { rotulo, proximaEm: `${ESPERA_MS / 60_000}min` },
+        'cota do Firestore esgotada — esperando a virada do dia',
+      );
+      await new Promise((r) => setTimeout(r, ESPERA_MS));
+    }
+  }
+}
+
 interface Entrada {
   track?: { id?: unknown };
   [chave: string]: unknown;
@@ -53,7 +93,9 @@ async function resgatarBibliotecaDe(uid: string): Promise<number> {
     return 0;
   }
 
-  const snapshot = await db.collection('users').doc(uid).collection('library').get();
+  const snapshot = await insistindo(`library/${uid.slice(0, 8)}`, () =>
+    db.collection('users').doc(uid).collection('library').get(),
+  );
   if (snapshot.empty) return 0;
 
   const itens = snapshot.docs
@@ -99,7 +141,7 @@ async function resgatarBibliotecaDe(uid: string): Promise<number> {
 
 async function resgatarAcervo(): Promise<number> {
   const db = getFirestore(getFirebaseApp());
-  const snapshot = await db.collection('catalogo').get();
+  const snapshot = await insistindo('catalogo', () => db.collection('catalogo').get());
   if (snapshot.empty) return 0;
 
   const itens = snapshot.docs
@@ -141,7 +183,7 @@ async function main(): Promise<void> {
   });
   const antesAcervo = await prisma.catalogTrack.count();
 
-  const usuarios = await db.collection('users').listDocuments();
+  const usuarios = await insistindo('users', () => db.collection('users').listDocuments());
   log.info({ usuarios: usuarios.length, antesBiblioteca, antesAcervo }, 'resgate iniciado');
 
   let total = 0;
