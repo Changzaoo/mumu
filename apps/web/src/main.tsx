@@ -5,6 +5,7 @@ import '@fontsource-variable/jetbrains-mono';
 import '@/styles/globals.css';
 import App from '@/App';
 import { initPwaUpdater } from '@/pwa';
+import { arrumarCofre } from '@/lib/local/cofreLocal';
 import { instalarDiagnostico } from '@/lib/local/playbackDiagnosis';
 import { instalarBootPerf, marcarBoot } from '@/lib/telemetry/bootPerf';
 import { instalarSyncDiagnostico } from '@/lib/sync/syncStatus';
@@ -14,6 +15,15 @@ import { instalarSyncDiagnostico } from '@/lib/sync/syncStatus';
 // tempo inteira — sem ela, "está lento no boot" não aponta para lugar nenhum.
 marcarBoot('bundle');
 instalarBootPerf();
+
+// FAXINA ANTES DE QUALQUER GRAVAÇÃO.
+//
+// Um aparelho que fechou o app com o localStorage lotado reabre lotado, e um
+// cofre lotado quebra coisas que nem passam pelo nosso código: foi um `setItem`
+// falhando DENTRO do SDK do Firestore que derrubou o cliente no meio da música.
+// Reagir à falha (ver gravarLocal) salva a gravação, mas chega tarde demais para
+// isso. Aqui o app acorda já com folga. Cofre folgado: não apaga nada.
+arrumarCofre();
 
 // Register the service worker + auto-updater as early as possible.
 initPwaUpdater();

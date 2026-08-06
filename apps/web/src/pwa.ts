@@ -15,6 +15,8 @@ import { pushNotification } from '@/stores/notificationsStore';
 
 export function initPwaUpdater(): void {
   let toastShown = false;
+  /** Já há um vigia esperando a música parar para aplicar a versão nova? */
+  let esperandoPausa = false;
 
   const updateSW = registerSW({
     immediate: true,
@@ -39,6 +41,31 @@ export function initPwaUpdater(): void {
         void updateSW(true); // activate the new worker and reload — safe when idle
         return;
       }
+
+      // TOCANDO: ESPERAR A MÚSICA PARAR — E DE FATO ESPERAR.
+      //
+      // Aqui a versão anterior só avisava e ia embora. Ninguém voltava para
+      // aplicar: `onNeedRefresh` dispara UMA vez por worker novo, e `toastShown`
+      // ainda garantia que nem o aviso se repetisse. Quem ouve música com o app
+      // aberto — ou seja, o uso normal — ficava preso no build antigo por tempo
+      // indeterminado, e só saía dali fechando o app na hora certa.
+      //
+      // Isso transformou uma correção já publicada em correção que não chega:
+      // o erro do Firestore continuou aparecendo num aparelho cujo conserto já
+      // estava no ar havia horas. Um conserto que não alcança o aparelho não é
+      // um conserto.
+      //
+      // Agora ficamos de guarda: no instante em que a reprodução para, o worker
+      // novo assume. A assinatura se desfaz sozinha ao aplicar.
+      if (!esperandoPausa) {
+        esperandoPausa = true;
+        const parar = usePlayerStore.subscribe((estado) => {
+          if (estado.isPlaying) return;
+          parar();
+          void updateSW(true);
+        });
+      }
+
       if (toastShown) return;
       toastShown = true;
       pushNotification({

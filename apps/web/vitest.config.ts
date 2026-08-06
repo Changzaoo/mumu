@@ -7,6 +7,14 @@ export default defineConfig({
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),
+      // `virtual:pwa-register` só existe quando o plugin do PWA está ligado, e
+      // ele não roda nos testes. Sem este apelido, `src/pwa.ts` nem chega a ser
+      // transformado — e o atualizador, que já deixou um aparelho preso num
+      // build antigo, ficaria sem teste nenhum. O stub é substituído por
+      // `vi.mock` em quem testa; aqui ele só precisa resolver.
+      'virtual:pwa-register': fileURLToPath(
+        new URL('./src/test/pwaRegisterStub.ts', import.meta.url),
+      ),
     },
   },
   test: {

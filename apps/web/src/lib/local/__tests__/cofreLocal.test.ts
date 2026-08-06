@@ -110,6 +110,46 @@ describe('cofre local', () => {
     expect(window.localStorage.getItem('aurial:lyrics-cache')).toBeNull();
   });
 
+  // ── faxina de abertura ───────────────────────────────────────────────────
+  // Reagir à falha salva a gravação, mas chega TARDE para quem já abriu o app
+  // com o cofre lotado da sessão passada — e foi um cofre lotado que derrubou o
+  // Firestore por dentro, num caminho que nem passa pelo nosso código.
+
+  it('cofre folgado: a faxina não apaga nada', () => {
+    vi.stubGlobal('localStorage', montarCofre(10_000_000));
+    window.localStorage.setItem('aurial:lyrics-cache', 'l'.repeat(1000));
+    expect(cofre.arrumarCofre()).toBe(0);
+    expect(window.localStorage.getItem('aurial:lyrics-cache')).not.toBeNull();
+  });
+
+  it('cofre lotado: abre espaço no boot, do mais barato para o mais caro', () => {
+    vi.stubGlobal('localStorage', montarCofre(10_000_000));
+    // Passa dos 3 MB que disparam a faxina.
+    window.localStorage.setItem('aurial:lyrics-cache', 'l'.repeat(2_000_000));
+    window.localStorage.setItem('aurial:artist-bios', 'b'.repeat(900_000));
+    window.localStorage.setItem('aurial:coverAttempts', 'c'.repeat(300_000));
+    window.localStorage.setItem('aurial:library', 'y'.repeat(200_000));
+
+    expect(cofre.arrumarCofre()).toBeGreaterThan(0);
+
+    // O que é do usuário nunca entra na conta do sacrifício.
+    expect(window.localStorage.getItem('aurial:library')).not.toBeNull();
+    // Contadores e biografias caem primeiro; a letra é a última.
+    expect(window.localStorage.getItem('aurial:coverAttempts')).toBeNull();
+    expect(window.localStorage.getItem('aurial:artist-bios')).toBeNull();
+    expect(cofre.usoDoCofre().total).toBeLessThanOrEqual(3_000_000);
+  });
+
+  it('faxina alcança cache de módulo que nem foi carregado ainda', () => {
+    // Quase todo cache entra por import() preguiçoso: no boot, o registro está
+    // vazio. Se a faxina dependesse dele, acordaria de mãos vazias justamente
+    // no aparelho que está lotado desde a sessão passada.
+    vi.stubGlobal('localStorage', montarCofre(10_000_000));
+    window.localStorage.setItem('aurial:artist-bios', 'b'.repeat(3_500_000));
+    expect(cofre.arrumarCofre()).toBeGreaterThan(0);
+    expect(window.localStorage.getItem('aurial:artist-bios')).toBeNull();
+  });
+
   it('quando nem sacrificando tudo cabe, a falha é registrada e não engolida', async () => {
     vi.resetModules();
     const registrar = vi.fn();

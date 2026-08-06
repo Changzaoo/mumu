@@ -47,7 +47,36 @@ interface Descartavel {
   esquecer: () => void;
 }
 
-const descartaveis: Descartavel[] = [];
+/**
+ * OS CACHES SACRIFICÁVEIS, DECLARADOS AQUI E NÃO SÓ POR REGISTRO.
+ *
+ * O registro (`registrarDescartavel`) só acontece quando o módulo dono é
+ * carregado — e quase todos entram por `import()` preguiçoso, minutos depois do
+ * boot ou nunca. Uma faxina que dependesse só dele acordaria de mãos vazias
+ * exatamente no aparelho que mais precisa dela: o que já está com o cofre cheio
+ * desde a sessão passada.
+ *
+ * Então a lista mora aqui, e o registro só ACRESCENTA o "esquecer" quando o
+ * dono existe. Apagar a chave de um módulo que não foi carregado é seguro por
+ * construção: não há cópia em memória para ressuscitar nada.
+ */
+const descartaveis: Descartavel[] = [
+  // 10 — contadores e controle: somem sem o usuário perceber.
+  { chave: 'aurial:coverAttempts', prioridade: 10, esquecer: () => undefined },
+  { chave: 'aurial:genreAgentAttempts', prioridade: 10, esquecer: () => undefined },
+  { chave: 'aurial:telemetrySessions', prioridade: 10, esquecer: () => undefined },
+  { chave: 'aurial:recent-searches', prioridade: 10, esquecer: () => undefined },
+  // 20 — texto e listas que voltam numa chamada.
+  { chave: 'aurial:artist-bios', prioridade: 20, esquecer: () => undefined },
+  { chave: 'aurial:artist-top', prioridade: 20, esquecer: () => undefined },
+  { chave: 'aurial:label-top', prioridade: 20, esquecer: () => undefined },
+  { chave: 'aurial:credits-cache', prioridade: 20, esquecer: () => undefined },
+  // 30 — imagens e impressões digitais.
+  { chave: 'aurial:artist-images', prioridade: 30, esquecer: () => undefined },
+  { chave: 'radinho:acervoPublicado', prioridade: 30, esquecer: () => undefined },
+  // 40 — letras: as mais caras de refazer, e por isso as últimas a cair.
+  { chave: 'aurial:lyrics-cache', prioridade: 40, esquecer: () => undefined },
+];
 
 /**
  * Declara um cache como sacrificável sob pressão de cota.
@@ -162,6 +191,49 @@ export function gravarCache(chave: string, texto: string, tetoBytes: number): bo
   } catch {
     return false;
   }
+}
+
+/**
+ * FAXINA DE ABERTURA — não esperar a falha para abrir espaço.
+ *
+ * `gravarLocal` conserta reagindo: alguém tenta gravar, estoura, e aí despejamos
+ * o enfeite. Isso salva a gravação, mas chega TARDE para quem já abriu o app com
+ * o cofre lotado da sessão passada — e um cofre lotado quebra coisas que nem
+ * passam por aqui (foi assim que o Firestore caiu por dentro, no meio da
+ * música). Um aparelho nesse estado precisa acordar já com folga, não ganhar
+ * folga depois do primeiro acidente.
+ *
+ * Roda uma vez no boot, antes de qualquer sistema começar a gravar. Custa uma
+ * varredura das chaves do próprio app e, no caso normal — cofre folgado —,
+ * termina na primeira linha sem apagar nada.
+ *
+ * Os números: ~5 MB é o limite típico do navegador. Acima de 3 MB começamos a
+ * faxina e paramos ao chegar em 2 MB, deixando mais de metade do cofre livre
+ * para a biblioteca e para quem mais precisar gravar.
+ */
+const COMEÇA_A_FAXINA = 3_000_000;
+const ALVO_DA_FAXINA = 2_000_000;
+
+export function arrumarCofre(): number {
+  const { total } = usoDoCofre();
+  if (total <= COMEÇA_A_FAXINA) return 0;
+
+  let restante = total;
+  let liberado = 0;
+  for (const alvo of [...descartaveis].sort((a, b) => a.prioridade - b.prioridade)) {
+    if (restante <= ALVO_DA_FAXINA) break;
+    let tamanho = 0;
+    try {
+      tamanho = (window.localStorage.getItem(alvo.chave) ?? '').length;
+    } catch {
+      continue;
+    }
+    if (tamanho === 0) continue;
+    if (!descartar(alvo)) continue;
+    liberado += tamanho;
+    restante -= tamanho;
+  }
+  return liberado;
 }
 
 /** Quantos caracteres o app ocupa no cofre — para o /diagnostico. */

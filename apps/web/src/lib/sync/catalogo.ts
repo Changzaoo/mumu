@@ -27,7 +27,7 @@ import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { auth, db, firebaseReady } from '@/lib/firebase';
 import { firestore } from '@/lib/sync/firestoreLazy';
 import { isAuthorizedEmail } from '@/lib/auth/roles';
-import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+import { arrumarCofre, gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { registrarErro, registrarSnapshot, registrarUsuario } from '@/lib/sync/syncStatus';
 
 const COLECAO = 'catalogo';
@@ -73,12 +73,19 @@ function talvezAdmin(): boolean {
  */
 let ultimoAviso = '';
 
-function traduzirFalha(erro: unknown): string {
+function traduzirFalha(erro: unknown): string | null {
   const cru = erro instanceof Error ? erro.message : String(erro);
-  // Cofre do navegador cheio. Chega aqui disfarçado de erro do Firestore porque
-  // o SDK estoura por dentro quando não consegue gravar — ver cofreLocal.ts.
+  // COFRE DO NAVEGADOR CHEIO: CONSERTA, NÃO AVISA.
+  //
+  // Chega aqui disfarçado de erro do Firestore porque o SDK estoura por dentro
+  // quando não consegue gravar (ver cofreLocal.ts). Não existe nada que o
+  // usuário possa fazer a respeito, e foi exatamente este texto que apareceu por
+  // cima da letra, com a música tocando. Aviso que não é acionável é só ruído em
+  // cima de quem está tentando ouvir música: abrimos espaço e seguimos calados.
+  // O recibo continua no /diagnostico, via registrarErro.
   if (/quota has been exceeded|QuotaExceededError/i.test(cru)) {
-    return 'O armazenamento deste navegador encheu. Liberei espaço automaticamente — se voltar a aparecer, limpe os dados do site.';
+    arrumarCofre();
+    return null;
   }
   if (/RESOURCE_EXHAUSTED|Quota exceeded/i.test(cru)) {
     return 'A cota diária do Firestore acabou. O acervo volta a publicar sozinho amanhã.';
@@ -97,8 +104,9 @@ function traduzirFalha(erro: unknown): string {
  *  custou dias de procura no lugar errado. */
 function avisarFalha(erro: unknown): void {
   registrarErro(COLECAO, erro); // o texto CRU vive aqui, para o /diagnostico
+  const mensagem = traduzirFalha(erro); // pode consertar e devolver null
+  if (!mensagem) return; // resolvido por dentro: nada a dizer ao usuário
   if (!talvezAdmin()) return;
-  const mensagem = traduzirFalha(erro);
   if (mensagem === ultimoAviso) return; // uma rajada de falhas = um aviso
   ultimoAviso = mensagem;
   void import('sonner')
