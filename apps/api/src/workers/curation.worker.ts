@@ -22,12 +22,27 @@
  * é pior que deixar como está.
  */
 import { getFirestore, type Firestore } from 'firebase-admin/firestore';
-import { EMBED_DIMS, type FaixaComparavel } from '@aurial/shared';
+import {
+  aceitarSugestao,
+  EMBED_DIMS,
+  generoDoArtista,
+  revisarGeneros as revisarGenerosDeFaixas,
+  type FaixaComparavel,
+  type FaixaMinima,
+} from '@aurial/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { getFirebaseApp, isFirebaseEnabled } from '../infra/firebase/firebase.js';
 import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
-import { auditor, dna, faxineiro, generista, identificador, type TrackFacts } from './agents.js';
+import {
+  auditor,
+  auditorDeGenero,
+  dna,
+  faxineiro,
+  generista,
+  identificador,
+  type TrackFacts,
+} from './agents.js';
 
 const log = logger.child({ worker: 'curation' });
 
@@ -51,6 +66,8 @@ interface LibraryEntry {
   addedAt?: unknown;
   [AUDIT_FIELD]?: unknown;
   [DNA_FIELD]?: unknown;
+  /** Última conferência da CATEGORIA — o rodízio de `auditarGeneros`. */
+  generoAuditadoEm?: number;
 }
 
 /** Extrai os fatos que os agentes consomem. */
@@ -212,10 +229,61 @@ async function curateUser(db: Firestore, uid: string): Promise<number> {
   // estava vencido: gênero e DNA não expiram, ou a faixa tem ou não tem. Uma
   // faixa correta há dois anos nunca entraria na fila de auditoria e ficaria
   // fora da busca semântica para sempre.
-  corrigidas += await preencherGeneros(snapshot.docs);
+  corrigidas += await curarCategorias(snapshot.docs);
   await gravarDna(snapshot.docs);
   corrigidas += await fundirDuplicatas(snapshot.docs);
 
+  return corrigidas;
+}
+
+/**
+ * As três passagens de categoria, na ordem em que fazem sentido.
+ *
+ * A revisão vem primeiro porque é de graça e porque ela DESTRAVA as outras: ao
+ * esvaziar os baldes ("Brasileira" não é gênero), devolve para `preencherGeneros`
+ * um monte de faixa que estava escondida atrás de um campo preenchido.
+ */
+async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
+  let corrigidas = await revisarGeneros(docs); // regra pura, sem IA
+  corrigidas += await auditarGeneros(docs); // confere o que já tem categoria
+  corrigidas += await preencherGeneros(docs); // preenche quem está sem
+  return corrigidas;
+}
+
+/**
+ * O ACERVO DO APP — a coleção que TODO usuário lê.
+ *
+ * A curadoria varria `users/{uid}/library` e só. Só que o que o usuário comum vê
+ * na tela vem de `catalogo`, e ninguém nunca passou por lá: as categorias
+ * erradas do acervo eram corrigidas na biblioteca do admin e o acervo continuava
+ * com as antigas. Consertar onde ninguém olha e deixar errado onde todo mundo
+ * olha é o pior arranjo possível.
+ *
+ * Aqui roda a mesma cura de categorias, sobre a coleção que importa. Nada de
+ * auditoria de atribuição, DNA ou fusão de duplicatas: essas passagens têm dono
+ * (a biblioteca de quem importou) e o acervo é espelho dela.
+ *
+ * DE HORA EM HORA, NÃO A CADA VOLTA. Ler o acervo inteiro custa uma leitura por
+ * faixa, e a volta é de 15 minutos: com trezentas faixas isso seria ~29 mil
+ * leituras por dia só aqui, num projeto cujo limite diário grátis é 50 mil — e
+ * cuja cota já foi estourada uma vez, derrubando o app inteiro. De hora em hora
+ * o custo cai para um quarto e não muda nada na prática: categoria errada não
+ * fica mais certa por ser conferida quatro vezes por hora.
+ */
+const ACERVO_INTERVALO_MS = 60 * 60_000;
+let acervoVistoEm = 0;
+
+async function curarAcervo(db: Firestore): Promise<number> {
+  const agora = Date.now();
+  if (agora - acervoVistoEm < ACERVO_INTERVALO_MS) return 0;
+  acervoVistoEm = agora;
+
+  const snapshot = await db.collection('catalogo').get();
+  if (snapshot.empty) return 0;
+  const corrigidas = await curarCategorias(snapshot.docs);
+  if (corrigidas > 0) {
+    log.info({ corrigidas, faixas: snapshot.size }, 'categorias do acervo curadas');
+  }
   return corrigidas;
 }
 
@@ -286,6 +354,134 @@ async function fundirDuplicatas(docs: LibraryDoc[]): Promise<number> {
 
 type LibraryDoc = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
 
+/** As faixas do lote na forma que as regras de gênero consomem. */
+function faixasMinimas(docs: LibraryDoc[]): FaixaMinima[] {
+  return docs.map((doc) => {
+    const track = (doc.data() as LibraryEntry).track ?? {};
+    return {
+      id: doc.id,
+      genre: typeof track.genre === 'string' ? track.genre : null,
+      artistas: artistNames(track),
+    };
+  });
+}
+
+/**
+ * PASSO 1 DA CATEGORIA — o que dá para consertar SEM perguntar a ninguém.
+ *
+ * Três correções de graça, e elas resolvem a maior parte do estrago:
+ *
+ *  - o balde: o catálogo da Apple devolve "Brasileira" (nacionalidade) para boa
+ *    parte do que é nacional, e isso entrava como se fosse gênero. Sertanejo,
+ *    trap, gospel e funk no mesmo lugar — e, pior, com o campo preenchido a
+ *    faixa ficava invisível para `preencherGeneros`, que só procura quem está
+ *    SEM gênero. O balde não era só inútil: ele trancava a porta.
+ *  - a grafia: "eletronica" e "Eletrônica" viravam duas prateleiras.
+ *  - o discrepante: uma faixa de trap sozinha no meio de uma discografia inteira
+ *    de trap não é um artista eclético, é um erro — e a prova já está aqui.
+ *
+ * As regras vivem em `shared/ai/generoCoerencia.ts`, as MESMAS que o app usa.
+ */
+async function revisarGeneros(docs: LibraryDoc[]): Promise<number> {
+  const mudancas = revisarGenerosDeFaixas(faixasMinimas(docs)).slice(0, env.CURATION_BATCH);
+  if (mudancas.length === 0) return 0;
+
+  const porId = new Map(docs.map((d) => [d.id, d]));
+  let aplicadas = 0;
+  for (const mudanca of mudancas) {
+    const doc = porId.get(mudanca.id);
+    if (!doc) continue;
+    try {
+      await doc.ref.update({ 'track.genre': mudanca.para });
+      aplicadas += 1;
+      log.info(
+        { doc: doc.id, de: mudanca.de, para: mudanca.para, motivo: mudanca.motivo },
+        'categoria revisada',
+      );
+    } catch (err) {
+      log.warn({ err, doc: doc.id }, 'falha ao revisar categoria');
+    }
+  }
+  return aplicadas;
+}
+
+/**
+ * PASSO 2 DA CATEGORIA — perguntar, para o que a regra não alcança.
+ *
+ * A revisão acima só enxerga o que destoa DENTRO da biblioteca. Quando o sistema
+ * antigo errou de forma consistente — a discografia inteira de um artista de
+ * trap rotulada como sertanejo — não há discrepância nenhuma para achar: está
+ * tudo igualmente errado, e a coerência até defende o erro.
+ *
+ * Então aqui se pergunta. Mesmo desenho prudente do auditor de atribuição: o
+ * auditor (barato, uma palavra) só decide SE está errado; só com um "NAO" claro
+ * é que o generista (caro) diz o que é. "INCERTO" não mexe em nada.
+ *
+ * O campo `generoAuditadoEm` faz o rodízio: cada volta pega quem está há mais
+ * tempo sem conferência, então em algumas voltas a biblioteca inteira passou —
+ * e continua passando, para sempre, sem ninguém abrir nada.
+ */
+const GENRE_AUDIT_FIELD = 'generoAuditadoEm';
+
+async function auditarGeneros(docs: LibraryDoc[]): Promise<number> {
+  const agora = Date.now();
+  const maxAge = env.CURATION_RECHECK_DAYS * 24 * 3600_000;
+
+  const candidatos = docs
+    .map((doc) => {
+      const entry = doc.data() as LibraryEntry;
+      return {
+        doc,
+        facts: factsOf(entry.track ?? {}),
+        visto: typeof entry[GENRE_AUDIT_FIELD] === 'number' ? entry[GENRE_AUDIT_FIELD] : 0,
+      };
+    })
+    .filter((c) => c.facts.title && c.facts.artists.length > 0 && c.facts.genre)
+    .filter((c) => agora - c.visto > maxAge)
+    // Quem está há mais tempo sem conferência vai na frente: é o rodízio que
+    // garante que toda faixa é reexaminada, em vez de as mesmas sempre.
+    .sort((a, b) => a.visto - b.visto)
+    .slice(0, env.CURATION_BATCH);
+
+  if (candidatos.length === 0) return 0;
+
+  const vereditos = await Promise.all(candidatos.map((c) => auditorDeGenero(c.facts)));
+  const errados = candidatos.filter((_, i) => vereditos[i] === false);
+
+  // Todo mundo que foi conferido ganha a data — inclusive quem passou. Sem isso
+  // o rodízio não anda e as mesmas faixas seriam reconferidas para sempre.
+  await Promise.all(
+    candidatos.map((c) => c.doc.ref.update({ [GENRE_AUDIT_FIELD]: agora }).catch(() => undefined)),
+  );
+
+  if (errados.length === 0) return 0;
+
+  const novos = await generista(errados.map((c) => c.facts));
+  const faixas = faixasMinimas(docs);
+  let corrigidas = 0;
+
+  for (let i = 0; i < errados.length; i += 1) {
+    const alvo = errados[i]!;
+    // A resposta ainda passa pelo crivo do artista: o que contradiz uma maioria
+    // FORTE é recusado, e a faixa fica sem categoria. Buraco visível vale mais
+    // que categoria errada — é a regra que atravessa este arquivo inteiro.
+    const voto = generoDoArtista(faixas, alvo.facts.artists[0] ?? '', alvo.doc.id);
+    const novo = aceitarSugestao(novos[i] ?? null, voto);
+    if (!novo || novo === alvo.facts.genre) continue;
+    try {
+      await alvo.doc.ref.update({ 'track.genre': novo });
+      corrigidas += 1;
+      log.info(
+        { doc: alvo.doc.id, de: alvo.facts.genre, para: novo, titulo: alvo.facts.title },
+        'categoria reclassificada pelo auditor',
+      );
+    } catch (err) {
+      log.warn({ err, doc: alvo.doc.id }, 'falha ao reclassificar categoria');
+    }
+  }
+  return corrigidas;
+}
+
 /**
  * Preenche o gênero de quem está sem. Alimenta as prateleiras por gênero da
  * Home — faixa sem gênero simplesmente não aparece em nenhuma delas.
@@ -299,10 +495,15 @@ async function preencherGeneros(docs: LibraryDoc[]): Promise<number> {
   if (semGenero.length === 0) return 0;
 
   const generos = await generista(semGenero.map((x) => x.facts));
+  const faixas = faixasMinimas(docs);
 
   let gravados = 0;
   for (let i = 0; i < semGenero.length; i += 1) {
-    const genero = generos[i];
+    // Mesmo crivo do resto: o artista vota. Uma resposta que contradiz uma
+    // maioria forte é recusada e a faixa continua sem categoria.
+    const alvo = semGenero[i]!;
+    const voto = generoDoArtista(faixas, alvo.facts.artists[0] ?? '', alvo.doc.id);
+    const genero = aceitarSugestao(generos[i] ?? null, voto);
     if (!genero) continue;
     try {
       await semGenero[i]!.doc.ref.update({ 'track.genre': genero });
@@ -361,6 +562,11 @@ async function runOnce(db: Firestore): Promise<void> {
   for (const user of users) {
     fixed += await curateUser(db, user.id);
   }
+  // O acervo é o que o usuário comum realmente vê — ver curarAcervo.
+  fixed += await curarAcervo(db).catch((err) => {
+    log.warn({ err }, 'falha ao curar o acervo');
+    return 0;
+  });
   if (fixed > 0) log.info({ corrigidas: fixed, usuarios: users.length }, 'volta concluída');
 }
 

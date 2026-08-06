@@ -22,7 +22,7 @@ import {
   herdarDoArtista,
   revisarGeneros,
   type FaixaMinima,
-} from '@/lib/local/generoCoerencia';
+} from '@aurial/shared';
 
 const ATTEMPTS_KEY = 'aurial:genreAgentAttempts';
 const REVISAO_KEY = 'aurial:genreRevisao';

@@ -27,6 +27,7 @@ import {
   parseIdentity,
   parseVerify,
   trackEmbeddingText,
+  verifyGenreMessages,
   verifyMessages,
   type TrackIdentity,
 } from '@aurial/shared';
@@ -58,6 +59,26 @@ export async function auditor(facts: TrackFacts): Promise<boolean | null> {
     model: modelFor('verify'),
     maxTokens: AI_BUDGET.verify,
   });
+  return resposta === null ? null : parseVerify(resposta);
+}
+
+// ── Agente 1b: AUDITOR DE GÊNERO — a categoria está errada? ─────────────────
+
+/**
+ * Mesma prudência do auditor de atribuição: só o `false` autoriza mexer.
+ *
+ * Existe porque a curadoria só sabia PREENCHER gênero vazio. Faixa já
+ * categorizada nunca mais era olhada — então um trap que caiu na prateleira de
+ * sertanejo ficava lá para sempre, e nenhuma quantidade de dias rodando 24/7
+ * mudava isso. Preencher buraco não é a mesma coisa que consertar erro.
+ */
+export async function auditorDeGenero(facts: TrackFacts): Promise<boolean | null> {
+  const genero = facts.genre?.trim();
+  if (!genero || facts.artists.length === 0) return null; // nada a conferir
+  const resposta = await nvidiaChat(
+    verifyGenreMessages(facts.title, facts.artists.join(', '), genero),
+    { model: modelFor('verify'), maxTokens: AI_BUDGET.verify },
+  );
   return resposta === null ? null : parseVerify(resposta);
 }
 

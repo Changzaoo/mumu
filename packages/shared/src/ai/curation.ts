@@ -207,16 +207,70 @@ export function verifyMessages(title: string, artist: string): AiMessage[] {
   ];
 }
 
-/** true = confirmado, false = claramente errado, null = incerto (não mexer). */
+/**
+ * true = confirmado, false = claramente errado, null = incerto (não mexer).
+ *
+ * "NÃO SEI" NÃO É "NÃO".
+ *
+ * Esta função lia qualquer "nao" solto como acusação, e em português a dúvida
+ * começa com a mesma palavra: "não sei", "não conheço essa música", "não tenho
+ * certeza". Todas devolviam `false` — e `false` é o ÚNICO veredito que autoriza
+ * escrever por cima. Ou seja, exatamente quando o modelo admitia ignorância, o
+ * sistema entendia "está errado, corrija" e reescrevia metadata correta com um
+ * palpite.
+ *
+ * Isso valia para os dois auditores que dependem daqui: o de atribuição (que
+ * troca o ARTISTA da faixa) e o de categoria. É o caminho mais curto que existe
+ * neste código entre "o modelo não sabe" e "o usuário vê a coisa errada".
+ *
+ * Agora a hesitação é reconhecida ANTES e vira incerteza, que é o que ela é.
+ */
 export function parseVerify(content: string): boolean | null {
+  const normalized = content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
+  // A hesitação some da frase antes de procurar o veredito. Sem isto, o "nao"
+  // de "nao sei" seria contado como a resposta.
+  const semHesitacao = normalized.replace(
+    /\bnao\s+(sei|conheco|tenho|consigo|posso|da|e|estou|ha)\b/g,
+    ' incerto ',
+  );
   // Um modelo de raciocínio pode escrever antes de concluir; a decisão é a
   // ÚLTIMA palavra reconhecível, não a primeira.
-  const normalized = content.toLowerCase().normalize('NFD').replace(/[̀-ͯ]/g, '');
-  const matches = normalized.match(/\b(sim|nao|incerto)\b/g);
+  const matches = semHesitacao.match(/\b(sim|nao|incerto)\b/g);
   const last = matches?.at(-1);
   if (last === 'sim') return true;
   if (last === 'nao') return false;
   return null;
+}
+
+// ── Agente: auditoria de gênero ─────────────────────────────────────────────
+
+/**
+ * "Esta faixa é MESMO desse gênero?" — a pergunta que faltava.
+ *
+ * A curadoria só sabia PREENCHER gênero vazio. Faixa já categorizada, ainda que
+ * categorizada errado, nunca mais era olhada: o trap continuava na prateleira de
+ * sertanejo para sempre, porque ninguém perguntava.
+ *
+ * O formato copia o auditor de atribuição de propósito — é o padrão prudente que
+ * já funciona aqui: uma palavra, três respostas, e SÓ o "NAO" autoriza mexer.
+ * Um "INCERTO" que reescrevesse categoria seria um palpite com cara de conserto,
+ * e reclassificar em cima de uma categoria certa é o estrago que o usuário não
+ * consegue desfazer — ele nem fica sabendo que mudou.
+ */
+export function verifyGenreMessages(title: string, artist: string, genre: string): AiMessage[] {
+  return [
+    {
+      role: 'system',
+      content:
+        'Você confere se a CATEGORIA de uma música está correta. ' +
+        `Definições que você DEVE seguir: ${GLOSSARIO_DE_GENEROS} ` +
+        'Responda com UMA palavra apenas: SIM (a categoria está certa), ' +
+        'NAO (está claramente errada), ou INCERTO (não conhece a música ou tem dúvida). ' +
+        'Na dúvida responda INCERTO — é melhor que trocar uma categoria certa. ' +
+        'Sem nada além da palavra.',
+    },
+    { role: 'user', content: `A música "${title}", de "${artist}", é do gênero "${genre}"?` },
+  ];
 }
 
 // ── Agente: classificação de gênero ─────────────────────────────────────────

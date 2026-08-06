@@ -26,10 +26,17 @@
  * 75%), senão um artista que muda de estilo nunca conseguiria uma categoria
  * nova. Vetar demais também é um defeito.
  *
- * Tudo aqui é função pura: recebe faixas, devolve decisões. Quem aplica é o
- * agente de categorias.
+ * Tudo aqui é função pura: recebe faixas, devolve decisões. Quem aplica é quem
+ * tem as faixas na mão.
+ *
+ * Vive em `shared` porque os DOIS lados decidem gênero: o app, para o que acaba
+ * de ser importado, e o worker de curadoria 24/7, que é quem varre a biblioteca
+ * inteira e o acervo sem ninguém abrir nada. Duas cópias divergiriam, e a mesma
+ * faixa receberia categorias diferentes conforme quem a processou — que é
+ * exatamente o defeito que este arquivo existe para consertar.
  */
-import { GENRE_TAXONOMY, normalizarGenero, type Genre } from '@aurial/shared';
+import { GENRE_TAXONOMY, type Genre } from './curation.js';
+import { normalizarGenero } from './generos.js';
 
 /** O mínimo que precisamos saber de uma faixa para decidir gênero. */
 export interface FaixaMinima {
