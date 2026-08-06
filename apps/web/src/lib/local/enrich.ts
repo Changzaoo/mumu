@@ -216,13 +216,79 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
 // STRICT title match: normalized equality, or one is the other plus a short
 // live/remaster-style suffix ("song" vs "song ao vivo"). Deliberately NOT a
 // loose substring test — that let a different song by another artist "match".
-const titleExact = (a: string, b: string): boolean => {
+/**
+ * Tira o que vem entre parênteses/colchetes NO FIM do título.
+ *
+ * É o "(feat. Fulano & Beltrano)", o "[Remix]", o "(Ao Vivo)". Repetido porque
+ * um título pode carregar dois: "Faixa (feat. X) [Remix]".
+ */
+/**
+ * O que pode sobrar no fim de um título e AINDA ser a mesma música.
+ *
+ * Já normalizado (minúsculo, sem acento e sem pontuação). A lista é fechada de
+ * propósito: qualquer outra sobra é tratada como outra faixa.
+ */
+const MARCADOR_DE_VERSAO =
+  /^(ao vivo|live|acustic[oa]|acoustic|unplugged|remaster(ed)?|remix|vers[aã]o|version|radio edit|edit|extended|deluxe|bonus|instrumental|playback|sped up|slowed( reverb)?|reverb|karaoke|demo|mono|stereo|explicit|clean|single|ep|album)( .*)?$|^\d{4}$/;
+
+const semSufixo = (valor: string): string => {
+  let atual = valor.trim();
+  for (let i = 0; i < 3; i += 1) {
+    const cortado = atual.replace(/\s*[([{][^)\]}]*[)\]}]\s*$/, '').trim();
+    if (cortado === atual || !cortado) break;
+    atual = cortado;
+  }
+  return atual;
+};
+
+/**
+ * O mesmo título, mesmo escrito de outro jeito?
+ *
+ * ESTE ERA O DEFEITO DO ÁLBUM QUE APARECIA PELA METADE.
+ *
+ * O app já limpava os parênteses do NOSSO título antes de comparar, mas não do
+ * que o iTunes devolve — e a assimetria condenava exatamente as faixas com
+ * participação. Medido nas faixas do XTRANHO, do Matuê:
+ *
+ *   "OS MELHORES"                                → sobra  0 → casava
+ *   "PENSAMENTOS PERIGOSOS (feat. LPT Zlatan)"   → sobra 16 → casava
+ *   "FACAS E MACHADOS (feat. FAB GODAMN & Okie)" → sobra 21 → RECUSAVA
+ *   "ÍCONE FASHION (feat. Kouth & Pabllo Vittar)"→ sobra 25 → RECUSAVA
+ *
+ * A tolerância de 18 caracteres foi calibrada para sufixo curto ("ao vivo",
+ * "remaster"); um "(feat. A & B)" de rap passa longe dela. E recusar não
+ * significava só perder o álbum: sem confirmação do catálogo a faixa fica sem
+ * capa, sem álbum E sem gênero — e aí o classificador chuta no escuro. É por
+ * isso que "FACAS E MACHADOS", um trap do Matuê, foi parar em Sertanejo.
+ *
+ * O conserto é a simetria: limpa dos DOIS lados e exige igualdade. Continua sem
+ * ser teste frouxo de substring — "Faixa" não casa com "Faixa Dois" —, e o que
+ * se abre é o caso legítimo de a mesma música vir com a lista de convidados no
+ * nome. O preço: uma versão "(Ao Vivo)" pode adotar a ficha do estúdio. Trocar
+ * "sem capa, sem álbum e com gênero chutado" por "capa e gênero certos, versão
+ * do estúdio" é um bom negócio.
+ */
+export const titleExact = (a: string, b: string): boolean => {
   const na = norm(a);
   const nb = norm(b);
   if (!na || !nb) return false;
   if (na === nb) return true;
+
+  const sa = norm(semSufixo(a));
+  const sb = norm(semSufixo(b));
+  if (sa && sb && sa === sb) return true;
+
+  // Sufixo SOLTO, sem parênteses ("Faixa Ao Vivo"). Aqui a régua antiga era
+  // "cabe em 18 caracteres", e contar caracteres não distingue versão de OUTRA
+  // MÚSICA: "Faixa Dois" casava com "Faixa" (12 de sobra) e "Warzone
+  // Freestyle" com "Warzone" (9). Cada casamento desses dá à faixa o álbum, a
+  // capa e o gênero de uma música que não é ela.
+  //
+  // Agora o que sobra precisa SER um marcador de versão. Marcador desconhecido
+  // é recusa — e recusar deixa a faixa como está, que é o lado seguro do erro.
   const [short, long] = na.length <= nb.length ? [na, nb] : [nb, na];
-  return long.startsWith(`${short} `) && long.length - short.length <= 18;
+  if (!long.startsWith(`${short} `)) return false;
+  return MARCADOR_DE_VERSAO.test(long.slice(short.length + 1));
 };
 
 // Confirm an artist: normalized equality, or one is a WORD-prefix of the other

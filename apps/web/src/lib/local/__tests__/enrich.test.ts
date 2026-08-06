@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import { identifyByTitle, parseTrackFileName } from '@/lib/local/enrich';
+import { titleExact, identifyByTitle, parseTrackFileName } from '@/lib/local/enrich';
 import { searchSongs, type AppleSong } from '@/lib/catalog/itunes';
 import type * as itunes from '@/lib/catalog/itunes';
 import { aiIdentifyTrack } from '@/lib/ai/ai';
@@ -129,5 +129,78 @@ describe('identifyByTitle — lente de TÍTULO (só sem crédito a proteger)', (
   it('catálogo fora do ar devolve null em vez de lançar', async () => {
     mockSearch.mockRejectedValue(new Error('rede'));
     await expect(identifyByTitle('Máquina do Tempo')).resolves.toBeNull();
+  });
+});
+
+/**
+ * O ÁLBUM QUE APARECIA PELA METADE.
+ *
+ * Relato: "as músicas do Matuê do álbum XTRANHO não aparecem no catálogo". Elas
+ * apareciam — sem ÁLBUM, então a página do XTRANHO mostrava uma faixa só.
+ *
+ * A causa foi uma assimetria: o app limpava os parênteses do NOSSO título antes
+ * de comparar com o iTunes, mas não do título que o iTunes devolve. Sobrava um
+ * "(feat. Fulano & Beltrano)" inteiro do outro lado, e a tolerância de 18
+ * caracteres — calibrada para "ao vivo" e "remaster" — recusava.
+ *
+ * E recusar custava mais que o álbum: sem confirmação do catálogo a faixa fica
+ * sem capa, sem álbum E sem gênero, e aí o classificador chuta. Foi assim que
+ * "FACAS E MACHADOS", um trap do Matuê, foi parar em Sertanejo.
+ */
+describe('o mesmo título com lista de convidados', () => {
+  // Medidos na biblioteca real, no acervo em produção.
+  it('faixa com participação longa casa — era o caso que recusava', () => {
+    expect(titleExact('ÍCONE FASHION (feat. Kouth & Pabllo Vittar)', 'ÍCONE FASHION')).toBe(true);
+    expect(titleExact('FACAS E MACHADOS (feat. FAB GODAMN & Okie)', 'FACAS E MACHADOS')).toBe(true);
+  });
+
+  it('o que já casava continua casando', () => {
+    expect(titleExact('OS MELHORES', 'OS MELHORES')).toBe(true);
+    expect(titleExact('PENSAMENTOS PERIGOSOS (feat. LPT Zlatan)', 'PENSAMENTOS PERIGOSOS')).toBe(
+      true,
+    );
+  });
+
+  it('limpa os dois lados — tanto faz de que lado vem a participação', () => {
+    expect(titleExact('MEU CEMITÉRIO', 'MEU CEMITÉRIO (feat. Alguém)')).toBe(true);
+  });
+
+  it('dois sufixos empilhados também', () => {
+    expect(titleExact('Faixa (feat. X) [Remix]', 'Faixa')).toBe(true);
+  });
+
+  // ── e o que NÃO pode passar a casar ─────────────────────────────────────
+  it('música diferente continua sendo música diferente', () => {
+    expect(titleExact('ÍCONE FASHION', 'FACAS E MACHADOS')).toBe(false);
+    expect(titleExact('Faixa Dois (feat. X)', 'Faixa')).toBe(false);
+    expect(titleExact('Warzone', 'Warzone Freestyle')).toBe(false);
+  });
+
+  it('título vazio nunca casa com nada', () => {
+    expect(titleExact('', 'Faixa')).toBe(false);
+    expect(titleExact('(feat. X)', 'Faixa')).toBe(false);
+  });
+});
+
+/**
+ * SUFIXO SOLTO: "Faixa Ao Vivo" é a mesma música; "Faixa Dois" não é.
+ *
+ * A régua antiga era "cabe em 18 caracteres", e contar caracteres não distingue
+ * versão de outra música: "Faixa Dois" casava com "Faixa" (12 de sobra) e
+ * "Warzone Freestyle" com "Warzone" (9). Cada casamento desses dava à faixa o
+ * álbum, a capa e o gênero de uma música que não é ela.
+ */
+describe('sufixo de versão versus outra música', () => {
+  it('marcador de versão conhecido casa', () => {
+    expect(titleExact('Só Os Loucos Ao Vivo', 'Só Os Loucos')).toBe(true);
+    expect(titleExact('Warzone Remix', 'Warzone')).toBe(true);
+    expect(titleExact('Quase Sem Querer Acústico', 'Quase Sem Querer')).toBe(true);
+    expect(titleExact('Song Remastered 2011', 'Song')).toBe(true);
+  });
+
+  it('sobra desconhecida é OUTRA MÚSICA — recusa', () => {
+    expect(titleExact('Faixa Dois', 'Faixa')).toBe(false);
+    expect(titleExact('Warzone Freestyle', 'Warzone')).toBe(false);
+    expect(titleExact('Amor Bandido', 'Amor')).toBe(false);
   });
 });

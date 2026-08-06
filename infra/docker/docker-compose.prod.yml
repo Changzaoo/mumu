@@ -150,8 +150,21 @@ services:
         condition: service_healthy
     restart: 'no'
 
+  # NÃO SOBE SOZINHO — o Caddy do host é quem atende a porta 80.
+  #
+  # Esta máquina hospeda mais coisa além do Aurial, e quem responde na 80 é um
+  # Caddy instalado no host. O nginx daqui então nunca conseguia subir ("address
+  # already in use") e ficava `unhealthy` havia dois meses. O efeito colateral
+  # era pior que ele não subir: o `deploy-api.sh` terminava com erro por causa
+  # disso e NUNCA chegava no passo final, que limpa imagens antigas — o disco
+  # chegou a 95% por isso.
+  #
+  # O serviço fica aqui, atrás de um profile, em vez de ser apagado: se um dia o
+  # Caddy sair de cena, `docker compose --profile nginx up -d` traz de volta o
+  # proxy com cache de HLS e os certificados já configurados.
   nginx:
     image: nginx:alpine
+    profiles: ['nginx']
     restart: unless-stopped
     extra_hosts:
       - 'host.docker.internal:host-gateway'
