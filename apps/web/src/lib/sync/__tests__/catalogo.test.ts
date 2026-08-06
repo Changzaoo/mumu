@@ -1,13 +1,17 @@
 /**
- * O acervo é o ÍNDICE; quem serve a música é o servidor Linux.
+ * Publicar no acervo do app — e as duas lições que custaram caro.
  *
- * Uma entrada só vale se apontar para lá: `remoteUrl` (a cópia no cofre) ou
- * `sourceUrl` (o link, que o importador transmite ao vivo). Sem rota para o
- * áudio, a faixa aparece na tela de todo mundo e não toca para ninguém — o
- * pior estado possível, porque parece que chegou.
+ * 1. ESCREVER SÓ O QUE MUDOU. Publicar a cada remendo da curadoria e reescrever
+ *    a biblioteca inteira a cada abertura esgotou a COTA DIÁRIA do projeto, e
+ *    com ela pararam a biblioteca pessoal, o "em alta" e os compartilhamentos.
+ * 2. NUNCA CONFIAR NA MEMÓRIA DO CLIENTE. A marca local de "já publiquei" fez
+ *    o aparelho acreditar que tinha subido faixas que nunca saíram — e nunca
+ *    mais tentar. O acervo ficou vazio e continuou vazio. Quem manda é o
+ *    snapshot: o que falta lá, sobe, quantas vezes for preciso.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { LibraryEntry } from '@/lib/local/localLibrary';
+import type * as CatalogoModule from '@/lib/sync/catalogo';
 import { makeTrack } from '@/test/factories';
 
 const setDoc = vi.fn(() => Promise.resolve());
@@ -44,7 +48,7 @@ function entrada(extra: Partial<LibraryEntry> = {}): LibraryEntry {
 const assentar = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 
 describe('publicar no acervo do app', () => {
-  let catalogo: typeof import('@/lib/sync/catalogo');
+  let catalogo: typeof CatalogoModule;
 
   beforeEach(async () => {
     setDoc.mockClear();
@@ -82,18 +86,46 @@ describe('publicar no acervo do app', () => {
     expect(setDoc).toHaveBeenCalledTimes(2);
   });
 
-  it('a migração não reescreve a biblioteca a cada abertura do app', async () => {
-    const acervo = [
+  // ── o acervo vazio que não se enchia sozinho ─────────────────────────────
+  // A reconciliação compara com a REALIDADE (o snapshot), nunca com a memória
+  // do cliente. Foi confiar na memória que deixou o acervo vazio para sempre.
+
+  it('sobe para o acervo o que falta lá, comparando com o snapshot real', async () => {
+    const minhas = [
       entrada({ remoteUrl: 'https://cofre/a.mp3' }),
       { ...entrada({ remoteUrl: 'https://cofre/b.mp3' }), track: makeTrack('local:b') },
     ];
 
-    expect(await catalogo.publicarAcervoDoAdmin(acervo)).toBe(2);
+    // O acervo já tem a primeira; falta a segunda.
+    expect(await catalogo.reconciliarAcervo(minhas, new Set(['local:a']))).toBe(1);
+    expect(setDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('acervo já completo não gasta escrita nenhuma', async () => {
+    const minhas = [entrada({ remoteUrl: 'https://cofre/a.mp3' })];
+
+    expect(await catalogo.reconciliarAcervo(minhas, new Set(['local:a']))).toBe(0);
+    expect(setDoc).not.toHaveBeenCalled();
+  });
+
+  it('memória local mentindo NÃO impede a republicação do que falta', async () => {
+    const faixa = entrada({ remoteUrl: 'https://cofre/a.mp3' });
+    // Simula o estrago da versão anterior: o aparelho "lembra" que publicou.
+    catalogo.publicarNoCatalogo(faixa);
+    await assentar();
     setDoc.mockClear();
 
-    // Segunda abertura: nada mudou, nada sobe.
-    expect(await catalogo.publicarAcervoDoAdmin(acervo)).toBe(0);
-    expect(setDoc).not.toHaveBeenCalled();
+    // Mas o acervo está VAZIO de verdade. A reconciliação tem que corrigir.
+    expect(await catalogo.reconciliarAcervo([faixa], new Set())).toBe(1);
+    expect(setDoc).toHaveBeenCalledTimes(1);
+  });
+
+  it('faixa sem rota para o áudio TAMBÉM entra — não aparecer é pior', async () => {
+    // A tranca antiga (só publicar com remoteUrl/sourceUrl) esvaziava o acervo
+    // inteiro quando o cofre do importador estava fora do ar.
+    catalogo.publicarNoCatalogo(entrada());
+    await assentar();
+    expect(setDoc).toHaveBeenCalledTimes(1);
   });
 
   it('faixa com cópia no cofre entra', async () => {
@@ -106,19 +138,5 @@ describe('publicar no acervo do app', () => {
     catalogo.publicarNoCatalogo(entrada({ sourceUrl: 'https://youtube.com/watch?v=x' }));
     await assentar();
     expect(setDoc).toHaveBeenCalledTimes(1);
-  });
-
-  it('faixa SEM rota para o áudio não entra — não pode aparecer e não tocar', async () => {
-    catalogo.publicarNoCatalogo(entrada());
-    await assentar();
-    expect(setDoc).not.toHaveBeenCalled();
-  });
-
-  it('a migração do acervo antigo respeita a mesma regra', async () => {
-    const publicadas = await catalogo.publicarAcervoDoAdmin([
-      entrada({ remoteUrl: 'https://cofre/a.mp3' }),
-      entrada(), // sem rota: fica de fora
-    ]);
-    expect(publicadas).toBe(1);
   });
 });

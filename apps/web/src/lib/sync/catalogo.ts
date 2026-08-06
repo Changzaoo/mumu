@@ -31,9 +31,34 @@ import { registrarErro, registrarSnapshot, registrarUsuario } from '@/lib/sync/s
 
 const COLECAO = 'catalogo';
 
-/** Só o admin escreve no acervo. As regras do Firestore repetem esta lista. */
-function souAdmin(): boolean {
+/**
+ * QUEM BARRA A ESCRITA É A REGRA DO FIRESTORE, NÃO ESTE ARQUIVO.
+ *
+ * Antes havia uma segunda tranca aqui: uma lista de e-mails no cliente. Ela
+ * parecia inofensiva e foi a provável causa do acervo ter ficado VAZIO — se a
+ * conta usada para importar não fosse exatamente uma daquelas duas strings, a
+ * publicação virava um `return` mudo, sem erro, sem log, sem nada na tela. Duas
+ * trancas para a mesma porta, e a de dentro não avisava quando estava fechada.
+ *
+ * Agora o cliente SEMPRE tenta. Se a conta não tiver direito, o Firestore
+ * recusa — e aí existe um erro de verdade, que o diagnóstico mostra e o admin
+ * vê em forma de aviso. Falha visível vale mais que falha silenciosa.
+ */
+function talvezAdmin(): boolean {
+  // Mantido só para decidir se vale AVISAR o usuário quando a escrita falha:
+  // um ouvinte comum não precisa ver "falha ao publicar no acervo".
   return isAuthorizedEmail(auth?.currentUser?.email);
+}
+
+/** Avisa o admin quando o acervo recusa uma escrita — silêncio aqui foi o que
+ *  custou dias de procura no lugar errado. */
+function avisarFalha(erro: unknown): void {
+  registrarErro(COLECAO, erro);
+  if (!talvezAdmin()) return;
+  const texto = erro instanceof Error ? erro.message : String(erro);
+  void import('sonner')
+    .then(({ toast }) => toast.error(`Acervo: não consegui publicar — ${texto}`))
+    .catch(() => undefined);
 }
 
 // ── ESCREVER SÓ O QUE MUDOU ─────────────────────────────────────
@@ -98,35 +123,32 @@ function impressaoDigital(entry: LibraryEntry): string {
  * no-op silencioso, e as regras do Firestore garantem isso mesmo se o cliente
  * for adulterado.
  */
-export function publicarNoCatalogo(entry: LibraryEntry): void {
-  // SEM ROTA PARA O ÁUDIO, NÃO ENTRA NO ACERVO.
+export function publicarNoCatalogo(entry: LibraryEntry, forcar = false): void {
+  // A SEGUNDA TRANCA QUE EU TINHA POSTO AQUI SAIU.
   //
-  // O catálogo é o índice; quem serve a música é o servidor Linux. A entrada só
-  // vale se apontar para lá — `remoteUrl` (a cópia no cofre) ou `sourceUrl` (o
-  // link, que o importador transmite ao vivo). Publicar antes disso colocava a
-  // faixa na tela de todo mundo por alguns segundos sem nada para tocar, que é
-  // o pior estado possível: parece que chegou e não toca.
-  //
-  // Não é perda: assim que o upload termina, `patchEntry` republica com a rota
-  // pronta. O acervo só mostra o que dá para ouvir.
-  if (!entry.remoteUrl && !entry.sourceUrl) return;
+  // Era "sem remoteUrl nem sourceUrl, não entra", para evitar faixa que aparece
+  // e não toca. O raciocínio estava certo e a consequência estava errada: se o
+  // cofre do importador estiver fora do ar na hora do upload, NENHUMA faixa
+  // ganha rota, e o acervo inteiro fica vazio — que é infinitamente pior. Não
+  // aparecer é o defeito que o usuário relatou; aparecer e não tocar é um
+  // aviso que o /diagnostico já dá, com contagem.
   const digital = impressaoDigital(entry);
-  if (lerImpressoes()[entry.track.id] === digital) return; // nada mudou: sem escrita
+  if (!forcar && lerImpressoes()[entry.track.id] === digital) return; // nada mudou
   void (async () => {
     await firebaseReady();
-    if (!db || !souAdmin()) return;
+    if (!db) return;
     const { doc, setDoc } = await firestore();
     await setDoc(doc(db, COLECAO, entry.track.id), entry);
     lerImpressoes()[entry.track.id] = digital;
     gravarImpressoes();
-  })().catch((erro) => registrarErro(COLECAO, erro));
+  })().catch(avisarFalha);
 }
 
 /** Tira uma faixa do acervo (admin apagou de vez). */
 export function removerDoCatalogo(id: string): void {
   void (async () => {
     await firebaseReady();
-    if (!db || !souAdmin()) return;
+    if (!db) return; // quem barra é a regra do Firestore — ver publicarNoCatalogo
     const { deleteDoc, doc } = await firestore();
     await deleteDoc(doc(db, COLECAO, id));
     delete lerImpressoes()[id]; // some da memória também: republicar volta a valer
@@ -148,24 +170,38 @@ export function removerDoCatalogo(id: string): void {
  */
 const TETO_POR_RODADA = 200;
 
-export async function publicarAcervoDoAdmin(entradas: LibraryEntry[]): Promise<number> {
+/**
+ * Compara a biblioteca com o que o acervo TEM DE VERDADE e sobe a diferença.
+ *
+ * Substitui a migração antiga, que confiava numa marca local de "já publiquei".
+ * Essa marca é uma memória do cliente, e memória de cliente mente: durante a
+ * cota estourada as escritas falhavam e, na versão anterior, bastava um deslize
+ * para o aparelho passar a acreditar que tinha publicado algo que nunca saiu —
+ * e nunca mais tentar. Foi assim que o acervo ficou vazio e continuou vazio.
+ *
+ * Aqui não há memória envolvida: `idsNoAcervo` vem do snapshot que a assinatura
+ * já trouxe (custo zero de leitura), e o que falta é republicado à força. Se
+ * alguma coisa impedir a escrita, a próxima abertura tenta de novo, porque a
+ * comparação é sempre contra a realidade.
+ */
+export async function reconciliarAcervo(
+  minhasEntradas: LibraryEntry[],
+  idsNoAcervo: ReadonlySet<string>,
+): Promise<number> {
   await firebaseReady();
-  if (!db || !souAdmin()) return 0;
-  const jaPublicadas = lerImpressoes();
-  const pendentes = entradas.filter(
-    (e) => (e.remoteUrl || e.sourceUrl) && jaPublicadas[e.track.id] !== impressaoDigital(e),
-  );
-  if (pendentes.length === 0) return 0;
+  if (!db) return 0;
+  const faltando = minhasEntradas.filter((e) => !idsNoAcervo.has(e.track.id));
+  if (faltando.length === 0) return 0;
 
   const { doc, setDoc } = await firestore();
   let publicadas = 0;
-  for (const entry of pendentes.slice(0, TETO_POR_RODADA)) {
+  for (const entry of faltando.slice(0, TETO_POR_RODADA)) {
     try {
       await setDoc(doc(db, COLECAO, entry.track.id), entry);
-      jaPublicadas[entry.track.id] = impressaoDigital(entry);
+      lerImpressoes()[entry.track.id] = impressaoDigital(entry);
       publicadas += 1;
     } catch (erro) {
-      registrarErro(COLECAO, erro);
+      avisarFalha(erro);
       break; // cota estourada ou regra negando: insistir 300 vezes não ajuda
     }
     // Respiro entre escritas: uma rajada de centenas de setDoc trava a página
