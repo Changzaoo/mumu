@@ -76,11 +76,17 @@ async function run(): Promise<void> {
       const t = entry.track;
       if (t.genre?.trim()) continue;
       if ((attempts[t.id] ?? 0) >= MAX_ATTEMPTS) continue;
+      // SEM ARTISTA NÃO SE CLASSIFICA.
+      //
+      // Antes, faixa com artista "Desconhecido" era mandada ao modelo com o
+      // TÍTULO SOZINHO. Isso não é classificar, é adivinhar pelo clima da
+      // palavra — "WARZONE" vira Trap ou Metal conforme o humor do modelo — e o
+      // palpite entra no app como fato: prateleira de gênero, mix, recomendação.
+      // Faixa sem categoria é um buraco que a curadoria preenche depois; faixa
+      // na categoria errada é uma mentira que ninguém revisa.
       const artist = t.artists[0]?.name;
-      const genre = await aiClassifyGenre(
-        t.title,
-        artist && artist !== 'Desconhecido' ? artist : undefined,
-      ).catch(() => null);
+      if (!artist || artist === 'Desconhecido') continue;
+      const genre = await aiClassifyGenre(t.title, artist).catch(() => null);
       classifiedThisSession += 1;
       if (genre) {
         localLibrary.setTrackGenre(t.id, genre);

@@ -66,7 +66,7 @@ function parseLrc(lrc: string): LyricLine[] {
   return out.sort((a, b) => a.timeMs - b.timeMs);
 }
 
-interface LrclibRow {
+export interface LrclibRow {
   syncedLyrics?: string | null;
   plainLyrics?: string | null;
   trackName?: string | null;
@@ -90,24 +90,41 @@ function normLoose(s: string): string {
  * the first row with synced lyrics is exactly how WRONG lyrics get locked in.
  * Guard on title similarity + artist overlap + duration proximity.
  */
-function rowMatches(row: LrclibRow, title: string, names: string[], durationSec: number): boolean {
+export function rowMatches(
+  row: LrclibRow,
+  title: string,
+  names: string[],
+  durationSec: number,
+): boolean {
   const rt = normLoose(row.trackName ?? '');
   const qt = normLoose(title);
   if (!rt || !qt) return false;
+  // O casamento de título é de propósito FROUXO ("Warzone" casa com "Warzone
+  // (Remix)"), e por isso ele sozinho nunca pode bastar — ver a prova mínima
+  // no fim desta função.
   const titleOk = rt === qt || rt.includes(qt) || qt.includes(rt);
   if (!titleOk) return false;
+
   const ra = normLoose(row.artistName ?? '');
-  const artistOk =
-    names.length === 0 ||
-    !ra ||
-    names.some((n) => {
-      const nn = normLoose(n);
-      return nn.length > 0 && (ra.includes(nn) || nn.includes(ra));
-    });
-  if (!artistOk) return false;
-  // Sem duração de referência (preview) não dá pra checar; título+artista bastam.
-  const durOk = !durationSec || !row.duration || Math.abs(row.duration - durationSec) <= 3;
-  return durOk;
+  const nomes = names.map(normLoose).filter(Boolean);
+  const daParaCompararArtista = ra.length > 0 && nomes.length > 0;
+  const artistaBate = daParaCompararArtista && nomes.some((n) => ra.includes(n) || n.includes(ra));
+  if (daParaCompararArtista && !artistaBate) return false; // artista conhecido e diferente
+
+  const daParaCompararDuracao = durationSec > 0 && typeof row.duration === 'number';
+  const duracaoBate = daParaCompararDuracao && Math.abs((row.duration ?? 0) - durationSec) <= 3;
+  if (daParaCompararDuracao && !duracaoBate) return false; // duração conhecida e diferente
+
+  // PROVA MÍNIMA: título parecido NÃO É EVIDÊNCIA.
+  //
+  // Antes, a ausência de dado contava como aprovação: sem artista conhecido
+  // (faixa creditada a "Desconhecido", que a busca descarta) e sem duração na
+  // linha, sobrava só o título frouxo — e a letra de outra música entrava e
+  // ficava em cache. É o defeito clássico de "a letra não é dessa música", e
+  // ele nascia aqui, de um `||` que lia "não sei" como "pode".
+  //
+  // Agora falta de prova é reprovação: ou o artista bate, ou a duração bate.
+  return artistaBate || duracaoBate;
 }
 
 function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {

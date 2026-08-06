@@ -216,6 +216,19 @@ export function parseVerify(content: string): boolean | null {
 
 // ── Agente: classificação de gênero ─────────────────────────────────────────
 
+/**
+ * O MODELO PRECISA PODER DIZER "NÃO SEI".
+ *
+ * A primeira versão deste prompt mandava escolher UM gênero da lista e
+ * responder só com ele. Não havia saída: diante de uma faixa que o modelo nunca
+ * viu — justamente o caso do acervo, cheio de artista independente — a única
+ * resposta possível era um palpite pelo clima do título. E palpite entra no app
+ * como fato: vira a prateleira de gênero, o mix e a recomendação.
+ *
+ * Agora DESCONHECIDO é uma resposta legítima e explicitamente preferida à
+ * adivinhação. Faixa sem categoria é um buraco visível que a curadoria pode
+ * preencher depois; faixa na categoria errada é uma mentira que ninguém revisa.
+ */
 export function genreMessages(title: string, artist?: string): AiMessage[] {
   return [
     {
@@ -223,15 +236,51 @@ export function genreMessages(title: string, artist?: string): AiMessage[] {
       content:
         'Você classifica uma música em UM gênero musical desta lista EXATA: ' +
         `${GENRE_TAXONOMY.join(', ')}. ` +
-        'Responda SOMENTE com o nome do gênero, exatamente como está na lista — sem texto extra.',
+        'Se você NÃO CONHECE esta música ou este artista, responda exatamente DESCONHECIDO. ' +
+        'Nunca deduza o gênero pelo clima do título — é preferível responder DESCONHECIDO ' +
+        'a arriscar uma categoria errada. ' +
+        'Responda SOMENTE com o nome do gênero (ou DESCONHECIDO), sem explicação.',
     },
     { role: 'user', content: `Música: "${title}"${artist ? ` — Artista: ${artist}` : ''}` },
   ];
 }
 
+/** Compara rótulos ignorando acento e pontuação: "Hip Hop/Rap" = "Hip-Hop/Rap". */
+function chaveDeGenero(valor: string): string {
+  return valor
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '');
+}
+
+/**
+ * Lê a resposta do classificador — e RECUSA tudo que não for uma resposta.
+ *
+ * A versão anterior procurava qualquer nome da taxonomia em qualquer lugar do
+ * texto. Com um modelo de raciocínio, que escreve o pensamento antes de
+ * concluir, isso lia o rascunho como se fosse a decisão: "não é Rock, soa mais
+ * como trap nordestino" virava Rock, e "não conheço, talvez Pop" virava Pop.
+ * Uma recusa do modelo era transformada em categoria pelo nosso parser.
+ *
+ * Agora só conta a ÚLTIMA linha — onde a conclusão fica — e ela precisa ser o
+ * rótulo inteiro, não uma menção dentro de uma frase. Qualquer outra coisa vira
+ * `null`, que deixa a faixa sem categoria e agenda nova tentativa.
+ */
 export function parseGenre(content: string): Genre | null {
-  const normalized = content.toLowerCase();
-  // Casa o rótulo mais longo primeiro para "Hip-Hop/Rap" não perder para "Rap".
-  const ordered = [...GENRE_TAXONOMY].sort((a, b) => b.length - a.length);
-  return ordered.find((g) => normalized.includes(g.toLowerCase())) ?? null;
+  const linhas = content
+    .split(/\r?\n/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const conclusao = linhas[linhas.length - 1] ?? '';
+  const limpa = conclusao
+    .replace(/^(g[eê]nero|resposta|answer|final)\s*[:\-–]\s*/i, '')
+    .replace(/^[\s*_`"'[(]+|[\s*_`"'.\])]+$/g, '')
+    .trim();
+  if (!limpa) return null;
+  const chave = chaveDeGenero(limpa);
+  if (!chave) return null;
+  // "Não sei" é uma resposta boa: preserva o buraco em vez de inventar.
+  if (/^(desconhecido|naosei|naoconheco|unknown|none|na)$/.test(chave)) return null;
+  return GENRE_TAXONOMY.find((g) => chaveDeGenero(g) === chave) ?? null;
 }
