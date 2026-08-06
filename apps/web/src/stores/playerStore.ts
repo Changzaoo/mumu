@@ -497,6 +497,21 @@ export const usePlayerStore = create<PlayerState>()(
           duration: track.durationMs / 1000,
         });
 
+        // O GUARDIÃO DO OFFLINE PRECISA SABER O QUE VEM A SEGUIR.
+        //
+        // Sem isto ele baixaria na ordem da biblioteca, e a faixa que você
+        // mandou tocar agora seria a última da fila de download — que é o mesmo
+        // que não ter offline nenhum. Ver lib/offline/guardiaoOffline.ts.
+        void import('@/lib/offline/guardiaoOffline')
+          .then(({ informarContexto }) => {
+            const { queue, queueIndex } = get();
+            informarContexto({
+              aSeguir: queue.slice(queueIndex + 1, queueIndex + 8).map((t) => t.id),
+              recentes: [track.id],
+            });
+          })
+          .catch(() => undefined);
+
         // A letra da faixa que está começando fura a fila de transcrição. Sem
         // isto, quem abrisse a letra do que está tocando esperava atrás da
         // playlist inteira que foi baixada meia hora antes.

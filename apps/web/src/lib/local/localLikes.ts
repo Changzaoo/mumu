@@ -4,7 +4,7 @@
  * Record<id, TrackDto> so the Curtidas page renders and plays without a backend.
  */
 import type { TrackDto } from '@aurial/shared';
-import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const LIKES_KEY = 'aurial:local-likes'; // string[] of track ids, newest-first
@@ -94,7 +94,13 @@ function applyRemove(id: string): void {
   // The companion DTO is left in the map; it's tiny and harmless.
 }
 
-const cloud = cloudCollection<LikeDoc>({
+// A SINCRONIA SAIU DO FIRESTORE (ver lib/sync/serverCollection.ts).
+// Motivo: o primeiro snapshot de cada sessão trazia a coleção INTEIRA, cobrada
+// por documento, e o limite grátis é do PROJETO — quando estourava, caíam
+// juntos acervo, sincronia e curtidas. Aconteceu três vezes.
+// Ganho de quebra: a escrita entra numa FILA EM DISCO antes de tentar a rede,
+// então curtir com o servidor fora do ar funciona e sobe sozinho depois.
+const cloud = serverCollection<LikeDoc>({
   name: 'likes',
   localItems: () => {
     const map = readTracks();

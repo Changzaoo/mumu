@@ -14,7 +14,7 @@
  */
 import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
 import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
-import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
@@ -200,8 +200,13 @@ export function remapTrackIds(replace: ReadonlyMap<string, string>): number {
   return changed.length;
 }
 
-// ── cross-device sync (Firestore) ───────────────────────────────
-const cloud = cloudCollection<PlaylistDocData>({
+// A SINCRONIA SAIU DO FIRESTORE (ver lib/sync/serverCollection.ts).
+// Motivo: o primeiro snapshot de cada sessão trazia a coleção INTEIRA, cobrada
+// por documento, e o limite grátis é do PROJETO — quando estourava, caíam
+// juntos acervo, sincronia e curtidas. Aconteceu três vezes.
+// Ganho de quebra: a escrita entra numa FILA EM DISCO antes de tentar a rede,
+// então curtir com o servidor fora do ar funciona e sobe sozinho depois.
+const cloud = serverCollection<PlaylistDocData>({
   name: 'playlists',
   localItems: () =>
     readPlaylists().map((p): [string, PlaylistDocData] => [

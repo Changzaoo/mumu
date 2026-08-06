@@ -52,15 +52,17 @@ export default function App() {
     let pararPesquisador: (() => void) | null = null;
     let cancelado = false;
     void (async () => {
-      const [sync, catalogo, fila, telemetria, presenca, genero, pesquisador] = await Promise.all([
-        import('@/lib/sync/syncManager'),
-        import('@/lib/sync/catalogoBoot'),
-        import('@/lib/local/importQueue'),
-        import('@/lib/telemetry/telemetry'),
-        import('@/lib/devices/presence'),
-        import('@/lib/local/genreAgent'),
-        import('@/lib/local/pesquisador'),
-      ]);
+      const [sync, catalogo, fila, telemetria, presenca, genero, pesquisador, guardiao] =
+        await Promise.all([
+          import('@/lib/sync/syncManager'),
+          import('@/lib/sync/catalogoBoot'),
+          import('@/lib/local/importQueue'),
+          import('@/lib/telemetry/telemetry'),
+          import('@/lib/devices/presence'),
+          import('@/lib/local/genreAgent'),
+          import('@/lib/local/pesquisador'),
+          import('@/lib/offline/guardiaoOffline'),
+        ]);
       if (cancelado) return;
       sync.initCloudSync();
       catalogo.initCatalogo(); // acervo do app: o que o admin adiciona chega em todos
@@ -68,6 +70,10 @@ export default function App() {
       telemetria.initTelemetry(); // usage metrics for the admin /telemetria page
       presenca.initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
       genero.initGenreAgent(); // plantão que categoriza a biblioteca por gênero (IA)
+      // "Se você viu a música, ela toca": traz os bytes para o aparelho ANTES de
+      // precisar deles, para o servidor fora do ar deixar de virar faixa que
+      // aparece e não toca. Ver lib/offline/guardiaoOffline.ts.
+      guardiao.initGuardiaoOffline();
       // Agente pesquisador: DESLIGADO por padrão. Ele confere o interruptor a
       // cada rodada, então desligar nas configurações para o agente na hora.
       pararPesquisador = pesquisador.iniciarPesquisador(

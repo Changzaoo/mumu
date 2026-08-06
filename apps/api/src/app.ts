@@ -29,6 +29,7 @@ import { socialRoutes, registerFeedProjection } from './modules/social/index.js'
 import { adminRoutes } from './modules/admin/index.js';
 import { undergroundRoutes } from './modules/underground/index.js';
 import { catalogRoutes } from './modules/catalog/index.js';
+import { collectionsRoutes } from './modules/collections/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -98,6 +99,9 @@ export function createApp(): Express {
   // Saiu do Firestore porque a coleção inteira era lida a cada abertura do
   // app, por cada pessoa: o limite grátis é do projeto e estourou três vezes.
   api.use('/catalogo', catalogRoutes);
+  // Biblioteca, curtidas e playlists de cada um — sincronia por DELTA, com
+  // fila offline no cliente. Saíram do Firestore pelo mesmo motivo do acervo.
+  api.use('/me/colecoes', collectionsRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());

@@ -59,6 +59,7 @@ model User {
   playlistFollows    PlaylistFollow[]
   hostedSessions     ListenSession[]        @relation("SessionHost")
   sessionMemberships ListenSessionMember[]
+  collectionItems    UserCollectionItem[]
 
   @@index([handle])
   @@index([createdAt])
@@ -661,4 +662,33 @@ model CatalogTrack {
   createdAt DateTime @default(now())
 
   @@index([updatedAt])
+}
+
+/// AS COLEÇÕES DE CADA USUÁRIO — biblioteca, curtidas, playlists.
+///
+/// Mesma história do acervo: viviam no Firestore, e a leitura era cobrada por
+/// documento a cada abertura do app. A diferença é que estas são PRIVADAS, então
+/// toda rota que mexe aqui exige token e filtra por `userId` — nunca por um id
+/// que venha do cliente.
+///
+/// `deleted` é uma LÁPIDE, não um detalhe. Sem ela, a sincronia por delta não
+/// tem como contar que algo sumiu: o aparelho B pede "o que mudou desde X",
+/// recebe uma lista sem o item apagado e conclui, errado, que nada aconteceu —
+/// a faixa que você removeu no computador reaparece no celular para sempre.
+model UserCollectionItem {
+  userId     String
+  /// Nome da coleção ("library", "likes", "playlists"...).
+  collection String
+  /// Id do item DENTRO da coleção, gerado pelo cliente.
+  itemId     String
+  data       Json
+  deleted    Boolean  @default(false)
+  updatedAt  DateTime @updatedAt
+  createdAt  DateTime @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@id([userId, collection, itemId])
+  /// O cursor da sincronia por delta ("o que mudou desde X") sai daqui.
+  @@index([userId, collection, updatedAt])
 }

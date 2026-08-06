@@ -21,7 +21,7 @@ import {
   putAudio,
   putCover,
 } from '@/lib/offline/audioCache';
-import { cloudCollection } from '@/lib/sync/cloudCollection';
+import { serverCollection } from '@/lib/sync/serverCollection';
 import { publicarNoCatalogo, removerDoCatalogo } from '@/lib/sync/catalogo';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
@@ -539,11 +539,16 @@ export function reportDeadRemote(id: string, deadUrl: string): void {
   })();
 }
 
-// ── cross-device sync (Firestore, metadata only) ────────────────
 // Only the registry (track + metadata) syncs. The audio bytes stay on the
 // device that has them; a synced-in entry simply isn't playable elsewhere until
 // its file is re-imported/received (the user opted for library-only sync).
-const cloud = cloudCollection<LibraryEntry>({
+// A SINCRONIA SAIU DO FIRESTORE (ver lib/sync/serverCollection.ts).
+// Motivo: o primeiro snapshot de cada sessão trazia a coleção INTEIRA, cobrada
+// por documento, e o limite grátis é do PROJETO — quando estourava, caíam
+// juntos acervo, sincronia e curtidas. Aconteceu três vezes.
+// Ganho de quebra: a escrita entra numa FILA EM DISCO antes de tentar a rede,
+// então curtir com o servidor fora do ar funciona e sobe sozinho depois.
+const cloud = serverCollection<LibraryEntry>({
   name: 'library',
   // O que é do ACERVO fica de fora: subir faixa emprestada para a nuvem privada
   // do usuário a transformaria em cópia dele, que sobreviveria ao admin tirar a
@@ -1166,41 +1171,59 @@ export async function repairMissingAudio(): Promise<number> {
   let recuperadas = 0;
 
   for (const entry of tracksMissingAudio()) {
-    const id = entry.track.id;
-
-    // Pode já estar no cofre local e só faltar o object URL desta sessão —
-    // nesse caso não há o que baixar.
-    const local = await getBlob(id).catch(() => null);
-    if (local) {
-      blobUrls.set(id, URL.createObjectURL(local));
-      recuperadas += 1;
-      continue;
-    }
-
-    const fontes = [
-      entry.remoteUrl,
-      entry.sourceUrl ? await buildStreamUrl(entry.sourceUrl) : null,
-    ];
-    for (const url of fontes) {
-      if (!url) continue;
-      try {
-        const res = await fetch(url);
-        if (!res.ok) continue;
-        const blob = await res.blob();
-        if (!blob.size) continue;
-        await putBlob(id, blob); // já confere que ficou gravado
-        blobUrls.set(id, URL.createObjectURL(blob));
-        recuperadas += 1;
-        break;
-      } catch {
-        // tenta a próxima fonte
-      }
-    }
+    if (await garantirAudioLocal(entry.track.id)) recuperadas += 1;
     await descanso(200);
   }
 
   if (recuperadas) emit();
   return recuperadas;
+}
+
+/**
+ * Garante que os bytes desta faixa estejam NESTE aparelho, baixando se preciso.
+ *
+ * É o tijolo do "se você viu a música, ela toca": com o áudio gravado aqui, o
+ * player nem consulta a rede (ver `ensurePlayableSource`), então o servidor
+ * fora do ar deixa de ser motivo para uma faixa aparecer e não tocar.
+ *
+ * Devolve `true` quando a faixa passou a ter áudio local — inclusive quando ela
+ * já tinha e só faltava o object URL desta sessão. Nunca lança: quem chama é
+ * uma varredura de fundo, e uma faixa que não dá para baixar agora não pode
+ * derrubar as outras.
+ */
+export async function garantirAudioLocal(id: string): Promise<boolean> {
+  const entry = read().find((e) => e.track.id === id);
+  if (!entry) return false;
+
+  // Pode já estar no cofre e só faltar o object URL desta sessão — nesse caso
+  // não há o que baixar.
+  const local = await getBlob(id).catch(() => null);
+  if (local) {
+    if (!blobUrls.has(id)) blobUrls.set(id, URL.createObjectURL(local));
+    audioLocal.add(id);
+    return true;
+  }
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+
+  // A cópia enviada ao importador primeiro (mesmo arquivo, mais barata) e, na
+  // falta dela, o link de origem.
+  const fontes = [entry.remoteUrl, entry.sourceUrl ? await buildStreamUrl(entry.sourceUrl) : null];
+  for (const url of fontes) {
+    if (!url) continue;
+    try {
+      const res = await fetch(url);
+      if (!res.ok) continue;
+      const blob = await res.blob();
+      if (!blob.size) continue;
+      await putBlob(id, blob); // já confere que ficou gravado
+      blobUrls.set(id, URL.createObjectURL(blob));
+      audioLocal.add(id);
+      return true;
+    } catch {
+      // tenta a próxima fonte
+    }
+  }
+  return false;
 }
 
 // ── album / artist organization (Spotify-style, all from local metadata) ──
