@@ -19,46 +19,46 @@ enum UserRole {
 }
 
 model User {
-  id          String   @id @default(cuid())
-  firebaseUid String   @unique
-  email       String?  @unique
-  handle      String   @unique
+  id          String    @id @default(cuid())
+  firebaseUid String    @unique
+  email       String?   @unique
+  handle      String    @unique
   displayName String
   avatarUrl   String?
   bannerUrl   String?
-  bio         String?  @db.VarChar(300)
+  bio         String?   @db.VarChar(300)
   socialLinks Json?
-  role        UserRole @default(USER)
-  isPremium   Boolean  @default(false)
-  isBanned    Boolean  @default(false)
+  role        UserRole  @default(USER)
+  isPremium   Boolean   @default(false)
+  isBanned    Boolean   @default(false)
   bannedUntil DateTime?
   banReason   String?
   settings    Json?
-  lastSeenAt  DateTime @default(now())
-  createdAt   DateTime @default(now())
-  updatedAt   DateTime @updatedAt
+  lastSeenAt  DateTime  @default(now())
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
 
-  playlists           Playlist[]           @relation("PlaylistOwner")
-  playlistCollabs     PlaylistCollaborator[]
-  likedTracks         LikedTrack[]
-  likedAlbums         LikedAlbum[]
-  followedArtists     ArtistFollow[]
-  following           UserFollow[]         @relation("Follower")
-  followers           UserFollow[]         @relation("Followee")
-  playHistory         PlayHistory[]
-  uploads             Upload[]
-  uploadedTracks      Track[]              @relation("UploadedTracks")
-  importJobs          ImportJob[]
-  comments             Comment[]
-  commentLikes        CommentLike[]
-  feedEvents          FeedEvent[]
-  notifications       Notification[]
-  badges              UserBadge[]
-  downloads           Download[]
-  auditLogs           AuditLog[]           @relation("AuditActor")
-  playlistFollows     PlaylistFollow[]
-  hostedSessions      ListenSession[]      @relation("SessionHost")
-  sessionMemberships  ListenSessionMember[]
+  playlists          Playlist[]             @relation("PlaylistOwner")
+  playlistCollabs    PlaylistCollaborator[]
+  likedTracks        LikedTrack[]
+  likedAlbums        LikedAlbum[]
+  followedArtists    ArtistFollow[]
+  following          UserFollow[]           @relation("Follower")
+  followers          UserFollow[]           @relation("Followee")
+  playHistory        PlayHistory[]
+  uploads            Upload[]
+  uploadedTracks     Track[]                @relation("UploadedTracks")
+  importJobs         ImportJob[]
+  comments           Comment[]
+  commentLikes       CommentLike[]
+  feedEvents         FeedEvent[]
+  notifications      Notification[]
+  badges             UserBadge[]
+  downloads          Download[]
+  auditLogs          AuditLog[]             @relation("AuditActor")
+  playlistFollows    PlaylistFollow[]
+  hostedSessions     ListenSession[]        @relation("SessionHost")
+  sessionMemberships ListenSessionMember[]
 
   @@index([handle])
   @@index([createdAt])
@@ -79,10 +79,10 @@ model UserFollow {
 // ─────────────────────────────── Catalog ───────────────────────────────
 
 model Genre {
-  id     String  @id @default(cuid())
-  name   String  @unique
-  slug   String  @unique
-  color  String?
+  id    String  @id @default(cuid())
+  name  String  @unique
+  slug  String  @unique
+  color String?
 
   artists ArtistGenre[]
   albums  AlbumGenre[]
@@ -102,14 +102,14 @@ model Artist {
   updatedAt        DateTime @updatedAt
 
   /// Gravadora / selo com que o artista trabalha (a mais frequente no acervo).
-  label            String?
+  label         String?
   /// Operator-curated catalog tag e.g. "underground", "freestyle", "local
   /// artist". Distinct from `label`, which is the record company.
-  catalogTag       String?
+  catalogTag    String?
   /// Short location string e.g. "São Paulo, BR", "Brooklyn, NY"
-  location         String?
+  location      String?
   /// Other platforms links (JSON: { soundcloud, bandcamp, instagram, twitter... })
-  externalLinks    Json?
+  externalLinks Json?
 
   genres    ArtistGenre[]
   albums    AlbumArtist[]
@@ -231,8 +231,8 @@ model Track {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  album        Album?        @relation(fields: [albumId], references: [id], onDelete: SetNull)
-  uploadedBy   User?         @relation("UploadedTracks", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
+  album        Album?          @relation(fields: [albumId], references: [id], onDelete: SetNull)
+  uploadedBy   User?           @relation("UploadedTracks", fields: [uploadedByUserId], references: [id], onDelete: SetNull)
   artists      TrackArtist[]
   genres       TrackGenre[]
   likedBy      LikedTrack[]
@@ -559,13 +559,13 @@ model FeedEvent {
 }
 
 model ListenSession {
-  id         String   @id @default(cuid())
+  id         String    @id @default(cuid())
   hostUserId String
   trackId    String?
-  positionMs Int      @default(0)
-  isPlaying  Boolean  @default(false)
+  positionMs Int       @default(0)
+  isPlaying  Boolean   @default(false)
   endedAt    DateTime?
-  createdAt  DateTime @default(now())
+  createdAt  DateTime  @default(now())
 
   host    User                  @relation("SessionHost", fields: [hostUserId], references: [id], onDelete: Cascade)
   members ListenSessionMember[]
@@ -605,14 +605,14 @@ model UserBadge {
 }
 
 model Notification {
-  id        String   @id @default(cuid())
+  id        String    @id @default(cuid())
   userId    String
   type      String
   title     String
   body      String?
   linkUrl   String?
   readAt    DateTime?
-  createdAt DateTime @default(now())
+  createdAt DateTime  @default(now())
 
   user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
@@ -634,4 +634,31 @@ model AuditLog {
 
   @@index([actorId])
   @@index([createdAt])
+}
+
+// ─────────────────────────────── Acervo do app ───────────────────────────────
+
+/// O ACERVO — o que o admin adiciona e todo mundo ouve.
+///
+/// Morava no Firestore, e a conta não fechava: a coleção INTEIRA é lida a cada
+/// abertura do app, por cada pessoa, mais a varredura horária do worker. O
+/// limite grátis de 50 mil leituras/dia é do projeto todo, e ele estourou três
+/// vezes — derrubando junto sincronia, curtidas e o acervo de todo mundo.
+///
+/// Aqui não há pedágio por leitura, e a máquina que serve isto JÁ é dependência
+/// dura para tocar: todo áudio sai dela. Mover a listagem para cá não cria
+/// nenhum ponto de falha novo — ele já existia.
+///
+/// A faixa inteira fica em `data` (o `LibraryEntry` do cliente, como ele já
+/// trafega) em vez de espalhada em colunas: o formato é do cliente, muda com
+/// ele, e nenhuma consulta aqui precisa filtrar por dentro — são centenas de
+/// linhas, lidas de uma vez e servidas com ETag.
+model CatalogTrack {
+  /// O id da faixa no cliente (`local:<uuid>`), não um id gerado aqui.
+  id        String   @id
+  data      Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([updatedAt])
 }

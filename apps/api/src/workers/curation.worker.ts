@@ -32,6 +32,7 @@ import {
 } from '@aurial/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
+import { prisma } from '../infra/db/prisma.js';
 import { getFirebaseApp, isFirebaseEnabled } from '../infra/firebase/firebase.js';
 import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
 import {
@@ -296,27 +297,52 @@ async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
  * auditoria de atribuição, DNA ou fusão de duplicatas: essas passagens têm dono
  * (a biblioteca de quem importou) e o acervo é espelho dela.
  *
- * DE HORA EM HORA, NÃO A CADA VOLTA. Ler o acervo inteiro custa uma leitura por
- * faixa, e a volta é de 15 minutos: com trezentas faixas isso seria ~29 mil
- * leituras por dia só aqui, num projeto cujo limite diário grátis é 50 mil — e
- * cuja cota já foi estourada uma vez, derrubando o app inteiro. De hora em hora
- * o custo cai para um quarto e não muda nada na prática: categoria errada não
- * fica mais certa por ser conferida quatro vezes por hora.
+ * O ACERVO AGORA MORA NO POSTGRES, aqui do lado — não no Firestore. Ler a
+ * coleção inteira lá custava uma leitura por faixa, e o limite grátis de 50 mil
+ * por dia é do projeto todo: era esta varredura, somada às aberturas do app,
+ * que derrubava acervo, sincronia e curtidas juntos. Aqui a mesma varredura é
+ * um `SELECT` numa tabela de centenas de linhas, e custa nada.
  */
-const ACERVO_INTERVALO_MS = 60 * 60_000;
-let acervoVistoEm = 0;
+async function curarAcervo(): Promise<number> {
+  const linhas = await prisma.catalogTrack.findMany();
+  if (linhas.length === 0) return 0;
 
-async function curarAcervo(db: Firestore): Promise<number> {
-  const agora = Date.now();
-  if (agora - acervoVistoEm < ACERVO_INTERVALO_MS) return 0;
-  acervoVistoEm = agora;
+  const faixas: FaixaMinima[] = linhas.map((linha) => {
+    const track = (linha.data as { track?: LibraryTrack }).track ?? {};
+    return {
+      id: linha.id,
+      genre: typeof track.genre === 'string' ? track.genre : null,
+      artistas: artistNames(track),
+    };
+  });
 
-  const snapshot = await db.collection('catalogo').get();
-  if (snapshot.empty) return 0;
-  const corrigidas = await curarCategorias(snapshot.docs);
-  if (corrigidas > 0) {
-    log.info({ corrigidas, faixas: snapshot.size }, 'categorias do acervo curadas');
+  // A REVISÃO (regra pura, sem IA) resolve o grosso: esvazia o balde
+  // "Brasileira", padroniza grafia e corrige a faixa que destoa de toda a
+  // discografia do artista. As mesmas regras que o app usa — ver
+  // shared/ai/generoCoerencia.ts.
+  const mudancas = revisarGenerosDeFaixas(faixas);
+  let corrigidas = 0;
+  for (const mudanca of mudancas) {
+    const linha = linhas.find((l) => l.id === mudanca.id);
+    if (!linha) continue;
+    const dados = linha.data as { track?: Record<string, unknown> };
+    if (!dados.track) continue;
+    try {
+      await prisma.catalogTrack.update({
+        where: { id: mudanca.id },
+        data: { data: { ...dados, track: { ...dados.track, genre: mudanca.para } } },
+      });
+      corrigidas += 1;
+      log.info(
+        { faixa: mudanca.id, de: mudanca.de, para: mudanca.para, motivo: mudanca.motivo },
+        'categoria do acervo revisada',
+      );
+    } catch (err) {
+      log.warn({ err, faixa: mudanca.id }, 'falha ao revisar categoria do acervo');
+    }
   }
+
+  if (corrigidas > 0) log.info({ corrigidas, faixas: linhas.length }, 'acervo curado');
   return corrigidas;
 }
 
@@ -596,7 +622,7 @@ async function runOnce(db: Firestore): Promise<void> {
     fixed += await curateUser(db, user.id);
   }
   // O acervo é o que o usuário comum realmente vê — ver curarAcervo.
-  fixed += await curarAcervo(db).catch((err) => {
+  fixed += await curarAcervo().catch((err) => {
     log.warn({ err }, 'falha ao curar o acervo');
     return 0;
   });

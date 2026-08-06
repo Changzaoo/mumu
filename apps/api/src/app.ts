@@ -28,6 +28,7 @@ import { recommendationsRoutes } from './modules/recommendations/index.js';
 import { socialRoutes, registerFeedProjection } from './modules/social/index.js';
 import { adminRoutes } from './modules/admin/index.js';
 import { undergroundRoutes } from './modules/underground/index.js';
+import { catalogRoutes } from './modules/catalog/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -93,6 +94,10 @@ export function createApp(): Express {
   api.use('/', socialRoutes); // /feed, /tracks/:id/comments, /comments/:id, /sessions
   api.use('/admin', adminRoutes);
   api.use('/underground', undergroundRoutes);
+  // O ACERVO — leitura aberta (visitante ouve prévia), escrita com conta.
+  // Saiu do Firestore porque a coleção inteira era lida a cada abertura do
+  // app, por cada pessoa: o limite grátis é do projeto e estourou três vezes.
+  api.use('/catalogo', catalogRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());
