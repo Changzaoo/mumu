@@ -32,13 +32,22 @@ export default function DiagnosticoPage(): React.ReactElement {
       // do navegador estourada. Sem isto aqui, a pessoa lia o diagnóstico de
       // reprodução inteiro para descobrir que o problema era outro.
       const entradas = listarBiblioteca();
-      const sincronia = relatorioSyncTexto({
-        total: entradas.length,
-        doAcervo: entradas.filter((e) => e.origem === 'catalogo').length,
-        // Sem cópia no importador E sem link de origem = só toca no aparelho
-        // que importou. Ver ResumoBiblioteca.
-        semFonteRemota: entradas.filter((e) => !e.remoteUrl && !e.sourceUrl).length,
-      });
+      const { auth } = await import('@/lib/firebase');
+      const usuario = auth?.currentUser ?? null;
+      const sincronia = relatorioSyncTexto(
+        {
+          total: entradas.length,
+          doAcervo: entradas.filter((e) => e.origem === 'catalogo').length,
+          // Sem cópia no importador E sem link de origem = só toca no aparelho
+          // que importou. Ver ResumoBiblioteca.
+          semFonteRemota: entradas.filter((e) => !e.remoteUrl && !e.sourceUrl).length,
+        },
+        {
+          uid: usuario?.uid ?? null,
+          email: usuario?.email ?? null,
+          anonima: usuario?.isAnonymous ?? false,
+        },
+      );
       setRelatorio(`${sincronia}\n\n${'─'.repeat(48)}\n\n${await relatorioDeReproducao()}`);
     } catch (err) {
       setRelatorio(`O diagnóstico falhou: ${(err as Error).message}`);

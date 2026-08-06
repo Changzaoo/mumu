@@ -24,6 +24,29 @@ describe('relatório de sincronia', () => {
     expect(texto).toContain('independe de login');
   });
 
+  // ── a conta, que era o que faltava saber ─────────────────────────────────
+  // A escrita no acervo era negada por uma comparação de e-mail, e o app dizia
+  // "não consegui publicar" sem dizer com QUAL conta tinha tentado. Sessão
+  // anônima nem e-mail tem — e o app oferece login anônimo.
+
+  it('mostra a conta usada, que é onde quase toda recusa se explica', () => {
+    const texto = status.relatorioSyncTexto(
+      { total: 0, doAcervo: 0, semFonteRemota: 0 },
+      { uid: 'abc123', email: 'alguem@exemplo.com', anonima: false },
+    );
+    expect(texto).toContain('alguem@exemplo.com');
+    expect(texto).toContain('abc123');
+  });
+
+  it('sessão anônima é denunciada — token sem e-mail nunca casa com a regra', () => {
+    const texto = status.relatorioSyncTexto(
+      { total: 0, doAcervo: 0, semFonteRemota: 0 },
+      { uid: 'anon1', email: null, anonima: true },
+    );
+    expect(texto).toContain('ANÔNIMA');
+    expect(texto).toContain('não tem e-mail');
+  });
+
   it('acervo vazio aponta o suspeito nº 1: regras não publicadas', () => {
     status.registrarSnapshot('catalogo', 0, 'servidor');
 

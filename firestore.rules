@@ -30,9 +30,27 @@ service cloud.firestore {
     //
     // Leitura aberta de propósito: o app funciona para visitante (prévia de
     // 30s), e é o acervo que dá o que ouvir antes de criar conta.
+    // ESCRITA POR QUALQUER CONTA LOGADA, DE PROPÓSITO.
+    //
+    // A primeira versão exigia `ehAdmin()` — o e-mail do token numa lista fixa.
+    // Ela negou TODAS as escritas e o acervo ficou vazio por dias, sem ninguém
+    // conseguir dizer por quê: leitura liberada, regra publicada, escrita
+    // recusada em silêncio. Duas contas fazem a lista falhar sem aviso: entrar
+    // com outro e-mail, e entrar de forma ANÔNIMA — aí o token não tem e-mail
+    // nenhum e a comparação nunca casa.
+    //
+    // O que se perde: qualquer pessoa logada pode escrever no acervo. Numa
+    // plataforma aberta isso seria inaceitável; aqui é um app com um punhado de
+    // usuários conhecidos, e o cliente só publica faixas da PRÓPRIA biblioteca
+    // (nunca as emprestadas do acervo) — na prática vira acervo comunitário,
+    // que é o mesmo modelo já usado em `sharedTracks` logo abaixo.
+    //
+    // Para voltar a restringir depois, sem repetir o erro: troque por uma
+    // comparação de UID (`request.auth.uid == '...'`), que existe em TODA
+    // sessão, inclusive anônima — o e-mail não.
     match /catalogo/{trackId} {
       allow read: if true;
-      allow write: if ehAdmin();
+      allow write: if request.auth != null;
     }
 
     // Community trending: public to read (the "em alta" feed); any signed-in

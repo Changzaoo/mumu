@@ -108,6 +108,20 @@ export function relatorioSync(): RelatorioSync {
 }
 
 /** Foto da biblioteca deste aparelho, medida por quem a conhece (a página). */
+/**
+ * Quem está logado NESTE aparelho.
+ *
+ * Existe porque a escrita no acervo era negada por uma comparação de e-mail que
+ * ninguém conseguia ver: o app dizia "não consegui publicar" e não dizia com
+ * QUAL conta tinha tentado. Sessão anônima — que o app oferece — nem e-mail tem.
+ * Uma linha aqui responde o que custou dias.
+ */
+export interface Conta {
+  uid: string | null;
+  email: string | null;
+  anonima: boolean;
+}
+
 export interface ResumoBiblioteca {
   /** Faixas na biblioteca deste aparelho. */
   total: number;
@@ -134,10 +148,21 @@ export interface ResumoBiblioteca {
  * O resumo é passado de fora (a página conhece a biblioteca) para este módulo
  * não depender da loja que ele mede.
  */
-export function relatorioSyncTexto(resumo: ResumoBiblioteca): string {
+export function relatorioSyncTexto(resumo: ResumoBiblioteca, conta?: Conta): string {
   const r = relatorioSync();
   const itensLocais = resumo.total;
   const linhas: string[] = ['SINCRONIA ENTRE APARELHOS', ''];
+
+  // A CONTA VEM PRIMEIRO. Quase toda recusa de escrita se explica aqui, e sem
+  // esta linha o app dizia "não consegui publicar" sem dizer com quem tentou.
+  if (conta) {
+    if (!conta.uid) linhas.push('conta: NENHUMA (deslogado)');
+    else if (conta.anonima) {
+      linhas.push(`conta: ANÔNIMA (${conta.uid})`);
+      linhas.push('  Sessão anônima não tem e-mail — regra que compara e-mail nunca casa.');
+    } else linhas.push(`conta: ${conta.email ?? '(sem e-mail no token)'} (${conta.uid})`);
+    linhas.push('');
+  }
 
   // O ACERVO vem primeiro, e é reportado mesmo sem login: ele é o que o app
   // tem para oferecer a quem só escuta. Acervo vazio aqui e cheio no aparelho
