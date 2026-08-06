@@ -11,6 +11,10 @@
 import { appleArtwork, searchSongs, type AppleSong } from '@/lib/catalog/itunes';
 import { aiIdentifyTrack, aiSplitArtists } from '@/lib/ai/ai';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
+// O catálogo devolve PRATELEIRA, não gênero: "Brasileira" cobre sertanejo, trap,
+// gospel e funk ao mesmo tempo. Gravar isso cru criava a prateleira inútil E
+// trancava a faixa fora do agente de categorias. Ver shared/ai/generos.ts.
+import { normalizarGenero } from '@aurial/shared';
 
 export interface CleanQuery {
   title: string;
@@ -195,7 +199,7 @@ export async function enrichMeta(q: CleanQuery): Promise<EnrichedMeta | null> {
         artists: await resolveArtists(best.artistName, best.trackName),
         album: best.collectionName || null,
         coverUrl: best.artworkUrl100 ? hiRes(best.artworkUrl100) : null,
-        genre: best.primaryGenreName || null,
+        genre: normalizarGenero(best.primaryGenreName),
         composer: composerOf(best),
       };
     }
@@ -284,7 +288,7 @@ export async function verifyIdentity(
     artists: await resolveArtists(chosen.artistName, chosen.trackName),
     album: chosen.collectionName || null,
     coverUrl: chosen.artworkUrl100 ? hiRes(chosen.artworkUrl100) : null,
-    genre: chosen.primaryGenreName || null,
+    genre: normalizarGenero(chosen.primaryGenreName),
     composer: composerOf(chosen),
   };
 }
@@ -359,7 +363,7 @@ export async function identifyByTitle(title: string): Promise<EnrichedMeta | nul
     artists: await resolveArtists(chosen.artistName, chosen.trackName),
     album: chosen.collectionName || null,
     coverUrl: chosen.artworkUrl100 ? hiRes(chosen.artworkUrl100) : null,
-    genre: chosen.primaryGenreName || null,
+    genre: normalizarGenero(chosen.primaryGenreName),
     composer: composerOf(chosen),
   };
 }

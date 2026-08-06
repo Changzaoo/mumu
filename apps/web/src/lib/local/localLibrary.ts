@@ -867,9 +867,12 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
 
 /** AGENTE DE CATEGORIAS: aplica um gênero classificado a uma faixa (patch
  *  mínimo — não mexe em crédito/capa; ver lib/local/genreAgent.ts). */
-export function setTrackGenre(id: string, genre: string): void {
+export function setTrackGenre(id: string, genre: string | null): void {
   const cur = read().find((e) => e.track.id === id);
-  if (!cur || cur.track.genre === genre) return;
+  // `null` é um valor legítimo aqui: é como a revisão esvazia um rótulo que não
+  // era gênero ("Brasileira" é nacionalidade) e devolve a faixa para a fila do
+  // agente — que só enxerga quem está SEM categoria. Ver generoCoerencia.ts.
+  if (!cur || (cur.track.genre ?? null) === genre) return;
   patchEntry(id, { ...cur, track: { ...cur.track, genre } });
 }
 

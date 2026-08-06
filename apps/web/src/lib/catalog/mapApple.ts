@@ -10,7 +10,7 @@
  * clip, not the full song). `downloadUrl` is always null and `previewOnly` is
  * true — these tracks are never downloaded, offline-cached or P2P-shared.
  */
-import type { TrackDto } from '@aurial/shared';
+import { normalizarGenero, type TrackDto } from '@aurial/shared';
 import { appleArtwork, type AppleSong } from '@/lib/catalog/itunes';
 
 /** Apple preview clip length in ms (fixed — matches the seek bar). */
@@ -47,7 +47,8 @@ export function appleSongToDto(song: AppleSong): TrackDto {
     // Stream-only 30s preview: never downloadable / offline / P2P-shareable.
     downloadUrl: null,
     previewOnly: true,
-    genre: song.primaryGenreName ?? null,
+    // "Brasileira" é nacionalidade, não gênero — ver shared/ai/generos.ts.
+    genre: normalizarGenero(song.primaryGenreName),
     // Só a busca por álbum traz o copyright; nas outras rotas fica null.
     label: song.label ?? null,
     uploadedByUserId: null,

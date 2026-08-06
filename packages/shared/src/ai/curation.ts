@@ -20,6 +20,11 @@ export const GENRE_TAXONOMY = [
   'Sertanejo',
   'MPB',
   'Pagode',
+  // Samba e Axé faltavam numa biblioteca brasileira, e falta de rótulo não
+  // deixa a faixa sem categoria: empurra para a categoria vizinha errada (samba
+  // virando Pagode ou MPB). São gêneros que a própria Apple devolve.
+  'Samba',
+  'Axé',
   'Forró',
   'Gospel',
   'Rock',
@@ -229,6 +234,36 @@ export function parseVerify(content: string): boolean | null {
  * adivinhação. Faixa sem categoria é um buraco visível que a curadoria pode
  * preencher depois; faixa na categoria errada é uma mentira que ninguém revisa.
  */
+/**
+ * O GLOSSÁRIO EXISTE PORQUE OS ERROS RELATADOS ERAM SEMPRE OS MESMOS PARES.
+ *
+ * Trap indo para Lo-Fi, trap indo para Sertanejo, funk/gospel/sertanejo se
+ * embaralhando. Não é aleatório: são rótulos que colidem quando o modelo lê só
+ * o nome da categoria, sem saber o que ela significa AQUI.
+ *
+ *  - "Funk", para um modelo treinado em inglês, é James Brown. No Brasil é funk
+ *    carioca — outra música inteira, com outro público.
+ *  - "Lo-Fi" não é um estilo de canção, é uma estética de produção instrumental.
+ *    Um trap com rapper na frente não vira Lo-Fi porque a base é crua — e era
+ *    exatamente esse o erro.
+ *  - "Sertanejo" e "Trap" não se parecem em nada, mas ambos são o rótulo
+ *    "brasileiro genérico" na cabeça de quem não conhece a faixa. Sem definição,
+ *    o modelo escolhe o mais famoso.
+ *
+ * Definir custa algumas dezenas de tokens e remove a colisão na origem.
+ */
+export const GLOSSARIO_DE_GENEROS = [
+  'Funk = funk carioca/brasileiro (baile funk, MC, batida de tamborzão). NÃO é o funk/soul americano — esse é R&B/Soul.',
+  'Trap = 808 grave, hi-hats rápidos, flow cantado/arrastado; inclui trap brasileiro. Se tem rapper ou cantor na frente, é Trap ou Hip-Hop/Rap, NUNCA Lo-Fi.',
+  'Lo-Fi = INSTRUMENTAL de estudo/relaxar, chiado e batida crua, sem vocal protagonista. Se a faixa tem letra cantada ou rimada, NÃO é Lo-Fi.',
+  'Hip-Hop/Rap = rap, boom bap, rap nacional. Use Trap só quando a produção for de trap.',
+  'Sertanejo = dupla sertaneja, viola/acordeão, sofrência, universitário, arrocha. NÃO use para faixa com 808 e rap.',
+  'Gospel = louvor e adoração cristã (a LETRA é religiosa), qualquer que seja a batida.',
+  'Pagode = pagode e samba de roda moderno; Samba = samba tradicional, escola de samba.',
+  'Forró = forró, piseiro, brega nordestino; Axé = axé baiano, carnaval.',
+  'MPB = música popular brasileira de compositor (Chico, Caetano, Djavan e herdeiros).',
+].join(' ');
+
 export function genreMessages(title: string, artist?: string): AiMessage[] {
   return [
     {
@@ -236,6 +271,7 @@ export function genreMessages(title: string, artist?: string): AiMessage[] {
       content:
         'Você classifica uma música em UM gênero musical desta lista EXATA: ' +
         `${GENRE_TAXONOMY.join(', ')}. ` +
+        `Definições que você DEVE seguir: ${GLOSSARIO_DE_GENEROS} ` +
         'Se você NÃO CONHECE esta música ou este artista, responda exatamente DESCONHECIDO. ' +
         'Nunca deduza o gênero pelo clima do título — é preferível responder DESCONHECIDO ' +
         'a arriscar uma categoria errada. ' +

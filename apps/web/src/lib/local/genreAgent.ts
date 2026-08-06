@@ -16,8 +16,18 @@
 import { aiClassifyGenre } from '@/lib/ai/ai';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+import {
+  aceitarSugestao,
+  generoDoArtista,
+  herdarDoArtista,
+  revisarGeneros,
+  type FaixaMinima,
+} from '@/lib/local/generoCoerencia';
 
 const ATTEMPTS_KEY = 'aurial:genreAgentAttempts';
+const REVISAO_KEY = 'aurial:genreRevisao';
+/** Suba isto para reexaminar TODA a biblioteca com as regras de gênero novas. */
+const REVISAO_VERSAO = 1;
 const MAX_ATTEMPTS = 3;
 const SESSION_BUDGET = 20;
 const PACE_MS = 1_800;
@@ -65,11 +75,53 @@ export function isRunning(): boolean {
   return running;
 }
 
+/** A biblioteca na forma mínima que as decisões de gênero precisam. */
+function faixasMinimas(): FaixaMinima[] {
+  return localLibrary.list().map((e) => ({
+    id: e.track.id,
+    genre: e.track.genre ?? null,
+    artistas: e.track.artists.map((a) => a.name),
+  }));
+}
+
+/**
+ * REVISÃO ÚNICA DO QUE JÁ ESTÁ GRAVADO.
+ *
+ * As regras novas só valem para o que vier daqui em diante — e a biblioteca já
+ * está cheia de categoria errada posta pelo sistema antigo. Como o agente só
+ * enxerga faixa SEM gênero, nada disso seria reexaminado um dia sequer: a
+ * prateleira "Brasileira" ficaria lá para sempre, e o trap continuaria no meio
+ * do sertanejo.
+ *
+ * Sai caro uma vez e nunca mais: fica gravada a versão da revisão. O ritmo é
+ * proposital — cada mudança vira uma escrita na nuvem e no acervo, e uma rajada
+ * de trezentas já derrubou a cota do projeto inteiro uma vez.
+ */
+async function revisarGravados(): Promise<void> {
+  try {
+    if (window.localStorage.getItem(REVISAO_KEY) === String(REVISAO_VERSAO)) return;
+  } catch {
+    return;
+  }
+  const mudancas = revisarGeneros(faixasMinimas());
+  for (const mudanca of mudancas) {
+    localLibrary.setTrackGenre(mudanca.id, mudanca.para);
+    await new Promise((resolve) => setTimeout(resolve, 60));
+  }
+  try {
+    window.localStorage.setItem(REVISAO_KEY, String(REVISAO_VERSAO));
+  } catch {
+    /* cota: tenta de novo no próximo boot — a revisão é idempotente */
+  }
+  emit();
+}
+
 async function run(): Promise<void> {
   if (running || typeof navigator === 'undefined' || !navigator.onLine) return;
   running = true;
   emit();
   try {
+    await revisarGravados();
     const attempts = readAttempts();
     for (const entry of localLibrary.list()) {
       if (classifiedThisSession >= SESSION_BUDGET) break;
@@ -86,8 +138,29 @@ async function run(): Promise<void> {
       // na categoria errada é uma mentira que ninguém revisa.
       const artist = t.artists[0]?.name;
       if (!artist || artist === 'Desconhecido') continue;
-      const genre = await aiClassifyGenre(t.title, artist).catch(() => null);
+
+      // O ARTISTA VOTA ANTES DO MODELO.
+      //
+      // Se as outras faixas dele já dizem, de forma firme, qual é o gênero, a
+      // faixa nova nasce com ele — de graça, e sem o sorteio independente que
+      // punha uma faixa de trap sozinha na prateleira de sertanejo. Ver
+      // generoCoerencia.ts.
+      const voto = generoDoArtista(faixasMinimas(), artist, t.id);
+      const herdado = herdarDoArtista(voto);
+      if (herdado) {
+        localLibrary.setTrackGenre(t.id, herdado);
+        delete attempts[t.id];
+        writeAttempts(attempts);
+        emit();
+        continue; // não gastou consulta nenhuma
+      }
+
+      const resposta = await aiClassifyGenre(t.title, artist).catch(() => null);
       classifiedThisSession += 1;
+      // A resposta ainda passa pelo crivo do artista: se contradiz uma maioria
+      // FORTE, é recusada e a faixa fica sem categoria (buraco visível vale mais
+      // que categoria errada).
+      const genre = aceitarSugestao(resposta, voto);
       if (genre) {
         localLibrary.setTrackGenre(t.id, genre);
         delete attempts[t.id];

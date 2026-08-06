@@ -6,7 +6,8 @@
  * cuidar sozinho, e mantém o mesmo contrato: função pura que monta mensagem,
  * função pura que lê resposta. Nada de rede aqui.
  */
-import { GENRE_TAXONOMY, extractJson, type AiMessage } from './curation.js';
+import { GENRE_TAXONOMY, GLOSSARIO_DE_GENEROS, extractJson, type AiMessage } from './curation.js';
+import { normalizarGenero } from './generos.js';
 
 // ── Agente: guardião de conteúdo ────────────────────────────────────────────
 
@@ -194,8 +195,14 @@ export function batchGenreMessages(tracks: { title: string; artist: string }[]):
       content:
         'Você classifica músicas em gêneros. Para CADA música da lista, escolha UM gênero desta ' +
         `lista EXATA: ${GENRE_TAXONOMY.join(', ')}. ` +
+        // O MESMO glossário do classificador de uma faixa só. Este caminho em
+        // lote roda no servidor e grava na MESMA biblioteca — sem as definições
+        // aqui, ele reintroduziria de madrugada os erros que o outro lado
+        // acabou de corrigir (funk americano vs. carioca, trap virando Lo-Fi).
+        `Definições que você DEVE seguir: ${GLOSSARIO_DE_GENEROS} ` +
         'Responda SOMENTE com um array JSON de strings, um gênero por música, na MESMA ORDEM e ' +
-        'com o MESMO tamanho da lista recebida. Use null quando não souber. Sem markdown.',
+        'com o MESMO tamanho da lista recebida. Use null quando NÃO CONHECER a música — nunca ' +
+        'deduza pelo clima do título. Sem markdown.',
     },
     {
       role: 'user',
@@ -216,7 +223,9 @@ export function parseBatchGenres(content: string, expected: number): (string | n
 
   return json.map((item) => {
     if (typeof item !== 'string') return null;
-    const alvo = item.trim().toLowerCase();
-    return GENRE_TAXONOMY.find((g) => g.toLowerCase() === alvo) ?? null;
+    // Passa pela mesma tradução do catálogo: um "Funk brasileiro" ou uma
+    // "Brasileira" vindos do modelo caem no lugar certo (ou em null), em vez de
+    // dependerem de o modelo ter escrito o rótulo com a grafia exata da lista.
+    return normalizarGenero(item);
   });
 }
