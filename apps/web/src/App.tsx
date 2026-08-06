@@ -52,17 +52,33 @@ export default function App() {
     let pararPesquisador: (() => void) | null = null;
     let cancelado = false;
     void (async () => {
-      const [sync, catalogo, fila, telemetria, presenca, genero, pesquisador, guardiao] =
-        await Promise.all([
-          import('@/lib/sync/syncManager'),
-          import('@/lib/sync/catalogoBoot'),
-          import('@/lib/local/importQueue'),
-          import('@/lib/telemetry/telemetry'),
-          import('@/lib/devices/presence'),
-          import('@/lib/local/genreAgent'),
-          import('@/lib/local/pesquisador'),
-          import('@/lib/offline/guardiaoOffline'),
-        ]);
+      const [
+        sync,
+        catalogo,
+        fila,
+        telemetria,
+        presenca,
+        genero,
+        pesquisador,
+        guardiao,
+        biblioteca,
+      ] = await Promise.all([
+        import('@/lib/sync/syncManager'),
+        import('@/lib/sync/catalogoBoot'),
+        import('@/lib/local/importQueue'),
+        import('@/lib/telemetry/telemetry'),
+        import('@/lib/devices/presence'),
+        import('@/lib/local/genreAgent'),
+        import('@/lib/local/pesquisador'),
+        import('@/lib/offline/guardiaoOffline'),
+        import('@/lib/local/localLibrary'),
+      ]);
+      if (cancelado) return;
+      // O REGISTRO DA BIBLIOTECA PRIMEIRO. Ele mora no IndexedDB (4 mil faixas
+      // não cabem nos ~5 MB do localStorage) e, enquanto não carrega, NADA
+      // persiste — é a trava que impede uma biblioteca pela metade de ser
+      // gravada por cima da inteira. Ver lib/local/localLibrary.ts.
+      await biblioteca.hydrate();
       if (cancelado) return;
       sync.initCloudSync();
       catalogo.initCatalogo(); // acervo do app: o que o admin adiciona chega em todos

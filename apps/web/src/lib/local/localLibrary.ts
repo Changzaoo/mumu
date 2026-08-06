@@ -40,7 +40,6 @@ import {
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
 import { marcarBoot } from '@/lib/telemetry/bootPerf';
-import { gravarLocal } from '@/lib/local/cofreLocal';
 import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
@@ -129,10 +128,128 @@ export function subscribe(listener: () => void): () => void {
   };
 }
 
-// ── registry (localStorage) ─────────────────────────────────────
+// ── registry (IndexedDB; localStorage é só a ponte da migração) ──
+//
+// O REGISTRO NÃO CABE MAIS NO localStorage, e isso não é teoria: medi 1352
+// bytes por faixa na base de produção. A conta é curta e implacável:
+//
+//     2.588 faixas → 3,4 MB      4.000 faixas → 5,4 MB      limite ≈ 5 MB
+//
+// Passando disso, `setItem` estoura e falha POR INTEIRO — não grava "o que
+// coube". A biblioteca continua perfeita na tela durante a sessão e volta
+// truncada na recarga, sem aviso nenhum. Numa biblioteca de quatro mil faixas
+// isso é perda de dado silenciosa, e ela some justamente onde ninguém olha: nas
+// faixas adicionadas por último.
+//
+// O IndexedDB guarda gigabytes, funciona em http:// de LAN e em aba anônima, e
+// é o mesmo cofre onde o áudio e as capas já moram. O preço é a leitura ser
+// assíncrona — resolvido em `hydrate()`, que carrega o registro antes de tudo e
+// emite; a interface já re-renderiza por assinatura.
+const DB_REGISTRO = 'aurial-registro';
+const STORE_REGISTRO = 'biblioteca';
+const CHAVE_REGISTRO = 'entradas';
+
+/**
+ * Trava de segurança: NINGUÉM grava antes de o registro carregar do disco.
+ *
+ * Sem isto, uma escrita que chegasse antes da hidratação (o acervo aplicando, a
+ * curadoria remendando) persistiria uma biblioteca de duas faixas por cima de
+ * quatro mil. É o pior estrago possível neste arquivo, e ele é assíncrono por
+ * natureza — só uma trava explícita resolve.
+ */
+let registroCarregado = false;
+
+let dbRegistro: Promise<IDBDatabase> | null = null;
+
+function abrirRegistro(): Promise<IDBDatabase> {
+  dbRegistro ??= new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_REGISTRO, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_REGISTRO)) db.createObjectStore(STORE_REGISTRO);
+    };
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB indisponível'));
+  });
+  return dbRegistro;
+}
+
+async function lerRegistroDoDisco(): Promise<LibraryEntry[] | null> {
+  if (typeof indexedDB === 'undefined') return null;
+  try {
+    const db = await abrirRegistro();
+    return await new Promise<LibraryEntry[] | null>((resolve) => {
+      const req = db
+        .transaction(STORE_REGISTRO, 'readonly')
+        .objectStore(STORE_REGISTRO)
+        .get(CHAVE_REGISTRO);
+      req.onsuccess = () => {
+        const valor = req.result as unknown;
+        resolve(Array.isArray(valor) ? (valor as LibraryEntry[]) : null);
+      };
+      req.onerror = () => resolve(null);
+    });
+  } catch {
+    return null;
+  }
+}
+
+async function gravarRegistroNoDisco(entradas: LibraryEntry[]): Promise<void> {
+  if (typeof indexedDB === 'undefined') throw new Error('IndexedDB indisponível');
+  const db = await abrirRegistro();
+  await new Promise<void>((resolve, reject) => {
+    const tx = db.transaction(STORE_REGISTRO, 'readwrite');
+    tx.objectStore(STORE_REGISTRO).put(entradas, CHAVE_REGISTRO);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => reject(tx.error ?? new Error('falha ao gravar o registro'));
+    tx.onabort = () => reject(tx.error ?? new Error('gravação do registro abortada'));
+  });
+}
+
+/**
+ * Carrega o registro do disco e funde com o que já estiver em memória.
+ *
+ * FUNDE, não substitui. Entre o boot e a hidratação pode ter entrado faixa
+ * (import em andamento, acervo aplicando), e trocar o array inteiro aqui
+ * apagaria essa faixa. Quem está em memória é mais novo e ganha; quem só está
+ * no disco entra.
+ */
+async function carregarRegistro(): Promise<void> {
+  const doDisco = await lerRegistroDoDisco();
+  const emMemoria = cache ?? [];
+
+  if (doDisco) {
+    const idsEmMemoria = new Set(emMemoria.map((e) => e.track.id));
+    cache = [...emMemoria, ...doDisco.filter((e) => !idsEmMemoria.has(e.track.id))];
+  } else {
+    // Primeira vez com o cofre novo: o que está no localStorage é a biblioteca
+    // de antes da mudança. `read()` já a trouxe para a memória — basta gravar.
+    cache = emMemoria.length > 0 ? emMemoria : read();
+  }
+
+  groupsCache = null;
+  registroCarregado = true;
+
+  // Grava já (e só então libera o localStorage): perder os ~5 MB que a
+  // biblioteca ocupava lá devolve espaço para todo o resto do app.
+  try {
+    await gravarRegistroNoDisco(
+      (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry),
+    );
+    window.localStorage.removeItem(STORAGE_KEY);
+  } catch (erro) {
+    // Sem IndexedDB (aba anônima antiga, storage desligado) seguimos com o
+    // localStorage como antes — pior, mas não pior do que já era.
+    registrarFalhaDePersistencia(erro);
+  }
+  emit();
+}
+
 function read(): LibraryEntry[] {
   if (cache) return cache;
   try {
+    // Ponte da migração: enquanto o registro não foi para o IndexedDB, ele
+    // ainda está aqui. Depois da primeira hidratação esta chave nem existe.
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
     cache = Array.isArray(parsed) ? (parsed as LibraryEntry[]) : [];
@@ -185,13 +302,16 @@ function flushWrite(): void {
     // para de persistir junto. Era isto que fazia a faixa recém-adicionada
     // aparecer na sessão e sumir na recarga, inclusive para o admin, que é
     // quem tem a maior biblioteca e portanto estoura primeiro.
-    const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
-    // `gravarLocal` ABRE ESPAÇO se preciso: a biblioteca do usuário tem
-    // precedência sobre TODO cache de enfeite (letra, biografia, top de
-    // artista…). Antes disto o cofre lotava com cache refazível e era a
-    // biblioteca — a única coisa insubstituível ali — que parava de gravar, em
-    // silêncio. Ver lib/local/cofreLocal.ts.
-    gravarLocal(STORAGE_KEY, JSON.stringify(proprias.map(storableEntry)));
+    // A TRAVA. Gravar antes de o registro ter vindo do disco persistiria uma
+    // biblioteca de duas faixas por cima de quatro mil. A escrita não se perde:
+    // a memória já está certa e a próxima passada grava tudo.
+    if (!registroCarregado) return;
+
+    const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry);
+    // O REGISTRO VAI PARA O IndexedDB — 1352 bytes por faixa medidos em
+    // produção fazem 4 mil faixas passarem de 5 MB, e o `setItem` estoura
+    // POR INTEIRO nesse ponto (ver o comentário do cofre lá em cima).
+    void gravarRegistroNoDisco(proprias).catch(registrarFalhaDePersistencia);
   } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
     // Registrado, não engolido: um aparelho nesta situação parece normal na
@@ -1676,6 +1796,10 @@ export function hydrate(): Promise<void> {
     // A LISTA PRIMEIRO: os títulos já estão no registro (localStorage, leitura
     // instantânea). Não há motivo para segurar a tela até o último arquivo de
     // áudio ser aberto.
+    // O REGISTRO PRIMEIRO, ANTES DE QUALQUER OUTRA COISA. Ele mora no
+    // IndexedDB (não cabe mais no localStorage — ver o comentário lá em cima),
+    // e é ele que destrava as gravações. Enquanto não vem, ninguém persiste.
+    await carregarRegistro();
     emit();
     marcarBoot('biblioteca-local');
 
