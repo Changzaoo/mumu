@@ -242,6 +242,25 @@ async function sweepStaleTmp() {
 const QUALITY_KBPS = { low: 96, normal: 160, high: 320, lossless: 320 };
 const kbpsFor = (quality) => QUALITY_KBPS[quality] ?? 320;
 
+/**
+ * Cookies do YouTube — o que realmente derruba o "Sign in to confirm you're
+ * not a bot" quando o IP já entrou na mira do limite de taxa.
+ *
+ * O CAMINHO É CONFERIDO A CADA CHAMADA, de propósito. Antes bastava a variável
+ * existir para o `--cookies` entrar na linha de comando; se o arquivo não
+ * estivesse lá (ainda não exportado, expirado e apagado, cartão desmontado), o
+ * yt-dlp abortava TUDO — inclusive os links que passariam sem cookie nenhum.
+ * Uma configuração pela metade virava um apagão completo.
+ *
+ * Conferindo na hora, o arquivo pode ser colocado, trocado ou removido com o
+ * serviço no ar, e a pior hipótese é voltar ao comportamento de antes.
+ */
+function cookieArgs() {
+  const caminho = process.env.YTDLP_COOKIES;
+  if (!caminho || !existsSync(caminho)) return [];
+  return ['--cookies', caminho];
+}
+
 async function importToMp3(ytdlp, url, quality) {
   const dir = await mkdtemp(path.join(tmpdir(), 'aurial-import-'));
   const args = [
@@ -270,7 +289,7 @@ async function importToMp3(ytdlp, url, quality) {
     '3',
     // Optional YouTube cookies (Netscape cookies.txt) to pass the "not a bot"
     // gate on large batches — set YTDLP_COOKIES to the file path.
-    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+    ...cookieArgs(),
     '-f',
     'bestaudio/best',
     '-x',
@@ -655,7 +674,7 @@ async function dumpJson(ytdlp, url) {
     // "confirme que você não é um robô" — e era o único que não passava os
     // cookies, ao contrário de listPlaylist e importToMp3. Sem isto, a leitura
     // de metadados falha primeiro que o download, que é o inverso do esperado.
-    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+    ...cookieArgs(),
     url,
   ];
   const out = await new Promise((resolve, reject) => {
@@ -687,7 +706,7 @@ async function listPlaylist(ytdlp, url) {
     '--no-warnings',
     '--dump-single-json',
     ...(MAX_PLAYLIST > 0 ? ['--playlist-end', String(MAX_PLAYLIST)] : []),
-    ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+    ...cookieArgs(),
     url,
   ];
   const stdout = await new Promise((resolve, reject) => {
@@ -1563,7 +1582,7 @@ async function main() {
             'bestaudio/best',
             '--no-playlist',
             '--no-warnings',
-            ...(process.env.YTDLP_COOKIES ? ['--cookies', process.env.YTDLP_COOKIES] : []),
+            ...cookieArgs(),
             '-o',
             '-',
             url,
