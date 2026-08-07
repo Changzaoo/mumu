@@ -64,3 +64,58 @@ describe('dominantLabel', () => {
     expect(dominantLabel([null, undefined, '', '   '])).toBeNull();
   });
 });
+
+/**
+ * FRASES REAIS, tiradas da API em 07/08/2026 para Matuê, Teto, WIU e Brandão85.
+ *
+ * A distribuidora assina o fonograma e o SELO vem depois de "sob licença
+ * exclusiva de". Sem esse corte, a prateleira de trap do 30PRAUM aparecia como
+ * "Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM
+ * Agenciamento e Produção" — errado, feio, e em 3 dos 8 álbuns consultados.
+ */
+describe('parseLabel — licença exclusiva em português', () => {
+  it('tira o selo de trás da distribuidora', () => {
+    expect(
+      parseLabel(
+        '℗ 2022 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM Agenciamento e Produção.',
+      ),
+    ).toBe('30PRAUM');
+    expect(
+      parseLabel(
+        '℗ 2021 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM Agenciamento e Produção ltda.',
+      ),
+    ).toBe('30PRAUM');
+    expect(
+      parseLabel('℗ 2019 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM.'),
+    ).toBe('30PRAUM');
+  });
+
+  it('não estraga o caso simples', () => {
+    expect(parseLabel('℗ 2024 30PRAUM')).toBe('30PRAUM');
+    expect(parseLabel('℗ 2018 30PRAUM')).toBe('30PRAUM');
+  });
+
+  it('PRESERVA selo cujo nome tem "Produções" de verdade', () => {
+    // O primeiro selo do Brandão85. Cortar "Produções" por atacado o apagaria.
+    expect(parseLabel('℗ 2022 Hash Produções')).toBe('Hash Produções');
+  });
+
+  it('artista que lança por conta própria continua aparecendo', () => {
+    expect(parseLabel('℗ 2017 Matuê')).toBe('Matuê');
+    expect(parseLabel('℗ 2024 LUDMILLA')).toBe('LUDMILLA');
+  });
+
+  it('a gravadora dominante do artista sai certa mesmo com formas misturadas', () => {
+    const doTeto = [
+      parseLabel('℗ 2025 30PRAUM'),
+      parseLabel(
+        '℗ 2021 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM Agenciamento e Produção ltda.',
+      ),
+      parseLabel(
+        '℗ 2023 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM Agenciamento e Produção ltda.',
+      ),
+    ];
+    // Antes as três formas eram três "gravadoras" diferentes e a moda era lixo.
+    expect(dominantLabel(doTeto)).toBe('30PRAUM');
+  });
+});

@@ -11,6 +11,34 @@
 const SUFFIX = /[,\s]+(inc|llc|ltda?|ltd|s\.?a\.?|gmbh|b\.?v\.?|corp|co)\.?$/i;
 
 /**
+ * "X sob licença exclusiva de Y" — QUEM ASSINA NÃO É QUEM LANÇA.
+ *
+ * A distribuidora aparece primeiro na frase e o selo de verdade vem depois. Já
+ * havia o corte em inglês; faltava o português, que é a forma de praticamente
+ * todo lançamento brasileiro grande. O efeito era exatamente o tipo de erro que
+ * não pode acontecer numa prateleira:
+ *
+ *   ℗ 2022 Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM
+ *      antes → "Sony Music Entertainment Brasil ltda. sob licença exclusiva de 30PRAUM"
+ *      agora → "30PRAUM"
+ *
+ * Medido na API real: em Matuê, Teto e WIU, 3 de 8 álbuns caíam nessa forma.
+ */
+const LICENCIADO =
+  /(?:exclusive licen[cs]e to|licen[cs]ed to|distributed by|sob licen[çc]a (?:exclusiva )?d[eo]|com licen[çc]a (?:exclusiva )?d[eo]|distribu[íi]d[oa] por)\s+(.+)$/i;
+
+/**
+ * Descrição da ATIVIDADE grudada no nome da empresa — "30PRAUM Agenciamento e
+ * Produção" é a razão social; a gravadora é "30PRAUM".
+ *
+ * A lista é curta e composta de propósito. Cortar "Produções" sozinho quebraria
+ * "Hash Produções", que é o nome REAL do selo do Brandão85 nos primeiros discos.
+ * Só sai o que ninguém usa como marca.
+ */
+const ATIVIDADE =
+  /[,\s]+(agenciamento e produç(?:ão|ões)|agenciamento|edições musicais|produç(?:ão|ões) fonográfica)\.?$/i;
+
+/**
  * Extrai o nome da gravadora de um `copyright` do iTunes. Devolve null quando
  * a frase não sobra nada útil (aviso genérico, string vazia) — melhor não
  * mostrar gravadora do que mostrar "2019".
@@ -23,13 +51,17 @@ export function parseLabel(copyright: string | null | undefined): string | null 
   let value = (copyright.split(/[℗©®]|\((?:p|c)\)/gi).find((part) => part.trim()) ?? '').trim();
   // Ano de lançamento no começo da frase: some (a data já vem em releaseYear).
   value = value.replace(/^(19|20)\d{2}\s*[-–—,]?\s*/, '').trim();
-  // "Distributed by X" / "under exclusive license to X" — o selo é quem vem depois.
-  const licensed = /(?:exclusive licen[cs]e to|licen[cs]ed to|distributed by)\s+(.+)$/i.exec(value);
+  // "Distributed by X" / "sob licença exclusiva de X" — o selo é quem vem depois.
+  const licensed = LICENCIADO.exec(value);
   if (licensed?.[1]) value = licensed[1].trim();
   value = value
     // Pontuação de emenda no fim (inclusive a "/" que separava as duas notas).
     .replace(/[/.,;\s]+$/, '')
     .replace(SUFFIX, '')
+    // A razão social sai DEPOIS do sufixo societário: "…Produção ltda." perde o
+    // "ltda." primeiro, e só então "Agenciamento e Produção" fica no fim da linha.
+    .replace(ATIVIDADE, '')
+    .replace(/[/.,;\s]+$/, '')
     .trim();
   // Sobrou só pontuação/número → não é nome de gravadora.
   if (value.length < 2 || !/[a-zà-ú]/i.test(value)) return null;

@@ -199,7 +199,7 @@ function LinkImportCard() {
           inputMode="url"
           value={url}
           onChange={(event) => setUrl(event.target.value)}
-          placeholder="Cole o link (YouTube, SoundCloud…)"
+          placeholder="Cole o link da música ou playlist"
           aria-label="Link para importar"
           disabled={linkImport.isPending}
           className="sm:flex-1"

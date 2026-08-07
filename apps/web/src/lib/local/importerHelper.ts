@@ -207,6 +207,47 @@ export interface PlaylistResult {
   entries: PlaylistEntry[];
 }
 
+/**
+ * A lista que vem DE CARONA num link de vídeo — `watch?v=X&list=Y`.
+ *
+ * É a forma que o botão "compartilhar" do YouTube no celular gera quando você
+ * está dentro de uma playlist ou de um mix. `isPlaylistUrl` devolve `false` para
+ * ela de propósito (o link aponta para UM vídeo), e o resultado é que quem cola
+ * uma playlist inteira recebe uma faixa só, sem nenhum aviso de que as outras
+ * ficaram para trás.
+ *
+ * O link é genuinamente ambíguo — "quero esta música" e "quero esta playlist"
+ * se escrevem igual — e nenhum palpite acerta sempre. Então esta função só
+ * DETECTA a ambiguidade; quem resolve é o usuário, no diálogo.
+ *
+ * Devolve o id da lista, ou `null` quando não há escolha a fazer.
+ */
+export function listaEmbutida(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const host = u.hostname.toLowerCase().replace(/^www\./, '');
+    if (!/(^|\.)youtube\.com$|(^|\.)youtu\.be$/.test(host)) return null;
+    if (u.pathname.startsWith('/playlist')) return null; // já é lista pura
+    const lista = u.searchParams.get('list');
+    if (!lista || !u.searchParams.get('v')) return null;
+    return lista;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * `true` quando a lista foi MONTADA PELO YOUTUBE, não pela pessoa.
+ *
+ * Os ids que começam com `RD` são rádio/mix: uma fila infinita de "parecidas"
+ * que o YouTube gera na hora. Medido num link real do usuário: 528 faixas. Isso
+ * não é a playlist de ninguém, e importar em massa encheria o cofre — que já
+ * está no teto e descartando — com música que ninguém escolheu.
+ */
+export function ehRadioAutomatica(listaId: string): boolean {
+  return /^RD/i.test(listaId);
+}
+
 /** True when the link points at a whole playlist/set (not a single track). */
 export function isPlaylistUrl(url: string): boolean {
   try {

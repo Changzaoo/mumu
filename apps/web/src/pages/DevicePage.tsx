@@ -263,9 +263,8 @@ export default function DevicePage() {
               <Link2 className="size-4 text-fg-muted" /> Adicionar por link
             </p>
             <p className="text-[13px] text-fg-muted">
-              Cole o link de uma música — ou de uma playlist do YouTube — do YouTube, SoundCloud,
-              Vimeo, Bandcamp ou de um arquivo de áudio. Vão para a fila e baixam algumas por vez —
-              pode continuar colando mais links.
+              Cole o link de uma música, de uma playlist ou de um arquivo de áudio. Vão para a fila
+              e baixam algumas por vez — pode continuar colando mais links.
             </p>
             <div className="flex gap-2">
               <Input

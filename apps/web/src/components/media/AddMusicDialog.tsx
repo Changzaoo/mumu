@@ -10,7 +10,7 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { isPlaylistUrl } from '@/lib/local/importerHelper';
+import { ehRadioAutomatica, isPlaylistUrl, listaEmbutida } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { useIsAuthorized } from '@/lib/auth/roles';
 
@@ -32,10 +32,14 @@ export function AddMusicDialog({
   const fileRef = useRef<HTMLInputElement>(null);
   const podeEnviarArquivo = useIsAuthorized();
 
-  const addLink = async (): Promise<void> => {
+  // A lista que vem de carona num link de vídeo (`watch?v=…&list=…`) — o que o
+  // botão "compartilhar" do YouTube no celular gera. Ver `listaEmbutida`.
+  const listaJunto = listaEmbutida(url.trim());
+
+  const addLink = async (forcarPlaylist = false): Promise<void> => {
     const link = url.trim();
     if (!link || busy) return;
-    const playlist = isPlaylistUrl(link);
+    const playlist = forcarPlaylist || isPlaylistUrl(link);
     setBusy(true);
     const id = toast.loading(playlist ? 'Lendo playlist…' : 'Baixando e convertendo…');
     try {
@@ -87,7 +91,7 @@ export function AddMusicDialog({
         <DialogHeader>
           <DialogTitle>Adicionar música</DialogTitle>
           <DialogDescription>
-            Cole o link de uma música ou playlist (YouTube, SoundCloud, Vimeo, Bandcamp)
+            Cole o link de uma música ou de uma playlist
             {podeEnviarArquivo ? ' ou envie um arquivo de áudio do seu aparelho.' : '.'}
           </DialogDescription>
         </DialogHeader>
@@ -105,6 +109,42 @@ export function AddMusicDialog({
               {busy ? <Loader2 className="animate-spin" /> : 'Adicionar'}
             </Button>
           </div>
+
+          {/* O LINK TEM UMA LISTA JUNTO, e só você sabe o que quis colar.
+              "Compartilhar" dentro de uma playlist no YouTube do celular gera
+              `watch?v=…&list=…`: o mesmo endereço para "esta música" e para "esta
+              playlist". Antes o app decidia sozinho pela música e as outras
+              sumiam caladas. Agora a escolha aparece — e o botão de cima segue
+              sendo o seguro (uma faixa), porque é o que o link literalmente
+              aponta. */}
+          {listaJunto && !busy && (
+            <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
+              <p className="text-[12px] leading-relaxed text-fg-muted">
+                Esse link também carrega{' '}
+                {ehRadioAutomatica(listaJunto) ? (
+                  <>
+                    uma <strong>fila automática</strong> — uma sequência de "parecidas" montada na
+                    hora, que costuma ter centenas de faixas que ninguém escolheu.
+                  </>
+                ) : (
+                  <>
+                    uma <strong>playlist</strong>.
+                  </>
+                )}{' '}
+                O botão acima adiciona só a música.
+              </p>
+              <Button
+                variant="outline"
+                className="w-full"
+                onClick={() => void addLink(true)}
+                disabled={busy}
+              >
+                {ehRadioAutomatica(listaJunto)
+                  ? 'Adicionar a fila inteira mesmo assim'
+                  : 'Adicionar a playlist inteira'}
+              </Button>
+            </div>
+          )}
           {/* Enviar arquivo é coisa de administrador: o arquivo fica no
               aparelho e é publicado no cofre para os outros, então quem envia
               responde pelo que entrou. Link continua aberto a todo mundo. */}

@@ -1145,8 +1145,11 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   // Other streaming platforms we can't (and won't) resolve.
   const streaming = STREAMING_HOSTS.find((s) => s.match.test(host));
   if (streaming) {
+    // A plataforma NÃO é nomeada na mensagem de propósito: o app não anuncia de
+    // onde vem (nem de onde não vem) a música. O `label` segue existindo para o
+    // log e para os testes distinguirem os casos.
     throw new Error(
-      `Não dá para importar do ${streaming.label} por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.`,
+      'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
     );
   }
 

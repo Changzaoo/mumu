@@ -429,7 +429,7 @@ export default function SettingsPage() {
       <SettingsCard icon={Search} title="Agente pesquisador">
         <Row
           label="Buscar música dos artistas que você ouve"
-          hint="Procura no YouTube e põe na fila de download. Usa internet e espaço."
+          hint="Procura faixas novas desses artistas e põe na fila de download. Usa internet e espaço."
           htmlFor="st-pesquisador"
         >
           <Switch
