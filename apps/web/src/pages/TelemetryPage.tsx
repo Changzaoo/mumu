@@ -43,12 +43,14 @@ import {
   XCircle,
   Zap,
 } from 'lucide-react';
-import { collection, onSnapshot } from 'firebase/firestore';
 import { toast } from 'sonner';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
-import { db } from '@/lib/firebase';
+import { getIdToken } from '@/lib/firebase';
+
+/** Mesma base das demais chamadas — ver lib/sync/catalogoApi.ts. */
+const API_BASE = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
 import { computeInsights } from '@/lib/telemetry/insights';
 import { cn, formatBytes } from '@/lib/utils';
 import type {
@@ -1279,20 +1281,42 @@ export default function TelemetryPage() {
   const [platformFilter, setPlatformFilter] = useState('todas');
   const [categoryFilter, setCategoryFilter] = useState('todas');
 
+  // LÊ DA NOSSA API, não mais do Firestore — e o ganho não é só de cota.
+  //
+  // A coleção antiga era `telemetry/{uid}`: uma linha por CONTA. Visitante não
+  // tinha uid, então não tinha linha, e por isso esta tela nunca mostrou um
+  // sequer. Agora a linha é por APARELHO e o `userId` é um campo — quem nunca
+  // fez login aparece com a conta em branco, que é a informação que faltava.
+  //
+  // Some o tempo real do `onSnapshot`; em troca, uma recarga a cada 30s. Painel
+  // de administração não precisa de atualização ao vivo, e a assinatura aberta
+  // relia a coleção inteira a cada reconexão — parte do que estourava a cota.
   useEffect(() => {
-    if (!db) {
-      setError(true);
-      return;
-    }
-    return onSnapshot(
-      collection(db, 'telemetry'),
-      (snap) => {
-        const rows = snap.docs.map((d) => ({ ...(d.data() as TelemetryDoc), uid: d.id }));
+    let vivo = true;
+    const carregar = async (): Promise<void> => {
+      try {
+        const token = await getIdToken().catch(() => null);
+        const res = await fetch(`${API_BASE}/telemetria?limite=500`, {
+          headers: token ? { Authorization: `Bearer ${token}` } : {},
+        });
+        if (!res.ok) throw new Error(String(res.status));
+        const { data } = (await res.json()) as {
+          data: Array<{ deviceId: string; userId: string | null; data: TelemetryDoc }>;
+        };
+        if (!vivo) return;
+        const rows = data.map((l) => ({ ...l.data, uid: l.userId ?? `anon:${l.deviceId}` }));
         rows.sort((a, b) => (b.lastSeenAt ?? '').localeCompare(a.lastSeenAt ?? ''));
         setDocs(rows);
-      },
-      () => setError(true),
-    );
+      } catch {
+        if (vivo) setError(true);
+      }
+    };
+    void carregar();
+    const timer = setInterval(() => void carregar(), 30_000);
+    return () => {
+      vivo = false;
+      clearInterval(timer);
+    };
   }, []);
 
   // Plataformas realmente presentes nos docs (para o select de filtro).

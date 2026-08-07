@@ -30,6 +30,7 @@ import { adminRoutes } from './modules/admin/index.js';
 import { undergroundRoutes } from './modules/underground/index.js';
 import { catalogRoutes } from './modules/catalog/index.js';
 import { collectionsRoutes } from './modules/collections/index.js';
+import { telemetryRoutes } from './modules/telemetry/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -102,6 +103,8 @@ export function createApp(): Express {
   // Biblioteca, curtidas e playlists de cada um — sincronia por DELTA, com
   // fila offline no cliente. Saíram do Firestore pelo mesmo motivo do acervo.
   api.use('/me/colecoes', collectionsRoutes);
+  // Escrita aberta (visitante conta), leitura só para ADMIN — ver as rotas.
+  api.use('/telemetria', telemetryRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());

@@ -692,3 +692,30 @@ model UserCollectionItem {
   /// O cursor da sincronia por delta ("o que mudou desde X") sai daqui.
   @@index([userId, collection, updatedAt])
 }
+
+/// Telemetria de uso, por APARELHO — não por conta.
+///
+/// A telemetria vivia em `telemetry/{uid}` no Firestore, e isso deixava dois
+/// buracos ao mesmo tempo. O primeiro: quem não fez login não existia. O painel
+/// mostrava só usuários registrados, então todo visitante — justamente quem a
+/// gente mais precisa entender, porque ainda não decidiu ficar — era invisível.
+/// O segundo: era mais uma coleção no Firestore, cuja cota gratuita já derrubou
+/// acervo, sincronia e curtidas três vezes; mandar TODO visitante escrever lá
+/// seria acelerar o próximo apagão.
+///
+/// A chave é o aparelho porque é o que existe sempre. `userId` entra quando a
+/// pessoa faz login, e é o que liga as sessões anônimas de antes à conta criada
+/// depois — sem ele não dá para ver que o visitante de ontem virou usuário hoje.
+model TelemetryDevice {
+  /// Id gerado no cliente e guardado no aparelho (ver lib/devices/presence).
+  deviceId  String   @id
+  /// Preenchido quando o dono do aparelho entra numa conta; nulo para visitante.
+  userId    String?
+  data      Json
+  updatedAt DateTime @updatedAt
+  createdAt DateTime @default(now())
+
+  @@index([userId])
+  /// O painel lista por atividade recente.
+  @@index([updatedAt])
+}

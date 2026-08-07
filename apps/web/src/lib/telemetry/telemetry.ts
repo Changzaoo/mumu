@@ -1,6 +1,6 @@
 /**
- * Telemetria de uso — alimenta a página do admin (/telemetria). Cada usuário
- * logado mantém UM doc `telemetry/{uid}` no Firestore com:
+ * Telemetria de uso — alimenta a página do admin (/telemetria). Cada APARELHO
+ * mantém UMA linha em `TelemetryDevice` no nosso Postgres com:
  *   - tempo total com o app aberto (heartbeat só com a aba visível) e sessões;
  *   - velocidade REAL de rede (download/upload medidos contra o importer) e a
  *     estimativa do navegador (effectiveType/downlink/rtt);
@@ -8,14 +8,24 @@
  *     reproduções;
  *   - plataforma, GPU, memória JS, Web Vitals, configurações do app, tamanho
  *     da biblioteca, downloads offline e curtidas.
- * Tudo best-effort: sem Firestore/login, nada roda; falhas são silenciosas.
- * As regras do Firestore limitam a leitura aos admins (ver firestore.rules).
+ * A CHAVE É O APARELHO, NÃO A CONTA — e essa é a mudança que importa. Antes o
+ * documento era `telemetry/{uid}`, então quem não fazia login não existia: o
+ * painel mostrava só usuários registrados e todo visitante era invisível.
+ * Visitante é justamente quem mais interessa entender, porque ainda não decidiu
+ * ficar. A conta entra como um campo a mais quando aparece, e é ela que liga as
+ * sessões anônimas de antes ao usuário criado depois.
+ *
+ * Saiu do Firestore junto: era mais uma coleção na cota gratuita que já derrubou
+ * acervo, sincronia e curtidas três vezes — e mandar TODO visitante escrever lá
+ * seria acelerar o próximo apagão em vez de evitá-lo.
+ *
+ * Tudo best-effort: falhas são silenciosas, telemetria nunca atrapalha o uso.
+ * A leitura do painel exige ADMIN (ver as rotas em modules/telemetry).
  */
-import { firestore, type FirestoreModule } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import { getDownloads } from '@/features/downloads/registry';
 import { deviceLabel, getDeviceId } from '@/lib/devices/presence';
-import { db, subscribeAuth } from '@/lib/firebase';
+import { getIdToken, subscribeAuth } from '@/lib/firebase';
 import { measureNetworkSpeed } from '@/lib/local/importerHelper';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -24,6 +34,10 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+
+/** Mesma base das demais chamadas — ver lib/sync/catalogoApi.ts. */
+const API_BASE = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const apiBaseUrl = (): string => API_BASE;
 
 const HEARTBEAT_MS = 30_000;
 const FLUSH_MS = 120_000;
@@ -382,12 +396,23 @@ function listeningStats(): {
 
 /** Merge a partial update into the user's telemetry doc (best-effort). */
 async function push(data: Record<string, unknown>): Promise<void> {
-  if (!db || !currentUser) return;
   try {
-    const { doc, setDoc } = await firestore();
-    await setDoc(doc(db, 'telemetry', currentUser.uid), data, { merge: true });
+    // O TOKEN É OPCIONAL. Quando existe, o servidor amarra este aparelho à
+    // conta — é o que liga as sessões anônimas de antes ao usuário criado
+    // depois. Quando não existe, a linha fica anônima e AINDA ASSIM conta, que
+    // é exatamente o que faltava.
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = await getIdToken().catch(() => null);
+    if (token) headers.Authorization = `Bearer ${token}`;
+
+    await fetch(`${apiBaseUrl()}/telemetria/${encodeURIComponent(getDeviceId())}`, {
+      method: 'PUT',
+      headers,
+      body: JSON.stringify({ dados: data }),
+      keepalive: true, // sobrevive ao fechamento da aba (o flush de saída)
+    });
   } catch {
-    /* offline / rules not published yet — silent */
+    /* offline / servidor fora — telemetria nunca atrapalha o uso */
   }
 }
 
@@ -401,18 +426,20 @@ async function push(data: Record<string, unknown>): Promise<void> {
  * chega; o flush que descobrir que ela ainda não chegou apenas adia (sem
  * consumir contador nenhum — ver `flush`).
  */
-let inc: FirestoreModule['increment'] | null = null;
-let buscandoInc = false;
-function garantirIncrement(): void {
-  if (inc || buscandoInc) return;
-  buscandoInc = true;
-  void firestore()
-    .then((fs) => {
-      inc = fs.increment;
-    })
-    .catch(() => {
-      buscandoInc = false; // tenta de novo no próximo flush
-    });
+/**
+ * "Some ao que já existe" — o antigo `increment` do Firestore.
+ *
+ * A telemetria é feita de acumulados: segundos com o app aberto, cliques por
+ * botão, erros. O cliente mede o PEDAÇO desde o último envio e não conhece o
+ * total — quem conhece é quem guarda. A marca abaixo diz ao servidor "some",
+ * e a soma acontece no repositório (apps/api/.../telemetry.repository.ts).
+ *
+ * Antes isto exigia carregar o módulo do Firestore só para obter a função, e o
+ * flush que chegasse antes dela precisava se adiar. Agora é um objeto literal:
+ * não há o que esperar, e a telemetria funciona sem Firebase nenhum.
+ */
+function increment(n: number): { __inc: number } {
+  return { __inc: n };
 }
 
 function snapshot(): Record<string, unknown> {
@@ -461,14 +488,13 @@ function snapshot(): Record<string, unknown> {
 }
 
 function flush(): void {
-  if (!currentUser) return;
-  // ANTES de drenar qualquer contador: sem `increment` não há o que montar, e
-  // zerar os pendentes aqui perderia a medição de vez. Adia inteiro.
-  if (!inc) {
-    garantirIncrement();
-    return;
-  }
-  const increment = inc;
+  // SEM TRAVA DE LOGIN — é o conserto todo. O `if (!currentUser) return` que
+  // estava aqui é a razão de o painel nunca ter mostrado um visitante: quem não
+  // fez login media tudo e não enviava nada. Agora a medição é do APARELHO, e a
+  // conta entra junto quando existe.
+  //
+  // A espera pelo `increment` do Firestore também saiu: ele virou uma marca
+  // local, sem módulo para carregar e sem flush para adiar.
   const seconds = pendingSeconds;
   pendingSeconds = 0;
 
@@ -542,7 +568,7 @@ function onVisibility(): void {
   if (document.hidden) flush(); // best-effort final write when leaving
 }
 
-function start(user: User): void {
+function start(user: User | null): void {
   currentUser = user;
   pendingSeconds = 0;
   sessionStartMs = Date.now();
@@ -552,10 +578,8 @@ function start(user: User): void {
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);
-  void firestore().then(({ increment }) => {
-    inc ??= increment;
-    return push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });
-  });
+  // Direto: o `increment` é local agora, não há módulo do Firestore a esperar.
+  void push({ ...snapshot(), sessions: increment(1), recentSessions: readSessionLog() });
 
   heartbeat ??= setInterval(() => {
     if (document.hidden) return;
@@ -607,8 +631,18 @@ function stop(): void {
 export function initTelemetry(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
+
+  // COMEÇA JÁ, sem esperar login. Era `if (user) start(user)`, e essa linha é a
+  // razão de o painel nunca ter mostrado um visitante: quem abria o app sem
+  // conta não iniciava sessão nenhuma, então não media nem enviava nada.
+  //
+  // A medição é do aparelho. `subscribeAuth` continua valendo para reiniciar a
+  // sessão quando alguém entra ou sai — o que muda é apenas o campo `userId`
+  // que vai junto; o aparelho é o mesmo antes e depois, e é assim que se enxerga
+  // que o visitante de ontem virou usuário hoje.
+  start(null);
   subscribeAuth((user) => {
     stop();
-    if (user) start(user);
+    start(user);
   });
 }
