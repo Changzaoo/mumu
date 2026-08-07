@@ -390,7 +390,18 @@ export async function buildStreamUrl(sourceUrl: string): Promise<string | null> 
  *  do usuário saber que a faixa ficou presa num aparelho só. */
 export let ultimaFalhaDeUpload: string | null = null;
 
-export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | null> {
+export async function uploadTrackBlob(
+  id: string,
+  blob: Blob,
+  /**
+   * De onde este áudio veio. Vai junto para o cofre e é o que permite
+   * reconstruí-lo quando a poda levar os bytes — ver `X-Aurial-Source` abaixo.
+   *
+   * Chega por PARÂMETRO, e não por `sourceUrlFor(id)`, porque `localLibrary` já
+   * importa este arquivo: buscar a origem aqui fecharia um ciclo de imports.
+   */
+  sourceUrl?: string | null,
+): Promise<string | null> {
   const headers = await baseHeaders();
   if (!headers.Authorization) {
     ultimaFalhaDeUpload = 'sem login — o envio exige conta';
@@ -408,7 +419,17 @@ export async function uploadTrackBlob(id: string, blob: Blob): Promise<string | 
     try {
       const res = await fetch(`${helperUrl()}/blob`, {
         method: 'POST',
-        headers: { ...headers, 'X-Blob-Id': id, 'Content-Type': blob.type || 'audio/mpeg' },
+        headers: {
+          ...headers,
+          'X-Blob-Id': id,
+          'Content-Type': blob.type || 'audio/mpeg',
+          // DE ONDE ESTE ÁUDIO VEIO. O cofre tem teto e descarta as faixas menos
+          // tocadas; guardando a origem junto, o descarte deixa de ser definitivo
+          // — o importador reextrai e regrava sob o mesmo token quando alguém
+          // pedir de novo. Sem este cabeçalho a faixa descartada vira 404 eterno,
+          // inclusive nos links já compartilhados.
+          ...(sourceUrl ? { 'X-Aurial-Source': sourceUrl } : {}),
+        },
         body: blob,
       });
       if (!res.ok) {

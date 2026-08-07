@@ -623,7 +623,9 @@ function addEntry(entry: LibraryEntry, blob: Blob): void {
  * failure / when signed out (the track just stays local-only, as before).
  */
 async function uploadAndLink(id: string, blob: Blob): Promise<void> {
-  const url = await uploadTrackBlob(id, blob);
+  // A origem viaja junto: é ela que deixa o cofre reconstruir esta faixa depois
+  // que a poda levar os bytes, em vez de devolver 404 para sempre.
+  const url = await uploadTrackBlob(id, blob, sourceUrlFor(id));
   if (!url) return;
   const current = read().find((e) => e.track.id === id);
   if (!current) return; // removed while uploading
@@ -645,15 +647,41 @@ async function uploadAndLink(id: string, blob: Blob): Promise<void> {
 export function reportDeadRemote(id: string, deadUrl: string): void {
   const entry = read().find((e) => e.track.id === id);
   if (!entry || entry.remoteUrl !== deadUrl) return;
-  const { remoteUrl: _dead, ...rest } = entry;
-  patchEntry(id, {
-    ...rest,
-    track: {
-      ...entry.track,
-      streamUrl: entry.track.streamUrl === deadUrl ? null : entry.track.streamUrl,
-    },
-  });
+
+  // CONFIRMAR ANTES DE DESCARTAR — e isso passou a ser obrigatório.
+  //
+  // O cofre agora se REFAZ: quando a poda leva os bytes, o importador reextrai
+  // da origem sob o mesmo token (ver `reconstruirBlob` em apps/importer). Essa
+  // reconstrução leva uns 20 segundos, e para o player ela é indistinguível de
+  // uma URL morta — o elemento <audio> só sabe dizer "não carregou".
+  //
+  // Descartar sem confirmar significaria apagar a cópia BOA justamente na
+  // primeira vez que alguém pede uma faixa descartada, e a faixa nunca mais
+  // seria pedida por aquela URL — o conserto se autodestruiria em uso.
+  //
+  // Uma resposta de verdade decide: 404/403 é morte (nem meta nem bytes);
+  // qualquer outra coisa, inclusive demora, é o cofre trabalhando.
   void (async () => {
+    let morta = false;
+    try {
+      const res = await fetch(deadUrl, { headers: { Range: 'bytes=0-0' } });
+      morta = res.status === 404 || res.status === 403;
+    } catch {
+      // Rede caiu, CORS, aba dormindo: não é prova de nada. Mantém a cópia.
+      return;
+    }
+    if (!morta) return;
+
+    const atual = read().find((e) => e.track.id === id);
+    if (!atual || atual.remoteUrl !== deadUrl) return; // mudou enquanto sondava
+    const { remoteUrl: _dead, ...rest } = atual;
+    patchEntry(id, {
+      ...rest,
+      track: {
+        ...atual.track,
+        streamUrl: atual.track.streamUrl === deadUrl ? null : atual.track.streamUrl,
+      },
+    });
     const blob = await blobFor(id).catch(() => null);
     if (blob) await uploadAndLink(id, blob);
   })();

@@ -530,6 +530,102 @@ async function blobStoreReady() {
  */
 let cofreForaDesde = null;
 
+/**
+ * RECONSTRUÇÃO SOB DEMANDA — o cofre volta a ter a faixa que ele mesmo jogou
+ * fora.
+ *
+ * O cofre tem teto e a biblioteca não cabe nele (42 GB de música, 18 GB de
+ * teto). A poda descarta as menos tocadas, e até aqui isso era definitivo:
+ * medido no acervo servido em produção, 34% das faixas que ANUNCIAVAM ter áudio
+ * respondiam 404, e outras 27% não tinham URL nenhuma — 60% do acervo mudo,
+ * para visitante e para dono, sem nada na tela explicando.
+ *
+ * Com a meta preservada (ver `sweepBlobStore`), o 404 deixa de ser o fim: dá
+ * para reextrair da origem e regravar os bytes sob o MESMO token. Quem tem o
+ * link nunca percebe — só espera alguns segundos a mais na primeira vez.
+ *
+ * O TETO DE SIMULTANEIDADE não é detalhe. Extrair é a operação cara e é ela que
+ * o YouTube limita por IP; uma prateleira aberta no celular dispara dezenas de
+ * pedidos quase juntos, e sem trava isso viraria uma rajada que derruba o IP
+ * para TODO mundo — inclusive para os imports normais. Uma de cada vez por
+ * faixa, três no total: o resto espera.
+ */
+const MAX_RECONSTRUCOES = 3;
+let reconstrucoesAtivas = 0;
+/** Uma faixa pedida por dois ouvintes ao mesmo tempo extrai UMA vez só. */
+const reconstruindo = new Map();
+
+async function reconstruirBlob(id, sourceUrl, contentType) {
+  const emAndamento = reconstruindo.get(id);
+  if (emAndamento) return emAndamento;
+  if (reconstrucoesAtivas >= MAX_RECONSTRUCOES) return null;
+
+  reconstrucoesAtivas += 1;
+  const tarefa = (async () => {
+    log('reconstruindo blob descartado:', id);
+    const args = [
+      '-f',
+      'bestaudio/best',
+      '--no-playlist',
+      '--no-warnings',
+      ...cookieArgs(),
+      '-o',
+      '-',
+      sourceUrl,
+    ];
+    const ytdlpBinario = await resolveYtdlp();
+    const yt = spawn(ytdlpBinario, args, { windowsHide: true });
+    const ff = spawn(
+      FFMPEG_BIN,
+      ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', `${kbpsFor(null)}k`, 'pipe:1'],
+      { windowsHide: true },
+    );
+    yt.stdout.pipe(ff.stdin);
+    yt.stderr.resume();
+    ff.stderr.resume();
+
+    const pedacos = [];
+    let bytes = 0;
+    const ok = await new Promise((resolve) => {
+      ff.stdout.on('data', (c) => {
+        bytes += c.length;
+        // Um limite de sanidade: sem ele um vídeo de horas encheria a memória.
+        if (bytes > MAX_BLOB) {
+          yt.kill();
+          ff.kill();
+          resolve(false);
+          return;
+        }
+        pedacos.push(c);
+      });
+      ff.on('close', (code) => resolve(code === 0 && bytes > 0));
+      ff.on('error', () => resolve(false));
+      yt.on('error', () => resolve(false));
+    });
+    if (!ok) {
+      log('reconstrução falhou:', id);
+      return null;
+    }
+    const buf = Buffer.concat(pedacos);
+    try {
+      await writeFile(blobPath(id), buf);
+      log('blob reconstruído:', id, `${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+    } catch (err) {
+      // Não conseguiu gravar (disco cheio, cofre desmontado): ainda assim dá
+      // para servir ESTA reprodução com os bytes que já estão na memória.
+      log('reconstruído mas não gravado:', id, err instanceof Error ? err.message : err);
+    }
+    void sweepBlobStore();
+    return { buf, contentType: contentType || 'audio/mpeg' };
+  })().finally(() => {
+    reconstrucoesAtivas -= 1;
+    reconstruindo.delete(id);
+  });
+
+  reconstruindo.set(id, tarefa);
+  return tarefa;
+}
+
 async function sweepBlobStore() {
   try {
     if (!(await blobStoreReady())) {
@@ -568,7 +664,17 @@ async function sweepBlobStore() {
     for (const b of bins) {
       if (total <= MAX_BLOB_BYTES) break;
       await rm(b.p, { force: true }).catch(() => undefined);
-      await rm(b.p.replace(/\.bin$/, '.json'), { force: true }).catch(() => undefined);
+      // A META FICA. Era ela que ia junto, e por isso a faixa descartada virava
+      // 404 PERMANENTE: o token de acesso vive aqui dentro, então apagá-la
+      // matava o link de capacidade para sempre — inclusive os já
+      // compartilhados, que não têm como ser reemitidos.
+      //
+      // Mantendo a meta, o descarte deixa de ser uma morte e vira o que sempre
+      // devia ter sido: um cache que errou e sabe como se refazer. O GET abaixo
+      // re-extrai da origem e regrava os bytes, com o MESMO token.
+      //
+      // Custo de guardar: ~200 bytes por faixa. Para as 4.416 do acervo, menos
+      // de 1 MB — contra os ~10 MB que cada .bin ocupava.
       total -= b.size;
     }
     log(`blob LRU: cofre reduzido para ${(total / 1024 ** 3).toFixed(1)}GB`);
@@ -752,7 +858,7 @@ function applyCors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id');
+  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id, X-Aurial-Source');
   res.setHeader(
     'Access-Control-Expose-Headers',
     'X-Aurial-Title, X-Aurial-Cover, X-Aurial-Artist, X-Aurial-Track, X-Aurial-Album, X-Aurial-Uploader',
@@ -1451,9 +1557,21 @@ async function main() {
         }
         const token = crypto.randomBytes(16).toString('hex');
         const contentType = req.headers['content-type'] || 'audio/mpeg';
+        // DE ONDE ESTE ÁUDIO VEIO — é o que permite reconstruí-lo quando a poda
+        // levar os bytes embora. Sem isso, a faixa descartada vira 404 eterno.
+        // Ver o `GET /blob/` e `sweepBlobStore`.
+        const sourceUrl = req.headers['x-aurial-source'];
         try {
           await writeFile(blobPath(id), buf);
-          await writeFile(blobMetaPath(id), JSON.stringify({ token, contentType, size: buf.length }));
+          await writeFile(
+            blobMetaPath(id),
+            JSON.stringify({
+              token,
+              contentType,
+              size: buf.length,
+              ...(typeof sourceUrl === 'string' && sourceUrl ? { sourceUrl } : {}),
+            }),
+          );
         } catch (err) {
           log('blob write error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
@@ -1492,6 +1610,21 @@ async function main() {
         try {
           st = await stat(blobPath(id));
         } catch {
+          // OS BYTES SUMIRAM, MAS O TOKEN CONFERE — foi a poda, não um invasor.
+          // Reconstrói da origem em vez de devolver 404. Ver `reconstruirBlob`.
+          const refeito = meta.sourceUrl
+            ? await reconstruirBlob(id, meta.sourceUrl, meta.contentType).catch(() => null)
+            : null;
+          if (refeito) {
+            res.writeHead(200, {
+              'Content-Type': refeito.contentType,
+              'Content-Length': String(refeito.buf.length),
+              'Accept-Ranges': 'bytes',
+              'Cache-Control': 'no-store',
+            });
+            res.end(refeito.buf);
+            return;
+          }
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('not found');
           return;

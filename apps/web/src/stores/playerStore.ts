@@ -238,7 +238,17 @@ const MAX_FALLBACK_ATTEMPTS = 3;
 
 // Carregamento pendurado (ex.: /stream ao vivo que nunca emite bytes) não gera
 // evento de erro nenhum — sem watchdog a faixa fica "carregando" para sempre.
-const LOAD_WATCHDOG_MS = 30_000;
+//
+// SESSENTA, NÃO TRINTA. O cofre passou a se refazer: quando a poda levou os
+// bytes, o importador reextrai a faixa da origem sob o mesmo token, e isso leva
+// 20 a 25 segundos medidos em produção — mais em rede de celular. Com o teto em
+// 30s o watchdog matava a reprodução no meio da reconstrução e a faixa que
+// estava a segundos de tocar era declarada morta.
+//
+// O custo de errar para cada lado não é simétrico: esperar 30s a mais numa
+// faixa genuinamente quebrada é chato; desistir de uma que ia tocar é perder a
+// música. Quem realmente não existe responde 404 na hora e nem chega aqui.
+const LOAD_WATCHDOG_MS = 60_000;
 // Depois que a faixa JÁ tocou, checagens mais curtas detectam travamento no
 // meio (o elemento emite 'waiting' e nunca mais volta) — antes disso o player
 // ficava eternamente no spinner sem nenhum erro.
