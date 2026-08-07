@@ -1,8 +1,16 @@
 /**
- * /s/:id — página PÚBLICA de um compartilhamento (link enviado por um usuário).
- * Logado: toca completo (stream via importer pelo sourceUrl) e pode mandar tudo
- * para a própria biblioteca. Sem login: prévias de 30s (iTunes) + convite a
- * criar conta (o gate global do player reforça o limite).
+ * /s/:id — página PÚBLICA de um compartilhamento.
+ *
+ * QUEM ABRE O LINK OUVE A MÚSICA INTEIRA, com conta ou sem. O áudio vem da
+ * cópia no cofre, cuja URL já foi assinada por quem compartilhou — ver
+ * `ShareTrack.remoteUrl`. A prévia de 30s virou último recurso, para o caso de
+ * a cópia ter sido descartada pelo teto do cofre.
+ *
+ * O comentário anterior falava num "gate global do player" que reforçaria o
+ * limite de 30s para visitante. Esse gate NÃO EXISTE: `previewOnly` é só um
+ * selo na interface, e o player toca o que vier em `streamUrl`. O limite era
+ * consequência de `buildStreamUrl` precisar do token de quem ouve — não uma
+ * regra deliberada em lugar nenhum.
  */
 import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
@@ -41,6 +49,33 @@ function toDto(t: ShareTrack, index: number, streamUrl: string | null, preview: 
   } as TrackDto;
 }
 
+/**
+ * A cópia no cofre ainda está lá?
+ *
+ * O cofre tem teto e descarta as faixas menos tocadas, então um link
+ * compartilhado semanas atrás pode apontar para áudio que já saiu. Pergunta o
+ * PRIMEIRO BYTE (`Range: bytes=0-0`): confirma que existe sem baixar nada.
+ *
+ * Teto de 4s porque isto roda ANTES de a música começar — uma sonda pendurada
+ * viraria "cliquei em tocar e não aconteceu nada", que é pior do que cair para
+ * a prévia. Sem resposta a tempo conta como ausente.
+ */
+async function copiaViva(url: string): Promise<boolean> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 4_000);
+  try {
+    const res = await fetch(url, {
+      headers: { Range: 'bytes=0-0' },
+      signal: controller.signal,
+    });
+    return res.ok || res.status === 206;
+  } catch {
+    return false;
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export default function SharedPage() {
   const { id = '' } = useParams<{ id: string }>();
   const [share, setShare] = useState<ShareDoc | null | 'loading'>('loading');
@@ -56,15 +91,37 @@ export default function SharedPage() {
 
   const tracks = useMemo(() => (share !== 'loading' && share ? share.tracks : []), [share]);
 
-  /** Resolve a fonte de cada faixa na hora do play: stream completo (logado)
-   *  ou prévia de 30s do iTunes (visitante). */
+  /**
+   * A fonte de cada faixa, da melhor para a pior — e a primeira delas é o
+   * motivo desta função ter mudado.
+   *
+   *   1. cópia no cofre  → MÚSICA INTEIRA, para qualquer um, sem conta
+   *   2. stream ao vivo  → inteira também, mas assina com o token de quem ouve
+   *   3. prévia de 30s   → último recurso
+   *
+   * Antes a lista começava no 2: visitante sem conta caía direto na prévia,
+   * porque `buildStreamUrl` assina com o Firebase de QUEM ESTÁ OUVINDO e
+   * visitante não tem token. Os 30 segundos não eram uma decisão de produto,
+   * eram o único caminho que sobrava.
+   *
+   * O passo 3 continua existindo por um motivo concreto: o cofre tem teto e
+   * descarta as faixas menos tocadas. Um link compartilhado meses atrás pode
+   * apontar para áudio que já saiu de lá — e é melhor tocar trinta segundos do
+   * que devolver silêncio.
+   */
   const play = async (index: number): Promise<void> => {
     const resolved = await Promise.all(
       tracks.map(async (t, i) => {
+        // 1. A cópia assinada por quem compartilhou: vale sem login nenhum.
+        if (t.remoteUrl && (await copiaViva(t.remoteUrl))) {
+          return toDto(t, i, t.remoteUrl, false);
+        }
+        // 2. Quem tem conta ainda consegue o stream ao vivo da fonte.
         if (user && t.sourceUrl) {
           const url = await buildStreamUrl(t.sourceUrl).catch(() => null);
-          return toDto(t, i, url, false);
+          if (url) return toDto(t, i, url, false);
         }
+        // 3. Sobrou a prévia.
         try {
           const songs = await searchSongs(`${t.title} ${t.artist}`, 'br', 1);
           return toDto(t, i, songs[0]?.previewUrl ?? null, true);
@@ -75,7 +132,7 @@ export default function SharedPage() {
     );
     const playable = resolved.filter((t) => t.streamUrl);
     if (playable.length === 0) {
-      toast.error('Nenhuma prévia disponível agora — crie sua conta para ouvir completo.');
+      toast.error('Não consegui tocar esta faixa agora. Tente de novo em instantes.');
       return;
     }
     const target = resolved[index]?.streamUrl ? playable.indexOf(resolved[index]!) : 0;

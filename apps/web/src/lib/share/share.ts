@@ -8,7 +8,7 @@ import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import type { TrackDto } from '@aurial/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
-import { sourceUrlFor } from '@/lib/local/localLibrary';
+import { remoteUrlFor, sourceUrlFor } from '@/lib/local/localLibrary';
 import { trackArtistNames } from '@/lib/utils';
 
 export type ShareType = 'música' | 'álbum' | 'artista' | 'mix';
@@ -18,8 +18,24 @@ export interface ShareTrack {
   artist: string;
   coverUrl: string | null;
   durationMs: number;
-  /** Link original (YouTube etc.) — permite o stream completo para logados. */
+  /** Link original — permite o stream completo para quem tem conta. */
   sourceUrl: string | null;
+  /**
+   * A CÓPIA NO COFRE — é ela que faz quem abre o link ouvir a música INTEIRA.
+   *
+   * Antes, visitante sem conta ouvia 30 segundos: o stream completo saía de
+   * `buildStreamUrl`, que assina com o token do Firebase de QUEM ESTÁ OUVINDO —
+   * e visitante não tem token. A prévia não era uma escolha de produto, era o
+   * único caminho que sobrava.
+   *
+   * Esta URL já vem assinada por QUEM COMPARTILHOU, no momento de compartilhar,
+   * e por isso vale para qualquer um que abra o link — sem conta, sem login.
+   *
+   * Consequência, e ela é deliberada: quem tiver o link ou o QR ouve a faixa
+   * inteira. Link se encaminha e se fotografa; não há como recolher um que já
+   * saiu. Foi pedido assim.
+   */
+  remoteUrl?: string | null;
 }
 
 export interface SharePayload {
@@ -80,6 +96,8 @@ export function tracksToShare(tracks: TrackDto[]): ShareTrack[] {
     coverUrl: t.coverUrl,
     durationMs: t.durationMs,
     sourceUrl: sourceUrlFor(t.id),
+    // Vai assinada por quem compartilha — ver o comentário de `remoteUrl`.
+    remoteUrl: remoteUrlFor(t.id) ?? t.streamUrl ?? null,
   }));
 }
 
