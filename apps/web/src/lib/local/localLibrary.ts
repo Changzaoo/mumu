@@ -2050,8 +2050,10 @@ function scheduleBackgroundCuration(): void {
       // catálogo ter a chance de identificá-las.
       await catalogSweep().catch(() => 0);
       await backfillCovers().catch(() => undefined);
-      await backfillRemote();
-      await reprocessExisting();
+      // `.catch()` em TODAS: esta era a única sem, e uma exceção aqui matava
+      // calada as cinco varreduras seguintes — inclusive a 2ª passada de capas.
+      await backfillRemote().catch(() => undefined);
+      await reprocessExisting().catch(() => undefined);
       await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
       await redriveFromSource().catch(() => false); // real metadata from the source
       await backfillCovers().catch(() => undefined); // 2ª passada: nomes já corrigidos
@@ -2075,12 +2077,27 @@ const descanso = (ms = 150): Promise<void> => new Promise((resolve) => setTimeou
  * that already has a remoteUrl (or no local audio) is skipped, so after the
  * first successful pass this does nothing.
  */
-async function backfillRemote(): Promise<void> {
-  for (const entry of read()) {
-    if (entry.remoteUrl) continue;
-    const blob = await blobFor(entry.track.id).catch(() => null);
-    if (!blob) continue; // synced-in from another device — nothing to upload here
-    await uploadAndLink(entry.track.id, blob);
+export async function backfillRemote(): Promise<void> {
+  // A LISTA É TIRADA UMA VEZ, no começo. `read()` devolve o array vivo do
+  // cache, e cada upload o substitui (patchEntry) — iterar direto sobre ele
+  // era percorrer uma lista trocada por baixo dos pés, pulando faixas.
+  const pendentes = read().filter((e) => !e.remoteUrl);
+  for (const entry of pendentes) {
+    // UMA FAIXA RUIM NÃO PODE MATAR A VARREDURA. Sem esta trava, um erro em
+    // qualquer faixa (áudio corrompido no cache, escrita recusada, cofre
+    // piscando) derrubava o laço inteiro E o resto da curadoria — as faixas
+    // seguintes nunca eram nem tentadas, e ninguém ficava sabendo. O sintoma
+    // era exatamente este: a varredura sobe algumas dezenas e "para sozinha".
+    try {
+      // Reconfere no estado ATUAL: outra passada (ou outro aparelho) pode ter
+      // enviado esta faixa enquanto esta varredura andava.
+      if (remoteUrlFor(entry.track.id)) continue;
+      const blob = await blobFor(entry.track.id).catch(() => null);
+      if (!blob) continue; // veio sincronizada de outro aparelho — nada a enviar
+      await uploadAndLink(entry.track.id, blob);
+    } catch (erro) {
+      registrarFalhaDePersistencia(erro);
+    }
     await descanso();
   }
 }
