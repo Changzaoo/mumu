@@ -89,7 +89,12 @@ export function MobileNav() {
           content scrolls "under" it without the tabs ever looking see-through. */}
       <nav
         aria-label="Navegação"
-        className="fixed inset-x-0 bottom-0 z-40 bg-linear-to-t from-bg from-85% to-bg/0 pb-[env(safe-area-inset-bottom)] pt-3 md:hidden"
+        // SÓLIDO E SEM FOLGA NO TOPO. O gradiente e o `pt-3` existiam para o
+        // conteúdo sumir suavemente por baixo das abas — mas com o mini player
+        // encostado em cima delas, esse degradê passou a ser o vão por onde a
+        // página aparecia entre as duas peças. Fundo chapado, altura exata:
+        // as abas e o player viram um bloco só.
+        className="fixed inset-x-0 bottom-0 z-40 bg-bg-elevated pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {/* 64px-tall targets with 28px glyphs — comfortably above Apple's 44pt
             minimum touch size; labels readable at arm's length. */}

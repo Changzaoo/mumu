@@ -19,7 +19,6 @@ import {
   IoLibraryOutline,
   IoMusicalNotesOutline,
   IoPeopleOutline,
-  IoPhonePortraitOutline,
   IoPulseOutline,
   IoSearch,
   IoSearchOutline,
@@ -185,7 +184,10 @@ export function Sidebar() {
   return (
     <aside
       className={cn(
-        'hidden shrink-0 flex-col border-r border-border bg-bg-elevated md:flex',
+        // Painel próprio dentro da moldura: cantos arredondados e sem a borda
+        // direita, que só fazia sentido quando menu e conteúdo eram a mesma
+        // folha coladas. A separação agora é a calha entre os painéis.
+        'hidden shrink-0 flex-col overflow-hidden rounded-xl bg-bg-elevated md:flex',
         collapsed ? 'w-18' : 'w-75',
       )}
     >

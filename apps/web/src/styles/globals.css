@@ -11,6 +11,10 @@
   /* light */
   --bg: 0 0% 99%;
   --bg-elevated: 0 0% 100%;
+  /* O fundo ATRÁS dos painéis. O app deixou de ser uma folha que sangra até a
+     borda e passou a ser painéis arredondados sobre esta cor — é ela que
+     desenha a moldura e as calhas entre menu, conteúdo e player. */
+  --bg-deep: 240 5% 93%;
   --bg-overlay: 240 5% 96%;
   --fg: 240 6% 7%;
   --fg-muted: 240 4% 42%;
@@ -26,6 +30,9 @@
 .dark {
   --bg: 240 6% 4%; /* #0A0A0C deep black */
   --bg-elevated: 240 5% 7%;
+  /* Preto puro no escuro: os painéis (4%) ganham relevo contra ele sem precisar
+     de borda nenhuma. */
+  --bg-deep: 0 0% 0%;
   --bg-overlay: 240 5% 10%;
   --fg: 0 0% 98%;
   --fg-muted: 240 4% 64%;
@@ -58,6 +65,7 @@
   --color-white: #fff;
   --color-black: #000;
   --color-bg: hsl(var(--bg));
+  --color-bg-deep: hsl(var(--bg-deep));
   --color-bg-elevated: hsl(var(--bg-elevated));
   --color-bg-overlay: hsl(var(--bg-overlay));
   --color-fg: hsl(var(--fg));

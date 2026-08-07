@@ -122,7 +122,9 @@ export function QueuePanel() {
   return (
     <aside
       aria-label="Fila de reprodução"
-      className="glass hidden w-80 shrink-0 flex-col rounded-none border-y-0 border-r-0 lg:flex"
+      // Painel dentro da moldura, como o menu e o conteúdo: cantos
+      // arredondados no lugar das bordas que emendavam as folhas.
+      className="glass hidden w-80 shrink-0 flex-col rounded-xl border-0 lg:flex"
     >
       <header className="flex h-16 shrink-0 items-center justify-between gap-2 px-4">
         <h2 className="text-sm font-semibold tracking-tight text-fg">Fila</h2>

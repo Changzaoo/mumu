@@ -53,7 +53,11 @@ export function TopBar() {
   // /search on the SAME screen — no modal. ⌘K/Ctrl K focuses the field.
   const searchRef = useRef<HTMLInputElement>(null);
   const [search, setSearch] = useState('');
-  const debouncedSearch = useDebounce(search, 250);
+  // 120ms, não 250. O atraso maior fazia a lista só chegar DEPOIS de a pessoa
+  // parar de digitar — a busca parecia responder ao fim da frase, não à digitação.
+  // Abaixo de ~100ms cada tecla vira uma requisição e a lista pisca; 120 é o
+  // ponto em que o resultado acompanha sem tremer.
+  const debouncedSearch = useDebounce(search, 120);
   const onSearchPage = location.pathname === '/search';
   // O que NÓS empurramos para a URL — para não espelhar o próprio eco de
   // volta ao campo (o eco chegava ATRASADO pelo debounce e apagava a última
@@ -110,7 +114,9 @@ export function TopBar() {
       data-scrolled={scrolled || undefined}
       className={cn(
         'sticky top-0 z-30 -mx-4 flex h-16 items-center gap-2 px-4 transition-colors duration-200 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8',
-        'data-scrolled:glass data-scrolled:rounded-none data-scrolled:border-x-0 data-scrolled:border-t-0',
+        // Sem `rounded-none`: dentro da moldura o conteúdo é um painel
+        // arredondado, e quadrar o topo ao rolar cortava o canto dele.
+        'data-scrolled:glass data-scrolled:rounded-t-xl data-scrolled:border-x-0 data-scrolled:border-t-0',
       )}
     >
       <div className="hidden items-center gap-1 md:flex">
@@ -142,7 +148,10 @@ export function TopBar() {
           placeholder="O que você quer ouvir?"
           aria-label="Buscar"
           className={cn(
-            'h-9 w-full rounded-full border border-border bg-bg-elevated/60 pl-10 pr-14 text-sm text-fg',
+            // OPACO. Era `bg-bg-elevated/60`: sobre uma capa clara o texto
+            // digitado competia com a arte por trás e o campo sumia como
+            // superfície. Chapado, ele volta a ser um lugar onde se escreve.
+            'h-9 w-full rounded-full border border-border bg-bg-elevated pl-10 pr-14 text-sm text-fg',
             'placeholder:text-fg-subtle transition-colors duration-200',
             'hover:border-fg/20 focus:border-accent focus:outline-none',
           )}

@@ -73,7 +73,18 @@ export function PlayerBar() {
           animate={{ y: 0 }}
           exit={{ y: 96 }}
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-          className="glass fixed inset-x-0 bottom-0 z-40 hidden h-[88px] grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-4 rounded-none border-x-0 border-b-0 px-4 md:grid"
+          // SAIU DE `fixed`, E ISSO É O CONSERTO DA SOBREPOSIÇÃO.
+          //
+          // Ele era `fixed inset-x-0 bottom-0`: uma faixa presa à janela, da
+          // borda esquerda à direita — ou seja, POR CIMA da barra lateral. O
+          // menu ficava coberto nos últimos 88px, e nenhum ajuste de z-index
+          // resolvia, porque o problema não era ordem de pilha: era a barra
+          // ocupar uma largura que não é dela.
+          //
+          // Agora ele é a última LINHA do layout. O menu e o conteúdo dividem a
+          // linha de cima, o player fica embaixo dos dois, e a sobreposição
+          // deixa de ser possível por construção — não por acerto de medida.
+          className="glass hidden h-[88px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-4 rounded-xl border-0 px-4 md:grid"
         >
           {/* Left — track identity */}
           <div className="flex min-w-0 items-center gap-3">

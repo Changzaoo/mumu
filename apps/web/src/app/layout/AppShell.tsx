@@ -30,11 +30,18 @@ function TrackAnnouncer() {
 /**
  * App shell (DESIGN §7):
  *
- *   ┌────────┬──────────────────────────┬─────────┐
- *   │Sidebar │ main (scroll) — TopBar   │ Queue*  │
- *   ├────────┴──────────────────────────┴─────────┤
- *   │ PlayerBar (88px, glass, fixed)              │
- *   └──────────────────────────────────────────────┘
+ *   ┌─ moldura (bg-deep) ─────────────────────────┐
+ *   │ ┌────────┐ ┌───────────────────┐ ┌────────┐ │
+ *   │ │Sidebar │ │ main — TopBar     │ │ Queue* │ │
+ *   │ └────────┘ └───────────────────┘ └────────┘ │
+ *   │ ┌─────────────────────────────────────────┐ │
+ *   │ │ PlayerBar (88px) — LINHA, não `fixed`   │ │
+ *   │ └─────────────────────────────────────────┘ │
+ *   └─────────────────────────────────────────────┘
+ *
+ * O player era `fixed inset-x-0`, uma faixa presa à janela inteira — e por isso
+ * passava POR CIMA da barra lateral. Sendo a última linha do layout, o menu e o
+ * conteúdo ficam acima dele e a sobreposição deixa de ser possível.
  *
  * Mobile: MobileNav tabs + MiniPlayer. The player never unmounts — page
  * transitions (fade + 8px rise, 320ms) only wrap the <Outlet/>.
@@ -86,8 +93,12 @@ export function AppShell() {
 
   return (
     <ScrollContainerContext.Provider value={scrollEl}>
-      <div className="flex h-dvh flex-col overflow-hidden bg-bg text-fg">
-        <div className="flex min-h-0 flex-1">
+      {/* A MOLDURA. O app era uma folha só, sangrando até as bordas da janela;
+          agora são painéis arredondados sobre um fundo mais profundo, com
+          calhas entre eles. No celular a moldura some (`p-0`): margem em tela
+          pequena é espaço roubado de conteúdo. */}
+      <div className="flex h-dvh flex-col overflow-hidden bg-bg-deep p-0 text-fg md:gap-2 md:p-2">
+        <div className="flex min-h-0 flex-1 md:gap-2">
           <Sidebar />
 
           <main
@@ -98,15 +109,22 @@ export function AppShell() {
             // overscroll-y-NONE (não 'contain'): o Chrome Android 12+ estica o
             // conteúdo do scroller ao puxar além do topo — 'contain' só impede
             // o encadeamento ao body, 'none' desliga o efeito por completo.
-            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-none px-4 md:px-6 lg:px-8"
+            className="relative min-w-0 flex-1 overflow-y-auto overflow-x-hidden overscroll-y-none bg-bg px-4 md:rounded-xl md:px-6 lg:px-8"
           >
             <TopBar />
             <div
               className={cn(
                 'mx-auto w-full max-w-[1600px]',
-                // Clear the bottom chrome: mobile tabs (+ mini player) / desktop PlayerBar.
+                // Só o rodapé do CELULAR precisa ser compensado: lá as abas e o
+                // mini player flutuam por cima. No desktop o PlayerBar deixou de
+                // ser `fixed` e ocupa a própria linha do layout — reservar
+                // espaço para ele aqui abriria um vão morto no fim da página.
+                //
+                // 4rem de abas + 4rem de mini player + folga. Era 10.5rem porque
+                // havia 1rem de vão entre os dois; sem o vão, o mesmo valor
+                // viraria espaço morto no fim de toda página.
                 hasTrack
-                  ? 'pb-[calc(10.5rem+env(safe-area-inset-bottom))] md:pb-[calc(88px+2rem)]'
+                  ? 'pb-[calc(9rem+env(safe-area-inset-bottom))] md:pb-8'
                   : 'pb-[calc(5.5rem+env(safe-area-inset-bottom))] md:pb-8',
               )}
             >

@@ -32,7 +32,14 @@ export function MiniPlayer() {
           animate={{ y: 0, opacity: 1 }}
           exit={{ y: 80, opacity: 0 }}
           transition={{ type: 'spring', stiffness: 380, damping: 32 }}
-          className="glass fixed inset-x-2 bottom-[calc(4.5rem+env(safe-area-inset-bottom)+0.5rem)] z-40 h-16 overflow-hidden rounded-xl md:hidden"
+          // COLADO NAS ABAS. A altura era `4.5rem + env + 0.5rem`, mas a barra
+          // de abas mede 4rem: sobravam 1rem de vão entre as duas, e por ele
+          // aparecia a página passando — a "brecha esquisita".
+          //
+          // Agora o fundo é exatamente a altura das abas, e só os cantos de
+          // CIMA são arredondados: as duas peças leem como um bloco só, que é o
+          // que a borda inferior arredondada contrariava mesmo sem vão nenhum.
+          className="glass fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 h-16 overflow-hidden rounded-b-none rounded-t-xl border-x-0 md:hidden"
         >
           {/* Swipe lateral (Spotify): arrastar para a ESQUERDA pula para a
               próxima, para a DIREITA volta — solta e o card volta ao lugar. */}
