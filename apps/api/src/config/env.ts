@@ -102,17 +102,21 @@ const envSchema = z
     /** Faixas auditadas por volta, por usuário. */
     CURATION_BATCH: z.coerce.number().int().min(1).max(500).default(40),
     /**
-     * Intervalo entre voltas — DE HORA EM HORA, e o número tem conta atrás.
+     * Intervalo entre voltas — DE HORA EM HORA.
      *
-     * Cada volta lê `CURATION_BATCH * 4` documentos por usuário. Com 15 minutos
-     * isso dava 96 voltas por dia = ~15 mil leituras por usuário, por dia, só
-     * para descobrir que quase tudo já estava em dia. O limite diário grátis do
-     * projeto é 50 mil leituras, compartilhado com o app inteiro — e ele
-     * estourou, derrubando acervo, sincronia e curtidas de todo mundo junto.
+     * O motivo ORIGINAL deste número era a cota do Firestore: cada volta lia
+     * `CURATION_BATCH * 4` documentos por usuário, e a 15 minutos isso dava ~15
+     * mil leituras por usuário por dia, contra um limite de 50 mil do projeto
+     * inteiro. Estourou, e derrubou acervo, sincronia e curtidas juntos.
      *
-     * De hora em hora o custo cai para um quarto e não se perde nada: a
-     * curadoria é faxina de fundo, e com a janela deslizante (ver `curateUser`)
-     * uma biblioteca de trezentas faixas é coberta inteira em duas voltas.
+     * ESSA RAZÃO MORREU: a curadoria lê do nosso Postgres (ver curation.worker),
+     * onde a mesma varredura é um `SELECT` indexado e não custa nada.
+     *
+     * O número FICA de hora em hora por outro motivo, que continua valendo: cada
+     * volta gasta até `CURATION_BATCH` auditorias na NVIDIA. Diminuir o intervalo
+     * multiplica o consumo do modelo na mesma proporção, sem apressar a parte que
+     * de fato aparece na tela — a revisão de categorias é regra pura e já varre o
+     * acervo INTEIRO a cada volta, sem janela.
      */
     CURATION_INTERVAL_MS: z.coerce
       .number()

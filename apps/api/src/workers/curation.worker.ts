@@ -7,10 +7,21 @@
  * e é por isso que nome de artista errado persiste.
  *
  * COMO ele alcança a biblioteca sem o app aberto: a biblioteca de cada usuário
- * espelha no Firestore em `users/{uid}/library` (ver `cloudCollection` no web).
- * Este worker lê de lá, corrige, e escreve de volta — e o `onRemoteUpsert` do
- * cliente aplica a correção em TODOS os aparelhos daquele usuário sozinho.
- * Ninguém precisa abrir nada.
+ * mora em `UserCollectionItem` no NOSSO Postgres. Este worker lê de lá, corrige,
+ * e escreve de volta — o `updatedAt` sobe, a sincronia por delta leva a correção
+ * para TODOS os aparelhos daquele usuário sozinha. Ninguém precisa abrir nada.
+ *
+ * ELE LIA DO FIRESTORE, E ISSO PAROU DE FUNCIONAR NA MIGRAÇÃO. A biblioteca saiu
+ * do Firestore para o Postgres (ver `serverCollection` no web e o módulo
+ * `collections` na API), mas a curadoria continuou lendo e gravando na coleção
+ * antiga. O resultado era o pior tipo de defeito: TUDO parecia funcionar — o log
+ * mostrava "BENÇA: Sertanejo → Trap", exatamente a correção pedida — e nada
+ * chegava na tela, porque o app não lê mais de lá. Um sistema 24/7 consertando
+ * uma cópia que ninguém abre.
+ *
+ * De quebra, cada volta gastava a cota gratuita do Firestore (50 mil leituras
+ * por dia, do projeto inteiro) — foi o que derrubou acervo, sincronia e curtidas
+ * juntos, três vezes. Aqui a mesma varredura é um `SELECT` indexado e custa nada.
  *
  * SIMULTANEIDADE: os agentes rodam em paralelo através do pool em
  * `infra/ai/nvidia.ts`. As chamadas esperam a rede, não a CPU, então várias em
@@ -21,7 +32,6 @@
  * (`false`), nunca no "incerto". Escrever palpite por cima de metadata correta
  * é pior que deixar como está.
  */
-import { FieldPath, getFirestore, type Firestore } from 'firebase-admin/firestore';
 import {
   aceitarSugestao,
   EMBED_DIMS,
@@ -33,7 +43,6 @@ import {
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
-import { getFirebaseApp, isFirebaseEnabled } from '../infra/firebase/firebase.js';
 import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
 import {
   auditor,
@@ -213,40 +222,48 @@ function tituloMelhor(atual: string, sugerido: string): string | null {
  */
 const cursorPorUsuario = new Map<string, string>();
 
-async function curateUser(db: Firestore, uid: string): Promise<number> {
-  const colecao = db.collection('users').doc(uid).collection('library');
+async function curateUser(userId: string): Promise<number> {
   const janela = env.CURATION_BATCH * 4; // folga: a maioria já estará em dia
-  const desde = cursorPorUsuario.get(uid);
+  const desde = cursorPorUsuario.get(userId);
 
-  let consulta = colecao.orderBy(FieldPath.documentId()).limit(janela);
-  if (desde) consulta = colecao.orderBy(FieldPath.documentId()).startAfter(desde).limit(janela);
-  const snapshot = await consulta.get();
+  const linhas = await prisma.userCollectionItem.findMany({
+    where: {
+      userId,
+      collection: 'library',
+      deleted: false,
+      ...(desde ? { itemId: { gt: desde } } : {}),
+    },
+    orderBy: { itemId: 'asc' },
+    take: janela,
+  });
 
   // Chegou ao fim da coleção: recomeça do início na PRÓXIMA volta (não agora —
   // reler tudo de uma vez é justamente o desperdício que estamos cortando).
-  if (snapshot.empty && desde) {
-    cursorPorUsuario.delete(uid);
+  if (linhas.length === 0 && desde) {
+    cursorPorUsuario.delete(userId);
     return 0;
   }
-  const ultimo = snapshot.docs.at(-1);
-  if (ultimo && snapshot.size === janela) cursorPorUsuario.set(uid, ultimo.id);
-  else cursorPorUsuario.delete(uid); // página final: próxima volta começa do topo
+  const ultimo = linhas.at(-1);
+  if (ultimo && linhas.length === janela) cursorPorUsuario.set(userId, ultimo.itemId);
+  else cursorPorUsuario.delete(userId); // página final: próxima volta começa do topo
+
+  const docs = linhas.map((linha) =>
+    docDoPostgres(userId, linha.itemId, (linha.data ?? {}) as LibraryEntry),
+  );
 
   const now = Date.now();
-  const due = snapshot.docs
-    .filter((d) => isDue(d.data() as LibraryEntry, now))
-    .slice(0, env.CURATION_BATCH);
+  const due = docs.filter((d) => isDue(d.data(), now)).slice(0, env.CURATION_BATCH);
 
   let corrigidas = 0;
 
   if (due.length > 0) {
-    log.info({ uid: uid.slice(0, 8), pendentes: due.length }, 'auditando');
+    log.info({ usuario: userId.slice(0, 8), pendentes: due.length }, 'auditando');
 
     // Todas de uma vez: o pool em nvidia.ts é quem segura o ritmo real.
     const results = await Promise.all(
       due.map(async (doc) => {
         try {
-          const patch = await auditTrack(doc.data() as LibraryEntry);
+          const patch = await auditTrack(doc.data());
           if (!patch) return false;
           await doc.ref.update(patch);
           return Object.keys(patch).length > 1; // mais que só a data = corrigiu
@@ -263,9 +280,9 @@ async function curateUser(db: Firestore, uid: string): Promise<number> {
   // estava vencido: gênero e DNA não expiram, ou a faixa tem ou não tem. Uma
   // faixa correta há dois anos nunca entraria na fila de auditoria e ficaria
   // fora da busca semântica para sempre.
-  corrigidas += await curarCategorias(snapshot.docs);
-  await gravarDna(snapshot.docs);
-  corrigidas += await fundirDuplicatas(snapshot.docs);
+  corrigidas += await curarCategorias(docs);
+  await gravarDna(docs);
+  corrigidas += await fundirDuplicatas(docs);
 
   return corrigidas;
 }
@@ -411,7 +428,86 @@ async function fundirDuplicatas(docs: LibraryDoc[]): Promise<number> {
   return fundidas;
 }
 
-type LibraryDoc = FirebaseFirestore.QueryDocumentSnapshot<FirebaseFirestore.DocumentData>;
+/**
+ * O CONTRATO MÍNIMO que todas as passagens consomem.
+ *
+ * Era o `QueryDocumentSnapshot` do Firestore. Reduzi-lo a esta interface é o que
+ * permitiu trocar a fonte (Firestore → Postgres) sem tocar em NENHUMA das seis
+ * passagens de curadoria — elas continuam falando `doc.id`, `doc.data()`,
+ * `doc.ref.update(...)`. Trocar a fonte e reescrever as regras no mesmo passo
+ * seria trocar um defeito conhecido por vários desconhecidos.
+ */
+interface LibraryDoc {
+  id: string;
+  data(): LibraryEntry;
+  ref: {
+    /** Aceita caminho pontilhado (`'track.genre'`), como o Firestore aceitava. */
+    update(patch: Record<string, unknown>): Promise<void>;
+    delete(): Promise<void>;
+  };
+}
+
+/**
+ * Aplica um patch de caminhos pontilhados sobre o JSON da entrada.
+ *
+ * As passagens gravam `{'track.genre': 'Trap'}` — sintaxe do Firestore, que
+ * atualiza SÓ aquele campo. Um `update` de JSON no Postgres substitui o
+ * documento inteiro, então quem traduz é esta função: sem ela, gravar o gênero
+ * apagaria título, artistas, capa e duração da faixa junto.
+ */
+export function aplicarPatch(dados: LibraryEntry, patch: Record<string, unknown>): LibraryEntry {
+  const saida: Record<string, unknown> = { ...(dados as Record<string, unknown>) };
+  for (const [caminho, valor] of Object.entries(patch)) {
+    const partes = caminho.split('.');
+    if (partes.length === 1) {
+      saida[caminho] = valor;
+      continue;
+    }
+    let alvo = saida;
+    for (const parte of partes.slice(0, -1)) {
+      const atual = alvo[parte];
+      const proximo =
+        atual && typeof atual === 'object' && !Array.isArray(atual)
+          ? { ...(atual as Record<string, unknown>) }
+          : {};
+      alvo[parte] = proximo;
+      alvo = proximo;
+    }
+    alvo[partes.at(-1) as string] = valor;
+  }
+  return saida as LibraryEntry;
+}
+
+/**
+ * Uma faixa da biblioteca no Postgres, vestida de documento.
+ *
+ * `delete()` NÃO apaga a linha: marca `deleted`. A sincronia por delta descobre
+ * o que sumiu pela lápide — uma remoção de verdade seria invisível para os
+ * aparelhos, que continuariam mostrando a faixa fundida para sempre.
+ */
+function docDoPostgres(userId: string, itemId: string, inicial: LibraryEntry): LibraryDoc {
+  let dados = inicial;
+  const chave = { userId_collection_itemId: { userId, collection: 'library', itemId } };
+  return {
+    id: itemId,
+    data: () => dados,
+    ref: {
+      async update(patch) {
+        dados = aplicarPatch(dados, patch);
+        await prisma.userCollectionItem.update({
+          where: chave,
+          data: { data: dados as object },
+        });
+      },
+      async delete() {
+        await prisma.userCollectionItem.update({
+          where: chave,
+          data: { deleted: true },
+        });
+      },
+    },
+  };
+}
 
 /** As faixas do lote na forma que as regras de gênero consomem. */
 function faixasMinimas(docs: LibraryDoc[]): FaixaMinima[] {
@@ -615,43 +711,47 @@ async function gravarDna(docs: LibraryDoc[]): Promise<void> {
 }
 
 /** Uma passada por todos os usuários. */
-async function runOnce(db: Firestore): Promise<void> {
-  const users = await db.collection('users').listDocuments();
-  let fixed = 0;
-  for (const user of users) {
-    fixed += await curateUser(db, user.id);
-  }
-  // O acervo é o que o usuário comum realmente vê — ver curarAcervo.
-  fixed += await curarAcervo().catch((err) => {
+async function runOnce(): Promise<void> {
+  // SÓ QUEM TEM BIBLIOTECA. Varrer a tabela de usuários traria contas anônimas e
+  // de teste — uma consulta por volta, para cada uma, para não achar nada.
+  const comBiblioteca = await prisma.userCollectionItem.groupBy({
+    by: ['userId'],
+    where: { collection: 'library', deleted: false },
+  });
+  // O ACERVO VEM PRIMEIRO — e a ordem aqui não é estética.
+  //
+  // Ele era o ÚLTIMO, depois da volta por todos os usuários. Só que a volta por
+  // usuário espera a IA faixa a faixa, e observado em produção ela ficou presa
+  // em "auditando: 40 pendentes" sem nunca terminar: o acervo não era curado
+  // NENHUMA vez. E o acervo é o que aparece na tela de todo mundo, é regra pura
+  // (sem IA), custa um `SELECT` e termina em segundos.
+  //
+  // Barato, visível e determinístico não pode ficar refém de caro, invisível e
+  // dependente de terceiro.
+  let fixed = await curarAcervo().catch((err) => {
     log.warn({ err }, 'falha ao curar o acervo');
     return 0;
   });
-  if (fixed > 0) log.info({ corrigidas: fixed, usuarios: users.length }, 'volta concluída');
+
+  for (const { userId } of comBiblioteca) {
+    fixed += await curateUser(userId).catch((err) => {
+      log.warn({ err, usuario: userId.slice(0, 8) }, 'falha ao curar este usuário');
+      return 0;
+    });
+  }
+  if (fixed > 0) {
+    log.info({ corrigidas: fixed, usuarios: comBiblioteca.length }, 'volta concluída');
+  }
 }
 
 /**
  * Sobe o laço 24/7. Devolve uma função de parada para o desligamento gracioso.
  */
 export function startCurationWorker(): () => void {
-  if (!isFirebaseEnabled()) {
-    log.warn('curadoria desligada: credenciais do Firebase ausentes');
-    return () => undefined;
-  }
+  // O FIREBASE SAIU DAQUI. A curadoria lê e grava no nosso Postgres; a única
+  // dependência externa que resta é a NVIDIA, e sem ela não há o que auditar.
   if (!isNvidiaConfigured()) {
     log.warn('curadoria desligada: NVIDIA_API_KEY ausente');
-    return () => undefined;
-  }
-
-  // `isFirebaseEnabled()` só olha se as três variáveis estão preenchidas — não
-  // se a chave presta. Com o placeholder do .env.example, `cert()` estoura AQUI,
-  // fora de qualquer try, e o processo inteiro morre em laço de restart: as
-  // filas de transcode, waveform e import caem junto, sem ter nada com Firebase.
-  // A curadoria pode ficar desligada; a fila de upload, não.
-  let db: Firestore;
-  try {
-    db = getFirestore(getFirebaseApp());
-  } catch (err) {
-    log.error({ err }, 'curadoria desligada: credencial do Firebase não carrega');
     return () => undefined;
   }
 
@@ -661,7 +761,7 @@ export function startCurationWorker(): () => void {
   const loop = async (): Promise<void> => {
     if (stopped) return;
     try {
-      await runOnce(db);
+      await runOnce();
     } catch (err) {
       log.error({ err }, 'volta de curadoria falhou');
     }
