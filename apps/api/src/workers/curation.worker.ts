@@ -276,11 +276,33 @@ async function curateUser(userId: string): Promise<number> {
     corrigidas = results.filter(Boolean).length;
   }
 
-  // As duas passagens abaixo rodam sobre o snapshot INTEIRO, não só sobre o que
-  // estava vencido: gênero e DNA não expiram, ou a faixa tem ou não tem. Uma
-  // faixa correta há dois anos nunca entraria na fila de auditoria e ficaria
-  // fora da busca semântica para sempre.
-  corrigidas += await curarCategorias(docs);
+  // AS CATEGORIAS VEEM A BIBLIOTECA INTEIRA, não a janela.
+  //
+  // A janela existe para racionar chamadas de IA. Só que a primeira das três
+  // passagens de categoria — a revisão — é REGRA PURA: normalizar grafia e
+  // esvaziar balde ("Brasileira" não é gênero) não custa rede nenhuma. Presa na
+  // janela de 160, uma biblioteca de 4.416 faixas levaria vinte e oito voltas,
+  // ou seja mais de um dia, para limpar o que dá para limpar em segundos.
+  //
+  // As outras duas continuam racionadas: `auditarGeneros` e `preencherGeneros`
+  // têm `.slice(0, CURATION_BATCH)` por dentro, então ver mais faixas não gasta
+  // mais IA — só melhora a decisão. E melhora de verdade: quem vota se uma
+  // faixa destoa é a discografia do artista (`generoDoArtista`), e com a
+  // biblioteca inteira à vista esse voto passa a ser a discografia INTEIRA em
+  // vez de um pedaço arbitrário de 160. É exatamente o que separa um trap solto
+  // no sertanejo de um sertanejo de verdade.
+  const todas = await prisma.userCollectionItem.findMany({
+    where: { userId, collection: 'library', deleted: false },
+    orderBy: { itemId: 'asc' },
+  });
+  const docsCompletos = todas.map((linha) =>
+    docDoPostgres(userId, linha.itemId, (linha.data ?? {}) as LibraryEntry),
+  );
+  corrigidas += await curarCategorias(docsCompletos);
+
+  // DNA e fusão de duplicatas seguem na janela: o primeiro tem custo de rede por
+  // faixa, e o segundo APAGA (com lápide) — alargar o alcance de quem remove sem
+  // pedido é o tipo de mudança que se faz de propósito, não de carona.
   await gravarDna(docs);
   corrigidas += await fundirDuplicatas(docs);
 
