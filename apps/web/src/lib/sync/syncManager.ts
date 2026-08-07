@@ -19,6 +19,11 @@ export function initCloudSync(): void {
   localLikes.purgePreviews();
   localHistory.purgeCatalog();
   localPlaylists.purgeCatalog();
+  // A capa escolhida pela pessoa é servida por `URL.createObjectURL`, e essa URL
+  // morre junto com a aba: na recarga seguinte a lista aparecia com um quadrado
+  // cinza no lugar da capa que ela acabou de escolher. Os bytes continuam no
+  // cofre — este passe só emite uma URL viva a partir deles.
+  void localPlaylists.reidratarCapas().catch(() => undefined);
   subscribeAuth((user) => {
     const uid = user?.uid ?? null;
     localLikes.setUser(uid);

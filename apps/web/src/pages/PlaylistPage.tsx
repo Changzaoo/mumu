@@ -5,7 +5,7 @@
  * Note: the API has no playlist-like endpoint (library covers tracks/albums/
  * artists only), so the actions row offers share instead.
  */
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { useQueryClient } from '@tanstack/react-query';
 import { Link, useParams } from 'react-router';
 import { useForm } from 'react-hook-form';
@@ -14,6 +14,7 @@ import { toast } from 'sonner';
 import {
   ArrowDown,
   ArrowUp,
+  Image as ImageIcon,
   Link2,
   ListMusic,
   Loader2,
@@ -127,6 +128,146 @@ function EditDialog({
             </Button>
           </DialogFooter>
         </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+/**
+ * Editar uma lista DO APARELHO — nome e capa.
+ *
+ * Existe separado do diálogo do servidor porque as duas coisas não se parecem:
+ * lá é uma mutação de API com descrição e colaboração; aqui é escrita local,
+ * instantânea, e a capa é um arquivo que a pessoa escolhe do próprio aparelho.
+ *
+ * ISTO NÃO EXISTIA. O `EditPlaylistDialog` do servidor estava definido e nunca
+ * era renderizado, e o item "Editar detalhes" só aparecia para dono de playlist
+ * de servidor — então não havia, em lugar nenhum do app, como renomear uma
+ * lista que você mesmo criou.
+ */
+function EditLocalPlaylistDialog({
+  id,
+  title,
+  coverUrl,
+  open,
+  onOpenChange,
+  onSaved,
+}: {
+  id: string;
+  title: string;
+  coverUrl: string | null;
+  open: boolean;
+  onOpenChange: (open: boolean) => void;
+  onSaved: () => void;
+}) {
+  const [nome, setNome] = useState(title);
+  const [capa, setCapa] = useState<string | null>(coverUrl);
+  const [ocupado, setOcupado] = useState(false);
+  const capaRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    if (open) {
+      setNome(title);
+      setCapa(coverUrl);
+    }
+  }, [open, title, coverUrl]);
+
+  const escolherCapa = async (arquivo: File | undefined): Promise<void> => {
+    if (!arquivo) return;
+    setOcupado(true);
+    try {
+      const url = await localPlaylists.definirCapaDeArquivo(id, arquivo);
+      if (!url) {
+        toast.error('Não consegui usar essa imagem. Tente outra.');
+        return;
+      }
+      setCapa(url);
+      onSaved();
+    } finally {
+      setOcupado(false);
+    }
+  };
+
+  const salvar = (): void => {
+    if (!localPlaylists.rename(id, nome)) {
+      toast.error('Dê um nome para a lista.');
+      return;
+    }
+    onSaved();
+    onOpenChange(false);
+    toast.success('Playlist atualizada');
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Editar playlist</DialogTitle>
+          <DialogDescription>Mude o nome e a capa quando quiser.</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-start gap-4">
+            <button
+              type="button"
+              onClick={() => capaRef.current?.click()}
+              disabled={ocupado}
+              className="group relative size-24 shrink-0 overflow-hidden rounded-lg border border-border bg-bg-elevated"
+              aria-label="Trocar a capa"
+            >
+              {capa ? (
+                <img src={capa} alt="" className="size-full object-cover" />
+              ) : (
+                <span className="grid size-full place-items-center text-fg-subtle">
+                  <ImageIcon className="size-6" />
+                </span>
+              )}
+              <span className="absolute inset-0 grid place-items-center bg-black/55 text-[11px] font-medium text-white opacity-0 transition-opacity group-hover:opacity-100">
+                {ocupado ? <Loader2 className="size-4 animate-spin" /> : 'Trocar'}
+              </span>
+            </button>
+            <div className="min-w-0 flex-1 space-y-1.5">
+              <Label htmlFor="local-title">Nome</Label>
+              <Input
+                id="local-title"
+                value={nome}
+                onChange={(e) => setNome(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && salvar()}
+                maxLength={100}
+              />
+              {capa && (
+                <button
+                  type="button"
+                  className="text-[11px] text-fg-subtle underline-offset-2 hover:underline"
+                  onClick={() => {
+                    localPlaylists.setCover(id, null);
+                    setCapa(null);
+                    onSaved();
+                  }}
+                >
+                  Remover a capa escolhida
+                </button>
+              )}
+            </div>
+          </div>
+          <input
+            ref={capaRef}
+            type="file"
+            accept="image/*"
+            hidden
+            onChange={(e) => {
+              void escolherCapa(e.target.files?.[0]);
+              e.target.value = '';
+            }}
+          />
+          <DialogFooter>
+            <Button variant="ghost" onClick={() => onOpenChange(false)}>
+              Cancelar
+            </Button>
+            <Button variant="accent" onClick={salvar} disabled={ocupado}>
+              Salvar
+            </Button>
+          </DialogFooter>
+        </div>
       </DialogContent>
     </Dialog>
   );
@@ -431,6 +572,11 @@ export default function PlaylistPage() {
                 <DropdownMenuItem onSelect={copyLink}>
                   <Link2 /> Copiar link
                 </DropdownMenuItem>
+                {isLocal && (
+                  <DropdownMenuItem onSelect={() => setEditOpen(true)}>
+                    <Pencil /> Editar nome e capa
+                  </DropdownMenuItem>
+                )}
                 {isOwner && (
                   <>
                     <DropdownMenuItem onSelect={() => setEditOpen(true)}>
@@ -460,6 +606,17 @@ export default function PlaylistPage() {
           <p className="mt-4 max-w-2xl text-sm leading-relaxed text-fg-muted">{data.description}</p>
         )}
       </HeroHeader>
+
+      {isLocal && (
+        <EditLocalPlaylistDialog
+          id={id}
+          title={data.title}
+          coverUrl={localPlaylists.get(id)?.coverUrl ?? null}
+          open={editOpen}
+          onOpenChange={setEditOpen}
+          onSaved={() => void queryClient.invalidateQueries({ queryKey: ['playlist', id] })}
+        />
+      )}
 
       {data.tracks.length === 0 ? (
         <EmptyState

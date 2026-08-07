@@ -16,6 +16,7 @@ import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/share
 import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';
+import { deleteCover, getCoverBlob, putCover } from '@/lib/offline/audioCache';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
 const TRACKS_KEY = 'aurial:local-playlist-tracks';
@@ -25,6 +26,8 @@ interface PlaylistDocData {
   title: string;
   createdAt: string;
   tracks: TrackDto[];
+  /** Capa escolhida pela pessoa — viaja junto para os outros aparelhos. */
+  coverUrl?: string | null;
 }
 
 export interface LocalPlaylist {
@@ -32,6 +35,17 @@ export interface LocalPlaylist {
   title: string;
   trackIds: string[];
   createdAt: string;
+  /**
+   * Capa ESCOLHIDA pela pessoa. Ausente = a lista usa a capa da primeira faixa,
+   * que é o comportamento de sempre.
+   *
+   * Guarda uma URL, nunca os bytes. O registro das listas mora no localStorage,
+   * e foi exatamente ali que quatro mil faixas se perderam quando a chave passou
+   * de 5 MB: `setItem` não grava "o que coube", ele falha POR INTEIRO. Uma capa
+   * embutida em data URL traria o mesmo estrago de volta pela porta dos fundos.
+   * Bytes de imagem vão para o cofre de capas (IndexedDB) — ver `definirCapa`.
+   */
+  coverUrl?: string | null;
 }
 
 // ── in-memory cache + subscribers ───────────────────────────────
@@ -152,8 +166,112 @@ export function addTracks(id: string, tracks: TrackDto[]): number {
   return addedCount;
 }
 
+/**
+ * Renomeia a lista. Nome em branco é RECUSADO — devolve `false` em vez de
+ * gravar uma lista sem nome, que some da prateleira sem o usuário entender.
+ */
+export function rename(id: string, title: string): boolean {
+  const limpo = title.trim();
+  if (!limpo) return false;
+  const existe = readPlaylists().some((p) => p.id === id);
+  if (!existe) return false;
+  writePlaylists(readPlaylists().map((p) => (p.id === id ? { ...p, title: limpo } : p)));
+  pushPlaylist(id);
+  return true;
+}
+
+/**
+ * Troca a capa da lista. `null` volta a herdar a capa da primeira faixa.
+ *
+ * Só aceita URL — os bytes de uma imagem escolhida do aparelho vão para o cofre
+ * de capas (ver `definirCapaDeArquivo`). Ver o comentário de `coverUrl`.
+ */
+export function setCover(id: string, coverUrl: string | null): boolean {
+  const existe = readPlaylists().some((p) => p.id === id);
+  if (!existe) return false;
+  const valor = coverUrl?.trim() || null;
+  writePlaylists(readPlaylists().map((p) => (p.id === id ? { ...p, coverUrl: valor } : p)));
+  pushPlaylist(id);
+  return true;
+}
+
+/** Lado do quadrado da capa gravada. 512px cobre o maior card do app com folga. */
+const LADO_DA_CAPA = 512;
+/** Teto do JPEG gerado. Uma capa que passa disso não é capa, é foto crua. */
+const TETO_DA_CAPA = 400 * 1024;
+
+/**
+ * Capa escolhida do aparelho: reduz para um quadrado e guarda no cofre de capas.
+ *
+ * REDUZIR NÃO É ENFEITE. A foto que sai de um celular hoje tem 3–8 MB; guardada
+ * como veio, ela sozinha estoura qualquer orçamento de armazenamento do
+ * navegador e ainda entope a sincronia. 512×512 em JPEG dá uns 40 KB e é
+ * indistinguível no maior card que o app desenha.
+ *
+ * Devolve a URL a gravar na lista, ou `null` quando o arquivo não é uma imagem
+ * utilizável — nesse caso a lista fica com a capa que já tinha.
+ */
+export async function definirCapaDeArquivo(id: string, arquivo: Blob): Promise<string | null> {
+  if (!arquivo.type.startsWith('image/')) return null;
+  let bitmap: ImageBitmap;
+  try {
+    bitmap = await createImageBitmap(arquivo);
+  } catch {
+    return null; // arquivo corrompido ou formato que o navegador não abre
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = LADO_DA_CAPA;
+  canvas.height = LADO_DA_CAPA;
+  const ctx = canvas.getContext('2d');
+  if (!ctx) return null;
+
+  // Recorte central: a imagem preenche o quadrado sem esticar ninguém.
+  const lado = Math.min(bitmap.width, bitmap.height);
+  ctx.drawImage(
+    bitmap,
+    (bitmap.width - lado) / 2,
+    (bitmap.height - lado) / 2,
+    lado,
+    lado,
+    0,
+    0,
+    LADO_DA_CAPA,
+    LADO_DA_CAPA,
+  );
+  bitmap.close();
+
+  const blob = await new Promise<Blob | null>((resolve) =>
+    canvas.toBlob((b) => resolve(b), 'image/jpeg', 0.85),
+  );
+  if (!blob || blob.size === 0 || blob.size > TETO_DA_CAPA) return null;
+
+  // O cofre de capas é IndexedDB — cabe imagem, ao contrário do localStorage.
+  await putCover(`playlist:${id}`, blob);
+  const url = URL.createObjectURL(blob);
+  setCover(id, url);
+  return url;
+}
+
+/**
+ * Recupera a capa gravada de uma lista depois de recarregar a página.
+ *
+ * O `URL.createObjectURL` de `definirCapaDeArquivo` morre quando a aba fecha, e
+ * a URL guardada vira um link quebrado. Este passe troca a URL morta por uma
+ * viva a partir dos bytes, que continuam no cofre. Sem ele, a capa escolhida
+ * aparecia uma vez e virava quadrado cinza na recarga seguinte.
+ */
+export async function reidratarCapas(): Promise<void> {
+  for (const playlist of readPlaylists()) {
+    if (!playlist.coverUrl?.startsWith('blob:')) continue;
+    const blob = await getCoverBlob(`playlist:${playlist.id}`).catch(() => null);
+    setCover(playlist.id, blob ? URL.createObjectURL(blob) : null);
+  }
+}
+
 export function remove(id: string): void {
   writePlaylists(readPlaylists().filter((p) => p.id !== id));
+  void deleteCover(`playlist:${id}`).catch(() => undefined);
   cloud.remove(id);
   // Companion track entries are intentionally left; they're tiny and may be
   // referenced by other lists. They fall out of use harmlessly.
@@ -211,7 +329,12 @@ const cloud = serverCollection<PlaylistDocData>({
   localItems: () =>
     readPlaylists().map((p): [string, PlaylistDocData] => [
       p.id,
-      { title: p.title, createdAt: p.createdAt, tracks: resolveTracks(p.id) },
+      {
+        title: p.title,
+        createdAt: p.createdAt,
+        tracks: resolveTracks(p.id),
+        coverUrl: p.coverUrl ?? null,
+      },
     ]),
   onRemoteUpsert: (id, data) => applyRemoteUpsert(id, data),
   onRemoteDelete: (id) => applyRemoteDelete(id),
@@ -227,6 +350,7 @@ function pushPlaylist(id: string): void {
       title: playlist.title,
       createdAt: playlist.createdAt,
       tracks: resolveTracks(id),
+      coverUrl: playlist.coverUrl ?? null,
     });
   }
 }
@@ -242,6 +366,8 @@ function applyRemoteUpsert(id: string, data: PlaylistDocData): void {
     title: data.title,
     trackIds: tracks.map((t) => t.id),
     createdAt: data.createdAt,
+    // `blob:` só vale no aparelho que criou: chegando de fora é link morto.
+    coverUrl: data.coverUrl?.startsWith('blob:') ? null : (data.coverUrl ?? null),
   };
   const existing = readPlaylists();
   writePlaylists(
@@ -315,7 +441,8 @@ export function toPlaylistDto(playlist: LocalPlaylist): PlaylistDto {
     id: playlist.id,
     title: playlist.title,
     description: null,
-    coverUrl: tracks.find((t) => t.coverUrl)?.coverUrl ?? null,
+    // A escolha da pessoa vence a capa herdada da primeira faixa.
+    coverUrl: playlist.coverUrl ?? tracks.find((t) => t.coverUrl)?.coverUrl ?? null,
     dominantColor: null,
     isPublic: false,
     isCollaborative: false,
