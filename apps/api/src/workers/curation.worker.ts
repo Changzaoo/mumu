@@ -36,6 +36,7 @@ import {
   aceitarSugestao,
   EMBED_DIMS,
   generoDoArtista,
+  promoverArtistaReal,
   revisarGeneros as revisarGenerosDeFaixas,
   type FaixaComparavel,
   type FaixaMinima,
@@ -317,9 +318,57 @@ async function curateUser(userId: string): Promise<number> {
  * um monte de faixa que estava escondida atrás de um campo preenchido.
  */
 async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
-  let corrigidas = await revisarGeneros(docs); // regra pura, sem IA
+  // A GRAVADORA SAI DA FRENTE ANTES DE QUALQUER COISA — e a ordem é o ponto.
+  //
+  // Faixa importada do canal de um selo fica com o NOME DO SELO como artista
+  // principal ("MK MUSIC, Anderson Freire"). Todas as passagens abaixo decidem
+  // olhando `artistas[0]`, então enquanto o selo estiver ali elas trabalham com
+  // a premissa errada: onze faixas de cantores diferentes votam juntas, nenhuma
+  // maioria se forma, e o gênero errado da fonte sobrevive. Foi assim que
+  // "Raridade", do Anderson Freire, ficou em Sertanejo e a prateleira Gospel
+  // apareceu vazia de músicas que estavam lá dentro.
+  //
+  // Devolvido o crédito, a coerência por artista volta a funcionar sozinha: a
+  // discografia do Anderson Freire é Gospel por maioria, e ela puxa a faixa
+  // que destoa. Consertar o dado é melhor que ensinar cada passagem a
+  // desconfiar dele.
+  let corrigidas = await promoverArtistas(docs);
+  corrigidas += await revisarGeneros(docs); // regra pura, sem IA
   corrigidas += await auditarGeneros(docs); // confere o que já tem categoria
   corrigidas += await preencherGeneros(docs); // preenche quem está sem
+  return corrigidas;
+}
+
+/**
+ * Tira o nome da gravadora da frente do artista de verdade.
+ *
+ * Conserta três coisas de uma vez, porque as três liam o mesmo campo errado: a
+ * foto da ficha (que trazia o logotipo do selo), a categoria (ver acima) e a
+ * prateleira de artistas (onde o selo aparecia como se fosse um cantor com
+ * dezenas de faixas). Ver `promoverArtistaReal` em shared.
+ */
+async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
+  let corrigidas = 0;
+  for (const doc of docs) {
+    const track = doc.data().track;
+    if (!Array.isArray(track?.artists)) continue;
+    const artistas = track.artists as Array<{ name?: unknown }>;
+    if (!artistas.every((a) => a && typeof a.name === 'string')) continue;
+
+    const novo = promoverArtistaReal(artistas as Array<{ name: string }>);
+    if (!novo) continue;
+    try {
+      await doc.ref.update({ 'track.artists': novo });
+      corrigidas += 1;
+      log.info(
+        { doc: doc.id, de: artistas[0]?.name, para: novo[0]?.name },
+        'gravadora saiu da frente do artista',
+      );
+    } catch (err) {
+      log.warn({ err, doc: doc.id }, 'falha ao promover o artista');
+    }
+  }
+  if (corrigidas > 0) log.info({ corrigidas }, 'créditos de artista devolvidos');
   return corrigidas;
 }
 

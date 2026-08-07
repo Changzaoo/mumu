@@ -8,10 +8,38 @@
  */
 import type { PeerControlMessage } from '@aurial/shared';
 
-const ICE_SERVERS: RTCIceServer[] = [
-  { urls: 'stun:stun.l.google.com:19302' },
-  { urls: 'stun:global.stun.twilio.com:3478' },
-];
+/**
+ * O IP DE QUEM EMPRESTA NÃO PODE APARECER PARA QUEM RECEBE.
+ *
+ * Isto é o oposto do que o WebRTC faz por padrão. Para achar o caminho mais
+ * curto, os dois lados trocam "candidatos" — e entre eles vai o endereço
+ * público de cada um. Numa conexão direta, servir uma música para um estranho
+ * entrega o seu IP para ele, e não há configuração que impeça: a troca É o
+ * mecanismo.
+ *
+ * A única forma de esconder é obrigar tudo a passar por um relay (TURN):
+ * `iceTransportPolicy: 'relay'` faz o navegador DESCARTAR os candidatos locais e
+ * refletidos, e oferecer apenas o endereço do relay. Cada lado enxerga o
+ * servidor; nenhum enxerga o outro.
+ *
+ * O PREÇO, e ele é honesto: os bytes voltam a atravessar um servidor, então o
+ * P2P deixa de economizar banda. O que ele continua economizando é o que de
+ * fato quebra aqui — espaço no cofre (a biblioteca não cabe nele) e extrações
+ * ao vivo (o que estrangula o IP do servidor). Sem TURN configurado, o
+ * compartilhamento simplesmente não sobe: melhor não servir do que servir
+ * expondo o endereço de quem emprestou sem essa pessoa saber.
+ */
+const TURN_URL = import.meta.env.VITE_TURN_URL as string | undefined;
+const TURN_USER = import.meta.env.VITE_TURN_USER as string | undefined;
+const TURN_PASS = import.meta.env.VITE_TURN_PASS as string | undefined;
+
+export function turnConfigurado(): boolean {
+  return Boolean(TURN_URL && TURN_USER && TURN_PASS);
+}
+
+const ICE_SERVERS: RTCIceServer[] = turnConfigurado()
+  ? [{ urls: TURN_URL as string, username: TURN_USER, credential: TURN_PASS }]
+  : [];
 
 /** Pause sends above this many buffered bytes; resume on bufferedamountlow. */
 export const BUFFERED_HIGH = 4 * 1024 * 1024;
@@ -62,7 +90,13 @@ export class PeerConnection {
     this.polite = options.polite;
     this.sendSignal = options.sendSignal;
 
-    this.pc = new RTCPeerConnection({ iceServers: ICE_SERVERS });
+    this.pc = new RTCPeerConnection({
+      iceServers: ICE_SERVERS,
+      // 'relay' é o que esconde o IP — ver o comentário de ICE_SERVERS. Sem ele
+      // o navegador tentaria a rota direta primeiro, que é justamente a que
+      // entrega o endereço de cada lado para o outro.
+      iceTransportPolicy: 'relay',
+    });
 
     this.pc.onnegotiationneeded = () => {
       void (async () => {
