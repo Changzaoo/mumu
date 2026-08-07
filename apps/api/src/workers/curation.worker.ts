@@ -560,7 +560,19 @@ function faixasMinimas(docs: LibraryDoc[]): FaixaMinima[] {
  * As regras vivem em `shared/ai/generoCoerencia.ts`, as MESMAS que o app usa.
  */
 async function revisarGeneros(docs: LibraryDoc[]): Promise<number> {
-  const mudancas = revisarGenerosDeFaixas(faixasMinimas(docs)).slice(0, env.CURATION_BATCH);
+  // SEM TETO, e de propósito.
+  //
+  // O `.slice(0, CURATION_BATCH)` que estava aqui racionava 40 por volta. Ele
+  // fazia sentido quando cada escrita era uma no Firestore, com cota diária do
+  // projeto inteiro. Hoje é um UPDATE no Postgres ao lado, e o teto só serve
+  // para arrastar por oito horas um trabalho de segundos: 288 rótulos ruins a
+  // 40 por hora.
+  //
+  // E não é um risco novo: `curarAcervo` aplica ESTA MESMA função sem teto
+  // nenhum, e foi assim que o acervo saiu de 3.858 faixas para zero rótulo ruim
+  // numa volta só. Racionar de um lado o que se aplica inteiro do outro não
+  // protege nada — só faz a biblioteca ficar suja mais tempo que o acervo.
+  const mudancas = revisarGenerosDeFaixas(faixasMinimas(docs));
   if (mudancas.length === 0) return 0;
 
   const porId = new Map(docs.map((d) => [d.id, d]));
