@@ -8,7 +8,6 @@ import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
   IoAddCircleOutline,
-  IoBusinessOutline,
   IoCompassOutline,
   IoEllipsisHorizontal,
   IoHeartOutline,
@@ -17,7 +16,6 @@ import {
   IoLibrary,
   IoLibraryOutline,
   IoPeopleOutline,
-  IoPhonePortraitOutline,
   IoPulseOutline,
   IoSearch,
   IoSearchOutline,
@@ -62,7 +60,11 @@ const MENU: MenuGroup[] = [
     heading: 'Biblioteca',
     items: [
       { to: '/artistas', label: 'Artistas', icon: IoPeopleOutline },
-      { to: '/gravadoras', label: 'Gravadoras', icon: IoBusinessOutline },
+      // GRAVADORA NÃO É DESTINO, é atalho. A lista de selos não é algo que se
+      // navega ("quero ver minhas gravadoras"); ela só faz sentido quando você
+      // já está olhando um artista ou uma faixa e quer saber quem lançou. A
+      // página do selo continua existindo — chega-se a ela clicando no nome
+      // onde ele aparece, não por uma aba na barra.
       { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
       { to: '/history', label: 'Histórico', icon: IoTimeOutline },
     ],
