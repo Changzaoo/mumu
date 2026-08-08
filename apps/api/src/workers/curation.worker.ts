@@ -452,20 +452,42 @@ async function uniformizarTitulos(docs: LibraryDoc[]): Promise<number> {
       patch['track.title'] = novoTitulo;
     }
 
-    // Artista: só preenche onde estava VAZIO. Sobrescrever atribuição existente
-    // é trabalho do auditor, que confere antes; aqui a regra é cega e não tem
-    // como saber se o que já está lá veio de uma correção anterior.
+    // Artista: preenche onde estava VAZIO e ACRESCENTA o convidado que o próprio
+    // título nomeia ("ft./part.") e que ainda não está na lista. Não reordena
+    // nem troca quem já está — isso é trabalho do auditor. Mas um feat que o
+    // título declara é fato, não palpite: descartá-lo foi o que deixou "Ninguém
+    // Explica Deus" sem a Gabriela Rocha quando o "ft." saiu do nome — e sem ela
+    // a herança de gênero por artista creditado não tinha de quem puxar.
+    const montarArtista = (name: string, order: number) => ({
+      id: `video:${name.toLowerCase().replace(/\s+/g, '-')}`,
+      name,
+      slug: name
+        .toLowerCase()
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, ''),
+      imageUrl: null,
+      order,
+    });
+    const chaveNome = (n: string): string =>
+      n
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+    const jaPresentes = new Set(atuais.map(chaveNome));
+    const convidadosNovos = partes.artists.filter(
+      (n) => n.trim() && !jaPresentes.has(chaveNome(n)),
+    );
+
     if (atuais.length === 0 && partes.artists.length > 0) {
-      patch['track.artists'] = partes.artists.map((name, i) => ({
-        id: `video:${name.toLowerCase().replace(/\s+/g, '-')}`,
-        name,
-        slug: name
-          .toLowerCase()
-          .replace(/[^a-z0-9]+/g, '-')
-          .replace(/^-|-$/g, ''),
-        imageUrl: null,
-        order: i,
-      }));
+      patch['track.artists'] = partes.artists.map((name, i) => montarArtista(name, i));
+    } else if (convidadosNovos.length > 0) {
+      const existentes = Array.isArray(track?.artists) ? (track.artists as unknown[]) : [];
+      patch['track.artists'] = [
+        ...existentes,
+        ...convidadosNovos.map((name, i) => montarArtista(name, existentes.length + i)),
+      ];
     }
 
     if (partes.label && !track?.label) patch['track.label'] = partes.label;
