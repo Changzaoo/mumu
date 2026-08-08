@@ -15,6 +15,13 @@ const f = (id: string, genre: string | null, artista: string): FaixaMinima => ({
   genre,
   artistas: [artista],
 });
+/** Uma faixa com selo — para os testes do voto por fonte. */
+const fs = (id: string, genre: string | null, artista: string, label: string): FaixaMinima => ({
+  id,
+  genre,
+  artistas: [artista],
+  label,
+});
 const varias = (n: number, prefixo: string, genero: string, artista: string): FaixaMinima[] =>
   Array.from({ length: n }, (_, i) => f(`${prefixo}${i}`, genero, artista));
 
@@ -121,5 +128,66 @@ describe('revisarGeneros — nunca duas revisões da mesma faixa', () => {
     ]);
     const ids = mudancas.map((m) => m.id);
     expect(ids).toEqual([...new Set(ids)]);
+  });
+});
+
+/**
+ * O GÊNERO QUE VEM DA FONTE — quando o artista sozinho não tem como votar.
+ *
+ * Medido em produção: o Midian Lima entrou com TRÊS faixas e as três erradas
+ * (Funk, Reggaeton, Sertanejo). Não há faixa certa dele para a regra de artista
+ * puxar as outras. Mas todas saíram do MK Music, um selo gospel, e o catálogo do
+ * selo é a prova que faltava. A barra é alta para NÃO deixar uma gravadora
+ * grande, que lança de tudo, arrastar faixa nenhuma.
+ */
+describe('revisarGeneros — o selo vota quando o artista não pode', () => {
+  it('selo gospel puxa a faixa órfã que entrou como Funk', () => {
+    // MK Music: 5 gospel de artistas variados + a faixa do Midian Lima em Funk.
+    const mudancas = revisarGeneros([
+      fs('g1', 'Gospel', 'Elaine Martins', 'MK Music'),
+      fs('g2', 'Gospel', 'Sarah Farias', 'MK Music'),
+      fs('g3', 'Gospel', 'Anderson Freire', 'MK Music'),
+      fs('g4', 'Gospel', 'Paulo Neto', 'MK Music'),
+      fs('g5', 'Gospel', 'Samuel Messias', 'MK Music'),
+      fs('naoPare', 'Funk', 'Midian Lima', 'MK Music'),
+    ]);
+    expect(mudancas.find((m) => m.id === 'naoPare')).toMatchObject({
+      para: 'Gospel',
+      motivo: 'genero-do-selo',
+    });
+  });
+
+  it('gravadora grande e diversa NÃO vota — sem maioria, sem conversão', () => {
+    // Universal lança de tudo: pop, rock, hip-hop. Nenhuma maioria de dois
+    // terços se forma, então a faixa de sertanejo dela fica onde está.
+    const mudancas = revisarGeneros([
+      fs('u1', 'Pop', 'Artista A', 'Universal Music'),
+      fs('u2', 'Rock', 'Artista B', 'Universal Music'),
+      fs('u3', 'Hip-Hop/Rap', 'Artista C', 'Universal Music'),
+      fs('u4', 'Pop', 'Artista D', 'Universal Music'),
+      fs('sert', 'Sertanejo', 'Artista E', 'Universal Music'),
+    ]);
+    expect(mudancas.find((m) => m.id === 'sert')).toBeUndefined();
+  });
+
+  it('poucas faixas do selo não bastam — abaixo de 4 votos não vota', () => {
+    // Dois gospel não provam que o selo é gospel; pode ser coincidência.
+    const mudancas = revisarGeneros([
+      fs('g1', 'Gospel', 'A', 'Selo Novo'),
+      fs('g2', 'Gospel', 'B', 'Selo Novo'),
+      fs('rock', 'Rock', 'C', 'Selo Novo'),
+    ]);
+    expect(mudancas.find((m) => m.id === 'rock')).toBeUndefined();
+  });
+
+  it('faixa sem selo não é tocada por esta passada', () => {
+    const mudancas = revisarGeneros([
+      fs('g1', 'Gospel', 'A', 'MK Music'),
+      fs('g2', 'Gospel', 'B', 'MK Music'),
+      fs('g3', 'Gospel', 'C', 'MK Music'),
+      fs('g4', 'Gospel', 'D', 'MK Music'),
+      f('semSelo', 'Funk', 'E'),
+    ]);
+    expect(mudancas.find((m) => m.id === 'semSelo')).toBeUndefined();
   });
 });

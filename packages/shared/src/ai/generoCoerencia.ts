@@ -43,6 +43,12 @@ export interface FaixaMinima {
   id: string;
   genre: string | null;
   artistas: string[];
+  /**
+   * A fonte que publicou a faixa — selo ou canal. Sai do leitor de título, que
+   * já decide se um nome como "MK MUSIC" é a gravadora (vira `label`) ou uma
+   * pessoa (vira artista). Aqui ela vota no gênero: ver a 4ª passada.
+   */
+  label?: string | null;
 }
 
 export interface VotoDoArtista {
@@ -70,6 +76,14 @@ const GENEROS_DO_ARTISTA = new Set<Genre>(['Gospel']);
 /** Barra da 3ª passada: duas faixas do artista já bastam. */
 const MIN_VOTOS_ARTISTA = 2;
 const MIN_FATIA_VETAR = 0.75;
+/**
+ * Barra da 4ª passada — o voto do selo. Mais alta que a do artista porque um
+ * selo publica MUITO mais que um artista: quatro faixas e dois terços do
+ * catálogo garantem que é um selo especializado (gospel, trap), não uma
+ * gravadora grande que lança de tudo — essas nunca formam maioria e não votam.
+ */
+const MIN_VOTOS_SELO = 4;
+const MIN_FATIA_SELO = 0.66;
 
 function chaveArtista(nome: string): string {
   return nome
@@ -109,6 +123,48 @@ export function generoDoArtista(
   for (const faixa of faixas) {
     if (faixa.id === exceto) continue;
     if (!faixa.artistas.some((a) => chaveArtista(a) === alvo)) continue;
+    const g = generoValido(faixa);
+    if (!g) continue;
+    contagem.set(g, (contagem.get(g) ?? 0) + 1);
+    total += 1;
+  }
+  if (total === 0) return VAZIO;
+
+  let dominante: Genre | null = null;
+  let votos = 0;
+  for (const [g, n] of contagem) {
+    if (n > votos) {
+      dominante = g;
+      votos = n;
+    }
+  }
+  return { dominante, votos, total };
+}
+
+/**
+ * Apura o gênero de um SELO a partir das faixas dele que já têm categoria.
+ *
+ * Mesma mecânica de `generoDoArtista`, com a fonte no lugar do artista. Existe
+ * porque há um erro que o artista não alcança: quando a discografia INTEIRA de
+ * um artista entrou torta (o Midian Lima com três faixas em Funk, Reggaeton e
+ * Sertanejo), não há faixa certa dele para votar. Mas todas saíram do mesmo
+ * selo gospel, e o catálogo do selo — dezenas de faixas de vários artistas — é
+ * a prova que faltava. Um selo especializado é uma pista de gênero tão boa
+ * quanto o artista, às vezes melhor, e é de graça.
+ */
+export function generoDoSelo(
+  faixas: readonly FaixaMinima[],
+  label: string,
+  exceto?: string,
+): VotoDoArtista {
+  const alvo = chaveArtista(label);
+  if (!alvo) return VAZIO;
+
+  const contagem = new Map<Genre, number>();
+  let total = 0;
+  for (const faixa of faixas) {
+    if (faixa.id === exceto) continue;
+    if (!faixa.label || chaveArtista(faixa.label) !== alvo) continue;
     const g = generoValido(faixa);
     if (!g) continue;
     contagem.set(g, (contagem.get(g) ?? 0) + 1);
@@ -174,7 +230,13 @@ export type MotivoDaRevisao =
    * `discrepante` porque cantor de louvor não tem faixa sertaneja no meio do
    * repertório — ver a 3ª passada de `revisarGeneros`.
    */
-  | 'genero-do-artista';
+  | 'genero-do-artista'
+  /**
+   * O gênero veio da FONTE — o selo/canal que publicou. Alcança o que o artista
+   * não alcança: uma discografia inteira que entrou torta, mas de um selo
+   * especializado cujo catálogo prova o gênero. Ver a 4ª passada.
+   */
+  | 'genero-do-selo';
 
 export interface RevisaoDeGenero {
   id: string;
@@ -296,6 +358,36 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     if (mudancas.get(faixa.id)?.motivo === 'discrepante') continue;
 
     registrar(faixa.id, atual, voto.dominante, 'genero-do-artista');
+  }
+
+  // 4ª passada: O GÊNERO QUE VEM DA FONTE — o selo/canal que publicou.
+  //
+  // A 3ª passada precisa de UMA faixa certa do artista para votar. Quando a
+  // discografia inteira entrou torta, não há voto nenhum: o Midian Lima tem três
+  // faixas e as três estão erradas (Funk, Reggaeton, Sertanejo) — nenhuma para
+  // puxar as outras. Mas todas saíram do MK Music, e o catálogo do selo —
+  // dezenas de faixas de artistas diferentes, majoritariamente gospel — é a
+  // prova que o artista sozinho não tinha.
+  //
+  // Fecha com a 3ª de um jeito que importa: assim que o selo põe DUAS faixas do
+  // Midian Lima em Gospel, ele passa a ter discografia gospel, e na volta
+  // seguinte a 3ª passada puxa a terceira sozinha. Um conserto destrava o outro.
+  //
+  // A barra é alta de propósito (4 votos, dois terços) para separar selo
+  // especializado de gravadora grande: MK Music é gospel puro e vota; Universal,
+  // que lança de tudo, nunca forma maioria e fica de fora.
+  for (const faixa of depois) {
+    const label = faixa.label?.trim();
+    if (!label) continue;
+    if (mudancas.has(faixa.id)) continue; // uma revisão por volta
+
+    const atual = generoValido(faixa);
+    const voto = generoDoSelo(depois, label, faixa.id);
+    if (!voto.dominante || voto.dominante === atual) continue;
+    if (voto.votos < MIN_VOTOS_SELO) continue;
+    if (voto.votos / voto.total < MIN_FATIA_SELO) continue;
+
+    registrar(faixa.id, atual, voto.dominante, 'genero-do-selo');
   }
 
   return [...mudancas.values()];

@@ -514,6 +514,7 @@ async function curarAcervo(): Promise<number> {
       id: linha.id,
       genre: typeof track.genre === 'string' ? track.genre : null,
       artistas: artistNames(track),
+      label: typeof track.label === 'string' ? track.label : null,
     };
   });
 
@@ -735,6 +736,7 @@ function faixasMinimas(docs: LibraryDoc[]): FaixaMinima[] {
       id: doc.id,
       genre: typeof track.genre === 'string' ? track.genre : null,
       artistas: artistNames(track),
+      label: typeof track.label === 'string' ? track.label : null,
     };
   });
 }
