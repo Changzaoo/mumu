@@ -22,8 +22,22 @@
 import http from 'node:http';
 import crypto from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { mkdtemp, readdir, readFile, rm, stat, chmod, writeFile, unlink, mkdir } from 'node:fs/promises';
-import { createWriteStream, createReadStream, existsSync } from 'node:fs';
+import {
+  mkdtemp,
+  readdir,
+  readFile,
+  rm,
+  stat,
+  statfs,
+  chmod,
+  writeFile,
+  unlink,
+  mkdir,
+  open,
+  rename,
+  utimes,
+} from 'node:fs/promises';
+import { createWriteStream, existsSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import https from 'node:https';
@@ -510,6 +524,134 @@ const BLOB_MARKERS = [
 // dono e a faixa segue tocável via streaming ao vivo da fonte.
 const MAX_BLOB_BYTES = Number(process.env.MAX_BLOB_GB ?? 15) * 1024 ** 3;
 
+// ── ESPAÇO REAL EM DISCO ────────────────────────────────────────────────────
+// MAX_BLOB_GB é um teto CONTÁBIL: soma apenas os `.bin` do cofre. O disco, no
+// entanto, enche POR FORA — no cartão de 29,1 GB há ~6,6 GB que não são nossos,
+// e eles crescem. Encher um sistema de arquivos não estraga só o cofre: estraga
+// tudo que escreve nele (banco, logs, /tmp). Antes de qualquer gravação nova
+// perguntamos ao sistema de arquivos quanto sobrou DE VERDADE, e guardamos uma
+// folga que nunca é consumida por áudio.
+//
+// A folga padrão é 1 GB porque a medição de hoje no cartão manda nisso: 4,2 GB
+// livres (86% cheio), cofre em 16 GB para um teto de 18 — ou seja, o teto
+// contábil só reclamaria depois de o disco já ter acabado. A folga é o que
+// realmente segura a queda.
+const MIN_LIVRE_BYTES = Number(process.env.MIN_FREE_MB ?? 1024) * 1024 * 1024;
+
+/** Bytes livres no sistema de arquivos do cofre, ou null se não der para saber. */
+async function espacoLivre() {
+  try {
+    const fs = await statfs(BLOB_DIR);
+    return fs.bavail * fs.bsize;
+  } catch {
+    // Sistema de arquivos que não responde não é motivo para recusar gravação:
+    // o comportamento antigo (gravar sem perguntar) vira o pior caso, não o
+    // caso comum.
+    return null;
+  }
+}
+
+/**
+ * Garante espaço para gravar `bytes`.
+ *
+ * Se o disco estiver apertado, PODA primeiro — o cofre é exatamente a parte
+ * sacrificável, e as faixas podadas sabem se refazer (ver `reconstruirBlob`).
+ * Só recusa se nem depois da poda couber, e aí recusar é o conserto: é melhor
+ * um upload negado com explicação do que um disco cheio que derruba o serviço.
+ */
+async function garantirEspaco(bytes) {
+  let livre = await espacoLivre();
+  if (livre === null) return true;
+  if (livre - bytes >= MIN_LIVRE_BYTES) return true;
+  log(`disco apertado: ${(livre / 1024 ** 2).toFixed(0)}MB livres, pedindo ${(bytes / 1024 ** 2).toFixed(0)}MB — podando`);
+  await sweepBlobStore({ liberar: bytes });
+  livre = await espacoLivre();
+  if (livre === null) return true;
+  const cabe = livre - bytes >= MIN_LIVRE_BYTES;
+  if (!cabe) log(`RECUSADO por falta de espaço: ${(livre / 1024 ** 2).toFixed(0)}MB livres`);
+  return cabe;
+}
+
+/**
+ * Blobs com uma reprodução EM CURSO — a poda não os toca.
+ *
+ * A varredura roda a cada gravação e de hora em hora, sem olhar quem está no ar.
+ * No Linux apagar um arquivo aberto não corta a leitura já iniciada, mas havia
+ * uma janela sem proteção nenhuma entre "conferi que o arquivo existe" e
+ * "abri o arquivo": a poda entrando ali fazia o servidor mandar os cabeçalhos
+ * com Content-Length e depois fechar sem corpo — do lado do ouvinte, a música
+ * simplesmente para. Agora o arquivo é ABERTO antes de qualquer cabeçalho (a
+ * janela deixa de existir) e enquanto o descritor estiver aberto o arquivo fica
+ * fora da lista de candidatos à poda.
+ */
+const servindo = new Map(); // caminho do .bin → nº de leituras abertas
+
+function marcarServindo(p) {
+  servindo.set(p, (servindo.get(p) ?? 0) + 1);
+}
+
+function soltarServindo(p) {
+  const n = (servindo.get(p) ?? 0) - 1;
+  if (n > 0) servindo.set(p, n);
+  else servindo.delete(p);
+}
+
+/**
+ * Marca o blob como USADO AGORA.
+ *
+ * A poda ordena por mtime e o comentário chamava isso de "menos tocadas". Não
+ * era: LER um arquivo não altera mtime em sistema de arquivos nenhum, então a
+ * ordem real era a de GRAVAÇÃO — puro FIFO por data de upload. Medido com dois
+ * blobs, 20 reproduções do primeiro e uma poda: saiu justamente o mais tocado.
+ * Num acervo de 42 GB com teto de 18 GB isso significa reconstruir sem parar
+ * exatamente as faixas preferidas da casa.
+ *
+ * O toque é represado (uma vez por hora por faixa) — o cofre mora num cartão SD
+ * e não vale gastar escrita de metadado a cada segundo de reprodução.
+ */
+const TOQUE_MIN_MS = Number(process.env.BLOB_TOUCH_MIN_MS ?? 3600_000);
+
+function toqueNoBlob(p, mtimeMs) {
+  if (Date.now() - mtimeMs < TOQUE_MIN_MS) return;
+  const agora = new Date();
+  void utimes(p, agora, agora).catch(() => undefined);
+}
+
+/**
+ * Interpreta `Range` para um recurso de `total` bytes.
+ *
+ * Devolve `null` (sem faixa / pedido malformado → resposta 200 inteira),
+ * `'invalida'` (fora do arquivo → 416) ou `{ start, end }` já GRAMPEADO ao
+ * tamanho real.
+ *
+ * O que havia antes quebrava de dois jeitos, os dois medidos:
+ *  • `bytes=0-99999999` num arquivo de 1 MB respondia
+ *    `206 Content-Length: 100000000` / `Content-Range: bytes 0-99999999/1000000`
+ *    e entregava 1 MB. A conexão nunca fecha — faltam 99 MB prometidos — e o
+ *    player fica no spinner até o proxy desistir.
+ *  • `bytes=-100` (os ÚLTIMOS 100 bytes, que é como se lê a cauda de um MP3)
+ *    devolvia os 100 PRIMEIROS, anunciados como `bytes 0-100`.
+ */
+function faixaPedida(cabecalho, total) {
+  if (!cabecalho) return null;
+  const m = /^\s*bytes\s*=\s*(\d*)\s*-\s*(\d*)\s*$/i.exec(String(cabecalho).split(',')[0]);
+  if (!m || (!m[1] && !m[2])) return null;
+  if (total <= 0) return 'invalida';
+  if (!m[1]) {
+    // Sufixo: os últimos N bytes.
+    const n = Number(m[2]);
+    if (!Number.isFinite(n) || n <= 0) return 'invalida';
+    return { start: Math.max(0, total - n), end: total - 1 };
+  }
+  const start = Number(m[1]);
+  if (!Number.isFinite(start)) return null;
+  if (start >= total) return 'invalida';
+  if (!m[2]) return { start, end: total - 1 };
+  const pedido = Number(m[2]);
+  if (!Number.isFinite(pedido) || pedido < start) return null; // malformado: ignora a faixa
+  return { start, end: Math.min(pedido, total - 1) };
+}
+
 async function blobStoreReady() {
   if (!BLOB_DIR_EXTERNAL) return true;
   for (const marcador of BLOB_MARKERS) {
@@ -550,19 +692,68 @@ let cofreForaDesde = null;
  * para TODO mundo — inclusive para os imports normais. Uma de cada vez por
  * faixa, três no total: o resto espera.
  */
-const MAX_RECONSTRUCOES = 3;
+const MAX_RECONSTRUCOES = Number(process.env.MAX_RECONSTRUCOES ?? 3);
 let reconstrucoesAtivas = 0;
 /** Uma faixa pedida por dois ouvintes ao mesmo tempo extrai UMA vez só. */
 const reconstruindo = new Map();
 
-async function reconstruirBlob(id, sourceUrl, contentType) {
+/**
+ * Teto de tempo de UMA reconstrução. Sem ele, um yt-dlp que trava na rede (o
+ * YouTube estrangulando a conexão é rotina) segura o pedido HTTP para sempre E
+ * ocupa uma das três vagas para sempre — três links mortos bastavam para o
+ * cofre nunca mais reconstruir nada.
+ */
+const RECONSTRUCAO_TIMEOUT_MS = Number(process.env.RECONSTRUCAO_TIMEOUT_MS ?? 180_000);
+/** Quanto reservar no disco quando não se sabe o tamanho do que vai ser extraído. */
+const RESERVA_RECONSTRUCAO = 24 * 1024 * 1024;
+
+/**
+ * Refaz os bytes de um blob podado. Devolve:
+ *   true          — bytes de volta no disco, prontos para servir (com Range);
+ *   false         — a extração rodou e falhou (origem morta): erro definitivo;
+ *   'ocupado'     — teto de simultaneidade; tente de novo;
+ *   'estourou'    — passou do tempo; tente de novo;
+ *   'sem-espaco'  — não há disco; tente de novo.
+ *
+ * A distinção não é decorativa: o app trata 404/403 como MORTE da cópia e apaga
+ * o `remoteUrl` da faixa (localLibrary.reportDeadRemote). Um 404 por
+ * "estou ocupado agora" faria o app jogar fora um link de capacidade vivo — e
+ * link de capacidade já compartilhado não tem como ser reemitido.
+ *
+ * Os bytes vão para um arquivo PARCIAL e só viram `.bin` por rename, que é
+ * atômico. Antes o áudio inteiro era acumulado em memória (até 140 MB × 3
+ * reconstruções) e gravado de uma vez: falhar no meio da gravação deixava um
+ * `.bin` cortado no disco que o pedido seguinte servia como se fosse completo.
+ */
+async function reconstruirBlob(id, meta) {
+  // A ORIGEM PRECISA SER DE UM HOST QUE ESTE AJUDANTE RESOLVE.
+  //
+  // O `sourceUrl` chegou como um cabeçalho de upload (`X-Aurial-Source`), ficou
+  // guardado na meta por meses e só agora é entregue ao yt-dlp — até aqui sem
+  // ninguém conferir de onde ele aponta. Quem conseguisse gravar um blob estava,
+  // na prática, escolhendo uma URL que o SERVIDOR iria buscar no futuro, e o
+  // servidor busca de dentro da rede doméstica: `http://127.0.0.1:…`,
+  // `http://192.168.…`, o painel do roteador. Não é teórico — foi exatamente
+  // assim que a bancada de teste fez o cofre baixar de um servidor local.
+  //
+  // O `/stream` já exigia `hostSupported`; o cofre não exigia nada. Agora exige
+  // o MESMO. Origem fora da lista é irrecuperável: 404 na hora, sem ocupar vaga
+  // de extração e sem sequer chamar o yt-dlp.
+  if (!hostSupported(meta.sourceUrl)) {
+    log('reconstrução recusada (origem fora da lista):', id);
+    return false;
+  }
   const emAndamento = reconstruindo.get(id);
   if (emAndamento) return emAndamento;
-  if (reconstrucoesAtivas >= MAX_RECONSTRUCOES) return null;
+  if (reconstrucoesAtivas >= MAX_RECONSTRUCOES) return 'ocupado';
 
   reconstrucoesAtivas += 1;
+  const parcial = `${blobPath(id)}.parcial`;
   const tarefa = (async () => {
     log('reconstruindo blob descartado:', id);
+    const reserva = Math.max(Number(meta.size) || 0, RESERVA_RECONSTRUCAO);
+    if (!(await garantirEspaco(reserva))) return 'sem-espaco';
+
     const args = [
       '-f',
       'bestaudio/best',
@@ -571,7 +762,7 @@ async function reconstruirBlob(id, sourceUrl, contentType) {
       ...cookieArgs(),
       '-o',
       '-',
-      sourceUrl,
+      meta.sourceUrl,
     ];
     const ytdlpBinario = await resolveYtdlp();
     const yt = spawn(ytdlpBinario, args, { windowsHide: true });
@@ -580,53 +771,77 @@ async function reconstruirBlob(id, sourceUrl, contentType) {
       ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', `${kbpsFor(null)}k`, 'pipe:1'],
       { windowsHide: true },
     );
+    // Um cano quebrado (ffmpeg que nem chegou a existir) emite erro no stream,
+    // e stream sem ouvinte de 'error' derruba o processo inteiro.
+    ff.stdin.on('error', () => undefined);
+    yt.stdout.on('error', () => undefined);
     yt.stdout.pipe(ff.stdin);
     yt.stderr.resume();
     ff.stderr.resume();
 
-    const pedacos = [];
+    const saida = createWriteStream(parcial);
     let bytes = 0;
+    let estourou = false;
+    const matar = () => {
+      yt.kill();
+      ff.kill();
+    };
+    const relogio = setTimeout(() => {
+      estourou = true;
+      matar();
+    }, RECONSTRUCAO_TIMEOUT_MS);
+
     const ok = await new Promise((resolve) => {
       ff.stdout.on('data', (c) => {
         bytes += c.length;
-        // Um limite de sanidade: sem ele um vídeo de horas encheria a memória.
+        // Limite de sanidade: um vídeo de horas encheria o cofre sozinho.
         if (bytes > MAX_BLOB) {
-          yt.kill();
-          ff.kill();
+          matar();
           resolve(false);
-          return;
         }
-        pedacos.push(c);
       });
-      ff.on('close', (code) => resolve(code === 0 && bytes > 0));
+      ff.stdout.pipe(saida);
+      saida.on('error', () => resolve(false));
+      // Só depois que o ARQUIVO fecha os bytes estão realmente no disco.
+      saida.on('close', () => resolve(!estourou && bytes > 0 && bytes <= MAX_BLOB));
       ff.on('error', () => resolve(false));
       yt.on('error', () => resolve(false));
     });
+    clearTimeout(relogio);
+    saida.destroy();
+
     if (!ok) {
-      log('reconstrução falhou:', id);
-      return null;
+      await rm(parcial, { force: true }).catch(() => undefined);
+      log('reconstrução falhou:', id, estourou ? '(tempo esgotado)' : '');
+      return estourou ? 'estourou' : false;
     }
-    const buf = Buffer.concat(pedacos);
     try {
-      await writeFile(blobPath(id), buf);
-      log('blob reconstruído:', id, `${(buf.length / 1024 / 1024).toFixed(1)}MB`);
+      await rename(parcial, blobPath(id));
+      // A meta guarda o tamanho para detectar arquivo cortado; a reconstrução
+      // reencoda a 320k e o tamanho MUDA — sem atualizar aqui, o próprio blob
+      // recém-refeito seria considerado truncado no pedido seguinte.
+      await writeFile(blobMetaPath(id), JSON.stringify({ ...meta, size: bytes }));
     } catch (err) {
-      // Não conseguiu gravar (disco cheio, cofre desmontado): ainda assim dá
-      // para servir ESTA reprodução com os bytes que já estão na memória.
+      await rm(parcial, { force: true }).catch(() => undefined);
       log('reconstruído mas não gravado:', id, err instanceof Error ? err.message : err);
+      return 'sem-espaco';
     }
+    log('blob reconstruído:', id, `${(bytes / 1024 / 1024).toFixed(1)}MB`);
     void sweepBlobStore();
-    return { buf, contentType: contentType || 'audio/mpeg' };
-  })().finally(() => {
-    reconstrucoesAtivas -= 1;
-    reconstruindo.delete(id);
-  });
+    return true;
+  })()
+    .catch(() => false)
+    .finally(() => {
+      reconstrucoesAtivas -= 1;
+      reconstruindo.delete(id);
+      void rm(parcial, { force: true }).catch(() => undefined);
+    });
 
   reconstruindo.set(id, tarefa);
   return tarefa;
 }
 
-async function sweepBlobStore() {
+async function sweepBlobStore({ liberar = 0 } = {}) {
   try {
     if (!(await blobStoreReady())) {
       // ISSO PRECISA GRITAR. O cofre caiu em 3 de agosto e o único registro
@@ -659,10 +874,29 @@ async function sweepBlobStore() {
       bins.push({ p, size: st.size, mtime: st.mtimeMs });
       total += st.size;
     }
-    if (total <= MAX_BLOB_BYTES) return;
-    bins.sort((a, b) => a.mtime - b.mtime); // mais antigos primeiro
+    // QUANTO PRECISA SAIR. Duas contas, e vence a maior:
+    //  • o excesso sobre o teto contábil (MAX_BLOB_GB);
+    //  • o que falta de espaço REAL, quando alguém pediu para gravar. No cartão
+    //    de produção o teto contábil quase nunca é quem manda: são 16 GB de
+    //    cofre para 18 de teto, mas só 4,2 GB livres no disco — o disco enche
+    //    MUITO antes de o teto reclamar, e até aqui ninguém olhava para ele.
+    let precisoRemover = Math.max(total - MAX_BLOB_BYTES, 0);
+    if (liberar > 0) {
+      const livre = await espacoLivre();
+      if (livre !== null)
+        precisoRemover = Math.max(precisoRemover, liberar + MIN_LIVRE_BYTES - livre);
+    }
+    if (precisoRemover <= 0) return;
+    bins.sort((a, b) => a.mtime - b.mtime); // menos usados primeiro (ver toqueNoBlob)
+    let removido = 0;
+    let preservados = 0;
     for (const b of bins) {
-      if (total <= MAX_BLOB_BYTES) break;
+      if (removido >= precisoRemover) break;
+      // NUNCA o arquivo que está descendo pelo fio agora. Ver `servindo`.
+      if (servindo.has(b.p)) {
+        preservados += 1;
+        continue;
+      }
       await rm(b.p, { force: true }).catch(() => undefined);
       // A META FICA. Era ela que ia junto, e por isso a faixa descartada virava
       // 404 PERMANENTE: o token de acesso vive aqui dentro, então apagá-la
@@ -675,9 +909,14 @@ async function sweepBlobStore() {
       //
       // Custo de guardar: ~200 bytes por faixa. Para as 4.416 do acervo, menos
       // de 1 MB — contra os ~10 MB que cada .bin ocupava.
+      removido += b.size;
       total -= b.size;
     }
-    log(`blob LRU: cofre reduzido para ${(total / 1024 ** 3).toFixed(1)}GB`);
+    log(
+      `blob LRU: ${(removido / 1024 ** 2).toFixed(0)}MB descartados, cofre em ` +
+        `${(total / 1024 ** 3).toFixed(2)}GB` +
+        (preservados ? ` (${preservados} poupados: em reprodução)` : ''),
+    );
   } catch {
     /* diretório ilegível — nada a varrer */
   }
@@ -1581,14 +1820,28 @@ async function main() {
           res.end(JSON.stringify({ error: 'Corpo vazio.' }));
           return;
         }
+        // ESPAÇO REAL, não só o teto contábil: o cofre divide o disco com coisas
+        // que não são dele e que crescem sozinhas. Ver `garantirEspaco`.
+        if (!(await garantirEspaco(buf.length))) {
+          res.writeHead(507, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Sem espaço em disco no cofre.' }));
+          return;
+        }
         const token = crypto.randomBytes(16).toString('hex');
         const contentType = req.headers['content-type'] || 'audio/mpeg';
         // DE ONDE ESTE ÁUDIO VEIO — é o que permite reconstruí-lo quando a poda
         // levar os bytes embora. Sem isso, a faixa descartada vira 404 eterno.
         // Ver o `GET /blob/` e `sweepBlobStore`.
         const sourceUrl = req.headers['x-aurial-source'];
+        // GRAVAÇÃO EM DOIS TEMPOS. Os bytes vão para um arquivo parcial e só
+        // viram `.bin` por rename, que é atômico: nenhum pedido nunca enxerga
+        // meio arquivo. A ORDEM também importa — a meta é gravada ANTES do
+        // rename porque um `.bin` sem meta é lixo invisível (404 para sempre e
+        // espaço ocupado), enquanto uma meta sem `.bin` é exatamente o estado
+        // que a reconstrução sabe resolver.
+        const parcial = `${blobPath(id)}.parcial`;
         try {
-          await writeFile(blobPath(id), buf);
+          await writeFile(parcial, buf);
           await writeFile(
             blobMetaPath(id),
             JSON.stringify({
@@ -1598,7 +1851,9 @@ async function main() {
               ...(typeof sourceUrl === 'string' && sourceUrl ? { sourceUrl } : {}),
             }),
           );
+          await rename(parcial, blobPath(id));
         } catch (err) {
+          await rm(parcial, { force: true }).catch(() => undefined);
           log('blob write error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Falha ao salvar.' }));
@@ -1611,7 +1866,11 @@ async function main() {
         return;
       }
 
-      if (req.method === 'GET' && pathname.startsWith('/blob/')) {
+      // HEAD ENTRA AQUI TAMBÉM. O ramo `req.method === 'HEAD'` lá embaixo era
+      // código morto: a condição só deixava GET passar, então todo HEAD caía no
+      // 404 genérico do fim do arquivo. Player que confere o tamanho antes de
+      // tocar (e todo probe de "a cópia ainda está viva?") recebia "não existe".
+      if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/blob/')) {
         const id = decodeURIComponent(pathname.slice('/blob/'.length));
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'text/plain' });
@@ -1632,62 +1891,122 @@ async function main() {
           res.end('forbidden');
           return;
         }
-        let st;
-        try {
-          st = await stat(blobPath(id));
-        } catch {
+        const caminho = blobPath(id);
+
+        /**
+         * ABRE E SEGURA o arquivo antes de qualquer cabeçalho.
+         *
+         * O que havia era `stat()` e, depois, `createReadStream()` — duas idas
+         * ao disco com uma janela entre elas em que a poda cabia inteira. Quando
+         * cabia, os cabeçalhos já tinham saído prometendo N bytes e a resposta
+         * fechava vazia: a música parava sem erro nenhum. Com o descritor aberto
+         * primeiro, ou existe (e a poda não alcança mais) ou não existe (e a
+         * reconstrução assume) — não há terceiro estado.
+         */
+        const abrir = async () => {
+          const fh = await open(caminho, 'r');
+          const st = await fh.stat();
+          // ARQUIVO CORTADO. Gravação interrompida no meio (disco cheio, cofre
+          // desmontado) deixa bytes pela metade, e servir isso é entregar a
+          // música truncada anunciada como inteira — o pedido seguinte nem
+          // tentava reconstruir, porque para ele o arquivo "existe". Metas
+          // refeitas pelo script trazem size 0 (desconhecido): essas não têm o
+          // que conferir e passam.
+          if (typeof meta.size === 'number' && meta.size > 0 && st.size !== meta.size) {
+            await fh.close().catch(() => undefined);
+            log('blob truncado, descartando:', id, `${st.size}/${meta.size} bytes`);
+            await rm(caminho, { force: true }).catch(() => undefined);
+            throw new Error('truncado');
+          }
+          return { fh, st };
+        };
+
+        let aberto = await abrir().catch(() => null);
+
+        if (!aberto) {
           // OS BYTES SUMIRAM, MAS O TOKEN CONFERE — foi a poda, não um invasor.
           // Reconstrói da origem em vez de devolver 404. Ver `reconstruirBlob`.
-          const refeito = meta.sourceUrl
-            ? await reconstruirBlob(id, meta.sourceUrl, meta.contentType).catch(() => null)
-            : null;
-          if (refeito) {
-            res.writeHead(200, {
-              'Content-Type': refeito.contentType,
-              'Content-Length': String(refeito.buf.length),
-              'Accept-Ranges': 'bytes',
-              'Cache-Control': 'no-store',
-            });
-            res.end(refeito.buf);
-            return;
+          const r = meta.sourceUrl ? await reconstruirBlob(id, meta).catch(() => false) : false;
+          if (r === true) {
+            // RELER A META. A reconstrução reencoda a 320k e o tamanho MUDA;
+            // ela grava o novo `size` em disco, mas a cópia que este pedido tem
+            // na mão ainda é a antiga. Sem reler, a conferência de arquivo
+            // cortado logo abaixo compara o blob recém-refeito com o tamanho
+            // velho e o apaga na hora — medido: reconstruía 482 KB, achava que
+            // eram 1 MB cortados, descartava, e o ouvinte tomava 404 depois de
+            // esperar a extração inteira.
+            meta = await readFile(blobMetaPath(id), 'utf8')
+              .then(JSON.parse)
+              .catch(() => meta);
+            aberto = await abrir().catch(() => null);
           }
-          res.writeHead(404, { 'Content-Type': 'text/plain' });
-          res.end('not found');
-          return;
-        }
-        const total = st.size;
-        const range = req.headers.range;
-        let start = 0;
-        let end = total - 1;
-        let status = 200;
-        if (range) {
-          const m = /bytes=(\d*)-(\d*)/.exec(range);
-          if (m) {
-            if (m[1]) start = parseInt(m[1], 10);
-            if (m[2]) end = parseInt(m[2], 10);
-            if (Number.isNaN(start) || start > end || start >= total) {
-              res.writeHead(416, { 'Content-Range': `bytes */${total}` });
-              res.end();
+          if (!aberto) {
+            // 503 ≠ 404, DE PROPÓSITO. O app trata 404/403 como MORTE da cópia e
+            // apaga o `remoteUrl` da faixa. Ficar sem vaga de reconstrução, ou
+            // estourar o tempo, ou faltar disco não são morte — devolver 404 ali
+            // faria o app jogar fora um link de capacidade vivo que ninguém
+            // consegue reemitir. Só a extração que RODOU e falhou (origem
+            // removida) vale um 404.
+            if (r === 'ocupado' || r === 'estourou' || r === 'sem-espaco') {
+              res.writeHead(503, {
+                'Content-Type': 'text/plain',
+                'Retry-After': '30',
+                'Cache-Control': 'no-store',
+              });
+              res.end('reconstruindo');
               return;
             }
-            status = 206;
+            res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+            res.end('not found');
+            return;
           }
         }
+
+        const { fh, st } = aberto;
+        const total = st.size;
+        const faixa = faixaPedida(req.headers.range, total);
+        if (faixa === 'invalida') {
+          await fh.close().catch(() => undefined);
+          res.writeHead(416, { 'Content-Range': `bytes */${total}`, 'Content-Type': 'text/plain' });
+          res.end();
+          return;
+        }
+        const start = faixa ? faixa.start : 0;
+        const end = faixa ? faixa.end : total - 1;
         const headers = {
           'Content-Type': meta.contentType || 'audio/mpeg',
           'Content-Length': String(end - start + 1),
           'Accept-Ranges': 'bytes',
           'Cache-Control': 'private, max-age=31536000',
         };
-        if (status === 206) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
-        res.writeHead(status, headers);
+        if (faixa) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
+        // Tocar conta como uso: é isto que transforma a poda por mtime em LRU
+        // de verdade em vez de FIFO por data de upload. Ver `toqueNoBlob`.
+        toqueNoBlob(caminho, st.mtimeMs);
+        res.writeHead(faixa ? 206 : 200, headers);
         if (req.method === 'HEAD') {
+          await fh.close().catch(() => undefined);
           res.end();
           return;
         }
-        const rs = createReadStream(blobPath(id), { start, end });
+
+        marcarServindo(caminho);
+        let solto = false;
+        const soltar = () => {
+          if (solto) return;
+          solto = true;
+          soltarServindo(caminho);
+          void fh.close().catch(() => undefined);
+        };
+        const rs = fh.createReadStream({ start, end, autoClose: false });
         rs.on('error', () => {
-          if (!res.writableEnded) res.end();
+          soltar();
+          if (!res.writableEnded) res.destroy();
+        });
+        rs.on('close', soltar);
+        res.on('close', () => {
+          rs.destroy();
+          soltar();
         });
         rs.pipe(res);
         return;
