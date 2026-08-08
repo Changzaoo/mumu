@@ -10,6 +10,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { VirtualList } from '@/components/media/VirtualList';
 import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import { useArtistBio } from '@/lib/artistBio';
@@ -235,18 +236,25 @@ export default function ArtistLocalPage() {
       <section className="space-y-3">
         <h2 className="text-lg font-semibold tracking-tight text-fg">Todas as músicas</h2>
         <TrackList header aria-label={`Músicas de ${artist}`}>
-          {tracks.map((track, index) => (
-            <TrackRow
-              key={track.id}
-              track={track}
-              index={index}
-              active={track.id === currentTrack?.id}
-              playing={track.id === currentTrack?.id && isPlaying}
-              liked={likes.isLiked(track)}
-              onToggleLike={(liked) => likes.toggle(track, liked)}
-              onPlay={() => play(index)}
-            />
-          ))}
+          {/* Virtualizada: a discografia completa de um artista muito ouvido
+              passa de cem faixas, e desenhar todas de uma vez é o que trava a
+              abertura da página em aparelho de entrada. Ver GenreLocalPage. */}
+          <VirtualList
+            items={tracks}
+            estimateSize={56}
+            renderItem={(track, index) => (
+              <TrackRow
+                key={track.id}
+                track={track}
+                index={index}
+                active={track.id === currentTrack?.id}
+                playing={track.id === currentTrack?.id && isPlaying}
+                liked={likes.isLiked(track)}
+                onToggleLike={(liked) => likes.toggle(track, liked)}
+                onPlay={() => play(index)}
+              />
+            )}
+          />
         </TrackList>
       </section>
 

@@ -1,4 +1,5 @@
 import { useEffect } from 'react';
+import { marcarDesempenho } from '@/lib/perf/dispositivo';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { MotionConfig } from 'framer-motion';
@@ -38,6 +39,12 @@ export default function App() {
 
   useEffect(() => {
     marcarBoot('app-montado');
+    // ANTES DE DESENHAR QUALQUER COISA: decide se este aparelho aguenta os
+    // efeitos caros. O resultado vira um atributo no <html> e o CSS se ajusta
+    // sozinho — se ficasse para depois, a primeira tela nasceria com o vidro
+    // ligado e o travamento apareceria justamente na abertura, que é quando
+    // mais incomoda. Ver lib/perf/dispositivo.ts.
+    marcarDesempenho();
     // O player é o único que sobe na hora: ele restaura "de onde parou" e
     // precisa estar de pé antes de qualquer toque no botão de play.
     initPlayerEngine();

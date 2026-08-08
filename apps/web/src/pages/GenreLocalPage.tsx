@@ -7,6 +7,7 @@ import { Play, Tag } from 'lucide-react';
 import { useParams } from 'react-router';
 import { EmptyState } from '@/components/media/EmptyState';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { VirtualList } from '@/components/media/VirtualList';
 import { useTrackLikes } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -61,19 +62,29 @@ export default function GenreLocalPage() {
         </button>
       </header>
 
+      {/* VIRTUALIZADA — a lista de um gênero é a maior da biblioteca.
+          Hip-Hop/Rap tem mais de mil faixas, e desenhar mil linhas de uma vez
+          significa mil nós no DOM, mil imagens de capa e mil assinaturas de
+          estado: no computador do desenvolvedor passa despercebido, no celular
+          de entrada é a página que congela ao abrir. Aqui só existem as linhas
+          que cabem na tela (mais uma folga de rolagem). */}
       <TrackList header aria-label={`Músicas de ${genre}`}>
-        {tracks.map((track, index) => (
-          <TrackRow
-            key={track.id}
-            track={track}
-            index={index}
-            active={track.id === currentTrack?.id}
-            playing={track.id === currentTrack?.id && isPlaying}
-            liked={likes.isLiked(track)}
-            onToggleLike={(liked) => likes.toggle(track, liked)}
-            onPlay={() => play(index)}
-          />
-        ))}
+        <VirtualList
+          items={tracks}
+          estimateSize={56}
+          renderItem={(track, index) => (
+            <TrackRow
+              key={track.id}
+              track={track}
+              index={index}
+              active={track.id === currentTrack?.id}
+              playing={track.id === currentTrack?.id && isPlaying}
+              liked={likes.isLiked(track)}
+              onToggleLike={(liked) => likes.toggle(track, liked)}
+              onPlay={() => play(index)}
+            />
+          )}
+        />
       </TrackList>
     </div>
   );
