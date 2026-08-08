@@ -8,7 +8,21 @@ import { useSyncExternalStore } from 'react';
 import { fetchArtistImage } from '@/lib/local/importerHelper';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
-const CACHE_KEY = 'aurial:artist-images';
+/**
+ * A CHAVE CARREGA VERSÃO — e sem isso o conserto não chegaria em ninguém.
+ *
+ * O cache guarda "nome → url" e nunca reconfere: uma vez gravada, a foto fica
+ * para sempre, inclusive quando é a pessoa errada. Foi o que aconteceu — o
+ * Drake ficou com o rosto do Ice Cube porque a busca antiga pegava o primeiro
+ * resultado do Deezer sem conferir o nome (ver `/artist-image` no importer).
+ *
+ * Consertar a busca não bastaria: o aparelho continuaria mostrando o que já
+ * está guardado. Subir o número aqui aposenta o cache inteiro de uma vez, e
+ * cada foto é buscada de novo pela regra nova. Suba de novo se a regra de
+ * correspondência mudar outra vez.
+ */
+const CACHE_KEY = 'aurial:artist-images:v2';
+const CHAVE_ANTIGA = 'aurial:artist-images';
 
 type Cache = Record<string, string | null>; // normalized name → url (null = looked up, none found)
 
@@ -23,6 +37,9 @@ function emit(): void {
 function read(): Cache {
   if (cache) return cache;
   try {
+    // O cache velho some junto: deixá-lo ali só ocuparia espaço no
+    // localStorage, que é justamente o recurso mais apertado do app.
+    window.localStorage.removeItem(CHAVE_ANTIGA);
     const raw = window.localStorage.getItem(CACHE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : {};
     cache = parsed && typeof parsed === 'object' ? (parsed as Cache) : {};

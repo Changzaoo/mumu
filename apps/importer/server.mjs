@@ -1230,11 +1230,37 @@ async function main() {
         let matched = null;
         if (name && name.trim()) {
           try {
+            // CINCO RESULTADOS, E CONFERINDO O NOME.
+            //
+            // Era `limit=1` + pegar `data[0]` sem olhar quem voltou. Busca é
+            // difusa: ela SEMPRE devolve alguém. Quando o nome tem ruído, o
+            // primeiro resultado é uma pessoa diferente entregue com toda a
+            // confiança — medido na API: "Drake Oficial" devolve "Marco & Lucas
+            // Drake Oficial", "DrakeVEVO" devolve "Drake Bell". O rosto errado
+            // no lugar do artista é o tipo de erro que ninguém reporta como bug,
+            // só acha o app ruim.
+            //
+            // Agora o nome do resultado precisa BATER com o que se pediu, e
+            // entre os que batem vence o mais popular — homônimo existe, e o
+            // Drake de 24 milhões de ouvintes não é o de 66.
             const r = await fetch(
-              `https://api.deezer.com/search/artist?limit=1&q=${encodeURIComponent(name.trim())}`,
+              `https://api.deezer.com/search/artist?limit=5&q=${encodeURIComponent(name.trim())}`,
             );
             const d = await r.json().catch(() => ({}));
-            const a = Array.isArray(d?.data) ? d.data[0] : null;
+            const lista = Array.isArray(d?.data) ? d.data : [];
+            const chave = (t) =>
+              String(t ?? '')
+                .toLowerCase()
+                .normalize('NFD')
+                .replace(/[̀-ͯ]/g, '')
+                .replace(/[^a-z0-9]+/g, '')
+                .trim();
+            const alvo = chave(name);
+            const iguais = lista.filter((x) => chave(x?.name) === alvo);
+            // NADA DE APROXIMADO: sem correspondência exata, devolve vazio. A
+            // interface cai para a capa da faixa, que no pior caso é neutra —
+            // enquanto a foto de outra pessoa é uma afirmação errada.
+            const a = iguais.sort((x, y) => (y?.nb_fan ?? 0) - (x?.nb_fan ?? 0))[0] ?? null;
             if (a) {
               matched = a.name ?? null;
               imageUrl = a.picture_xl || a.picture_big || a.picture_medium || null;
