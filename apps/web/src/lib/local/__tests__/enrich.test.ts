@@ -99,6 +99,7 @@ describe('identifyByTitle — lente de TÍTULO (só sem crédito a proteger)', (
     mockAi.mockResolvedValue({
       title: 'Warzone',
       artists: ['Brandão85'],
+      label: null,
       album: null,
       genre: null,
     });
@@ -110,6 +111,7 @@ describe('identifyByTitle — lente de TÍTULO (só sem crédito a proteger)', (
     mockAi.mockResolvedValue({
       title: 'Warzone',
       artists: ['Um Artista Inventado'],
+      label: null,
       album: null,
       genre: null,
     });

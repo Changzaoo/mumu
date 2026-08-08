@@ -156,3 +156,44 @@ describe('agruparDuplicatas', () => {
     expect(agruparDuplicatas([f({ id: '1' })])).toEqual([]);
   });
 });
+
+/**
+ * O CASO QUE PASSAVA BATIDO — e que não fazia sentido nenhum para quem olhava.
+ *
+ * Faixa importada por link nasce com o artista vindo do NOME DO CANAL, e canal
+ * é qualquer coisa: "GR6 EXPLODE", "XiaoAn", "SnoopDoggTV", ou até o nome da
+ * própria música que foi parar no campo errado. O portão `if (!mesmoArtista)
+ * return null` então barrava a comparação antes do título ser sequer olhado:
+ * duas cópias da MESMA música, com o MESMO título, não eram detectadas.
+ *
+ * A separação que conserta: artista AUSENTE não impede; artista que CONTRADIZ
+ * impede sempre, porque é ali que mora o cover.
+ */
+describe('saoAMesma — quando o artista não é confiável', () => {
+  it('funde duas cópias com o mesmo título quando falta artista dos dois lados', () => {
+    const a = f({ id: '1', title: 'BENÇA', artists: [], durationMs: 180_000 });
+    const b = f({ id: '2', title: 'BENÇA (Official Video)', artists: [], durationMs: 181_000 });
+    expect(saoAMesma(a, b)).toContain('sem artista para conferir');
+  });
+
+  it('funde quando SÓ UM dos lados tem artista', () => {
+    const a = f({ id: '1', title: 'BENÇA', artists: ['Matuê'], durationMs: 180_000 });
+    const b = f({ id: '2', title: 'BENÇA', artists: [], durationMs: 180_500 });
+    expect(saoAMesma(a, b)).not.toBeNull();
+  });
+
+  it('NÃO funde cover — artista presente dos dois lados e diferente', () => {
+    // A proteção que não pode cair junto: sem artista é falta de informação;
+    // com artistas diferentes é informação dizendo que são faixas distintas.
+    const a = f({ id: '1', title: 'Evidências', artists: ['Chitãozinho & Xororó'] });
+    const b = f({ id: '2', title: 'Evidências', artists: ['Lauana Prado'] });
+    expect(saoAMesma(a, b)).toBeNull();
+  });
+
+  it('sem artista, título PARECIDO não basta — precisa ser quase idêntico', () => {
+    // 0.86 passaria; a barra sobe para 0.97 quando não há artista corroborando.
+    const a = f({ id: '1', title: 'Evidências', artists: [], durationMs: 280_000 });
+    const b = f({ id: '2', title: 'Evidências Part. Zé Neto', artists: [], durationMs: 281_000 });
+    expect(saoAMesma(a, b)).toBeNull();
+  });
+});

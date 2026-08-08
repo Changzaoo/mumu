@@ -36,6 +36,7 @@ import {
   aceitarSugestao,
   EMBED_DIMS,
   generoDoArtista,
+  lerTituloDeVideo,
   promoverArtistaReal,
   revisarGeneros as revisarGenerosDeFaixas,
   type FaixaComparavel,
@@ -68,6 +69,8 @@ interface LibraryTrack {
   artists?: unknown;
   album?: unknown;
   genre?: unknown;
+  /** Selo, quando o leitor de título o reconhece no nome do canal. */
+  label?: unknown;
   /** Usados pelo faxineiro: duração confirma a gravação, capa desempata. */
   durationMs?: unknown;
   coverUrl?: unknown;
@@ -165,6 +168,10 @@ async function auditTrack(entry: LibraryEntry): Promise<Record<string, unknown> 
   }
 
   if (identity.genre) patch['track.genre'] = identity.genre;
+  // O selo tem campo próprio agora — antes, quando o modelo o reconhecia, ele
+  // vinha junto dos artistas e virava "quem canta". Guardado aqui, ele alimenta
+  // a página da gravadora sem contaminar a ficha do artista.
+  if (identity.label) patch['track.label'] = identity.label;
 
   return patch;
 }
@@ -332,7 +339,11 @@ async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
   // discografia do Anderson Freire é Gospel por maioria, e ela puxa a faixa
   // que destoa. Consertar o dado é melhor que ensinar cada passagem a
   // desconfiar dele.
-  let corrigidas = await promoverArtistas(docs);
+  // O leitor de título vem PRIMEIRO de todos: ele é quem separa o que é música,
+  // o que é gente e o que é selo dentro do nome do vídeo. Tudo depois disso —
+  // promoção de artista, coerência de gênero, duplicata — lê esses campos.
+  let corrigidas = await uniformizarTitulos(docs);
+  corrigidas += await promoverArtistas(docs);
   corrigidas += await revisarGeneros(docs); // regra pura, sem IA
   corrigidas += await auditarGeneros(docs); // confere o que já tem categoria
   corrigidas += await preencherGeneros(docs); // preenche quem está sem
@@ -369,6 +380,78 @@ async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
     }
   }
   if (corrigidas > 0) log.info({ corrigidas }, 'créditos de artista devolvidos');
+  return corrigidas;
+}
+
+/**
+ * PASSA O QUE JÁ ESTÁ SALVO PELO LEITOR DE TÍTULO DE VÍDEO.
+ *
+ * Toda faixa importada por link nasce do nome de um vídeo, e nome de vídeo é
+ * frase de propaganda, não metadata. As que entraram antes do leitor existir
+ * ficaram como vieram — e é por isso que a biblioteca tem título com "(Official
+ * Video)" grudado, número de faixa na frente, e nos piores casos o nome da
+ * música no campo do artista e a lista de cantores no campo do título.
+ *
+ * Não basta consertar dali para a frente: enquanto o acervo antigo continuar
+ * torto, a busca acha a mesma música duas vezes, a prateleira de artista mostra
+ * canal, e a duplicata não se reconhece. Uniformizar o que já existe é metade
+ * do conserto.
+ *
+ * CONSERVADOR DE PROPÓSITO: só grava quando o leitor melhora de verdade — nome
+ * mais curto e não vazio, ou artista que apareceu onde não havia. Título que o
+ * leitor devolveria igual, ou pior, fica como está. Reescrever por reescrever
+ * numa biblioteca inteira é o tipo de passagem que estraga mais do que arruma.
+ */
+async function uniformizarTitulos(docs: LibraryDoc[]): Promise<number> {
+  let corrigidas = 0;
+  for (const doc of docs) {
+    const entry = doc.data();
+    const track = entry.track;
+    const bruto = typeof track?.title === 'string' ? track.title : '';
+    if (!bruto.trim()) continue;
+
+    const atuais = artistNames(track ?? {});
+    const partes = lerTituloDeVideo(bruto, atuais[0] ?? null);
+
+    const patch: Record<string, unknown> = {};
+
+    // Título: só troca se sobrou algo E ficou mais enxuto. O leitor tira ruído;
+    // se o resultado ficou MAIOR, ele entendeu errado e é melhor não gravar.
+    const novoTitulo = partes.title.trim();
+    if (novoTitulo && novoTitulo.length < bruto.trim().length && novoTitulo.length >= 2) {
+      patch['track.title'] = novoTitulo;
+    }
+
+    // Artista: só preenche onde estava VAZIO. Sobrescrever atribuição existente
+    // é trabalho do auditor, que confere antes; aqui a regra é cega e não tem
+    // como saber se o que já está lá veio de uma correção anterior.
+    if (atuais.length === 0 && partes.artists.length > 0) {
+      patch['track.artists'] = partes.artists.map((name, i) => ({
+        id: `video:${name.toLowerCase().replace(/\s+/g, '-')}`,
+        name,
+        slug: name
+          .toLowerCase()
+          .replace(/[^a-z0-9]+/g, '-')
+          .replace(/^-|-$/g, ''),
+        imageUrl: null,
+        order: i,
+      }));
+    }
+
+    if (partes.label && !track?.label) patch['track.label'] = partes.label;
+
+    if (Object.keys(patch).length === 0) continue;
+    try {
+      await doc.ref.update(patch);
+      corrigidas += 1;
+      if (patch['track.title']) {
+        log.info({ doc: doc.id, de: bruto, para: patch['track.title'] }, 'título limpo');
+      }
+    } catch (err) {
+      log.warn({ err, doc: doc.id }, 'falha ao uniformizar o título');
+    }
+  }
+  if (corrigidas > 0) log.info({ corrigidas }, 'títulos uniformizados');
   return corrigidas;
 }
 

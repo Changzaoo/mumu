@@ -10,6 +10,7 @@
  *
  * Tudo aqui é função pura: monta mensagem, lê resposta. Nada de rede.
  */
+import { ehGravadora } from './gravadoraComoArtista.js';
 
 /** Taxonomia fechada de gêneros (rótulos pt-BR). */
 export const GENRE_TAXONOMY = [
@@ -54,6 +55,13 @@ export interface TrackIdentity {
   title: string;
   /** Todos os artistas distintos, principal primeiro. Nunca fundidos num só. */
   artists: string[];
+  /**
+   * O selo. Existe separado de `artists` de propósito: quando a gravadora
+   * entrava na lista de artistas, ela virava "quem canta" — e daí saíam a foto
+   * errada na ficha, a votação de gênero embaralhada e a duplicata que não se
+   * reconhecia. Ver `gravadoraComoArtista`.
+   */
+  label: string | null;
   album: string | null;
   genre: string | null;
 }
@@ -144,16 +152,31 @@ export function identityMessages(rawTitle: string, currentArtist?: string): AiMe
     {
       role: 'system',
       content:
-        'Você é um especialista em identificar músicas com precisão. Dado um título (às vezes ' +
-        'bagunçado, de vídeo do YouTube) e possivelmente um artista (que pode estar errado), ' +
-        'identifique a MÚSICA REAL e responda SOMENTE com JSON: ' +
-        '{"title":"...","artists":["principal","participação",...],"album":null,"genre":null}. ' +
-        'REGRAS OBRIGATÓRIAS: (1) liste TODOS os artistas distintos como itens SEPARADOS do array, ' +
-        'na ordem correta (principal primeiro, depois feats/participações); NUNCA junte dois ' +
-        'artistas num nome só. (2) Mantenha grupos/duplas reais como UM item ("AC/DC", ' +
-        '"Tyler, The Creator", "Simon & Garfunkel"). (3) "title" limpo, sem "(Official Video)" etc. ' +
+        'Você é um especialista em identificar músicas com precisão. O texto que você recebe é o ' +
+        'NOME DE UM VÍDEO, escrito por um canal para atrair clique — não é metadata. Sua tarefa é ' +
+        'separar as três coisas que vivem misturadas ali: o NOME DA MÚSICA, QUEM CANTA e a ' +
+        'GRAVADORA. Responda SOMENTE com JSON: ' +
+        '{"title":"...","artists":["principal","participação",...],"label":null,"album":null,"genre":null}. ' +
+        '\n\nO QUE É CADA COISA (erre isto e três sistemas erram junto — a categoria por artista, ' +
+        'a foto da ficha e a detecção de música repetida):\n' +
+        '• TÍTULO é o nome da música. Quando houver trecho ENTRE ASPAS, ele quase sempre é o ' +
+        'título — padrão dos canais de funk e gospel: `MC Ryan SP, MC Kako - "Liberdade" (DJ Boy)` ' +
+        'tem título "Liberdade", e NÃO a lista de MCs.\n' +
+        '• ARTISTA é quem canta. NÃO é o canal que publicou. Canal costuma ser agregador ' +
+        '("GR6 EXPLODE", "Set Djay W", "SnoopDoggTV") ou pessoa qualquer ("XiaoAn", "valtinho").\n' +
+        '• GRAVADORA é selo, e NUNCA entra em "artists": MK MUSIC, Som Livre, Universal Music, ' +
+        'Sony Music, 30PRAUM, Central Gospel, Onimusic, Graça Music, Pineapple Storm. Em ' +
+        '"MK MUSIC, Anderson Freire - Raridade", o artista é Anderson Freire e o label é MK MUSIC.\n' +
+        '\nREGRAS OBRIGATÓRIAS: (1) liste TODOS os artistas distintos como itens SEPARADOS do ' +
+        'array, na ordem correta (principal primeiro, depois feats/participações); NUNCA junte ' +
+        'dois artistas num nome só. (2) Mantenha grupos/duplas reais como UM item ("AC/DC", ' +
+        '"Tyler, The Creator", "Simon & Garfunkel"). (3) "title" limpo, sem "(Official Video)", ' +
+        '"[CLIPE OFICIAL]", "Ao Vivo", "HD", número de faixa na frente ou resolução. ' +
         `(4) "genre" deve ser um destes ou null: ${GENRE_TAXONOMY.join(', ')}. ` +
-        '(5) Se não tiver certeza do álbum ou gênero, use null. Sem markdown, sem texto extra.',
+        '(5) Música evangélica/de louvor é SEMPRE "Gospel", mesmo quando o arranjo é sertanejo, ' +
+        'rap ou pop — a categoria segue a obra, não o ritmo. ' +
+        '(6) Se não tiver certeza do álbum, do selo ou do gênero, use null. ' +
+        'Sem markdown, sem texto extra.',
     },
     {
       role: 'user',
@@ -166,6 +189,7 @@ export function parseIdentity(content: string): TrackIdentity | null {
   const json = extractJson(content) as {
     title?: unknown;
     artists?: unknown;
+    label?: unknown;
     album?: unknown;
     genre?: unknown;
   } | null;
@@ -186,7 +210,14 @@ export function parseIdentity(content: string): TrackIdentity | null {
 
   return {
     title: json.title.trim(),
-    artists,
+    // Rede de segurança: mesmo instruído, o modelo às vezes devolve o selo na
+    // lista de artistas. Aqui ele é retirado e movido para o campo certo — a
+    // regra local não depende de o modelo ter obedecido.
+    artists: artists.filter((a) => !ehGravadora(a)),
+    label:
+      (typeof json.label === 'string' && json.label.trim() ? json.label.trim() : null) ??
+      artists.find((a) => ehGravadora(a)) ??
+      null,
     album: typeof json.album === 'string' && json.album.trim() ? json.album.trim() : null,
     genre,
   };

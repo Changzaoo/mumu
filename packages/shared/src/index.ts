@@ -18,3 +18,4 @@ export * from './ai/models.js';
 export * from './ai/agents.js';
 export * from './ai/duplicatas.js';
 export * from './ai/gravadoraComoArtista.js';
+export * from './ai/tituloDeVideo.js';
