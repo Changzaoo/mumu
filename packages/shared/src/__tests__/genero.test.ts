@@ -23,6 +23,7 @@ import {
   verifyGenreMessages,
 } from '../ai/curation';
 import { batchGenreMessages, parseBatchGenres } from '../ai/agents';
+import { revisarGeneros } from '../ai/generoCoerencia';
 
 describe('classificação de gênero', () => {
   it('o prompt oferece DESCONHECIDO e proíbe deduzir pelo título', () => {
@@ -135,5 +136,72 @@ describe('auditoria de categoria (a pergunta que faltava)', () => {
     expect(parseVerify('Analisando o caso… NAO')).toBe(false);
     // Hesita e depois conclui: vale a conclusão.
     expect(parseVerify('Não tenho certeza, mas... NAO')).toBe(false);
+  });
+});
+
+/**
+ * "RARIDADE", DO ANDERSON FREIRE, FICOU EM SERTANEJO — e a regra do outlier
+ * nunca ia salvá-la.
+ *
+ * Ela exige 3 votos e 75% do artista, números feitos para discografia grande e
+ * certos no caso comum: um artista de pop PODE ter uma faixa de rock, então
+ * mexer precisa de prova forte.
+ *
+ * Gospel não funciona assim. Cantor de louvor não tem uma faixa sertaneja no
+ * meio do repertório — o gênero é propriedade DELE. E como a batida do gospel
+ * brasileiro imita sertanejo, forró e trap, a fonte erra sempre na mesma
+ * direção, enquanto o modelo, que não conhece a faixa, responde "incerto" e
+ * deixa como está.
+ */
+describe('revisarGeneros — gênero que é do artista', () => {
+  const f = (id: string, genre: string | null, artista: string) => ({
+    id,
+    genre,
+    artistas: [artista],
+  });
+
+  it('puxa a faixa que destoa com apenas DUAS faixas do artista', () => {
+    // O caso exato do banco: 2 Gospel + 1 Sertanejo do Anderson Freire.
+    const mudancas = revisarGeneros([
+      f('1', 'Gospel', 'Anderson Freire'),
+      f('2', 'Gospel', 'Anderson Freire'),
+      f('3', 'Sertanejo', 'Anderson Freire'),
+    ]);
+    const raridade = mudancas.find((m) => m.id === '3');
+    expect(raridade?.para).toBe('Gospel');
+    expect(raridade?.motivo).toBe('genero-do-artista');
+  });
+
+  it('NÃO faz o mesmo com gêneros que variam faixa a faixa', () => {
+    // Pop e Rock são escolha por faixa: dois votos não podem arrastar o resto.
+    const mudancas = revisarGeneros([
+      f('1', 'Pop', 'Fulano'),
+      f('2', 'Pop', 'Fulano'),
+      f('3', 'Rock', 'Fulano'),
+    ]);
+    expect(mudancas.find((m) => m.id === '3')).toBeUndefined();
+  });
+
+  it('não age com um voto só', () => {
+    const mudancas = revisarGeneros([f('1', 'Gospel', 'Fulano'), f('2', 'Sertanejo', 'Fulano')]);
+    expect(mudancas.find((m) => m.id === '2')).toBeUndefined();
+  });
+
+  it('não mexe em quem já está no lugar', () => {
+    const mudancas = revisarGeneros([
+      f('1', 'Gospel', 'Aline Barros'),
+      f('2', 'Gospel', 'Aline Barros'),
+      f('3', 'Gospel', 'Aline Barros'),
+    ]);
+    expect(mudancas).toHaveLength(0);
+  });
+
+  it('também preenche faixa SEM categoria do mesmo artista', () => {
+    const mudancas = revisarGeneros([
+      f('1', 'Gospel', 'Gabriela Rocha'),
+      f('2', 'Gospel', 'Gabriela Rocha'),
+      f('3', null, 'Gabriela Rocha'),
+    ]);
+    expect(mudancas.find((m) => m.id === '3')?.para).toBe('Gospel');
   });
 });

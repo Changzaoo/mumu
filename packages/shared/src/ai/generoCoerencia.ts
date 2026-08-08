@@ -61,6 +61,14 @@ const MIN_VOTOS_HERDAR = 2;
 const MIN_FATIA_HERDAR = 0.6;
 /** Vetar contraria quem ouviu a faixa: exige sinal forte. */
 const MIN_VOTOS_VETAR = 3;
+/**
+ * Gêneros que descrevem o ARTISTA e não a faixa — ver a 3ª passada de
+ * `revisarGeneros`. A lista é minúscula de propósito: só entra o que é
+ * repertório inteiro de uma carreira, nunca uma escolha faixa a faixa.
+ */
+const GENEROS_DO_ARTISTA = new Set<Genre>(['Gospel']);
+/** Barra da 3ª passada: duas faixas do artista já bastam. */
+const MIN_VOTOS_ARTISTA = 2;
 const MIN_FATIA_VETAR = 0.75;
 
 function chaveArtista(nome: string): string {
@@ -160,7 +168,13 @@ export type MotivoDaRevisao =
   /** Mesmo gênero escrito de outro jeito ("eletronica" → "Eletrônica"). */
   | 'normalizado'
   /** Destoa de todo o resto do artista — quase sempre é o erro que procuramos. */
-  | 'discrepante';
+  | 'discrepante'
+  /**
+   * O gênero é do ARTISTA, não da faixa (Gospel). Barra mais baixa que
+   * `discrepante` porque cantor de louvor não tem faixa sertaneja no meio do
+   * repertório — ver a 3ª passada de `revisarGeneros`.
+   */
+  | 'genero-do-artista';
 
 export interface RevisaoDeGenero {
   id: string;
@@ -207,6 +221,47 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     if (!voto.dominante || voto.dominante === atual) continue;
     if (voto.votos < MIN_VOTOS_VETAR || voto.votos / voto.total < MIN_FATIA_VETAR) continue;
     mudancas.push({ id: faixa.id, de: atual, para: voto.dominante, motivo: 'discrepante' });
+  }
+
+  // 3ª passada: OS GÊNEROS QUE SÃO DO ARTISTA, NÃO DA FAIXA.
+  //
+  // A passada acima exige 3 votos e 75% — números feitos para discografia
+  // grande, e certos para o caso comum: um artista de pop PODE ter uma faixa de
+  // rock, então mexer precisa de prova forte.
+  //
+  // Gospel não funciona assim. Cantor de louvor não tem uma faixa sertaneja no
+  // meio do repertório: o gênero é uma propriedade DELE, não de cada música. E
+  // como a batida do gospel brasileiro imita sertanejo, forró e trap, a fonte
+  // erra sempre na mesma direção — e o modelo, que não conhece a faixa, responde
+  // "incerto" e deixa como está.
+  //
+  // Medido na biblioteca: "Raridade" (Anderson Freire) em Sertanejo com outras
+  // DUAS faixas dele em Gospel; "Sobrevivi" (Sarah Farias) igual. Pela regra
+  // acima, 2 votos nunca alcançam os 3 exigidos e as duas ficariam erradas para
+  // sempre — foi exatamente o que aconteceu.
+  //
+  // Aqui a barra é 2 votos e maioria simples, e SÓ para os gêneros de artista.
+  // O risco assimétrico ajuda: uma faixa gospel a mais na prateleira de gospel
+  // não incomoda ninguém; uma faixa de louvor perdida no sertanejo é o que fez
+  // o dono do app passar vergonha.
+  for (const faixa of depois) {
+    const atual = generoValido(faixa);
+    const principal = faixa.artistas[0];
+    if (!principal) continue;
+    if (atual && GENEROS_DO_ARTISTA.has(atual)) continue; // já está no lugar
+
+    const voto = generoDoArtista(depois, principal, faixa.id);
+    if (!voto.dominante || !GENEROS_DO_ARTISTA.has(voto.dominante)) continue;
+    if (voto.votos < MIN_VOTOS_ARTISTA) continue;
+    if (voto.votos / voto.total <= 0.5) continue;
+    if (mudancas.some((m) => m.id === faixa.id)) continue; // a passada acima já resolveu
+
+    mudancas.push({
+      id: faixa.id,
+      de: atual,
+      para: voto.dominante,
+      motivo: 'genero-do-artista',
+    });
   }
 
   return mudancas;
