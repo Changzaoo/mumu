@@ -191,7 +191,26 @@ export interface RevisaoDeGenero {
  * e já derrubamos a cota do projeto assim uma vez.
  */
 export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[] {
-  const mudancas: RevisaoDeGenero[] = [];
+  // UMA MUDANÇA POR FAIXA, e não uma por passada.
+  //
+  // As três passadas podiam falar da mesma faixa: um rótulo torto que também
+  // destoa do artista ("sertaneja" numa discografia gospel) saía daqui como
+  // DUAS revisões do mesmo id — "sertaneja → Sertanejo" e "Sertanejo → Gospel".
+  // Quem aplica escreve as duas, o que é o dobro de escritas na nuvem (já
+  // derrubamos a cota assim) e, dependendo da ordem, grava a primeira por cima
+  // da segunda e deixa a faixa no lugar errado de novo.
+  //
+  // O `de` que vale é sempre o que está gravado HOJE — é ele que quem aplica
+  // usa para conferir se alguém mexeu no meio do caminho.
+  const mudancas = new Map<string, RevisaoDeGenero>();
+  const registrar = (
+    id: string,
+    de: string | null,
+    para: Genre | null,
+    motivo: MotivoDaRevisao,
+  ): void => {
+    mudancas.set(id, { id, de: mudancas.get(id)?.de ?? de, para, motivo });
+  };
 
   // 1ª passada: traduzir o que dá e esvaziar os baldes. Precisa vir antes da
   // apuração por artista — senão "Brasileira" contaria como voto.
@@ -200,12 +219,7 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     if (!atual) return faixa;
     const normalizado = normalizarGenero(atual);
     if (normalizado === atual) return faixa;
-    mudancas.push({
-      id: faixa.id,
-      de: atual,
-      para: normalizado,
-      motivo: normalizado ? 'normalizado' : 'balde',
-    });
+    registrar(faixa.id, atual, normalizado, normalizado ? 'normalizado' : 'balde');
     return { ...faixa, genre: normalizado };
   });
 
@@ -220,7 +234,18 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     const voto = generoDoArtista(depois, principal, faixa.id);
     if (!voto.dominante || voto.dominante === atual) continue;
     if (voto.votos < MIN_VOTOS_VETAR || voto.votos / voto.total < MIN_FATIA_VETAR) continue;
-    mudancas.push({ id: faixa.id, de: atual, para: voto.dominante, motivo: 'discrepante' });
+    // GÊNERO DE ARTISTA NÃO SAI POR MAIORIA — e sem esta linha a maioria era a
+    // arma do erro, não a defesa contra ele.
+    //
+    // A fonte erra sempre na mesma direção: gospel brasileiro entra como
+    // sertanejo, forró ou trap. Num artista com 2 faixas em Gospel e 3 em
+    // Sertanejo — o retrato de um cantor de louvor mal importado —, o sertanejo
+    // era a maioria e esta passada convertia as DUAS faixas certas para
+    // Sertanejo, cimentando o erro e esvaziando a prateleira Gospel de vez. A
+    // 3ª passada existe para puxar na direção contrária; deixar esta empurrar
+    // de volta é as duas brigando na mesma volta.
+    if (GENEROS_DO_ARTISTA.has(atual) && !GENEROS_DO_ARTISTA.has(voto.dominante)) continue;
+    registrar(faixa.id, atual, voto.dominante, 'discrepante');
   }
 
   // 3ª passada: OS GÊNEROS QUE SÃO DO ARTISTA, NÃO DA FAIXA.
@@ -253,16 +278,25 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     const voto = generoDoArtista(depois, principal, faixa.id);
     if (!voto.dominante || !GENEROS_DO_ARTISTA.has(voto.dominante)) continue;
     if (voto.votos < MIN_VOTOS_ARTISTA) continue;
-    if (voto.votos / voto.total <= 0.5) continue;
-    if (mudancas.some((m) => m.id === faixa.id)) continue; // a passada acima já resolveu
+    // A FAIXA EM JULGAMENTO CONTA COMO VOTO CONTRA — `+ 1` no denominador.
+    //
+    // A apuração exclui a própria faixa para ela não votar em si mesma, e isso
+    // estava virando uma balança viciada: num artista com 2 Gospel e 2 de outra
+    // coisa, tirar a faixa em questão deixava 2 contra 1, "maioria" folgada, e
+    // as DUAS faixas do outro gênero eram convertidas uma a uma — cada uma
+    // sozinha contra as gospel. Com 3 e 3 acontecia igual: o repertório inteiro
+    // de um artista misto virava Gospel.
+    //
+    // Contando a faixa julgada do lado dela, o empate volta a ser empate e a
+    // conversão só acontece quando o Gospel é maioria de verdade. O caso que
+    // motivou a passada continua passando: 2 Gospel + "Raridade" em Sertanejo
+    // são 2 de 3.
+    if (voto.votos / (voto.total + 1) <= 0.5) continue;
+    // A 2ª passada já decidiu esta faixa olhando a mesma discografia.
+    if (mudancas.get(faixa.id)?.motivo === 'discrepante') continue;
 
-    mudancas.push({
-      id: faixa.id,
-      de: atual,
-      para: voto.dominante,
-      motivo: 'genero-do-artista',
-    });
+    registrar(faixa.id, atual, voto.dominante, 'genero-do-artista');
   }
 
-  return mudancas;
+  return [...mudancas.values()];
 }

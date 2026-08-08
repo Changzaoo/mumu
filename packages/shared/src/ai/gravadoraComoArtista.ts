@@ -82,8 +82,51 @@ export function ehGravadora(nome: string): boolean {
   // "Music" ou "Storm" não pode ser confundido com um.
   if (GRAVADORAS.includes(k)) return true;
   // Sufixos que só aparecem em canal de selo ("MK MUSIC Oficial", "… TV").
-  const semSufixo = k.replace(/\s+(oficial|official|tv|records?|music)$/, '').trim();
+  //
+  // O sufixo vem COLADO com frequência — o canal do selo do Matuê se chama
+  // "Pineapple StormTV", sem espaço. Com `\s+` obrigatório ele não era
+  // reconhecido, e o nome do selo ia para o campo de quem canta. Aceitar a
+  // versão colada é seguro porque o que sobra ainda precisa estar na lista
+  // fechada acima: "Kurtv" vira "kur", que não é gravadora nenhuma.
+  const semSufixo = k.replace(/\s*(oficial|official|tv|records?|music)$/, '').trim();
   return semSufixo !== k && GRAVADORAS.includes(semSufixo);
+}
+
+/** Tira acento sem mexer no comprimento — para o índice continuar valendo. */
+function semAcento(texto: string): string {
+  return texto.normalize('NFD').replace(/[̀-ͯ]/g, '');
+}
+
+/**
+ * Um selo por nome, com as palavras separadas por qualquer pontuação —
+ * "MK Music", "MK-MUSIC", "( MK Music)".
+ */
+const PADROES = GRAVADORAS.map(
+  (g) => new RegExp(`(?<![a-z0-9])${g.split(' ').join('[^a-z0-9]+')}(?![a-z0-9])`, 'i'),
+);
+
+/**
+ * ACHA O SELO DENTRO DO NOME DO VÍDEO.
+ *
+ * O canal nem sempre é a gravadora: o selo aparece grudado no próprio título,
+ * entre parênteses — "Não Pare ( MK Music)", "Deus Proverá [Som Livre]",
+ * "Jó - COM LETRA (VideoLETRA® oficial MK Music)". Sem alguém para reconhecer
+ * isso, "( MK Music)" ficava dentro do nome da música: a faixa aparecia com o
+ * selo colado no cartão e nunca casava com a mesma música importada de outro
+ * canal.
+ *
+ * Devolve o trecho como ele aparece no texto, para o selo ser gravado do jeito
+ * que o dono do canal escreve.
+ */
+export function acharGravadora(texto: string): string | null {
+  if (!texto) return null;
+  const plano = semAcento(texto);
+  const fonte = plano.length === texto.length ? texto : plano;
+  for (const padrao of PADROES) {
+    const m = padrao.exec(plano);
+    if (m) return fonte.slice(m.index, m.index + m[0].length);
+  }
+  return null;
 }
 
 export interface ArtistaMinimo {

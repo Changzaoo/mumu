@@ -110,6 +110,62 @@ describe('chaveDeIdentidade — é ela que faz duas cópias se reconhecerem', ()
 });
 
 /**
+ * O CAMPO DE ARTISTA É UMA FRASE, E A MESMA PESSOA CHEGA ESCRITA DE TRÊS JEITOS.
+ *
+ * A chave comparava a frase inteira, então nenhuma destas cópias se reconhecia —
+ * e é esta função que decide se a mesma música importada duas vezes vira uma
+ * entrada ou duas na biblioteca.
+ */
+describe('chaveDeIdentidade — o que precisa colidir e o que não pode', () => {
+  it('"&" e "e" no nome da dupla são a MESMA dupla', () => {
+    expect(chaveDeIdentidade('Evidências', 'Chitãozinho & Xororó')).toBe(
+      chaveDeIdentidade('EVIDENCIAS (Official Video)', 'Chitãozinho e Xororó'),
+    );
+  });
+
+  it('crédito de feat a mais num dos lados não separa a faixa dela mesma', () => {
+    expect(chaveDeIdentidade('Ousado Amor', 'Isaias Saad')).toBe(
+      chaveDeIdentidade('Ousado Amor', 'Isaias Saad feat. Gabriela Rocha'),
+    );
+  });
+
+  it('o selo grudado no artista não cria uma segunda entrada', () => {
+    // "MK MUSIC, Anderson Freire" é como a faixa nasce quando vem do canal da
+    // gravadora — e ela não pode virar outra música por causa disso.
+    expect(chaveDeIdentidade('Raridade', 'MK MUSIC, Anderson Freire')).toBe(
+      chaveDeIdentidade('Raridade', 'Anderson Freire'),
+    );
+  });
+
+  it('COVER continua sendo outra faixa — é a proteção que não pode cair junto', () => {
+    expect(chaveDeIdentidade('Evidências', 'Chitãozinho & Xororó')).not.toBe(
+      chaveDeIdentidade('Evidências', 'Lauana Prado'),
+    );
+  });
+
+  /**
+   * "AO VIVO" NÃO SEPARA, "REMIX" SEPARA — e a diferença é deliberada.
+   *
+   * "(Ao Vivo)" e "(Acústico)" são rótulo que o canal escreve, e o MESMO vídeo
+   * sobe com e sem eles; se separassem, toda faixa reenviada com o rótulo viraria
+   * uma cópia nova na biblioteca. Quem de fato separa gravação de gravação é a
+   * DURAÇÃO, conferida em `duplicatas.ts` — uma versão ao vivo nunca cai dentro
+   * dos três segundos de tolerância da versão de estúdio.
+   *
+   * "Remix" fica na chave porque remix é outra faixa, com outro tempo e outra
+   * capa, e fundir os dois apagaria uma música que o usuário escolheu ter.
+   */
+  it('"Ao Vivo" colide (quem separa é a duração), "Remix" não colide', () => {
+    expect(chaveDeIdentidade('Evidências (Ao Vivo)', 'Fulano')).toBe(
+      chaveDeIdentidade('Evidências', 'Fulano'),
+    );
+    expect(chaveDeIdentidade('Cheguei (Remix)', 'Ludmilla')).not.toBe(
+      chaveDeIdentidade('Cheguei', 'Ludmilla'),
+    );
+  });
+});
+
+/**
  * REGRESSÕES PEGAS EM PRODUÇÃO, na primeira volta da curadoria com o leitor
  * ligado. As três estragaram títulos de verdade antes de eu ver o log.
  *
@@ -142,6 +198,158 @@ describe('lerTituloDeVideo — regressões vistas em produção', () => {
     expect(lerTituloDeVideo('05 SÁ RODRIX & GUARABYRA - POT POURRI').title).toBe('POT POURRI');
     expect(lerTituloDeVideo('12 - Evidências').title).toBe('Evidências');
     expect(lerTituloDeVideo('3. Sozinho').title).toBe('Sozinho');
+  });
+
+  it('APÓSTROFO não é aspa — dois deles destruíam o título e o artista', () => {
+    // Virou título "Roses - Sweet Child O" e artista "Guns N Mine": o leitor
+    // achava que o pedaço entre os dois apóstrofos era o nome da faixa.
+    const r = lerTituloDeVideo("Guns N' Roses - Sweet Child O' Mine");
+    expect(r.title).toBe("Sweet Child O' Mine");
+    expect(r.artists).toEqual(["Guns N' Roses"]);
+    // As aspas de verdade continuam mandando.
+    expect(lerTituloDeVideo('Nirvana "Come As You Are" Official Video').title).toBe(
+      'Come As You Are',
+    );
+  });
+
+  it('"(Áudio Oficial)" ficava dentro do nome da música', () => {
+    // A palavra começa com acento, e a borda de palavra do JavaScript é ASCII:
+    // o padrão nunca casava. Metade dos títulos gospel e sertanejos da
+    // biblioteca carregava esse rabo, e por causa dele a mesma faixa vinda de
+    // outro canal não era reconhecida como a mesma.
+    expect(lerTituloDeVideo('Legião Urbana - Tempo Perdido (Áudio Oficial)').title).toBe(
+      'Tempo Perdido',
+    );
+    expect(lerTituloDeVideo('Anitta - Envolver - Áudio Oficial').title).toBe('Envolver');
+    // "(Lyrics)" no plural também passava batido.
+    expect(lerTituloDeVideo('Adele - Someone Like You (Lyrics)').title).toBe('Someone Like You');
+    expect(lerTituloDeVideo('BTS - Dynamite (Official MV)').title).toBe('Dynamite');
+    // Crédito de produção é do produtor, não do nome da faixa.
+    expect(lerTituloDeVideo('MC Hariel - Chapa Quente (Prod. DJ Boy)').title).toBe('Chapa Quente');
+  });
+
+  it('o que vem depois do "|" não é continuação do título', () => {
+    // Os pedaços eram remontados com " - " no meio: "Ele Vem - OFICIAL".
+    expect(lerTituloDeVideo('Isaias Saad - Ele Vem (Ao Vivo) | OFICIAL').title).toBe('Ele Vem');
+    expect(lerTituloDeVideo('Ludmilla - Cheguei | Videoclipe Oficial').title).toBe('Cheguei');
+    // Mas o primeiro pedaço nunca sai: a banda LIVE se chama LIVE.
+    expect(lerTituloDeVideo('LIVE - Lightning Crashes').artists).toEqual(['LIVE']);
+  });
+
+  it('parêntese aberto sozinho não fica na prateleira', () => {
+    // A descrição do canal era comida de dentro do parêntese e o "(" sobrava.
+    expect(lerTituloDeVideo('Hallelujah (Cover Version) - Lucas').title).toBe('Hallelujah');
+  });
+
+  it('a resolução some junto com o "HD" que vinha antes dela', () => {
+    // "…BAR & VIOLÃO HD" era o que sobrava: com "640x360" ainda no fim, o "HD"
+    // não era o último pedaço e escapava.
+    expect(lerTituloDeVideo('05 SÁ RODRIX & GUARABYRA POT POURRI HD 640x360').title).toBe(
+      'SÁ RODRIX & GUARABYRA POT POURRI',
+    );
+  });
+
+  it('crédito de produção não gruda no último cantor da lista', () => {
+    // Nascia um artista chamado "Neguinho do Kaxeta - (DJ Boy)".
+    const r = lerTituloDeVideo('MC Ryan SP, Neguinho do Kaxeta - "Liberdade" (DJ Boy)');
+    expect(r.artists).toEqual(['MC Ryan SP', 'Neguinho do Kaxeta']);
+  });
+
+  it('"AC/DC" é UMA banda, não duas', () => {
+    // Viravam "AC" e "DC": duas prateleiras, duas fotos, dois votos de gênero,
+    // e nenhum dos dois existe. A barra só separa com espaço dos dois lados.
+    expect(lerTituloDeVideo('AC/DC - Highway to Hell').artists).toEqual(['AC/DC']);
+    // "vs." é encontro de dois artistas, e continuava colado num nome só.
+    expect(lerTituloDeVideo('Alok vs. Sevenn - BYOB').artists).toEqual(['Alok', 'Sevenn']);
+  });
+
+  it('o nome do canal entra limpo, como o de qualquer artista', () => {
+    // Sem passar pela limpeza, "Matuê - Topic" e "Caetano Veloso Oficial"
+    // viravam artistas PARALELOS do mesmo cantor — prateleira, foto e votação
+    // de gênero divididas em duas.
+    expect(lerTituloDeVideo('Bença', 'Matuê - Topic').artists).toEqual(['Matuê']);
+    expect(lerTituloDeVideo('Sozinho', 'Caetano Veloso Oficial').artists).toEqual([
+      'Caetano Veloso',
+    ]);
+  });
+});
+
+/**
+ * O SELO ESTAVA DENTRO DO NOME DA MÚSICA, e ninguém tinha ido buscar.
+ *
+ * O canal nem sempre é a gravadora — muitas faixas vêm do canal do cantor com o
+ * selo colado no título entre parênteses. Ele ficava lá: o cartão da prateleira
+ * mostrava "Não Pare ( MK Music)", e a mesma faixa importada de outro canal, sem
+ * o selo no nome, não casava com ela.
+ */
+describe('lerTituloDeVideo — o selo dentro do título', () => {
+  it('sai do título e vira o campo que é dele', () => {
+    expect(lerTituloDeVideo('Não Pare ( MK Music)')).toMatchObject({
+      title: 'Não Pare',
+      label: 'MK Music',
+    });
+    expect(lerTituloDeVideo('Raridade (MK Music)').title).toBe('Raridade');
+    expect(lerTituloDeVideo('Deus Proverá [Som Livre]')).toMatchObject({
+      title: 'Deus Proverá',
+      label: 'Som Livre',
+    });
+  });
+
+  it('só o parêntese do selo sai — o outro é parte do nome', () => {
+    expect(lerTituloDeVideo('Prioridad (Prioridade em Espanhol) ( MK Music)').title).toBe(
+      'Prioridad (Prioridade em Espanhol)',
+    );
+  });
+
+  it('acha o selo mesmo no meio do ruído do canal', () => {
+    expect(lerTituloDeVideo('Jó - COM LETRA (VideoLETRA® oficial MK Music)')).toMatchObject({
+      title: 'Jó',
+      label: 'MK Music',
+    });
+  });
+
+  it('o canal continua tendo preferência', () => {
+    expect(lerTituloDeVideo('Anderson Freire - Raridade', 'MK MUSIC').label).toBe('MK MUSIC');
+  });
+});
+
+/**
+ * "ft. Fulano" É GENTE, E ESTAVA SENDO GRAVADO COMO NOME DE MÚSICA.
+ *
+ * O canal do próprio artista publica sem separador nenhum, e o convidado vem
+ * grudado no fim do nome do vídeo. O estrago é duplo: o convidado nunca entra no
+ * cadastro (sem prateleira, sem foto, sem voto de gênero) e o título fica com um
+ * pedaço a mais, então a mesma faixa vinda de outro canal não casa com ela.
+ */
+describe('lerTituloDeVideo — convidado no nome da música', () => {
+  it('tira o convidado do título e o põe entre quem canta', () => {
+    expect(lerTituloDeVideo('Ninguém Explica Deus ft. Gabriela Rocha')).toMatchObject({
+      title: 'Ninguém Explica Deus',
+      artists: ['Gabriela Rocha'],
+    });
+    expect(
+      lerTituloDeVideo('Os Sonhos de Deus ft. Juninho Black, Lukão Carvalho, Eli Soares'),
+    ).toMatchObject({
+      title: 'Os Sonhos de Deus',
+      artists: ['Juninho Black', 'Lukão Carvalho', 'Eli Soares'],
+    });
+    expect(lerTituloDeVideo('Ousado Amor part. Isaias Saad').title).toBe('Ousado Amor');
+    expect(lerTituloDeVideo('Coração Blindado feat. Fernandinho').title).toBe('Coração Blindado');
+  });
+
+  it('funciona junto com o separador, sem perder quem já estava lá', () => {
+    expect(
+      lerTituloDeVideo('MC Cabelinho - Deu Onda part. Ludmilla (Áudio Oficial)'),
+    ).toMatchObject({
+      title: 'Deu Onda',
+      artists: ['MC Cabelinho', 'Ludmilla'],
+    });
+  });
+
+  it('"Parte" não é "part." — o nome da faixa fica inteiro', () => {
+    expect(lerTituloDeVideo("Racionais MC's - Vida Loka - Parte II").title).toBe(
+      'Vida Loka - Parte II',
+    );
   });
 });
 

@@ -10,7 +10,7 @@
  * Estes testes usam os nomes exatos que estão no banco de produção.
  */
 import { describe, expect, it } from 'vitest';
-import { ehGravadora, promoverArtistaReal } from '../gravadoraComoArtista.js';
+import { acharGravadora, ehGravadora, promoverArtistaReal } from '../gravadoraComoArtista.js';
 
 describe('ehGravadora', () => {
   it('reconhece os selos que apareceram na biblioteca', () => {
@@ -31,6 +31,37 @@ describe('ehGravadora', () => {
     expect(ehGravadora('Music')).toBe(false);
     expect(ehGravadora('Storm')).toBe(false);
     expect(ehGravadora('')).toBe(false);
+  });
+
+  it('o sufixo do canal também vem COLADO', () => {
+    // O canal do selo do Matuê se chama "Pineapple StormTV", sem espaço. Como a
+    // regra exigia espaço antes do "TV", o selo não era reconhecido e ia parar
+    // no campo de quem canta.
+    expect(ehGravadora('Pineapple StormTV')).toBe(true);
+    // E continua não bastando terminar em "tv": o resto tem que ser um selo.
+    expect(ehGravadora('Kurtv')).toBe(false);
+  });
+});
+
+/**
+ * O SELO VEM DENTRO DO NOME DO VÍDEO, não só no nome do canal — "Não Pare
+ * ( MK Music)", "Deus Proverá [Som Livre]". Sem alguém para achá-lo ali, ele
+ * ficava colado no nome da música na prateleira.
+ */
+describe('acharGravadora', () => {
+  it('acha o selo no meio do título, com a pontuação que estiver no caminho', () => {
+    expect(acharGravadora('Não Pare ( MK Music)')).toBe('MK Music');
+    expect(acharGravadora('Deus Proverá [Som Livre]')).toBe('Som Livre');
+    expect(acharGravadora('Jó - COM LETRA (VideoLETRA® oficial MK Music)')).toBe('MK Music');
+  });
+
+  it('devolve o selo como o canal escreveu', () => {
+    expect(acharGravadora('MK MUSIC - Raridade')).toBe('MK MUSIC');
+  });
+
+  it('não acha o que não está lá', () => {
+    expect(acharGravadora('Anderson Freire - Raridade')).toBeNull();
+    expect(acharGravadora('')).toBeNull();
   });
 });
 
