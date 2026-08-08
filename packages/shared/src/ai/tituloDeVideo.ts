@@ -69,7 +69,35 @@ const RUIDO_PALAVRAS = [
   'shorts',
   'visualizer',
   'videoletra',
+  // Descrição do canal que vinha DEPOIS do separador e era confundida com o
+  // nome da música: "Simply The Best - Bg Prevod" virava "Bg Prevod", e
+  // "How Will I Know - Sound-A-Like As Made Famous By: X" perdia a música
+  // inteira. Retirados ANTES da divisão, o separador some junto e o título
+  // certo fica.
+  'bg prevod',
+  'prevod',
+  'sound-a-like',
+  'sound a like',
+  'as made famous by',
+  'made famous by',
+  'karaoke version',
+  'karaoke',
+  'cover version',
+  'subtitles',
+  'sub espanol',
+  'sub español',
 ];
+
+/**
+ * DESCRIÇÃO DO CANAL — come daqui até o fim da frase.
+ *
+ * Estas não são palavras soltas, são o começo de uma explicação que o canal
+ * grudou no nome ("...- Sound-A-Like As Made Famous By: Jessica Folcker").
+ * Retirar só a expressão deixava o rabo (": Jessica Folcker"), e o rabo virava
+ * o título depois da divisão pelo separador — que é justamente o estrago.
+ */
+const DESCRICAO_DO_CANAL =
+  /\s*[-–—|]?\s*\b(?:sound[- ]a[- ]like|(?:as )?made famous by|bg prevod|prevod|karaoke(?: version)?|cover version|subtitles?|sub espa[nñ]ol)\b.*$/i;
 
 /** `(qualquer coisa com ruído dentro)` ou `[idem]`. */
 const PARENTESE_RUIDOSO = new RegExp(
@@ -103,6 +131,9 @@ function chave(s: string): string {
 function limpar(texto: string): string {
   return (
     texto
+      // A descrição vem PRIMEIRO: ela leva o separador junto, e sem separador a
+      // divisão "Artista - Música" nem chega a acontecer no lado errado.
+      .replace(DESCRICAO_DO_CANAL, ' ')
       .replace(PARENTESE_RUIDOSO, ' ')
       // Ruído solto, sem parênteses, no fim da frase.
       .replace(
@@ -113,8 +144,16 @@ function limpar(texto: string): string {
       .replace(/\b\d{3,4}\s*[x×]\s*\d{3,4}\b/g, ' ')
       .replace(/[®™©]/g, ' ')
       .replace(/#\w+/g, ' ')
-      // Número de faixa no começo ("05 ", "12 - ").
-      .replace(/^\s*\d{1,2}\s*[-.]?\s+/, '')
+      // Número de FAIXA no começo — e o corte é estreito de propósito.
+      //
+      // A regra era `^\d{1,2}\s*[-.]?\s+`, que engolia qualquer número solto na
+      // frente: "10 lil crips" virava "lil crips". Número faz parte do nome de
+      // música com frequência ("7 Days", "99 Problemas", "10 lil crips").
+      //
+      // Numeração de disco tem forma reconhecível: zero à esquerda ("05 ") ou
+      // um separador logo depois ("12 - ", "3. "). Sem uma das duas marcas, o
+      // número fica — errar deixando é invisível, errar tirando apaga o nome.
+      .replace(/^\s*(?:0\d|\d{1,2}\s*[-.])\s*/, '')
       // Sobras de pontuação e espaço.
       .replace(/\s{2,}/g, ' ')
       .replace(/^[\s\-–—,;|]+|[\s\-–—,;|]+$/g, '')

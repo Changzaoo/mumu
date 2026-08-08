@@ -103,3 +103,39 @@ describe('chaveDeIdentidade — é ela que faz duas cópias se reconhecerem', ()
     expect(chaveDeIdentidade('BENÇA (Official Video)')).toBe(chaveDeIdentidade('bença'));
   });
 });
+
+/**
+ * REGRESSÕES PEGAS EM PRODUÇÃO, na primeira volta da curadoria com o leitor
+ * ligado. As três estragaram títulos de verdade antes de eu ver o log.
+ *
+ * A causa das duas primeiras é a mesma: a regra "Artista - Música" assume que o
+ * lado DIREITO é a música. Quando o canal põe descrição ali, o nome da faixa é
+ * jogado fora — e o resultado tem cara de título, então nada reclama.
+ */
+describe('lerTituloDeVideo — regressões vistas em produção', () => {
+  it('descrição depois do separador não rouba o lugar do título', () => {
+    // Virou "Bg Prevod" (= "legendas em búlgaro").
+    expect(lerTituloDeVideo('Simply The Best - Bg Prevod').title).toBe('Simply The Best');
+  });
+
+  it('"sound-a-like / as made famous by" não vira o nome da música', () => {
+    const r = lerTituloDeVideo(
+      'How Will I Know (Who You Are) - Sound-A-Like As Made Famous By: Jessica Folcker',
+    );
+    expect(r.title).toBe('How Will I Know (Who You Are)');
+  });
+
+  it('NÚMERO que faz parte do nome não é confundido com número de faixa', () => {
+    // Virou "lil crips".
+    expect(lerTituloDeVideo('10 lil crips').title).toBe('10 lil crips');
+    expect(lerTituloDeVideo('7 Days').title).toBe('7 Days');
+    expect(lerTituloDeVideo('99 Problemas').title).toBe('99 Problemas');
+  });
+
+  it('mas numeração de disco continua saindo', () => {
+    // Zero à esquerda ou separador logo depois: é numeração, não nome.
+    expect(lerTituloDeVideo('05 SÁ RODRIX & GUARABYRA - POT POURRI').title).toBe('POT POURRI');
+    expect(lerTituloDeVideo('12 - Evidências').title).toBe('Evidências');
+    expect(lerTituloDeVideo('3. Sozinho').title).toBe('Sozinho');
+  });
+});
