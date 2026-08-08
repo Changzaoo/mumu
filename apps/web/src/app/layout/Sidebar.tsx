@@ -77,11 +77,11 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
       className={({ isActive }) =>
         cn(
           'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition-colors duration-200',
-          // Colapsado: quadrado fixo centralizado no trilho, sem padding lateral.
-          // O header também centraliza na largura cheia, então os dois passam a
-          // dividir UM eixo — antes o header era full-width e a nav tinha px-3,
-          // e a diferença de caixa deixava os ícones fora de prumo.
-          collapsed && 'mx-auto w-10 justify-center px-0',
+          // Colapsado: largura CHEIA e ícone centralizado por `justify-center`.
+          // Nada de `mx-auto` nem largura fixa — o ícone cai no centro exato dos
+          // 72px do trilho sem depender de margem automática, que era o que
+          // deixava os itens da nav à esquerda do logo e do botão de recolher.
+          collapsed && 'w-full justify-center px-0',
           isActive ? 'text-fg' : 'text-fg-muted hover:text-fg',
         )
       }
@@ -196,20 +196,20 @@ export function Sidebar() {
       )}
     >
       {collapsed ? (
-        // Trilho colapsado: a marca e o botão de expandir usam a MESMA caixa de
-        // 40px e o MESMO tamanho de glifo (size-5) que todo item da nav abaixo.
-        // Antes o botão era um IconButton de 32px — centralizava no mesmo eixo,
-        // mas a caixa menor e o glifo menor davam a impressão de desalinho. Uma
-        // caixa só, um glifo só: nada pode sair de prumo.
+        // Trilho colapsado: marca e botão de recolher usam EXATAMENTE o mesmo
+        // mecanismo dos itens da nav — largura cheia (`w-full`) e conteúdo
+        // centralizado (`place-items-center`/`justify-center`). Um só eixo, sem
+        // `mx-auto` nem caixa fixa: é matematicamente o centro dos 72px para
+        // TODOS os ícones, do topo ao rodapé do menu.
         <div className="flex flex-col gap-0.5 py-3">
-          <div className="mx-auto grid size-10 place-items-center">
+          <div className="grid h-10 w-full place-items-center">
             <AurialMark className="size-6" />
           </div>
           <button
             type="button"
             aria-label="Expandir menu"
             onClick={toggleSidebar}
-            className="mx-auto grid size-10 place-items-center rounded-lg text-fg-muted transition-colors duration-200 hover:bg-fg/8 hover:text-fg [&_svg]:size-5"
+            className="grid h-10 w-full place-items-center rounded-lg text-fg-muted transition-colors duration-200 hover:bg-fg/8 hover:text-fg [&_svg]:size-5"
           >
             <PanelLeft />
           </button>
