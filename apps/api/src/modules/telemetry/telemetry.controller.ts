@@ -16,7 +16,13 @@ import { z } from 'zod';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { ok } from '../../core/http/respond.js';
 import { ValidationError } from '../../core/errors/index.js';
-import { listar, mesclar } from './telemetry.repository.js';
+import {
+  listar,
+  mesclar,
+  profundidadeAceitavel,
+  tamanhoAceitavel,
+  MAX_PROFUNDIDADE,
+} from './telemetry.repository.js';
 
 /**
  * O id do aparelho é gerado no cliente, então o formato é a única coisa que dá
@@ -32,15 +38,42 @@ const deviceIdSchema = z
 
 const corpoSchema = z.object({
   // O documento é do cliente e muda com ele — gravado sem inspeção de campo,
-  // como já se faz nas coleções. O que se controla aqui é o TAMANHO.
+  // como já se faz nas coleções. O que se controla aqui é a FORMA: tamanho e
+  // profundidade, as duas coisas que não dependem de saber o que os campos são.
   dados: z.record(z.string(), z.unknown()),
 });
+
+/**
+ * A PORTA, e ela fica ANTES do banco.
+ *
+ * O teto de tamanho existia só no documento JÁ FUNDIDO, dentro do repositório —
+ * ou seja, depois de um `SELECT` no Postgres. Quem quisesse gastar o banco de
+ * graça mandava 1 MB (o limite do `express.json`) por requisição e cada uma
+ * custava uma ida ao Postgres antes de ser recusada.
+ *
+ * Pior: com aninhamento fundo a recusa nem chegava a acontecer. O `JSON.stringify`
+ * que MEDE o tamanho estoura a pilha em ~5.000 níveis, então o corpo que deveria
+ * ser barrado pelo teto derrubava a própria medição — 500 em vez de 4xx, a 10 KB
+ * por tentativa, sem conta nenhuma. Ver `MAX_PROFUNDIDADE`.
+ *
+ * A ordem aqui é obrigatória: profundidade PRIMEIRO (checagem iterativa, não
+ * estoura), tamanho depois (precisa do `stringify`, que estouraria).
+ */
+function recusarPedacoAbusivo(dados: Record<string, unknown>): void {
+  if (!profundidadeAceitavel(dados)) {
+    throw new ValidationError(`Telemetria aninhada demais (máximo de ${MAX_PROFUNDIDADE} níveis).`);
+  }
+  if (!tamanhoAceitavel(JSON.stringify(dados))) {
+    throw new ValidationError('Telemetria grande demais para este aparelho.');
+  }
+}
 
 export const telemetryController = {
   /** Funde um pedaço de telemetria no documento do aparelho. Sem login. */
   registrar: asyncHandler(async (req, res) => {
     const deviceId = deviceIdSchema.parse(req.params.deviceId);
     const { dados } = corpoSchema.parse(req.body);
+    recusarPedacoAbusivo(dados);
 
     // Lê `req.user` DIRETO em vez de `currentUser(req)`, que estoura sem conta.
     // O middleware `authenticate` já preenche o campo quando vem um token

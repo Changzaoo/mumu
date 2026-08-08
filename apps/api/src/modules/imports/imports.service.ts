@@ -73,7 +73,13 @@ export const importsService = {
       throw new ForbiddenError('O importador por link está desativado neste servidor.');
     }
     if (!isSupportedLinkHost(input.url)) {
-      throw new ValidationError(`Link não suportado. Use: ${LINK_IMPORT_HOSTS.join(', ')}.`);
+      // A MENSAGEM NÃO NOMEIA FONTE NENHUMA — e isso é regra do app, não estilo.
+      // Ela listava os domínios aceitos, e esse texto chega ao usuário num toast:
+      // a tela contava de onde a música vem. A validação continua a mesma; o que
+      // mudou é o que ela conta.
+      throw new ValidationError(
+        'Esse link não é de um serviço suportado. Cole o link de um vídeo ou de uma playlist.',
+      );
     }
 
     const uploadId = newUploadId();

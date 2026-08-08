@@ -46,6 +46,24 @@ export const authRateLimit = createLimiter({
   message: 'Too many auth attempts, try again in a minute',
 });
 
+/**
+ * Telemetria — 60 req/min/IP.
+ *
+ * O ÚNICO endereço de escrita SEM conta da API. O limite global de 300/min não
+ * segura o que importa aqui: cada requisição pode criar uma LINHA NOVA (o
+ * `deviceId` vem do cliente e nada obriga que se repita) de até 64 KB. A 300 por
+ * minuto isso são ~19 MB/min de Postgres por IP — 27 GB por dia, de graça, sem
+ * login. A 60 por minuto o mesmo IP consegue ~3,8 MB/min.
+ *
+ * Sessenta é folga larga para o cliente real, que envia a cada ~30 segundos.
+ */
+export const telemetryRateLimit = createLimiter({
+  name: 'telemetry',
+  windowMs: 60 * 1000,
+  max: 60,
+  message: 'Too many telemetry writes, slow down',
+});
+
 /** Uploads — 10 req/hour/IP. */
 export const uploadRateLimit = createLimiter({
   name: 'upload',

@@ -62,11 +62,31 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  */
 let recusasPorCota = 0;
 
-/** Lê e zera o contador — quem chama fica responsável pelo período medido. */
-export function recusasPorCotaDesdeAUltimaLeitura(): number {
-  const n = recusasPorCota;
+/**
+ * Quantas chamadas a NVIDIA RESPONDEU no mesmo período.
+ *
+ * O denominador que faltava. Sem ele, "zero recusas" é ambíguo: pode ser a cota
+ * folgada — ou pode ser que nenhuma chamada tenha sido feita. A curadoria lia
+ * essa ambiguidade como folga e AUMENTAVA o lote a cada volta silenciosa. Numa
+ * biblioteca já convergida (que é o estado normal depois de alguns dias) quase
+ * toda volta é silenciosa, então o lote subia sozinho de volta ao teto que
+ * estourou a cota — e a próxima leva de importações levava a rajada inteira.
+ */
+let chamadasRespondidas = 0;
+
+export interface PressaoDeCota {
+  /** Respostas 429 no período. */
+  recusas: number;
+  /** Chamadas que a API respondeu no período — o denominador. */
+  chamadas: number;
+}
+
+/** Lê e zera os contadores — quem chama fica responsável pelo período medido. */
+export function pressaoDeCotaDesdeAUltimaLeitura(): PressaoDeCota {
+  const medida = { recusas: recusasPorCota, chamadas: chamadasRespondidas };
   recusasPorCota = 0;
-  return n;
+  chamadasRespondidas = 0;
+  return medida;
 }
 
 export async function nvidiaChat(
@@ -116,6 +136,11 @@ async function once(
     }),
     signal: AbortSignal.timeout(env.NVIDIA_TIMEOUT_MS),
   });
+
+  // Contada assim que a API RESPONDE, qualquer que seja o status: é o
+  // denominador da pressão de cota. Erro de rede e timeout não chegam aqui e
+  // não contam — nesses casos a NVIDIA não disse nada sobre o próprio ritmo.
+  chamadasRespondidas += 1;
 
   if (response.status === 429 || response.status >= 500) {
     if (response.status === 429) recusasPorCota += 1;
@@ -178,7 +203,18 @@ export async function nvidiaEmbed(
       signal: AbortSignal.timeout(env.NVIDIA_TIMEOUT_MS),
     });
 
+    chamadasRespondidas += 1;
+
     if (!response.ok) {
+      // O 429 DAQUI ERA INVISÍVEL, e essa era a metade cega do termostato.
+      //
+      // Só o chat contava recusa. A vetorização (`gravarDna`) dimensiona o
+      // próprio lote pelo mesmo `loteEmVigor()` e bate na MESMA cota, então uma
+      // volta podia tomar recusa atrás de recusa no endpoint de embedding e
+      // reportar "zero recusas" — o que a curadoria lia como folga, e aí ela
+      // AUMENTAVA o lote. O termostato acelerava justamente quando estava
+      // sufocando.
+      if (response.status === 429) recusasPorCota += 1;
       log.warn({ status: response.status }, 'NVIDIA recusou o embedding');
       return null;
     }

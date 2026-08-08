@@ -719,3 +719,22 @@ model TelemetryDevice {
   /// O painel lista por atividade recente.
   @@index([updatedAt])
 }
+
+/// O POUCO QUE OS WORKERS APRENDEM E NÃO PODE MORRER COM O PROCESSO.
+///
+/// Hoje guarda uma coisa só: o lote da curadoria. Ele se ajusta sozinho à cota
+/// da NVIDIA (cai pela metade quando toma 429, sobe um quarto quando folga),
+/// mas vivia numa variável de módulo — ou seja, morria a cada deploy, a cada
+/// reinício do contêiner, a cada `docker compose up`. Medido em produção: o
+/// worker recriado às 10:55Z voltou ao teto de 150 e queimou 222 recusas para
+/// reaprender a mesma descida que já sabia ontem (150 → 75 → 37).
+///
+/// Um aprendizado que se apaga sozinho não é aprendizado; é um ciclo de dor com
+/// intervalo de deploy. A tabela é genérica de propósito para o próximo worker
+/// que precisar lembrar de algo não precisar de outra migração.
+model WorkerState {
+  /// Namespace + nome, ex.: "curation.lote".
+  key       String   @id
+  value     Json
+  updatedAt DateTime @updatedAt
+}

@@ -47,7 +47,11 @@ import {
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
-import { isNvidiaConfigured, recusasPorCotaDesdeAUltimaLeitura } from '../infra/ai/nvidia.js';
+import {
+  isNvidiaConfigured,
+  pressaoDeCotaDesdeAUltimaLeitura,
+  type PressaoDeCota,
+} from '../infra/ai/nvidia.js';
 import {
   auditor,
   auditorDeGenero,
@@ -635,10 +639,30 @@ interface LibraryDoc {
  * documento inteiro, então quem traduz é esta função: sem ela, gravar o gênero
  * apagaria título, artistas, capa e duração da faixa junto.
  */
+const SEGMENTOS_PROIBIDOS = new Set(['__proto__', 'constructor', 'prototype']);
+
 export function aplicarPatch(dados: LibraryEntry, patch: Record<string, unknown>): LibraryEntry {
   const saida: Record<string, unknown> = { ...(dados as Record<string, unknown>) };
   for (const [caminho, valor] of Object.entries(patch)) {
     const partes = caminho.split('.');
+
+    // CAMINHO MALFORMADO NÃO GRAVA NADA — nem meia coisa, nem em outro lugar.
+    //
+    // Os caminhos vêm de código legado que fala a sintaxe do Firestore, e um
+    // `split('.')` aceita tudo em silêncio: `''` virava uma chave vazia na raiz
+    // da entrada, `'.genre'` criava um objeto `{"": {...}}` do lado da faixa, e
+    // `'track.'` enfiava uma chave vazia DENTRO da faixa. Nenhum desses casos
+    // aparece no log — a gravação "funciona", só grava no lugar errado, e a
+    // biblioteca do usuário acumula lixo que ninguém sabe de onde veio.
+    if (partes.some((p) => p === '')) {
+      throw new Error(`caminho de patch malformado: ${JSON.stringify(caminho)}`);
+    }
+    if (partes.some((p) => SEGMENTOS_PROIBIDOS.has(p))) {
+      // `alvo['__proto__'] = {}` cai no acessor: o patch some, o objeto sai com
+      // o protótipo trocado e o `update` responde sucesso. Silêncio de novo.
+      throw new Error(`caminho de patch proibido: ${JSON.stringify(caminho)}`);
+    }
+
     if (partes.length === 1) {
       saida[caminho] = valor;
       continue;
@@ -646,10 +670,24 @@ export function aplicarPatch(dados: LibraryEntry, patch: Record<string, unknown>
     let alvo = saida;
     for (const parte of partes.slice(0, -1)) {
       const atual = alvo[parte];
+      // ARRAY NO MEIO DO CAMINHO É RECUSA, NÃO CONVERSÃO.
+      //
+      // `{'track.artists.0.name': 'X'}` transformava `artists: [{...}]` em
+      // `artists: {"0": {...}}` — a lista de artistas deixava de ser lista.
+      // Todo o resto do sistema faz `Array.isArray(track.artists)` antes de
+      // olhar, então a partir daí a faixa fica sem artista NENHUM: some da
+      // prateleira do artista, perde o voto de gênero, e não há erro no log.
+      // É exatamente o "estrago máximo e silencioso" que este arquivo teme.
+      //
+      // Escalar e nulo continuam virando mapa, que é o que o Firestore fazia e
+      // é como o nível intermediário nasce numa entrada nova.
+      if (Array.isArray(atual)) {
+        throw new Error(
+          `caminho de patch atravessaria uma lista: ${JSON.stringify(caminho)} (em ${parte})`,
+        );
+      }
       const proximo =
-        atual && typeof atual === 'object' && !Array.isArray(atual)
-          ? { ...(atual as Record<string, unknown>) }
-          : {};
+        atual && typeof atual === 'object' ? { ...(atual as Record<string, unknown>) } : {};
       alvo[parte] = proximo;
       alvo = proximo;
     }
@@ -919,45 +957,134 @@ async function gravarDna(docs: LibraryDoc[]): Promise<void> {
  * andando, só mais devagar.
  */
 const LOTE_MINIMO = 10;
-let loteAtual = 0; // 0 = ainda não iniciado; a 1ª volta usa o configurado
+const CHAVE_DO_LOTE = 'curation.lote';
 
-function ajustarLote(recusas: number): void {
+let loteAtual = 0; // 0 = ainda não sabido; ver `carregarLoteAprendido`
+let carregado = false;
+
+/**
+ * O RITMO NÃO PODE MORRER COM O CONTÊINER.
+ *
+ * `loteAtual` era uma variável de módulo e nada mais, então cada deploy e cada
+ * reinício jogavam fora tudo o que o termostato tinha aprendido. Medido em
+ * produção: o worker recriado às 10:55Z voltou ao teto de 150 e queimou 222
+ * recusas de cota para reaprender a MESMA descida de ontem (150 → 75 → 37).
+ * Isso não é um custo de estreia — é o preço cobrado a cada deploy, e ele cai
+ * sobre a cota compartilhada com o resto do app.
+ *
+ * O valor gravado é um TETO, nunca um chão: `min(teto configurado, aprendido)`.
+ * Se alguém baixar `CURATION_BATCH` no ambiente, a memória não pode desfazer a
+ * decisão do operador.
+ */
+async function carregarLoteAprendido(): Promise<void> {
+  if (carregado) return;
+  carregado = true;
   const teto = env.CURATION_BATCH;
-  if (loteAtual === 0) loteAtual = teto;
-  if (recusas > 0) {
+  try {
+    const linha = await prisma.workerState.findUnique({ where: { key: CHAVE_DO_LOTE } });
+    const gravado = (linha?.value as { lote?: unknown } | null)?.lote;
+    if (typeof gravado === 'number' && Number.isFinite(gravado) && gravado > 0) {
+      loteAtual = Math.min(teto, Math.max(LOTE_MINIMO, Math.floor(gravado)));
+      log.info({ lote: loteAtual, teto }, 'lote aprendido recuperado do banco');
+      return;
+    }
+    loteAtual = loteDeEstreia();
+    log.info({ lote: loteAtual, teto }, 'sem lote aprendido — estreando pela metade do teto');
+  } catch (err) {
+    // Tabela ainda não migrada, banco fora do ar, o que for: o worker NÃO pode
+    // deixar de rodar por causa da memória do ritmo. Mas também não volta ao
+    // teto cheio — foi ele que queimou as 222 recusas.
+    loteAtual = loteDeEstreia();
+    log.warn({ err, lote: loteAtual }, 'não deu para ler o lote aprendido — estreando cauteloso');
+  }
+}
+
+/**
+ * Sem memória, começa pela METADE do teto.
+ *
+ * Estrear no teto é começar pelo ritmo que a produção já provou ser alto demais.
+ * Estrear no mínimo desperdiça horas de convergência à toa. A metade erra para o
+ * lado barato: se sobrar cota, a subida de um quarto recupera o teto em poucas
+ * voltas; se faltar, a queda pela metade custa uma volta em vez de três.
+ */
+function loteDeEstreia(): number {
+  return Math.max(LOTE_MINIMO, Math.floor(env.CURATION_BATCH / 2));
+}
+
+/** Grava o ritmo aprendido. Melhor esforço: falhar aqui não pode parar a volta. */
+function lembrarLote(lote: number): void {
+  void prisma.workerState
+    .upsert({
+      where: { key: CHAVE_DO_LOTE },
+      create: { key: CHAVE_DO_LOTE, value: { lote } },
+      update: { value: { lote } },
+    })
+    .catch((err: unknown) => log.warn({ err, lote }, 'não deu para gravar o lote aprendido'));
+}
+
+function ajustarLote(pressao: PressaoDeCota): void {
+  const teto = env.CURATION_BATCH;
+  if (loteAtual === 0) loteAtual = loteDeEstreia();
+
+  if (pressao.recusas > 0) {
     const novo = Math.max(LOTE_MINIMO, Math.floor(loteAtual / 2));
     if (novo !== loteAtual) {
-      log.warn({ recusas, de: loteAtual, para: novo }, 'cota apertada — diminuindo o lote');
+      log.warn(
+        { recusas: pressao.recusas, de: loteAtual, para: novo },
+        'cota apertada — diminuindo o lote',
+      );
       loteAtual = novo;
+      lembrarLote(loteAtual);
     }
     return;
   }
+
+  // VOLTA SEM CHAMADA NENHUMA NÃO É FOLGA — é silêncio, e os dois são "zero
+  // recusas". A curadoria lia silêncio como folga e subia o lote. Só que a
+  // biblioteca convergida (o estado normal depois de alguns dias) passa quase
+  // toda volta sem uma única chamada: o lote escalava sozinho de volta ao teto
+  // que estourou a cota, e a próxima leva de importações levava a rajada
+  // inteira. O termostato precisa do denominador para saber que mediu alguma
+  // coisa.
+  if (pressao.chamadas === 0) return;
+
   if (loteAtual < teto) {
     const novo = Math.min(teto, loteAtual + Math.max(1, Math.floor(teto / 4)));
-    log.info({ de: loteAtual, para: novo }, 'cota folgada — aumentando o lote');
+    log.info({ chamadas: pressao.chamadas, de: loteAtual, para: novo }, 'cota folgada — subindo');
     loteAtual = novo;
+    lembrarLote(loteAtual);
   }
 }
 
 /** O lote em vigor nesta volta. */
 export function loteEmVigor(): number {
-  return loteAtual || env.CURATION_BATCH;
+  return loteAtual || loteDeEstreia();
 }
 
 /**
- * Porta de entrada do teste para `ajustarLote`.
+ * Portas de entrada do teste para o termostato.
  *
  * A regra do ritmo não pode ser verificada por fora: ela só aparece depois de
- * uma volta inteira contra a API real. Exposta assim, o comportamento que
- * importa — cair rápido, subir devagar, nunca zerar — fica travado por teste
- * sem precisar de rede nem de banco.
+ * uma volta inteira contra a API real. Expostas assim, o comportamento que
+ * importa — cair rápido, subir devagar, nunca zerar, e LEMBRAR — fica travado
+ * por teste sem precisar de rede.
  */
-export function __ajustarLoteParaTeste(recusas: number): void {
-  ajustarLote(recusas);
+export function __ajustarLoteParaTeste(pressao: PressaoDeCota): void {
+  ajustarLote(pressao);
+}
+
+export async function __carregarLoteParaTeste(): Promise<void> {
+  await carregarLoteAprendido();
 }
 
 /** Uma passada por todos os usuários. */
 async function runOnce(): Promise<void> {
+  // ANTES DE QUALQUER CHAMADA: recupera o ritmo aprendido. Aqui, e não em
+  // `startCurationWorker`, porque `loteEmVigor()` é síncrono e é lido no meio da
+  // volta — carregar de dentro dela garante que ninguém leia o valor de estreia
+  // por acidente de ordem.
+  await carregarLoteAprendido();
+
   // SÓ QUEM TEM BIBLIOTECA. Varrer a tabela de usuários traria contas anônimas e
   // de teste — uma consulta por volta, para cada uma, para não achar nada.
   const comBiblioteca = await prisma.userCollectionItem.groupBy({
@@ -986,7 +1113,12 @@ async function runOnce(): Promise<void> {
     });
   }
   // A cota teve a palavra final sobre o ritmo da próxima volta.
-  ajustarLote(recusasPorCotaDesdeAUltimaLeitura());
+  //
+  // A leitura zera os contadores, e é DE PROPÓSITO que ela acontece uma única
+  // vez por volta, no fim: este é o único ponto do processo que lê. Duas
+  // leituras por volta partiriam a medição em duas janelas e a segunda veria
+  // zero — que, sem o denominador, seria confundido com folga.
+  ajustarLote(pressaoDeCotaDesdeAUltimaLeitura());
 
   if (fixed > 0) {
     log.info(
