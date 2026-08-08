@@ -33,8 +33,22 @@ import { resumeAt, usePlayerStore } from '@/stores/playerStore';
 
 const DEVICE_ID_KEY = 'aurial:deviceId';
 const HEARTBEAT_MS = 25_000;
-/** Um device sem sinal há mais que isto é considerado offline. */
-const FRESH_MS = 60_000;
+/**
+ * Um device sem sinal há mais que isto é considerado offline.
+ *
+ * Era 60s, e por isso a aba que passava a reprodução para outro aparelho
+ * "sumia": pausada e em segundo plano, o navegador estrangula o heartbeat de
+ * 25s, e em um minuto ela cruzava o limite e virava "Offline". Três minutos
+ * cobrem o vaivém normal entre abas sem deixar um aparelho de fato fechado
+ * fingir presença por muito tempo.
+ */
+const FRESH_MS = 180_000;
+/**
+ * Janela para OFERECER retomar o que tocava em outro aparelho. Some depois de um
+ * tempo: retomar de onde parou faz sentido em horas, não em dias — reabrir o app
+ * uma semana depois e ser jogado no meio de uma música esquecida é pior que nada.
+ */
+const RETOMADA_JANELA_MS = 12 * 60 * 60 * 1000;
 /**
  * Comando mais velho que isto é DESCARTADO. Sem isso, um aparelho que ficou
  * offline aplicaria em rajada, ao voltar, todos os "próxima" que perdeu.
@@ -195,6 +209,54 @@ export function subscribeRemotePlayback(
 
 export function currentRemotePlayback(): RemotePlayback | null {
   return remoteState;
+}
+
+/** O que dá para continuar de onde parou, vindo de outro aparelho da conta. */
+export interface RetomadaRemota {
+  deviceId: string;
+  deviceName: string;
+  title: string;
+  artist: string;
+  coverUrl: string | null;
+  progress: number;
+  duration: number;
+}
+
+/**
+ * A melhor retomada entre aparelhos, ou `null`.
+ *
+ * O que o dono pediu: a música que ele ouvia num aparelho deve continuar no
+ * outro quando ele logar. A presença já publica faixa e posição de cada
+ * aparelho; aqui a gente escolhe a mais recente de OUTRO aparelho, dentro de uma
+ * janela de horas, com uma posição que vale a pena retomar.
+ *
+ * Não exige que o outro esteja tocando AGORA — o caso comum é o contrário: você
+ * pausou no celular e abriu no computador. Exige só que tenha uma faixa e uma
+ * posição que não seja nem o começo nem o fim (retomar aos 2s ou nos créditos
+ * não é retomar nada).
+ */
+export function retomadaEntreAparelhos(): RetomadaRemota | null {
+  const me = getDeviceId();
+  const now = Date.now();
+  let melhor: DeviceInfo | null = null;
+  for (const d of deviceState) {
+    if (d.isSelf || d.id === me) continue;
+    if (!d.trackId || !d.track) continue;
+    if (now - d.seenAt > RETOMADA_JANELA_MS) continue;
+    const restante = d.duration > 0 ? d.duration - d.progress : Infinity;
+    if (d.progress < 5 || restante < 15) continue; // nem no início, nem nos finais
+    if (!melhor || d.seenAt > melhor.seenAt) melhor = d;
+  }
+  if (!melhor || !melhor.track) return null;
+  return {
+    deviceId: melhor.id,
+    deviceName: melhor.name,
+    title: melhor.track.title,
+    artist: melhor.track.artist,
+    coverUrl: melhor.track.coverUrl,
+    progress: melhor.progress,
+    duration: melhor.duration,
+  };
 }
 
 /** Assina a LISTA de aparelhos da conta (para o seletor). */
