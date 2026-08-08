@@ -37,7 +37,9 @@ import {
   EMBED_DIMS,
   generoDoArtista,
   lerTituloDeVideo,
+  limparNomeDeArtista,
   promoverArtistaReal,
+  separarArtistasGrudados,
   revisarGeneros as revisarGenerosDeFaixas,
   type FaixaComparavel,
   type FaixaMinima,
@@ -366,7 +368,31 @@ async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
     const artistas = track.artists as Array<{ name?: unknown }>;
     if (!artistas.every((a) => a && typeof a.name === 'string')) continue;
 
-    const novo = promoverArtistaReal(artistas as Array<{ name: string }>);
+    // SEPARA ANTES DE PROMOVER — sem isto o conserto não alcança o dado real.
+    //
+    // No banco, `artists` costuma ter UM item cujo nome é a lista inteira:
+    // `[{name: "MK MUSIC, Elaine Martins"}]`. A promoção procura o selo no
+    // primeiro item e promove o PRÓXIMO — e como só existe um item, ela não
+    // tinha o que promover e devolvia "nada a fazer", silenciosamente. O
+    // conserto foi para produção e a prateleira Gospel continuou vazia, sem
+    // nenhum erro no log dizendo por quê.
+    const nomes = artistas.map((a) => a.name as string);
+    const separados = separarArtistasGrudados(nomes);
+
+    // "Oficial" também sai do que JÁ ESTÁ SALVO. Sem esta passagem, "Gabriela
+    // Rocha" e "Gabriela Rocha Oficial" seguiriam como dois artistas — duas
+    // prateleiras, duas fotos, e a votação de gênero dividida entre as duas
+    // metades da mesma discografia.
+    const base = separados ?? nomes;
+    const limpos = base.map((n) => limparNomeDeArtista(n));
+    const mudouONome = limpos.some((n, i) => n !== base[i]);
+
+    const lista: Array<{ name: string }> =
+      separados || mudouONome
+        ? limpos.map((name, i) => ({ ...(artistas[i] ?? {}), name }) as { name: string })
+        : (artistas as Array<{ name: string }>);
+
+    const novo = promoverArtistaReal(lista) ?? (separados || mudouONome ? lista : null);
     if (!novo) continue;
     try {
       await doc.ref.update({ 'track.artists': novo });

@@ -8,7 +8,12 @@
  * duplicata), um campo trocado estragava os três de uma vez.
  */
 import { describe, expect, it } from 'vitest';
-import { chaveDeIdentidade, lerTituloDeVideo } from '../tituloDeVideo.js';
+import {
+  chaveDeIdentidade,
+  lerTituloDeVideo,
+  limparNomeDeArtista,
+  separarArtistasGrudados,
+} from '../tituloDeVideo.js';
 
 describe('lerTituloDeVideo — o que é música e o que é gente', () => {
   it('as aspas mandam: o nome da faixa estava indo para o campo do artista', () => {
@@ -137,5 +142,76 @@ describe('lerTituloDeVideo — regressões vistas em produção', () => {
     expect(lerTituloDeVideo('05 SÁ RODRIX & GUARABYRA - POT POURRI').title).toBe('POT POURRI');
     expect(lerTituloDeVideo('12 - Evidências').title).toBe('Evidências');
     expect(lerTituloDeVideo('3. Sozinho').title).toBe('Sozinho');
+  });
+});
+
+/**
+ * O DADO ESTAVA GRUDADO UM NÍVEL ABAIXO DO QUE A REGRA ENXERGAVA.
+ *
+ * O conserto da gravadora-como-artista procurava o selo no PRIMEIRO item de
+ * `artists` e promovia o próximo. Só que no banco existe UM item cujo nome é a
+ * lista inteira — `[{name:"MK MUSIC, Elaine Martins"}]` — então não havia
+ * "próximo" para promover, a regra devolvia "nada a fazer", e a prateleira
+ * Gospel continuou vazia mesmo com o conserto no ar e sem nenhum erro no log.
+ */
+describe('separarArtistasGrudados', () => {
+  it('separa quando o selo está grudado no cantor', () => {
+    // "Oficial" é marca de canal e sai junto — ver `limparNomeDeArtista`.
+    expect(separarArtistasGrudados(['MK MUSIC, Elaine Martins Oficial'])).toEqual([
+      'MK MUSIC',
+      'Elaine Martins',
+    ]);
+    expect(separarArtistasGrudados(['MK MUSIC, Anderson Freire'])).toEqual([
+      'MK MUSIC',
+      'Anderson Freire',
+    ]);
+  });
+
+  it('NÃO quebra dupla/grupo real que tem separador no nome', () => {
+    // O risco de separar por separar: virariam dois artistas inexistentes.
+    expect(separarArtistasGrudados(['Simon & Garfunkel'])).toBeNull();
+    expect(separarArtistasGrudados(['Tyler, The Creator'])).toBeNull();
+    expect(separarArtistasGrudados(['Chitãozinho & Xororó'])).toBeNull();
+  });
+
+  it('não mexe no que já veio separado nem em nome simples', () => {
+    expect(separarArtistasGrudados(['Matuê', 'Teto'])).toBeNull();
+    expect(separarArtistasGrudados(['Gabriela Rocha'])).toBeNull();
+    expect(separarArtistasGrudados([])).toBeNull();
+  });
+});
+
+/**
+ * "Oficial" é o canal dizendo que é o canal certo — não faz parte do nome de
+ * ninguém. Entrando no cadastro, ele criava um artista PARALELO do mesmo
+ * cantor: "Gabriela Rocha" e "Gabriela Rocha Oficial" viram duas prateleiras,
+ * duas fotos e duas discografias — e a votação de gênero, que depende das
+ * faixas de uma pessoa estarem juntas, se divide junto.
+ */
+describe('limparNomeDeArtista', () => {
+  it('tira a marca de canal do fim do nome', () => {
+    expect(limparNomeDeArtista('Elaine Martins Oficial')).toBe('Elaine Martins');
+    expect(limparNomeDeArtista('Midian Lima Oficial')).toBe('Midian Lima');
+    expect(limparNomeDeArtista('Sarah Farias - Oficial')).toBe('Sarah Farias');
+    expect(limparNomeDeArtista('Gabriela Rocha Official')).toBe('Gabriela Rocha');
+    expect(limparNomeDeArtista('Anderson Freire - Topic')).toBe('Anderson Freire');
+  });
+
+  it('não mexe em nome que não tem a marca', () => {
+    expect(limparNomeDeArtista('Anderson Freire')).toBe('Anderson Freire');
+    expect(limparNomeDeArtista('Matuê')).toBe('Matuê');
+  });
+
+  it('só corta no FIM e como palavra inteira', () => {
+    // Cortar no meio inventaria nome que não existe.
+    expect(limparNomeDeArtista('Oficial da Casa')).toBe('Oficial da Casa');
+    expect(limparNomeDeArtista('Officialize')).toBe('Officialize');
+  });
+
+  it('a separação de artistas já entrega os nomes limpos', () => {
+    expect(separarArtistasGrudados(['MK MUSIC, Elaine Martins Oficial'])).toEqual([
+      'MK MUSIC',
+      'Elaine Martins',
+    ]);
   });
 });

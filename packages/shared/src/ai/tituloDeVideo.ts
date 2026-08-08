@@ -167,11 +167,61 @@ function limpar(texto: string): string {
  * O `e`/`and` só separa cercado de espaços — senão "Anderson" e "Rondinelly"
  * perderiam pedaços no meio da palavra.
  */
-function separarNomes(texto: string): string[] {
+export function separarNomes(texto: string): string[] {
   return texto
     .split(/\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bcom\b|\be\b|\band\b|\bx\b|\/)\s*/i)
-    .map((n) => n.trim())
+    .map((n) => limparNomeDeArtista(n))
     .filter((n) => n.length > 1 && n.length < 60);
+}
+
+/**
+ * "Oficial" NÃO É PARTE DO NOME — é o canal dizendo que é o canal certo.
+ *
+ * O nome do canal vira o nome do artista, e canal se chama "Elaine Martins
+ * Oficial", "Midian Lima Oficial", "Sarah Farias - Oficial", "FulanoVEVO". O
+ * sufixo entrava no cadastro e criava um artista PARALELO do mesmo cantor:
+ * "Gabriela Rocha" e "Gabriela Rocha Oficial" viram duas prateleiras, duas
+ * fotos e duas discografias. De quebra quebram a votação de gênero, que só
+ * funciona com as faixas de uma pessoa juntas.
+ *
+ * Só sai no FIM e como palavra inteira: existe nome com "Oficial" no meio, e
+ * cortar ali inventaria um artista que não existe.
+ */
+export function limparNomeDeArtista(nome: string): string {
+  return nome
+    .trim()
+    .replace(/\s*[-–—|]?\s*\b(?:oficial|official|vevo|topic|ao vivo)\b\s*$/i, '')
+    .replace(/\s*[-–—|,]\s*$/, '')
+    .trim();
+}
+
+/**
+ * UM CAMPO DE ARTISTA QUE, NA VERDADE, TRAZ VÁRIOS.
+ *
+ * No banco, `artists` costuma ter UM item cujo nome é a lista inteira:
+ *
+ *   [{ name: "MK MUSIC, Elaine Martins Oficial" }]   ← um item, dois nomes
+ *
+ * Isso derrotava silenciosamente o conserto da gravadora-como-artista: aquela
+ * regra procura o selo no PRIMEIRO item e promove o próximo — e como só existe
+ * um item, ela não tinha o que promover e devolvia "nada a fazer". A prateleira
+ * Gospel continuou vazia mesmo com o conserto no ar, porque o dado estava
+ * grudado num nível abaixo do que a regra enxergava.
+ *
+ * Devolve `null` quando não há nada a separar, para quem chama distinguir
+ * "já estava certo" de "separei".
+ */
+export function separarArtistasGrudados(nomes: readonly string[]): string[] | null {
+  if (nomes.length !== 1) return null; // já vieram separados
+  const unico = nomes[0]?.trim();
+  if (!unico) return null;
+  const partes = separarNomes(unico);
+  // "Simon & Garfunkel", "Tyler, The Creator" e "AC/DC" são UM artista com
+  // separador no nome. Não há como distinguir pelo texto, então o critério é
+  // conservador: só separa quando alguma das partes é reconhecidamente um selo.
+  // Fora esse caso, o nome fica inteiro — quebrar uma dupla real é pior.
+  if (partes.length < 2 || !partes.some((p) => ehGravadora(p))) return null;
+  return partes;
 }
 
 /**
