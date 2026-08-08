@@ -46,6 +46,31 @@ export const PAGINATION = {
 export const USER_ROLES = ['USER', 'MODERATOR', 'ADMIN'] as const;
 export type UserRole = (typeof USER_ROLES)[number];
 
+/**
+ * Os donos do acervo, por e-mail — a MESMA lista dos dois lados.
+ *
+ * O cliente decidia admin por esta lista; a API decidia pela coluna `role` do
+ * Postgres, que nascia `USER`. As duas discordavam em silêncio: a tela de
+ * administração aparecia (o cliente achava que podia), a API recusava com 403,
+ * e o painel dizia "sem acesso" sem explicar por quê. Uma fonte só resolve —
+ * a API promove estes e-mails a ADMIN no login, e a lista deixa de morar em
+ * dois lugares que podiam divergir.
+ *
+ * As `firestore.rules` guardam uma terceira cópia, presa ao Firestore que ainda
+ * hospeda presence/share/trending; quando esses saírem, ela sai com eles.
+ */
+export const ADMIN_EMAILS: readonly string[] = [
+  'perdibitcoin@gmail.com',
+  'redcanidsvinicius@gmail.com',
+];
+
+/** `true` para quem administra o acervo — comparação sem caixa nem espaço. */
+export function ehEmailAdmin(email: string | null | undefined): boolean {
+  if (!email) return false;
+  const alvo = email.trim().toLowerCase();
+  return ADMIN_EMAILS.some((e) => e === alvo);
+}
+
 export const REPEAT_MODES = ['off', 'all', 'one'] as const;
 export type RepeatMode = (typeof REPEAT_MODES)[number];
 

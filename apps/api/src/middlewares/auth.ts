@@ -1,6 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import type { User } from '@prisma/client';
-import { slugify, type UserRole } from '@aurial/shared';
+import { ehEmailAdmin, slugify, type UserRole } from '@aurial/shared';
 import { customAlphabet } from 'nanoid';
 import { asyncHandler } from '../core/http/asyncHandler.js';
 import { ForbiddenError, UnauthorizedError } from '../core/errors/index.js';
@@ -17,9 +17,21 @@ function baseHandle(identity: VerifiedIdentity): string {
 }
 
 async function findOrCreateUser(identity: VerifiedIdentity): Promise<User> {
+  // Quem é dono do acervo é ADMIN — a lista mora em shared, uma cópia só.
+  const papelDevido: UserRole = ehEmailAdmin(identity.email) ? 'ADMIN' : 'USER';
+
   const existing = await prisma.user.findUnique({ where: { firebaseUid: identity.uid } });
   if (existing) {
-    if (Date.now() - existing.lastSeenAt.getTime() > LAST_SEEN_REFRESH_MS) {
+    // Uma conta de dono criada ANTES desta regra nasceu USER e a API a recusava
+    // no painel enquanto o cliente a deixava entrar. Promover no login acerta o
+    // passado sem migração, e é seguro: só sobe quem está na lista, nunca desce
+    // (um admin promovido na mão pelo banco não pode ser rebaixado por aqui).
+    if (papelDevido === 'ADMIN' && existing.role !== 'ADMIN') {
+      const promovido = await prisma.user
+        .update({ where: { id: existing.id }, data: { role: 'ADMIN', lastSeenAt: new Date() } })
+        .catch(() => null);
+      if (promovido) return promovido;
+    } else if (Date.now() - existing.lastSeenAt.getTime() > LAST_SEEN_REFRESH_MS) {
       await prisma.user
         .update({ where: { id: existing.id }, data: { lastSeenAt: new Date() } })
         .catch(() => undefined);
@@ -38,6 +50,7 @@ async function findOrCreateUser(identity: VerifiedIdentity): Promise<User> {
           handle,
           displayName: identity.name ?? handle,
           avatarUrl: identity.picture,
+          role: papelDevido,
         },
       });
     } catch {
