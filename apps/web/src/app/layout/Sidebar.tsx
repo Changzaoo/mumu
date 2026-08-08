@@ -196,23 +196,23 @@ export function Sidebar() {
       )}
     >
       {collapsed ? (
-        // Trilho colapsado: marca e botão ficam na MESMA caixa de 40px que os
-        // itens da nav (`mx-auto w-10`), não num `items-center` à parte. É o que
-        // garante um eixo só — o logo, o expandir e todos os ícones abaixo caem
-        // na mesma vertical, em vez de dois mecanismos de centralização quase
-        // iguais que deixavam a marca um fio fora de prumo dos ícones.
-        <div className="flex flex-col items-center gap-1.5 py-4">
-          <div className="mx-auto grid h-10 w-10 place-items-center">
-            <AurialMark />
+        // Trilho colapsado: a marca e o botão de expandir usam a MESMA caixa de
+        // 40px e o MESMO tamanho de glifo (size-5) que todo item da nav abaixo.
+        // Antes o botão era um IconButton de 32px — centralizava no mesmo eixo,
+        // mas a caixa menor e o glifo menor davam a impressão de desalinho. Uma
+        // caixa só, um glifo só: nada pode sair de prumo.
+        <div className="flex flex-col gap-0.5 py-3">
+          <div className="mx-auto grid size-10 place-items-center">
+            <AurialMark className="size-6" />
           </div>
-          <IconButton
+          <button
+            type="button"
             aria-label="Expandir menu"
-            size="sm"
             onClick={toggleSidebar}
-            className="mx-auto"
+            className="mx-auto grid size-10 place-items-center rounded-lg text-fg-muted transition-colors duration-200 hover:bg-fg/8 hover:text-fg [&_svg]:size-5"
           >
             <PanelLeft />
-          </IconButton>
+          </button>
         </div>
       ) : (
         <div className="flex h-16 items-center justify-between px-4">
