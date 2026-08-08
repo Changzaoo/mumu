@@ -9,7 +9,6 @@ import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
   IoAddCircleOutline,
-  IoBusinessOutline,
   IoCompass,
   IoCompassOutline,
   IoDiscOutline,
@@ -58,13 +57,15 @@ const TOOLS_NAV: NavEntry[] = [
   { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
 ];
 
-type LibraryFilter = 'playlists' | 'artistas' | 'albuns' | 'gravadoras';
+type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
 
+// A gravadora NÃO é destino de navegação — é atalho. Só se chega ao perfil dela
+// clicando onde ela aparece (ficha da faixa, ficha do artista), nunca por uma
+// aba própria. Ver /gravadora/:nome, que continua existindo.
 const FILTERS: Array<{ key: LibraryFilter; label: string }> = [
   { key: 'playlists', label: 'Playlists' },
   { key: 'artistas', label: 'Artistas' },
   { key: 'albuns', label: 'Álbuns' },
-  { key: 'gravadoras', label: 'Gravadoras' },
 ];
 
 function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) {
@@ -76,7 +77,11 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
       className={({ isActive }) =>
         cn(
           'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition-colors duration-200',
-          collapsed && 'justify-center px-0',
+          // Colapsado: quadrado fixo centralizado no trilho, sem padding lateral.
+          // O header também centraliza na largura cheia, então os dois passam a
+          // dividir UM eixo — antes o header era full-width e a nav tinha px-3,
+          // e a diferença de caixa deixava os ícones fora de prumo.
+          collapsed && 'mx-auto w-10 justify-center px-0',
           isActive ? 'text-fg' : 'text-fg-muted hover:text-fg',
         )
       }
@@ -150,7 +155,7 @@ function LibraryItem({
 }
 
 function SectionLabel({ children, collapsed }: { children: ReactNode; collapsed: boolean }) {
-  if (collapsed) return <div className="mx-3 my-2 h-px bg-border" />;
+  if (collapsed) return <div className="mx-auto my-2 h-px w-10 bg-border" />;
   return (
     <p className="px-3 pb-1 pt-4 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-subtle">
       {children}
@@ -169,7 +174,6 @@ export function Sidebar() {
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
   const artists = localLibrary.artists();
   const albums = localLibrary.albumGroups();
-  const labels = localLibrary.labelGroups();
 
   const toolsNav = authorized ? TOOLS_NAV : TOOLS_NAV.filter((e) => !ADMIN_ONLY.has(e.to));
 
@@ -209,7 +213,10 @@ export function Sidebar() {
         </div>
       )}
 
-      <nav aria-label="Menu principal" className="flex min-h-0 flex-1 flex-col px-3 pb-3">
+      <nav
+        aria-label="Menu principal"
+        className={cn('flex min-h-0 flex-1 flex-col pb-3', collapsed ? 'px-0' : 'px-3')}
+      >
         <div className="space-y-0.5">
           {MAIN_NAV.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
@@ -305,17 +312,6 @@ export function Sidebar() {
                       subtitle={`Álbum • ${album.artist}`}
                       imageUrl={album.coverUrl}
                       icon={IoDiscOutline}
-                    />
-                  ))}
-                {filter === 'gravadoras' &&
-                  labels.map((label) => (
-                    <LibraryItem
-                      key={label.name}
-                      to={`/gravadora/${encodeURIComponent(label.name)}`}
-                      title={label.name}
-                      subtitle={`Gravadora • ${label.tracks.length} faixas`}
-                      imageUrl={label.coverUrl}
-                      icon={IoBusinessOutline}
                     />
                   ))}
               </div>
