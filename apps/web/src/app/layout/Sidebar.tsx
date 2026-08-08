@@ -196,11 +196,21 @@ export function Sidebar() {
       )}
     >
       {collapsed ? (
-        // Collapsed rail header: mark + expand toggle stacked and centered —
-        // everything on the rail shares one visual axis.
+        // Trilho colapsado: marca e botão ficam na MESMA caixa de 40px que os
+        // itens da nav (`mx-auto w-10`), não num `items-center` à parte. É o que
+        // garante um eixo só — o logo, o expandir e todos os ícones abaixo caem
+        // na mesma vertical, em vez de dois mecanismos de centralização quase
+        // iguais que deixavam a marca um fio fora de prumo dos ícones.
         <div className="flex flex-col items-center gap-1.5 py-4">
-          <AurialMark />
-          <IconButton aria-label="Expandir menu" size="sm" onClick={toggleSidebar}>
+          <div className="mx-auto grid h-10 w-10 place-items-center">
+            <AurialMark />
+          </div>
+          <IconButton
+            aria-label="Expandir menu"
+            size="sm"
+            onClick={toggleSidebar}
+            className="mx-auto"
+          >
             <PanelLeft />
           </IconButton>
         </div>
