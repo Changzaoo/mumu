@@ -51,6 +51,24 @@ const sleep = (ms: number): Promise<void> => new Promise((r) => setTimeout(r, ms
  * Uma chamada de chat. Devolve o texto, ou `null` quando a IA falhou —
  * curadoria é best-effort: sem resposta, a faixa fica como está.
  */
+/**
+ * Quantas vezes a NVIDIA respondeu 429 desde a última leitura.
+ *
+ * O 429 é a cota dizendo "devagar". Ele já era tratado como falha temporária e
+ * repetido, mas ninguém contava — então o único jeito de descobrir que o ritmo
+ * estava alto demais era ler o log à mão. Com o contador exposto, quem consome
+ * (a curadoria) mede a própria pressão e diminui o lote sozinho, em vez de
+ * depender de alguém perceber.
+ */
+let recusasPorCota = 0;
+
+/** Lê e zera o contador — quem chama fica responsável pelo período medido. */
+export function recusasPorCotaDesdeAUltimaLeitura(): number {
+  const n = recusasPorCota;
+  recusasPorCota = 0;
+  return n;
+}
+
 export async function nvidiaChat(
   messages: AiMessage[],
   opts: { model?: string; maxTokens?: number } = {},
@@ -100,6 +118,7 @@ async function once(
   });
 
   if (response.status === 429 || response.status >= 500) {
+    if (response.status === 429) recusasPorCota += 1;
     throw new RetryableError(`NVIDIA respondeu ${response.status}`);
   }
   if (!response.ok) {

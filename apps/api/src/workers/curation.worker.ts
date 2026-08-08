@@ -47,7 +47,7 @@ import {
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
-import { isNvidiaConfigured } from '../infra/ai/nvidia.js';
+import { isNvidiaConfigured, recusasPorCotaDesdeAUltimaLeitura } from '../infra/ai/nvidia.js';
 import {
   auditor,
   auditorDeGenero,
@@ -262,7 +262,7 @@ async function curateUser(userId: string): Promise<number> {
   );
 
   const now = Date.now();
-  const due = docs.filter((d) => isDue(d.data(), now)).slice(0, env.CURATION_BATCH);
+  const due = docs.filter((d) => isDue(d.data(), now)).slice(0, loteEmVigor());
 
   let corrigidas = 0;
 
@@ -788,7 +788,7 @@ async function auditarGeneros(docs: LibraryDoc[]): Promise<number> {
     // Quem está há mais tempo sem conferência vai na frente: é o rodízio que
     // garante que toda faixa é reexaminada, em vez de as mesmas sempre.
     .sort((a, b) => a.visto - b.visto)
-    .slice(0, env.CURATION_BATCH);
+    .slice(0, loteEmVigor());
 
   if (candidatos.length === 0) return 0;
 
@@ -837,7 +837,7 @@ async function preencherGeneros(docs: LibraryDoc[]): Promise<number> {
   const semGenero = docs
     .map((doc) => ({ doc, facts: factsOf((doc.data() as LibraryEntry).track ?? {}) }))
     .filter(({ facts }) => facts.title && facts.artists.length > 0 && !facts.genre)
-    .slice(0, env.CURATION_BATCH);
+    .slice(0, loteEmVigor());
 
   if (semGenero.length === 0) return 0;
 
@@ -881,7 +881,7 @@ async function gravarDna(docs: LibraryDoc[]): Promise<void> {
     })
     .map(({ doc, entry }) => ({ doc, facts: factsOf(entry.track ?? {}) }))
     .filter(({ facts }) => facts.title.length > 0)
-    .slice(0, env.CURATION_BATCH);
+    .slice(0, loteEmVigor());
 
   if (semDna.length === 0) return;
 
@@ -900,6 +900,60 @@ async function gravarDna(docs: LibraryDoc[]): Promise<void> {
   }
 
   if (gravados > 0) log.info({ gravados, pendentes: semDna.length }, 'DNA vetorizado');
+}
+
+/**
+ * O LOTE SE AJUSTA SOZINHO À COTA DA NVIDIA.
+ *
+ * O lote foi aumentado para a biblioteca convergir em horas em vez de dias — e
+ * medido em produção, esse ritmo tomou 15 recusas por cota (429) em quarenta
+ * minutos. Recuar no braço resolveria hoje e voltaria a doer amanhã, quando a
+ * biblioteca crescesse ou a cota mudasse.
+ *
+ * Então quem decide o ritmo é a resposta da própria API: cada volta lê quantos
+ * 429 aconteceram e ajusta a próxima. Cai rápido (metade) porque insistir sob
+ * cota estourada só gera mais recusa; sobe devagar (um quarto) porque voltar
+ * correndo ao ritmo que estourou é repetir o erro com passos menores.
+ *
+ * O piso existe para a fila nunca parar: mesmo sufocado, o worker continua
+ * andando, só mais devagar.
+ */
+const LOTE_MINIMO = 10;
+let loteAtual = 0; // 0 = ainda não iniciado; a 1ª volta usa o configurado
+
+function ajustarLote(recusas: number): void {
+  const teto = env.CURATION_BATCH;
+  if (loteAtual === 0) loteAtual = teto;
+  if (recusas > 0) {
+    const novo = Math.max(LOTE_MINIMO, Math.floor(loteAtual / 2));
+    if (novo !== loteAtual) {
+      log.warn({ recusas, de: loteAtual, para: novo }, 'cota apertada — diminuindo o lote');
+      loteAtual = novo;
+    }
+    return;
+  }
+  if (loteAtual < teto) {
+    const novo = Math.min(teto, loteAtual + Math.max(1, Math.floor(teto / 4)));
+    log.info({ de: loteAtual, para: novo }, 'cota folgada — aumentando o lote');
+    loteAtual = novo;
+  }
+}
+
+/** O lote em vigor nesta volta. */
+export function loteEmVigor(): number {
+  return loteAtual || env.CURATION_BATCH;
+}
+
+/**
+ * Porta de entrada do teste para `ajustarLote`.
+ *
+ * A regra do ritmo não pode ser verificada por fora: ela só aparece depois de
+ * uma volta inteira contra a API real. Exposta assim, o comportamento que
+ * importa — cair rápido, subir devagar, nunca zerar — fica travado por teste
+ * sem precisar de rede nem de banco.
+ */
+export function __ajustarLoteParaTeste(recusas: number): void {
+  ajustarLote(recusas);
 }
 
 /** Uma passada por todos os usuários. */
@@ -931,8 +985,14 @@ async function runOnce(): Promise<void> {
       return 0;
     });
   }
+  // A cota teve a palavra final sobre o ritmo da próxima volta.
+  ajustarLote(recusasPorCotaDesdeAUltimaLeitura());
+
   if (fixed > 0) {
-    log.info({ corrigidas: fixed, usuarios: comBiblioteca.length }, 'volta concluída');
+    log.info(
+      { corrigidas: fixed, usuarios: comBiblioteca.length, lote: loteEmVigor() },
+      'volta concluída',
+    );
   }
 }
 
