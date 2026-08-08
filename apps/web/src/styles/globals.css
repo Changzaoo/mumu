@@ -228,6 +228,15 @@
   -webkit-backdrop-filter: none;
 }
 
+/* O mesmo desfoque escrito como utilitário Tailwind (`backdrop-blur-sm` nos
+   fundos de dialog/sheet) em vez de `.glass`. O seletor por substring pega
+   qualquer variante (`md:backdrop-blur-*` incluso); o fundo escurecido
+   (bg-black/60) fica — só o borrão sai. */
+:root[data-perf='baixo'] [class*='backdrop-blur'] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
 /* Desfoques enormes de decoração (o brilho de fundo do NowPlaying usa 120px
    sobre 60vh) custam mais que a barra inteira e não carregam informação
    nenhuma: em aparelho fraco eles simplesmente somem. */

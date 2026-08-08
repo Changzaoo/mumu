@@ -12,6 +12,7 @@
 import { create } from 'zustand';
 import type { PeerControlMessage, SharedTrackMeta } from '@aurial/shared';
 import { PeerConnection } from '@/lib/p2p/peerConnection';
+import { emDadosMoveis, podeServir, registrarEnvioMovel } from '@/lib/p2p/politica';
 import { Transfer, type TransferProgress } from '@/lib/p2p/transfer';
 import { SignalingClient } from '@/lib/p2p/signaling';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -95,6 +96,15 @@ export const useP2PStore = create<P2PState>((set, get) => {
       myName: get().myName,
       getSharedMetas: computeSharedMetas,
       getBlob: (id) => localLibrary.blobFor(id),
+      // A política decide se ESTE aparelho serve agora (bateria, teto de dados
+      // móveis, interruptor) — e o gasto em rede móvel entra no contador do dia.
+      podeEnviar: async (sizeBytes) => {
+        const veredito = await podeServir();
+        return veredito.pode && sizeBytes <= veredito.restanteBytes;
+      },
+      aoEnviar: (sizeBytes) => {
+        if (emDadosMoveis() === true) registrarEnvioMovel(sizeBytes);
+      },
       saveReceived: async (meta, blob) => {
         const track = await localLibrary.saveReceivedTrack(meta, blob);
         void import('sonner').then(({ toast }) => toast.success(`Recebido: ${track.title}`));

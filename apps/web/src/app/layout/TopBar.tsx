@@ -116,7 +116,14 @@ export function TopBar() {
         'sticky top-0 z-30 -mx-4 flex h-16 items-center gap-2 px-4 transition-colors duration-200 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8',
         // Sem `rounded-none`: dentro da moldura o conteúdo é um painel
         // arredondado, e quadrar o topo ao rolar cortava o canto dele.
-        'data-scrolled:glass data-scrolled:rounded-t-xl data-scrolled:border-x-0 data-scrolled:border-t-0',
+        //
+        // `glass` entra como classe CONDICIONAL, não como variante
+        // `data-scrolled:glass`: a variante gera o token literal
+        // "data-scrolled:glass" no atributo class, e o modo de aparelho fraco
+        // (`:root[data-perf='baixo'] .glass` em globals.css) casa só com o
+        // token exato "glass" — a variante escapava da regra e o desfoque
+        // continuava ligado justamente durante a rolagem, o pior momento.
+        scrolled && 'glass rounded-t-xl border-x-0 border-t-0',
       )}
     >
       <div className="hidden items-center gap-1 md:flex">

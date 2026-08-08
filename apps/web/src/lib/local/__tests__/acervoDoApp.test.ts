@@ -21,9 +21,6 @@ vi.mock('@/lib/sync/catalogo', () => ({
   publicarNoCatalogo: vi.fn(),
   removerDoCatalogo: vi.fn(),
 }));
-vi.mock('@/lib/sync/cloudCollection', () => ({
-  cloudCollection: () => ({ push: vi.fn(), remove: vi.fn(), setUser: vi.fn() }),
-}));
 vi.mock('@/lib/sync/sharedLibrary', () => ({ publishSharedTrack: vi.fn() }));
 vi.mock('@/lib/lyrics/syncFromAudio', () => ({ queueLyricsSync: vi.fn() }));
 

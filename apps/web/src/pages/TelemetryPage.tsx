@@ -1198,10 +1198,10 @@ function CheckIcon({ status }: { status: CheckStatus }) {
 }
 
 /**
- * Checklist visual de saúde: Firestore (os docs chegaram?), Importer
+ * Checklist visual de saúde: API de telemetria (os docs chegaram?), Importer
  * (GET /health com timeout curto) e Service Worker (registrado e ativo).
  */
-function Diagnostics({ firestore }: { firestore: CheckStatus }) {
+function Diagnostics({ telemetria }: { telemetria: CheckStatus }) {
   const [importer, setImporter] = useState<CheckStatus>('checando');
   const [sw, setSw] = useState<CheckStatus>('checando');
 
@@ -1230,10 +1230,10 @@ function Diagnostics({ firestore }: { firestore: CheckStatus }) {
 
   const items: Array<{ label: string; detail: string; status: CheckStatus }> = [
     {
-      label: 'Firestore',
+      label: 'API de telemetria',
       detail:
-        firestore === 'ok' ? 'documentos de telemetria carregados' : 'sem acesso aos documentos',
-      status: firestore,
+        telemetria === 'ok' ? 'documentos de telemetria carregados' : 'sem acesso aos documentos',
+      status: telemetria,
     },
     {
       label: 'Importer',
@@ -1389,7 +1389,7 @@ export default function TelemetryPage() {
         <EmptyState
           icon={Activity}
           title="Sem acesso à telemetria"
-          description="Publique as firestore.rules atualizadas e confirme que sua conta é admin."
+          description="Confirme que sua conta é admin — a API só entrega a telemetria para administradores."
         />
       )}
 
@@ -1565,7 +1565,7 @@ export default function TelemetryPage() {
       )}
 
       {/* Saúde do sistema — independe de haver usuários. */}
-      <Diagnostics firestore={error ? 'falha' : docs === null ? 'checando' : 'ok'} />
+      <Diagnostics telemetria={error ? 'falha' : docs === null ? 'checando' : 'ok'} />
     </div>
   );
 }

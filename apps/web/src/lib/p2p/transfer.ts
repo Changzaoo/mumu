@@ -35,6 +35,14 @@ export interface TransferOptions {
   getSharedMetas: () => SharedTrackMeta[];
   /** Read a local track's bytes for sending. */
   getBlob: (trackId: string) => Promise<Blob | null>;
+  /**
+   * Consulted right before serving each track (see `politica.ts`): battery,
+   * mobile-data cap and the user's switch. Declining is cheap — the requester
+   * just falls back to the server; serving past the lender's limits is not.
+   */
+  podeEnviar?: (sizeBytes: number) => Promise<boolean>;
+  /** Reported after a track is fully sent, so the daily mobile cap can count it. */
+  aoEnviar?: (sizeBytes: number) => void;
   /** Persist a received track into the local library. */
   saveReceived: (meta: SharedTrackMeta, blob: Blob) => Promise<void>;
   onManifest: (metas: SharedTrackMeta[]) => void;
@@ -171,6 +179,13 @@ export class Transfer {
       return;
     }
 
+    // The policy gate runs per track, not per session: battery drains and the
+    // mobile-data budget shrinks while the room stays open.
+    if (this.opts.podeEnviar && !(await this.opts.podeEnviar(blob.size).catch(() => false))) {
+      this.opts.channel.sendControl({ t: 'decline', trackId, reason: 'policy' });
+      return;
+    }
+
     const size = blob.size;
     this.opts.channel.sendControl({
       t: 'track-begin',
@@ -190,6 +205,7 @@ export class Transfer {
     }
 
     this.opts.channel.sendControl({ t: 'track-end', trackId });
+    this.opts.aoEnviar?.(buffer.byteLength);
     this.opts.onProgress({ trackId, dir: 'send', progress: 1, done: true });
   }
 }

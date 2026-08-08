@@ -8,7 +8,7 @@ export function Toaster() {
     <SonnerToaster
       theme={resolveTheme(theme)}
       position="bottom-right"
-      offset={104} /* clear of the desktop PlayerBar */
+      offset={112} /* clear of the desktop PlayerBar (grid row + 0.5rem gutter) */
       mobileOffset={{
         bottom: 150,
         left: 12,

@@ -214,9 +214,8 @@ function LinkImportCard() {
         conteúdo que você tem direito de baixar (seus próprios vídeos, Creative Commons, domínio
         público). Você é responsável pelo que importa.
       </p>
-      {config.hosts.length > 0 && (
-        <p className="text-[11px] text-fg-subtle">Suporta: {config.hosts.join(', ')}.</p>
-      )}
+      {/* A lista de domínios suportados existe no DTO para validação, mas não é
+          exibida: nenhuma fonte de terceiro aparece na interface. */}
     </section>
   );
 }

@@ -113,4 +113,59 @@ describe('Transfer protocol', () => {
     await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0));
     expect(errors[0]).toMatchObject({ trackId: 'local:missing', dir: 'receive', error: true });
   });
+
+  /**
+   * O PORTÃO DA POLÍTICA TEM QUE SEGURAR O ENVIO.
+   *
+   * O compartilhamento é automático — quem empresta banda não clicou em nada.
+   * O único freio entre um pedido remoto e a franquia de dados do doador é o
+   * `podeEnviar` consultado aqui. Este teste existe porque a política chegou a
+   * ficar escrita e NUNCA ligada: o módulo `politica.ts` passou dias órfão, com
+   * os limites de bateria e teto móvel valendo nada.
+   */
+  it('NÃO envia quando a política nega — o pedinte recebe recusa, não bytes', async () => {
+    const data = new Uint8Array(1000);
+    const blob = new Blob([data], { type: 'audio/mpeg' });
+    const meta = makeMeta(data.length);
+
+    const errors: TransferProgress[] = [];
+    let bytesEnviados = 0;
+
+    const senderChannel = new LoopbackChannel();
+    const receiverChannel = new LoopbackChannel();
+
+    const sender = new Transfer({
+      channel: senderChannel,
+      myName: 'Sender',
+      getSharedMetas: () => [meta],
+      getBlob: async () => blob,
+      podeEnviar: async () => false, // bateria baixa / teto do dia estourado
+      aoEnviar: (n) => {
+        bytesEnviados += n;
+      },
+      saveReceived: async () => undefined,
+      onManifest: () => undefined,
+      onProgress: () => undefined,
+    });
+    const receiver = new Transfer({
+      channel: receiverChannel,
+      myName: 'Receiver',
+      getSharedMetas: () => [],
+      getBlob: async () => null,
+      saveReceived: async () => undefined,
+      onManifest: () => undefined,
+      onProgress: (p) => {
+        if (p.error) errors.push(p);
+      },
+    });
+
+    senderChannel.peer = receiver;
+    receiverChannel.peer = sender;
+
+    receiver.request(meta.id);
+
+    await vi.waitFor(() => expect(errors.length).toBeGreaterThan(0));
+    expect(errors[0]).toMatchObject({ trackId: meta.id, dir: 'receive', error: true });
+    expect(bytesEnviados).toBe(0);
+  });
 });

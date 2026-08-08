@@ -10,8 +10,8 @@
 import type { TrackDto } from '@aurial/shared';
 import { auth, db, firebaseReady } from '@/lib/firebase';
 
-// Import dinâmico pelo mesmo motivo do cloudCollection: a biblioteca local
-// alcança este módulo, e ela está no caminho crítico do boot.
+// Import dinâmico: a biblioteca local alcança este módulo, e ela está no
+// caminho crítico do boot — o SDK do Firestore não pode entrar no bundle inicial.
 import { firestore } from '@/lib/sync/firestoreLazy';
 
 export interface SharedTrack {

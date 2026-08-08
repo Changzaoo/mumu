@@ -26,7 +26,7 @@ export function RemotePlaybackBanner() {
             // nas abas (8rem no total, sem o vão de 1rem que havia); no desktop o
             // player saiu de `fixed` e agora ocupa a última linha da moldura, então
             // é preciso contar também a calha de 0.5rem abaixo dele.
-            'pointer-events-none fixed inset-x-0 bottom-[calc(8.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:bottom-[calc(88px+1.25rem)]'
+            'pointer-events-none fixed inset-x-0 bottom-[calc(8.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:bottom-29'
           : 'pointer-events-none fixed inset-x-0 bottom-[calc(5.5rem+env(safe-area-inset-bottom))] z-40 flex justify-center px-4 md:bottom-6'
       }
     >
