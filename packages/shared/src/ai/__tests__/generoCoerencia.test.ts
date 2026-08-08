@@ -191,3 +191,42 @@ describe('revisarGeneros — o selo vota quando o artista não pode', () => {
     expect(mudancas.find((m) => m.id === 'semSelo')).toBeUndefined();
   });
 });
+
+/**
+ * O GÊNERO SE HERDA DE QUEM PARTICIPA, não só de quem encabeça.
+ *
+ * "Ninguém Explica Deus" (Preto no Branco ft. Gabriela Rocha) ficava em MPB: o
+ * principal, Preto no Branco, tinha uma faixa gospel só na biblioteca — abaixo
+ * dos dois votos — e a regra ignorava a convidada, que tem seis, todas gospel.
+ * Quem divide o microfone numa música de louvor está cantando louvor.
+ */
+describe('revisarGeneros — o gênero de carreira vem de qualquer creditado', () => {
+  const faixaCom = (id: string, genre: string | null, artistas: string[]): FaixaMinima => ({
+    id,
+    genre,
+    artistas,
+  });
+
+  it('a convidada gospel puxa a faixa que o principal sozinho não puxava', () => {
+    const mudancas = revisarGeneros([
+      // Gabriela Rocha: seis faixas, todas gospel.
+      ...varias(6, 'gr', 'Gospel', 'Gabriela Rocha'),
+      // Preto no Branco: uma gospel só — sozinho, não alcança.
+      f('pnb1', 'Gospel', 'Preto no Branco'),
+      // A faixa em julgamento credita os dois; a convidada é quem prova.
+      faixaCom('ninguem', 'MPB', ['Preto no Branco', 'Gabriela Rocha']),
+    ]);
+    expect(mudancas.find((m) => m.id === 'ninguem')).toMatchObject({
+      para: 'Gospel',
+      motivo: 'genero-do-artista',
+    });
+  });
+
+  it('um convidado gospel fraco (só 1 faixa) NÃO arrasta — a barra continua de pé', () => {
+    const mudancas = revisarGeneros([
+      f('g1', 'Gospel', 'Convidado Gospel'),
+      faixaCom('funk', 'Funk', ['MC Qualquer', 'Convidado Gospel']),
+    ]);
+    expect(mudancas.find((m) => m.id === 'funk')).toBeUndefined();
+  });
+});

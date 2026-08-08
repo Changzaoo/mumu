@@ -333,11 +333,22 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
   // o dono do app passar vergonha.
   for (const faixa of depois) {
     const atual = generoValido(faixa);
-    const principal = faixa.artistas[0];
-    if (!principal) continue;
+    if (faixa.artistas.length === 0) continue;
     if (atual && GENEROS_DO_ARTISTA.has(atual)) continue; // já está no lugar
 
-    const voto = generoDoArtista(depois, principal, faixa.id);
+    // VALE QUALQUER ARTISTA CREDITADO, não só o principal.
+    //
+    // "Ninguém Explica Deus" tem o Preto no Branco como principal — uma só faixa
+    // gospel na biblioteca, não alcança os dois votos — e a Gabriela Rocha como
+    // convidada, com seis faixas, todas gospel. É a convidada que prova o
+    // gênero. Um gênero de carreira como Gospel se herda de quem PARTICIPA, não
+    // só de quem encabeça: quem divide o microfone numa música de louvor está
+    // cantando louvor. Fico com o voto gospel mais forte entre os creditados.
+    let voto = VAZIO;
+    for (const artista of faixa.artistas) {
+      const v = generoDoArtista(depois, artista, faixa.id);
+      if (v.dominante && GENEROS_DO_ARTISTA.has(v.dominante) && v.votos > voto.votos) voto = v;
+    }
     if (!voto.dominante || !GENEROS_DO_ARTISTA.has(voto.dominante)) continue;
     if (voto.votos < MIN_VOTOS_ARTISTA) continue;
     // A FAIXA EM JULGAMENTO CONTA COMO VOTO CONTRA — `+ 1` no denominador.
