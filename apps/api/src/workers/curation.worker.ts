@@ -395,6 +395,28 @@ function artistaDeVideo(name: string, order: number): Record<string, unknown> {
  */
 async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
   let corrigidas = 0;
+
+  // QUEM JÁ É ARTISTA SEPARADO NA BIBLIOTECA — a prova que distingue banda de
+  // colaboração quando as duas têm a forma "A, B & C". "Matuê", "WIU" e "Teto"
+  // aparecem sozinhos em dezenas de faixas, então "Matuê, WIU & Teto" é uma
+  // colaboração e separa; "Earth", "Wind" e "Fire" nunca aparecem sozinhos,
+  // então "Earth, Wind & Fire" continua sendo o nome de uma banda. Ver
+  // `separarArtistasGrudados`.
+  const conhecidos = new Set<string>();
+  for (const doc of docs) {
+    const arts = doc.data().track?.artists;
+    if (!Array.isArray(arts)) continue;
+    for (const a of arts) {
+      const nm = a && typeof a === 'object' ? (a as { name?: unknown }).name : null;
+      if (typeof nm !== 'string') continue;
+      const limpo = limparNomeDeArtista(nm);
+      // Só nome JÁ isolado (sem lista) conta como conhecido separado.
+      if (limpo.length > 1 && !limpo.includes(',') && !limpo.includes('&')) {
+        conhecidos.add(chaveDeArtista(limpo));
+      }
+    }
+  }
+
   for (const doc of docs) {
     const track = doc.data().track;
     if (!Array.isArray(track?.artists)) continue;
@@ -410,7 +432,7 @@ async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
     // meio e deduplicando a grafia suja. Uma faixa com os três nomes grudados num
     // item volta como TRÊS itens de artista na próxima volta.
     const nomes = artistas.map((a) => a.name as string);
-    const separados = separarArtistasGrudados(nomes);
+    const separados = separarArtistasGrudados(nomes, conhecidos);
 
     // "Oficial" também sai do que JÁ ESTÁ SALVO. Sem esta passagem, "Gabriela
     // Rocha" e "Gabriela Rocha Oficial" seguiriam como dois artistas — duas

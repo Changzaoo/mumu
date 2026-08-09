@@ -144,6 +144,11 @@ function chave(s: string): string {
     .trim();
 }
 
+/** A mesma normaliza\u00e7\u00e3o, exposta para montar o conjunto de nomes conhecidos. */
+export function chaveDeArtista(nome: string): string {
+  return chave(nome);
+}
+
 /**
  * As palavras de ruído JÁ NORMALIZADAS, para conferir sem tropeçar em acento.
  *
@@ -317,14 +322,34 @@ const CONVIDADO_EM_LISTA = /\s*\b(?:feat|ft|part|participacao|participação)\b\
  * Na dúvida, NÃO separa: colar uma colaboração é um aborrecimento pequeno;
  * quebrar uma banda real é o erro a evitar.
  */
-function quebrarListaDeNomes(texto: string): string[] {
+function quebrarListaDeNomes(texto: string, conhecidos?: ReadonlySet<string>): string[] {
   const saida: string[] = [];
   for (const trecho of texto.split(CONVIDADO_EM_LISTA)) {
     const t = trecho.trim();
     if (!t) continue;
-    // Contém "&" → é nome de banda, fica inteiro.
+    // Contém "&" → é nome de banda POR PADRÃO, fica inteiro.
+    //
+    // Mas "Earth, Wind & Fire" (banda) e "Matuê, WIU & Teto" (colaboração de
+    // trap) têm a mesma forma "A, B & C" — o texto sozinho não distingue. Quem
+    // distingue é a biblioteca: se CADA parte já existe como artista separado
+    // (Matuê, WIU e Teto aparecem sozinhos em dezenas de faixas), é colaboração
+    // de gente real e separa; se não (ninguém tem faixa só de "Earth", "Wind"
+    // ou "Fire"), continua sendo o nome de uma banda. Sem a lista de conhecidos,
+    // mantém o padrão seguro: não quebra.
     if (t.includes('&')) {
-      saida.push(t);
+      const partes = t
+        .split(/\s*(?:,|&|\be\b)\s*/i)
+        .map((p) => p.trim())
+        .filter((p) => p.length > 0);
+      if (
+        conhecidos &&
+        partes.length >= 2 &&
+        partes.every((p) => conhecidos.has(chave(p)))
+      ) {
+        for (const p of partes) saida.push(p);
+      } else {
+        saida.push(t);
+      }
       continue;
     }
     const porVirgula = t.split(',');
@@ -333,8 +358,11 @@ function quebrarListaDeNomes(texto: string): string[] {
       if (!parte) continue;
       // A religação por artigo só vale DENTRO da mesma vírgula (i > 0): um artigo
       // abrindo um trecho de convidado ("X feat. The Weeknd") é gente, não
-      // continuação.
-      if (i > 0 && saida.length > 0 && ARTIGO_DE_CONTINUACAO.test(parte)) {
+      // continuação. E se o próprio trecho já é um artista CONHECIDO ("The Game"
+      // aparece sozinho na biblioteca), é um segundo artista, não continuação —
+      // é o que separa "Snoop Dogg, The Game" (colab) de "Tyler, The Creator".
+      const ehConhecido = conhecidos?.has(chave(limparNomeDeArtista(parte))) ?? false;
+      if (i > 0 && saida.length > 0 && ARTIGO_DE_CONTINUACAO.test(parte) && !ehConhecido) {
         saida[saida.length - 1] = `${saida[saida.length - 1]}, ${parte}`;
       } else {
         saida.push(parte);
@@ -391,7 +419,10 @@ function sujeiraDoNome(nome: string): number {
  * Devolve `null` só quando não há NADA a fazer (já separado e limpo), para quem
  * chama distinguir "já estava certo" de "separei".
  */
-export function separarArtistasGrudados(nomes: readonly string[]): string[] | null {
+export function separarArtistasGrudados(
+  nomes: readonly string[],
+  conhecidos?: ReadonlySet<string>,
+): string[] | null {
   const bruto = nomes
     .map((n) => (typeof n === 'string' ? n.trim() : ''))
     .filter((n) => n.length > 0);
@@ -400,7 +431,7 @@ export function separarArtistasGrudados(nomes: readonly string[]): string[] | nu
   // 1) Cada item pode ser uma lista colada: quebra todos em nomes soltos.
   const soltos: string[] = [];
   for (const item of bruto) {
-    for (const nome of quebrarListaDeNomes(item)) {
+    for (const nome of quebrarListaDeNomes(item, conhecidos)) {
       const limpo = limparNomeDeArtista(nome);
       if (limpo.length > 1 && limpo.length < 60) soltos.push(limpo);
     }

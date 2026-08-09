@@ -483,6 +483,48 @@ describe('separarArtistasGrudados', () => {
     expect(separarArtistasGrudados([])).toBeNull();
   });
 
+  /**
+   * O "&" protege banda por padrão, mas "Matuê, WIU & Teto" (colaboração) e
+   * "Earth, Wind & Fire" (banda) têm a MESMA forma. Quem distingue é a
+   * biblioteca: se cada parte já é um artista separado conhecido, é colaboração.
+   */
+  it('separa colaboração "A, B & C" quando cada parte é artista conhecido', () => {
+    const conhecidos = new Set(['matue', 'wiu', 'teto', 'doode']);
+    expect(separarArtistasGrudados(['Matuê, WIU & Teto'], conhecidos)).toEqual([
+      'Matuê',
+      'WIU',
+      'Teto',
+    ]);
+    expect(separarArtistasGrudados(['Doode, Teto & Matuê'], conhecidos)).toEqual([
+      'Doode',
+      'Teto',
+      'Matuê',
+    ]);
+  });
+
+  it('NÃO separa banda "A, B & C" mesmo com a lista de conhecidos', () => {
+    // "Earth"/"Wind"/"Fire" não aparecem sozinhos: a banda fica inteira, e a
+    // presença de um homônimo solto ("Fire") não basta — TODAS as partes
+    // precisam ser conhecidas.
+    const conhecidos = new Set(['matue', 'teto', 'fire']);
+    expect(separarArtistasGrudados(['Earth, Wind & Fire'], conhecidos)).toBeNull();
+    expect(separarArtistasGrudados(['Simon & Garfunkel'], conhecidos)).toBeNull();
+  });
+
+  it('sem a lista de conhecidos, "A, B & C" continua protegido como banda', () => {
+    expect(separarArtistasGrudados(['Matuê, WIU & Teto'])).toBeNull();
+  });
+
+  it('"X, The Y" separa quando "The Y" é artista conhecido, mas protege Tyler', () => {
+    // "The Game" existe sozinho → colab; "The Creator" não → parte do nome.
+    const conhecidos = new Set(['snoop dogg', 'the game', 'tyler']);
+    expect(separarArtistasGrudados(['Snoop Dogg, The Game'], conhecidos)).toEqual([
+      'Snoop Dogg',
+      'The Game',
+    ]);
+    expect(separarArtistasGrudados(['Tyler, The Creator'], conhecidos)).toBeNull();
+  });
+
   it('não esvazia a lista quando ela é só selo — preservar é melhor que ninguém', () => {
     // Um único nome de selo, ou uma lista já separada só de selos: nada a fazer.
     expect(separarArtistasGrudados(['MK MUSIC'])).toBeNull();
