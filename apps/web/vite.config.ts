@@ -9,9 +9,12 @@ export default defineConfig({
     react(),
     tailwindcss(),
     VitePWA({
-      // 'prompt' + manual registration (src/pwa.ts) so we control WHEN a new
-      // build activates — apply immediately unless music is playing.
-      registerType: 'prompt',
+      // 'autoUpdate': o worker novo PULA A ESPERA e ASSUME os clientes sozinho
+      // (skipWaiting + clientsClaim abaixo). Sem isto o SW ficava "aguardando"
+      // e servia o bundle velho por tempo indeterminado — e não dá para pedir
+      // a cada usuário que limpe o cache na mão. Quem cuida de recarregar a
+      // página preservando a música é `src/pwa.ts` (no `controllerchange`).
+      registerType: 'autoUpdate',
       injectRegister: false,
       includeAssets: ['icons/favicon.png', 'icons/apple-touch-icon.png', 'robots.txt'],
       manifest: {
@@ -43,6 +46,14 @@ export default defineConfig({
         ],
       },
       workbox: {
+        // O worker novo assume IMEDIATAMENTE, sem esperar todas as abas
+        // fecharem, e passa a controlar as abas já abertas. É o par que faz o
+        // `controllerchange` disparar em `src/pwa.ts` e a página se atualizar
+        // sozinha. `cleanupOutdatedCaches` apaga o precache da versão anterior
+        // para não sobrar bundle velho ocupando espaço nem sendo servido.
+        skipWaiting: true,
+        clientsClaim: true,
+        cleanupOutdatedCaches: true,
         // Never serve the SPA shell for API / importer-proxy calls.
         navigateFallbackDenylist: [/^\/api/, /^\/importer/],
         runtimeCaching: [

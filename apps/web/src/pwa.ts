@@ -1,34 +1,45 @@
 /**
- * PWA auto-updater — keeps installed apps from serving a stale build.
+ * PWA auto-updater — mantém TODO usuário na versão nova, sem ninguém mexer.
  *
- * The service worker precaches the app shell, so without this an installed PWA
- * can keep showing an old version long after a deploy. Here we:
- *   • check for a new build aggressively (on load, on a 60s interval, and every
- *     time the app regains focus / visibility / network),
- *   • apply it immediately when nothing is playing (seamless on launch),
- *   • otherwise show a tap-to-update toast and apply on the next launch,
- * so we never cut the music out from under the user to reload.
+ * O SW é `autoUpdate` (ver vite.config): quando o navegador baixa um worker
+ * novo, ele PULA A ESPERA (`skipWaiting`) e ASSUME as abas abertas
+ * (`clientsClaim`). No instante em que assume, o evento `controllerchange`
+ * dispara — e é aqui que a página se recarrega sozinha para pegar o bundle novo.
+ *
+ * A versão anterior ("prompt": avisa e espera pausar) foi o que deixou o menu e
+ * outros consertos presos no bundle velho: quem ouve música o tempo todo nunca
+ * "pausava", e não dá para pedir a cada usuário que limpe o cache na mão.
+ *
+ * Preserva a reprodução: se a música estava tocando, grava a retomada TOCANDO
+ * antes de recarregar (ver `prepararRetomadaTocando`), então a faixa volta do
+ * ponto exato assim que a página sobe de novo.
  */
 import { registerSW } from 'virtual:pwa-register';
 import { prepararRetomadaTocando, usePlayerStore } from '@/stores/playerStore';
-import { pushNotification } from '@/stores/notificationsStore';
 
 export function initPwaUpdater(): void {
-  /**
-   * Aplica a versão nova recarregando a página, e — se a música estava tocando —
-   * grava a retomada TOCANDO antes, para o boot seguinte continuar de onde
-   * parou. É o que permite atualizar sem esperar o usuário pausar (o que, para
-   * quem ouve música o tempo todo, era "nunca") e sem perder a reprodução.
-   */
-  const aplicar = (updateSW: (reload?: boolean) => Promise<void>): void => {
-    if (usePlayerStore.getState().isPlaying) prepararRetomadaTocando();
-    void updateSW(true);
-  };
+  if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
+    // Só é ATUALIZAÇÃO se já havia um worker no controle. Na primeira visita
+    // (sem controller) o `clientsClaim` também dispara `controllerchange`, e
+    // recarregar ali seria um refresh à toa logo na abertura.
+    const tinhaControle = Boolean(navigator.serviceWorker.controller);
+    let recarregando = false;
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recarregando || !tinhaControle) return;
+      recarregando = true;
+      // A música volta de onde estava — inclusive com a tela apagada.
+      if (usePlayerStore.getState().isPlaying) prepararRetomadaTocando();
+      window.location.reload();
+    });
+  }
 
-  const updateSW = registerSW({
+  registerSW({
     immediate: true,
     onRegisteredSW(_swUrl, registration) {
       if (!registration) return;
+      // Procura versão nova com frequência: na carga, a cada 60s, e sempre que
+      // o app recupera foco / visibilidade / rede. Assim a atualização chega
+      // rápido sem depender de o usuário fechar o app.
       const check = (): void => {
         void registration.update().catch(() => undefined);
       };
@@ -37,44 +48,6 @@ export function initPwaUpdater(): void {
       window.addEventListener('online', check);
       document.addEventListener('visibilitychange', () => {
         if (!document.hidden) check();
-      });
-    },
-    onNeedRefresh() {
-      // VERSÃO NOVA PRONTA — aplica sozinha, sem esperar o usuário pausar.
-      //
-      // Antes, com a música no ar, só avisava e esperava pausar; para quem ouve
-      // o tempo todo isso era "nunca", e o conserto não chegava por horas. Agora:
-      //  • tocando ou em segundo plano (tela apagada, outro app) → recarrega já.
-      //    Se estava tocando, `aplicar` guarda a retomada e a música volta de
-      //    onde estava — inclusive com a tela desligada.
-      //  • parado e em primeiro plano → NÃO interrompe o uso ativo; espera o
-      //    próximo instante seguro: a aba ir para segundo plano ou a música
-      //    começar. Aí aplica.
-      const tentar = (): boolean => {
-        if (usePlayerStore.getState().isPlaying || document.hidden) {
-          aplicar(updateSW);
-          return true;
-        }
-        return false;
-      };
-      if (tentar()) return;
-
-      const aoEsconder = (): void => {
-        if (document.hidden && tentar()) desarmar();
-      };
-      const desarmar = (): void => {
-        document.removeEventListener('visibilitychange', aoEsconder);
-        pararDeOuvir();
-      };
-      const pararDeOuvir = usePlayerStore.subscribe(() => {
-        if (usePlayerStore.getState().isPlaying && tentar()) desarmar();
-      });
-      document.addEventListener('visibilitychange', aoEsconder);
-
-      pushNotification({
-        type: 'update',
-        title: 'Nova versão disponível',
-        body: 'Será aplicada ao trocar de tela ou tocar música.',
       });
     },
   });
