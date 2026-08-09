@@ -23,8 +23,10 @@ import { SeekSlider } from '@/components/media/SeekSlider';
 import { IconButton } from '@/components/ui/icon-button';
 import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
+import { MonitorSpeaker } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
+import { useNowPlaying } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -34,29 +36,43 @@ function VolumeIcon({ volume, muted }: { volume: number; muted: boolean }) {
   return <Volume2 />;
 }
 
+/** Curtir a faixa que está carregada AQUI (o remoto não tem esse estado). */
+function LocalLikeButton() {
+  const liked = usePlayerStore((s) => s.currentTrack?.isLiked ?? false);
+  return <LikeButton liked={liked} className="ml-1" />;
+}
+
 /**
  * Fixed bottom player (DESIGN §7): 88px glass, 3 columns —
  * [art + track + like] [transport + seek] [queue/lyrics/EQ/volume/fullscreen].
  * Hidden until the first track, then springs up. Desktop only (≥768px).
  */
 export function PlayerBar() {
-  const track = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const isBuffering = usePlayerStore((s) => s.isBuffering);
-  const progress = usePlayerStore((s) => s.progress);
-  const duration = usePlayerStore((s) => s.duration);
+  // A barra mostra o que está tocando AQUI ou em outro aparelho, sem distinção —
+  // só o `deviceName` indica quando é remoto. Play/pausar/pular/buscar seguem a
+  // música para o aparelho certo (ver `useNowPlaying`).
+  const np = useNowPlaying();
+  const isBuffering = usePlayerStore((s) => s.isBuffering && s.currentTrack !== null);
   const buffered = usePlayerStore((s) => s.buffered);
   const muted = usePlayerStore((s) => s.muted);
   const repeat = usePlayerStore((s) => s.repeat);
   const shuffle = usePlayerStore((s) => s.shuffle);
-  const { toggle, next, prev, seek, toggleMute, toggleShuffle, cycleRepeat } =
-    usePlayerStore.getState();
+  const { toggleMute, toggleShuffle, cycleRepeat } = usePlayerStore.getState();
 
-  // Com a música tocando em OUTRO aparelho, este controle passa a valer para
-  // lá. Mexer no volume mudo daqui não abaixava nada que se pudesse ouvir.
+  // O volume já valia para o aparelho remoto — mexer no alto-falante mudo daqui
+  // não abaixava nada audível.
   const remoto = useRemoteControl();
   const volume = remoto.volume;
   const setVolume = remoto.setVolume;
+
+  const track = np;
+  const isPlaying = np?.isPlaying ?? false;
+  const progress = np?.progress ?? 0;
+  const duration = np?.duration ?? 0;
+  const toggle = np?.toggle ?? (() => undefined);
+  const next = np?.next ?? (() => undefined);
+  const prev = np?.prev ?? (() => undefined);
+  const seek = np?.seek ?? (() => undefined);
 
   const queueOpen = useUiStore((s) => s.queueOpen);
   const toggleQueue = useUiStore((s) => s.toggleQueue);
@@ -107,17 +123,28 @@ export function PlayerBar() {
               </button>
               <p className="line-clamp-1 text-[13px] text-fg-muted">
                 {track.artists.map((artist, i) => (
-                  <Fragment key={artist.id}>
+                  <Fragment key={artist.id || artist.name}>
                     {i > 0 && ', '}
-                    <Link to={`/artist/${artist.id}`} className="hover:text-fg hover:underline">
-                      {artist.name}
-                    </Link>
+                    {track.source === 'remote' || !artist.id ? (
+                      <span>{artist.name}</span>
+                    ) : (
+                      <Link to={`/artist/${artist.id}`} className="hover:text-fg hover:underline">
+                        {artist.name}
+                      </Link>
+                    )}
                   </Fragment>
                 ))}
               </p>
+              {/* Onde está tocando — pequeno, só quando é outro aparelho. */}
+              {track.source === 'remote' && track.deviceName && (
+                <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-accent">
+                  <MonitorSpeaker className="size-3 shrink-0" />
+                  <span className="truncate">{track.deviceName}</span>
+                </span>
+              )}
             </div>
-            {/* Like wiring belongs to the features layer — seam kept visible. */}
-            <LikeButton liked={track.isLiked ?? false} className="ml-1" />
+            {/* Curtir só faz sentido para a faixa carregada AQUI. */}
+            {track.source === 'local' && <LocalLikeButton />}
           </div>
 
           {/* Center — transport + seek */}

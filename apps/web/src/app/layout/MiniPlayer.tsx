@@ -1,8 +1,8 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { Music, Pause, Play, SkipForward } from 'lucide-react';
+import { MonitorSpeaker, Music, Pause, Play, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
 import { useTrackLikes } from '@/features/library/api';
-import { trackArtistNames } from '@/lib/utils';
+import { useNowPlaying } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -11,15 +11,21 @@ import { useUiStore } from '@/stores/uiStore';
  * Hairline progress at the bottom edge; tap opens NowPlaying.
  */
 export function MiniPlayer() {
-  const track = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const progress = usePlayerStore((s) => s.progress);
-  const duration = usePlayerStore((s) => s.duration);
-  const toggle = usePlayerStore((s) => s.toggle);
-  const next = usePlayerStore((s) => s.next);
-  const prev = usePlayerStore((s) => s.prev);
+  // Mostra o que toca aqui OU em outro aparelho, sem distinção — só o nome do
+  // aparelho aparece quando é remoto. Ver `useNowPlaying`.
+  const np = useNowPlaying();
+  const localTrack = usePlayerStore((s) => s.currentTrack);
   const setNowPlayingOpen = useUiStore((s) => s.setNowPlayingOpen);
   const likes = useTrackLikes();
+
+  const track = np;
+  const isPlaying = np?.isPlaying ?? false;
+  const progress = np?.progress ?? 0;
+  const duration = np?.duration ?? 0;
+  const toggle = np?.toggle ?? (() => undefined);
+  const next = np?.next ?? (() => undefined);
+  const prev = np?.prev ?? (() => undefined);
+  const artistas = np?.artists.map((a) => a.name).join(', ') ?? '';
 
   const pct = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
 
@@ -72,15 +78,27 @@ export function MiniPlayer() {
               <span className="min-w-0">
                 <span className="line-clamp-1 text-sm font-medium text-fg">{track.title}</span>
                 <span className="line-clamp-1 text-xs text-fg-muted">
-                  {trackArtistNames(track)}
+                  {track.source === 'remote' && track.deviceName ? (
+                    <span className="flex items-center gap-1 text-accent">
+                      <MonitorSpeaker className="size-3 shrink-0" />
+                      <span className="truncate">
+                        {track.deviceName}
+                        {artistas ? ` · ${artistas}` : ''}
+                      </span>
+                    </span>
+                  ) : (
+                    artistas
+                  )}
                 </span>
               </span>
             </button>
-            <LikeButton
-              liked={likes.isLiked(track)}
-              onToggle={(liked) => likes.toggle(track, liked)}
-              className="shrink-0"
-            />
+            {track.source === 'local' && localTrack && (
+              <LikeButton
+                liked={likes.isLiked(localTrack)}
+                onToggle={(liked) => likes.toggle(localTrack, liked)}
+                className="shrink-0"
+              />
+            )}
             <button
               type="button"
               aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}

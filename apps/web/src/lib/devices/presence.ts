@@ -69,34 +69,32 @@ export function getDeviceId(): string {
   }
 }
 
-/** Nome humano do aparelho ("Android · Chrome", "Windows · Edge"…). */
+/**
+ * Nome do APARELHO, não do navegador — "moto g(60)", "iPhone", "Windows".
+ *
+ * O usuário quer saber ONDE a música está tocando, não em qual navegador. O
+ * Android expõe o modelo no user-agent ("… Android 13; moto g(60) Build/…"), e é
+ * ele que aparece. O iOS não expõe modelo nenhum (todo iPhone se anuncia só como
+ * "iPhone"), então fica o tipo. No computador não há modelo — fica o sistema.
+ */
 export function deviceLabel(): string {
   const ua = navigator.userAgent;
-  const platform = /iP(hone|od)/.test(ua)
-    ? 'iPhone'
-    : /iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)
-      ? 'iPad'
-      : /Android/.test(ua)
-        ? 'Android'
-        : /Mac/.test(ua)
-          ? 'macOS'
-          : /Windows/.test(ua)
-            ? 'Windows'
-            : 'Dispositivo';
-  const browser = /Edg\//.test(ua)
-    ? 'Edge'
-    : /OPR\//.test(ua)
-      ? 'Opera'
-      : /SamsungBrowser\//.test(ua)
-        ? 'Samsung Internet'
-        : /Chrome\//.test(ua)
-          ? 'Chrome'
-          : /Firefox\//.test(ua)
-            ? 'Firefox'
-            : /Safari\//.test(ua)
-              ? 'Safari'
-              : '';
-  return browser ? `${browser} · ${platform}` : platform;
+  // Android traz o modelo real entre o número da versão e o "Build" (ou o ")").
+  const android = /Android[\d.\s]*;\s*([^;)]+?)(?:\s+Build|\))/i.exec(ua);
+  if (android?.[1]) {
+    const modelo = android[1].replace(/\s*build.*$/i, '').trim();
+    // "wv" é o marcador de WebView, não um modelo; nesse caso cai para "Android".
+    if (modelo && !/^wv$/i.test(modelo)) return modelo;
+  }
+  if (/iPhone/.test(ua)) return 'iPhone';
+  if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
+    return 'iPad';
+  }
+  if (/Android/.test(ua)) return 'Android';
+  if (/Mac/.test(ua)) return 'Mac';
+  if (/Windows/.test(ua)) return 'Windows';
+  if (/Linux/.test(ua)) return 'Linux';
+  return 'Dispositivo';
 }
 
 export interface DevicePresence {
@@ -175,6 +173,13 @@ let wasPlaying = false;
  */
 let lastClaimAt = 0;
 const CLAIM_GRACE_MS = 10_000;
+/**
+ * Uma posse com carimbo mais novo que isto é um HANDOFF REAL — outro aparelho
+ * acabou de assumir, e este pausa. Mais velha é posse do passado (tocou ontem)
+ * e é ignorada, para não matar um play novo. A janela cobre a propagação entre
+ * aparelhos com folga sem alcançar uma sessão anterior.
+ */
+const POSSE_FRESCA_MS = 60_000;
 
 const remoteListeners = new Set<(remote: RemotePlayback | null) => void>();
 let remoteState: RemotePlayback | null = null;
@@ -294,6 +299,21 @@ export function remoteControlTarget(): DeviceInfo | null {
   if (usePlayerStore.getState().isPlaying) return null;
   const me = getDeviceId();
   return deviceState.find((d) => d.id !== me && d.online && d.isPlaying) ?? null;
+}
+
+/**
+ * O aparelho remoto a ESPELHAR na barra do player: outro aparelho da conta,
+ * online e tocando, quando não há faixa carregada AQUI. É o que faz a música do
+ * outro aparelho aparecer na barra como se fosse daqui, com o nome dele ao lado.
+ */
+export function dispositivoRemotoAtivo(): DeviceInfo | null {
+  const me = getDeviceId();
+  return deviceState.find((d) => d.id !== me && d.online && d.isPlaying && d.track) ?? null;
+}
+
+/** A posição estimada AGORA de um aparelho remoto (extrapola o relógio). */
+export function posicaoEstimada(device: DeviceInfo): number {
+  return posicaoAtualDe(device);
 }
 
 /** Quando foi visto pela última vez, preferindo o relógio do servidor. */
@@ -510,28 +530,32 @@ function start(user: User): void {
     unsubActive = onSnapshot(
       doc(db, 'users', user.uid, 'state', 'activeDevice'),
       (snap) => {
-        const data = snap.data() as { deviceId?: string; name?: string } | undefined;
+        const data = snap.data() as
+          | { deviceId?: string; name?: string; at?: Timestamp }
+          | undefined;
         activeDeviceId = data?.deviceId ?? null;
 
-        // SILENCIAR O USUÁRIO É O PIOR ERRO POSSÍVEL AQUI.
+        // UM APARELHO SÓ TOCA POR VEZ — mas silenciar o usuário à toa é o pior
+        // erro possível. O equilíbrio está na IDADE da posse, não na presença.
         //
-        // A primeira versão pausava sempre que o documento apontava para outro
-        // aparelho — sem olhar se aquele aparelho existe ainda. Bastava ter
-        // tocado no celular ontem: hoje, no computador, o play morria na hora,
-        // porque a posse antiga continuava gravada. Era exatamente o "não
-        // reproduz" relatado.
+        // Antes a pausa dependia de ver, na presença, o outro aparelho "tocando
+        // agora". Só que a posse (`state/activeDevice`) e a presença
+        // (`devices/{id}`) são dois documentos que chegam em tempos diferentes:
+        // a posse do aparelho 2 chegava ao aparelho 1 ANTES do "tocando", então
+        // o aparelho 1 não via conflito e os DOIS tocavam músicas diferentes.
         //
-        // Agora só pausamos diante de um conflito REAL: o outro aparelho está
-        // online E tocando agora. Em qualquer dúvida — presença desconhecida,
-        // posse velha, reivindicação nossa ainda em trânsito — a música
-        // continua. Dois aparelhos tocando por alguns segundos é um incômodo;
-        // o app emudecer sozinho é um defeito.
+        // Agora confiamos na posse em si, desde que FRESCA: se outro aparelho
+        // acabou de assumir (carimbo dos últimos segundos), paramos aqui na hora
+        // — a barra deste aparelho passa a espelhar o que o outro toca. A posse
+        // VELHA (ter tocado no celular ontem) tem carimbo antigo e é ignorada,
+        // que é o que evita o play novo morrer sozinho.
         if (activeDeviceId && activeDeviceId !== getDeviceId()) {
           const player = usePlayerStore.getState();
-          const dono = deviceState.find((d) => d.id === activeDeviceId);
-          const conflitoReal = Boolean(dono?.online && dono.isPlaying);
           const reivindicacaoRecente = Date.now() - lastClaimAt < CLAIM_GRACE_MS;
-          if (player.isPlaying && conflitoReal && !reivindicacaoRecente) {
+          const posseMs =
+            data?.at && typeof data.at.toMillis === 'function' ? data.at.toMillis() : 0;
+          const posseFresca = posseMs > 0 && Date.now() - posseMs < POSSE_FRESCA_MS;
+          if (player.isPlaying && posseFresca && !reivindicacaoRecente) {
             player.pause();
             void import('sonner').then(({ toast }) =>
               toast(`Reprodução movida para ${data?.name ?? 'outro aparelho'}`),

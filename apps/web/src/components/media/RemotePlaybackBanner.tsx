@@ -16,7 +16,10 @@ export function RemotePlaybackBanner() {
   const hasTrackHere = usePlayerStore((s) => s.currentTrack !== null);
   const [pickerOpen, setPickerOpen] = useState(false);
 
-  if (!remote || isPlayingHere) return null;
+  // Quando NÃO há faixa aqui, a própria barra do player já espelha o remoto
+  // (com o nome do aparelho) — a pílula seria redundante. Ela só aparece quando
+  // há uma faixa LOCAL carregada e outra tocando fora: aí informa e dá o atalho.
+  if (!remote || isPlayingHere || !hasTrackHere) return null;
 
   return (
     <div
