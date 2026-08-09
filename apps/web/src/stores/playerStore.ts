@@ -325,11 +325,33 @@ function saveResume(force = false): void {
   }
 }
 
-function readResume(): { track: TrackDto; progress: number } | null {
+/**
+ * Grava a retomada com a marca de "volte TOCANDO" — usado só quando uma versão
+ * nova vai recarregar a página com a música no ar. No próximo boot, em vez de
+ * voltar pausada (o padrão), a faixa retoma sozinha de onde estava. É uma marca
+ * de uso único: o primeiro boot que a lê já a apaga, para uma reabertura comum
+ * depois não sair tocando sem o usuário pedir.
+ */
+export function prepararRetomadaTocando(): void {
+  const s = usePlayerStore.getState();
+  if (!s.currentTrack) return;
+  try {
+    window.localStorage.setItem(
+      RESUME_KEY,
+      JSON.stringify({ track: s.currentTrack, progress: Math.floor(s.progress), tocando: true }),
+    );
+  } catch {
+    /* quota */
+  }
+}
+
+function readResume(): { track: TrackDto; progress: number; tocando?: boolean } | null {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(RESUME_KEY) ?? 'null');
-    const saved = parsed as { track?: TrackDto; progress?: number } | null;
-    return saved?.track ? { track: saved.track, progress: saved.progress ?? 0 } : null;
+    const saved = parsed as { track?: TrackDto; progress?: number; tocando?: boolean } | null;
+    return saved?.track
+      ? { track: saved.track, progress: saved.progress ?? 0, tocando: saved.tocando === true }
+      : null;
   } catch {
     return null;
   }
@@ -901,6 +923,16 @@ export function initPlayerEngine(): void {
       isPlaying: false,
       context: { source: 'queue' },
     });
+    // Recarregou por causa de uma versão nova COM a música tocando: volta
+    // tocando de onde estava. Apaga a marca primeiro — é de uso único, para uma
+    // reabertura comum depois não começar a tocar sozinha. Se o navegador
+    // recusar o autoplay (aba nova sem histórico de mídia), a faixa fica pronta
+    // e pausada, e o play da tela ou do controle de mídia retoma.
+    if (resume.tocando) {
+      saveResume(true); // reescreve sem a marca `tocando`
+      resumeAt(resume.progress);
+      void store.getState().play();
+    }
   }
   // Última chance de gravar a posição ao sair/minimizar o app.
   window.addEventListener('pagehide', () => saveResume(true));

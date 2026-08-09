@@ -11,6 +11,15 @@ const AUTH_ERRORS: Record<string, string> = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco.',
   'auth/popup-closed-by-user': 'Janela fechada antes de concluir.',
   'auth/network-request-failed': 'Falha de rede. Verifique sua conexão.',
+  // Sem estes, o erro virava um texto técnico em inglês que passava batido — e o
+  // login "não fazia nada". `unauthorized-domain` é o mais comum quando o app
+  // roda num domínio que ainda não foi liberado no console do Firebase.
+  'auth/unauthorized-domain':
+    'Este endereço ainda não foi liberado para login. Avise o administrador.',
+  'auth/popup-blocked':
+    'O navegador bloqueou a janela de login. Permita pop-ups para este site e tente de novo.',
+  'auth/cancelled-popup-request': 'Já havia uma janela de login aberta.',
+  'auth/operation-not-allowed': 'O login com Google não está habilitado nesta conta.',
 };
 
 function friendlyError(error: unknown): string {

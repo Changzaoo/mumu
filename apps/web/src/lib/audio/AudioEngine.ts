@@ -908,6 +908,17 @@ export class AudioEngine {
       // play-recording / gapless preload triggers.
       this.hiddenTicker ??= setInterval(() => {
         if (this.playing && document.hidden) {
+          // MANTER O CONTEXTO VIVO COM A TELA APAGADA.
+          //
+          // `startSlot` já retoma o contexto ao começar a faixa, mas o navegador
+          // o RE-SUSPENDE pouco depois quando a aba está em segundo plano — a
+          // faixa nova tocava um segundo e emudecia, e o usuário tinha que
+          // acender a tela para o áudio voltar. Retomar aqui, a cada segundo,
+          // recupera o som sozinho sem ninguém tocar em nada. `resume()` é
+          // permitido porque a reprodução começou com um gesto do usuário.
+          if (this.ctx && this.ctx.state === 'suspended') {
+            void this.ctx.resume().catch(() => undefined);
+          }
           this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
         }
       }, 1000);
