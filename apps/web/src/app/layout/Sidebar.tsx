@@ -77,11 +77,13 @@ function NavItem({ entry, collapsed }: { entry: NavEntry; collapsed: boolean }) 
       className={({ isActive }) =>
         cn(
           'flex h-10 items-center gap-3 rounded-lg px-3 text-sm font-semibold transition-colors duration-200',
-          // Colapsado: largura CHEIA e ícone centralizado por `justify-center`.
-          // Nada de `mx-auto` nem largura fixa — o ícone cai no centro exato dos
-          // 72px do trilho sem depender de margem automática, que era o que
-          // deixava os itens da nav à esquerda do logo e do botão de recolher.
-          collapsed && 'w-full justify-center px-0',
+          // Colapsado: quadrado fixo de 40px com o ícone centralizado. Quem
+          // centraliza o quadrado no trilho é o CONTAINER (`items-center`), não o
+          // link — porque este item é embrulhado num Tooltip, e o wrapper do
+          // Tooltip encolhia o `w-full`, jogando o ícone para a esquerda. Deixar
+          // o pai centralizar é o mesmo que o header faz, e não depende do que o
+          // Tooltip põe em volta.
+          collapsed && 'size-10 shrink-0 justify-center px-0',
           isActive ? 'text-fg' : 'text-fg-muted hover:text-fg',
         )
       }
@@ -196,20 +198,20 @@ export function Sidebar() {
       )}
     >
       {collapsed ? (
-        // Trilho colapsado: marca e botão de recolher usam EXATAMENTE o mesmo
-        // mecanismo dos itens da nav — largura cheia (`w-full`) e conteúdo
-        // centralizado (`place-items-center`/`justify-center`). Um só eixo, sem
-        // `mx-auto` nem caixa fixa: é matematicamente o centro dos 72px para
-        // TODOS os ícones, do topo ao rodapé do menu.
-        <div className="flex flex-col gap-0.5 py-3">
-          <div className="grid h-10 w-full place-items-center">
+        // Trilho colapsado: header e nav usam O MESMO mecanismo — o CONTAINER
+        // centraliza (`items-center`) e cada item é um quadrado de 40px
+        // (`size-10`). Nada de `w-full` (que o wrapper do Tooltip da nav
+        // encolhia) nem `mx-auto`. Assim marca, botão e todos os ícones abaixo
+        // caem no mesmo eixo — o centro dos 72px do trilho.
+        <div className="flex flex-col items-center gap-0.5 py-3">
+          <div className="grid size-10 place-items-center">
             <AurialMark className="size-6" />
           </div>
           <button
             type="button"
             aria-label="Expandir menu"
             onClick={toggleSidebar}
-            className="grid h-10 w-full place-items-center rounded-lg text-fg-muted transition-colors duration-200 hover:bg-fg/8 hover:text-fg [&_svg]:size-5"
+            className="grid size-10 place-items-center rounded-lg text-fg-muted transition-colors duration-200 hover:bg-fg/8 hover:text-fg [&_svg]:size-5"
           >
             <PanelLeft />
           </button>
@@ -227,7 +229,7 @@ export function Sidebar() {
         aria-label="Menu principal"
         className={cn('flex min-h-0 flex-1 flex-col pb-3', collapsed ? 'px-0' : 'px-3')}
       >
-        <div className="space-y-0.5">
+        <div className={collapsed ? 'flex flex-col items-center gap-0.5' : 'space-y-0.5'}>
           {MAIN_NAV.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
@@ -237,7 +239,7 @@ export function Sidebar() {
         {collapsed ? (
           <>
             <SectionLabel collapsed>Biblioteca</SectionLabel>
-            <div className="space-y-0.5">
+            <div className="flex flex-col items-center gap-0.5">
               {[
                 { to: '/library', label: 'Sua Biblioteca', icon: IoLibraryOutline },
                 { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
@@ -330,7 +332,7 @@ export function Sidebar() {
         )}
 
         <SectionLabel collapsed={collapsed}>Ferramentas</SectionLabel>
-        <div className="space-y-0.5">
+        <div className={collapsed ? 'flex flex-col items-center gap-0.5' : 'space-y-0.5'}>
           {toolsNav.map((entry) => (
             <NavItem key={entry.to} entry={entry} collapsed={collapsed} />
           ))}
