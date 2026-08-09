@@ -92,6 +92,30 @@ export function ehGravadora(nome: string): boolean {
   return semSufixo !== k && GRAVADORAS.includes(semSufixo);
 }
 
+/**
+ * SELO POR TOKEN — o reconhecimento amplo, para filtrar quem NÃO canta de uma
+ * lista de artistas.
+ *
+ * `ehGravadora` é uma lista fechada, de propósito: ela decide o crédito PRINCIPAL
+ * de uma faixa e errar ali apaga o cantor. Mas dentro de uma lista já separada
+ * ("Ton Carfi, Rocket Music Brazil", "Make The Girls Dance Records, HUGEL") o
+ * selo se anuncia por um token que nome de gente não carrega — e ali dá para ser
+ * mais ousado, porque o outro nome da lista continua sendo o artista.
+ *
+ * A regra: carregar a palavra "Records"/"Recordings", ou TERMINAR em
+ * "Music"/"Music Brasil"/"Music Brazil"/"Entertainment". Sempre com uma palavra
+ * ANTES do token — "Music" sozinho não é selo (é ambíguo demais), e um nome
+ * curto sem nenhum desses tokens NUNCA entra aqui.
+ */
+export function ehSelo(nome: string): boolean {
+  if (ehGravadora(nome)) return true;
+  const k = chave(nome);
+  if (!k) return false;
+  if (/\brecord(?:s|ings)\b/.test(k)) return true;
+  if (/\S+\s+(?:music(?:\s+bra[sz]il)?|entertainment)$/.test(k)) return true;
+  return false;
+}
+
 /** Tira acento sem mexer no comprimento — para o índice continuar valendo. */
 function semAcento(texto: string): string {
   return texto.normalize('NFD').replace(/[̀-ͯ]/g, '');

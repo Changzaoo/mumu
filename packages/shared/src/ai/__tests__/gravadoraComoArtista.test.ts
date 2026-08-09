@@ -10,7 +10,12 @@
  * Estes testes usam os nomes exatos que estão no banco de produção.
  */
 import { describe, expect, it } from 'vitest';
-import { acharGravadora, ehGravadora, promoverArtistaReal } from '../gravadoraComoArtista.js';
+import {
+  acharGravadora,
+  ehGravadora,
+  ehSelo,
+  promoverArtistaReal,
+} from '../gravadoraComoArtista.js';
 
 describe('ehGravadora', () => {
   it('reconhece os selos que apareceram na biblioteca', () => {
@@ -40,6 +45,34 @@ describe('ehGravadora', () => {
     expect(ehGravadora('Pineapple StormTV')).toBe(true);
     // E continua não bastando terminar em "tv": o resto tem que ser um selo.
     expect(ehGravadora('Kurtv')).toBe(false);
+  });
+});
+
+/**
+ * `ehSelo` é o reconhecimento AMPLO, para filtrar quem não canta de uma lista já
+ * separada. Vai além da lista fechada de `ehGravadora` porque, ali, o outro nome
+ * da lista continua sendo o artista — dá para confiar no token de selo.
+ */
+describe('ehSelo', () => {
+  it('pega o selo pelo token que nome de gente não carrega', () => {
+    expect(ehSelo('Rocket Music Brazil')).toBe(true);
+    expect(ehSelo('Make The Girls Dance Records')).toBe(true);
+    expect(ehSelo('Cat Music')).toBe(true);
+    expect(ehSelo('Universal Music Brasil')).toBe(true);
+    expect(ehSelo('YG Entertainment')).toBe(true);
+    // O que `ehGravadora` já pegava continua valendo.
+    expect(ehSelo('MK MUSIC')).toBe(true);
+  });
+
+  it('NÃO classifica quem canta como selo', () => {
+    expect(ehSelo('Ton Carfi')).toBe(false);
+    expect(ehSelo('HUGEL')).toBe(false);
+    expect(ehSelo('Costi')).toBe(false);
+    expect(ehSelo('S A G U N A')).toBe(false);
+    expect(ehSelo('Chris Beats Zn')).toBe(false);
+    // "Music" sozinho é ambíguo demais — precisa de uma palavra antes do token.
+    expect(ehSelo('Music')).toBe(false);
+    expect(ehSelo('')).toBe(false);
   });
 });
 

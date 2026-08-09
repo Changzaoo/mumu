@@ -356,13 +356,42 @@ async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
   return corrigidas;
 }
 
+/** slug de artista no formato que o arquivo grava. */
+function slugDeArtista(name: string): string {
+  return name
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '');
+}
+
+/** Chave de comparação de nome: sem acento, sem pontuação, sem caixa. */
+function chaveDeArtista(name: string): string {
+  return name
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/** Cunha um artista novo (o que apareceu da separação) no formato do arquivo. */
+function artistaDeVideo(name: string, order: number): Record<string, unknown> {
+  return {
+    id: `video:${name.toLowerCase().replace(/\s+/g, '-')}`,
+    name,
+    slug: slugDeArtista(name),
+    imageUrl: null,
+    order,
+  };
+}
+
 /**
- * Tira o nome da gravadora da frente do artista de verdade.
+ * Tira o nome da gravadora da frente do artista de verdade — E SEPARA A LISTA.
  *
  * Conserta três coisas de uma vez, porque as três liam o mesmo campo errado: a
  * foto da ficha (que trazia o logotipo do selo), a categoria (ver acima) e a
  * prateleira de artistas (onde o selo aparecia como se fosse um cantor com
- * dezenas de faixas). Ver `promoverArtistaReal` em shared.
+ * dezenas de faixas). Ver `promoverArtistaReal` e `separarArtistasGrudados`.
  */
 async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
   let corrigidas = 0;
@@ -375,11 +404,11 @@ async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
     // SEPARA ANTES DE PROMOVER — sem isto o conserto não alcança o dado real.
     //
     // No banco, `artists` costuma ter UM item cujo nome é a lista inteira:
-    // `[{name: "MK MUSIC, Elaine Martins"}]`. A promoção procura o selo no
-    // primeiro item e promove o PRÓXIMO — e como só existe um item, ela não
-    // tinha o que promover e devolvia "nada a fazer", silenciosamente. O
-    // conserto foi para produção e a prateleira Gospel continuou vazia, sem
-    // nenhum erro no log dizendo por quê.
+    // `[{name: "Snoop Dogg, Dr. Dre, D'Angelo"}]` ou `[{name:"MK MUSIC, Elaine
+    // Martins"}]`. `separarArtistasGrudados` agora quebra a lista de verdade —
+    // protegendo dupla real ("Simon & Garfunkel"), filtrando o selo escondido no
+    // meio e deduplicando a grafia suja. Uma faixa com os três nomes grudados num
+    // item volta como TRÊS itens de artista na próxima volta.
     const nomes = artistas.map((a) => a.name as string);
     const separados = separarArtistasGrudados(nomes);
 
@@ -389,20 +418,31 @@ async function promoverArtistas(docs: LibraryDoc[]): Promise<number> {
     // metades da mesma discografia.
     const base = separados ?? nomes;
     const limpos = base.map((n) => limparNomeDeArtista(n));
-    const mudouONome = limpos.some((n, i) => n !== base[i]);
+    const mudou = separados != null || limpos.some((n, i) => n !== nomes[i]);
 
-    const lista: Array<{ name: string }> =
-      separados || mudouONome
-        ? limpos.map((name, i) => ({ ...(artistas[i] ?? {}), name }) as { name: string })
-        : (artistas as Array<{ name: string }>);
+    // Reconstrói a lista preservando o objeto do artista que já existe (foto,
+    // id), casado pelo nome JÁ LIMPO — assim tirar "Oficial" não perde a foto —
+    // e cunhando um item novo para cada nome que apareceu da separação.
+    const existentePorNome = new Map<string, { name?: unknown }>();
+    for (const a of artistas) {
+      if (typeof a.name !== 'string') continue;
+      const k = chaveDeArtista(limparNomeDeArtista(a.name));
+      if (k && !existentePorNome.has(k)) existentePorNome.set(k, a);
+    }
+    const lista: Array<{ name: string }> = limpos.map((name, i) => {
+      const existente = existentePorNome.get(chaveDeArtista(name));
+      return existente
+        ? ({ ...existente, name, order: i } as unknown as { name: string })
+        : (artistaDeVideo(name, i) as unknown as { name: string });
+    });
 
-    const novo = promoverArtistaReal(lista) ?? (separados || mudouONome ? lista : null);
+    const novo = promoverArtistaReal(lista) ?? (mudou ? lista : null);
     if (!novo) continue;
     try {
       await doc.ref.update({ 'track.artists': novo });
       corrigidas += 1;
       log.info(
-        { doc: doc.id, de: artistas[0]?.name, para: novo[0]?.name },
+        { doc: doc.id, de: artistas[0]?.name, para: novo[0]?.name, itens: novo.length },
         'gravadora saiu da frente do artista',
       );
     } catch (err) {

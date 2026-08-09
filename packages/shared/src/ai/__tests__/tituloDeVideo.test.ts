@@ -263,6 +263,40 @@ describe('lerTituloDeVideo — regressões vistas em produção', () => {
     expect(lerTituloDeVideo('Alok vs. Sevenn - BYOB').artists).toEqual(['Alok', 'Sevenn']);
   });
 
+  it('o nome do artista NÃO é decepado por um "VS" no fim (o time "MC PP da VS")', () => {
+    // "MC PP da VS" terminava em "VS", e o antigo `\bvs\b` (separador de "Alok vs.
+    // Sevenn") fechava borda no fim da string: o nome virava "MC PP da", um
+    // artista que não existe. Agora "vs"/"x" exigem espaço dos DOIS lados.
+    const r = lerTituloDeVideo(
+      'MC Ryan SP, Neguinho do Kaxeta, Vitinho Avassalador e MC PP da VS - "Liberdade" (DJ Boy)',
+    );
+    expect(r.title).toBe('Liberdade');
+    expect(r.artists).toContain('MC PP da VS');
+    expect(r.artists).not.toContain('MC PP da');
+    // O "vs" de verdade continua separando dois artistas.
+    expect(lerTituloDeVideo('Alok vs. Sevenn - BYOB').artists).toEqual(['Alok', 'Sevenn']);
+  });
+
+  it('formatos de funk/rap: a lista de MCs fica no artista, a música no título', () => {
+    // "MC A, MC B - Título"
+    expect(lerTituloDeVideo('MC GP, MC MENO K - Vida Louca')).toMatchObject({
+      title: 'Vida Louca',
+      artists: ['MC GP', 'MC MENO K'],
+    });
+    // 'MC A, MC B - "Título" (DJ)' — as aspas mandam.
+    expect(lerTituloDeVideo('MC Hariel, MC Davi - "Bandida" (DJ GM)')).toMatchObject({
+      title: 'Bandida',
+      artists: ['MC Hariel', 'MC Davi'],
+    });
+    // O print do dono: vários MCs soltos, música entre aspas.
+    expect(
+      lerTituloDeVideo('MC\'s Lele JP, Luuky, Vitin LC - "Chama no Zap" (DJ TN Beat)'),
+    ).toMatchObject({
+      title: 'Chama no Zap',
+      artists: ["MC's Lele JP", 'Luuky', 'Vitin LC'],
+    });
+  });
+
   it('o nome do canal entra limpo, como o de qualquer artista', () => {
     // Sem passar pela limpeza, "Matuê - Topic" e "Caetano Veloso Oficial"
     // viravam artistas PARALELOS do mesmo cantor — prateleira, foto e votação
@@ -363,29 +397,99 @@ describe('lerTituloDeVideo — convidado no nome da música', () => {
  * Gospel continuou vazia mesmo com o conserto no ar e sem nenhum erro no log.
  */
 describe('separarArtistasGrudados', () => {
-  it('separa quando o selo está grudado no cantor', () => {
+  it('SEPARA a lista pura de colaboração — o caso comum que ficava grudado', () => {
+    // Dados reais do Postgres: cada um era UM item de artista só, bagunçando
+    // prateleira, foto e voto de gênero. Sem "&" no nome, vírgula é colaboração.
+    expect(separarArtistasGrudados(["Snoop Dogg, Dr. Dre, D'Angelo"])).toEqual([
+      'Snoop Dogg',
+      'Dr. Dre',
+      "D'Angelo",
+    ]);
+    expect(separarArtistasGrudados(['AriBeatz, Ozuna, Sfera Ebbasta, GIMS'])).toEqual([
+      'AriBeatz',
+      'Ozuna',
+      'Sfera Ebbasta',
+      'GIMS',
+    ]);
+    expect(separarArtistasGrudados(['MC GP, MC MENO K'])).toEqual(['MC GP', 'MC MENO K']);
+    expect(separarArtistasGrudados(['Doode, Reid, WIU, Lil Whind'])).toEqual([
+      'Doode',
+      'Reid',
+      'WIU',
+      'Lil Whind',
+    ]);
+    expect(separarArtistasGrudados(['Purple Disco Machine, Kungs'])).toEqual([
+      'Purple Disco Machine',
+      'Kungs',
+    ]);
+    expect(separarArtistasGrudados(['RHINO, Starship'])).toEqual(['RHINO', 'Starship']);
+  });
+
+  it('SELO escondido no meio da lista sai — vira label, não quem canta', () => {
+    // O outro nome continua sendo o artista; o selo se anuncia por um token que
+    // nome de gente não carrega ("Records", terminar em "Music"/"...Brazil").
+    expect(separarArtistasGrudados(['Ton Carfi, Rocket Music Brazil'])).toEqual(['Ton Carfi']);
+    expect(separarArtistasGrudados(['Make The Girls Dance Records, HUGEL'])).toEqual(['HUGEL']);
+    // "Cat Music" é selo; "Costi ©" é duplicata suja de "Costi".
+    expect(separarArtistasGrudados(['Costi, Cat Music, S A G U N A, BENZOL, Costi ©'])).toEqual([
+      'Costi',
+      'S A G U N A',
+      'BENZOL',
+    ]);
     // "Oficial" é marca de canal e sai junto — ver `limparNomeDeArtista`.
+    expect(separarArtistasGrudados(['Soud Oficial, Chris Beats Zn'])).toEqual([
+      'Soud',
+      'Chris Beats Zn',
+    ]);
+    // O selo do Gospel, que motivou o conserto original — agora FILTRADO da lista
+    // (antes ele era mantido como artista[0] e promovido; hoje vira label).
     expect(separarArtistasGrudados(['MK MUSIC, Elaine Martins Oficial'])).toEqual([
-      'MK MUSIC',
       'Elaine Martins',
     ]);
-    expect(separarArtistasGrudados(['MK MUSIC, Anderson Freire'])).toEqual([
-      'MK MUSIC',
-      'Anderson Freire',
+    expect(separarArtistasGrudados(['MK MUSIC, Anderson Freire'])).toEqual(['Anderson Freire']);
+  });
+
+  it('DUPLICATA suja na mesma lista é deduplicada', () => {
+    // "Ms. Toi" e "Ms Toi" (ponto vs sem ponto) são a mesma pessoa.
+    expect(separarArtistasGrudados(['Ice Cube, Ms. Toi, Ms Toi, Mack 10'])).toEqual([
+      'Ice Cube',
+      'Ms. Toi',
+      'Mack 10',
     ]);
   });
 
-  it('NÃO quebra dupla/grupo real que tem separador no nome', () => {
-    // O risco de separar por separar: virariam dois artistas inexistentes.
+  it('NÃO quebra BANDA real — nem com vírgula no nome', () => {
+    // O sinal decisivo é o "&" conectando os últimos elementos: é nome de banda,
+    // não lista de colaboração. Quebrar qualquer uma inventaria artistas que não
+    // existem — cada um com prateleira, foto e voto de gênero próprios.
     expect(separarArtistasGrudados(['Simon & Garfunkel'])).toBeNull();
-    expect(separarArtistasGrudados(['Tyler, The Creator'])).toBeNull();
     expect(separarArtistasGrudados(['Chitãozinho & Xororó'])).toBeNull();
+    expect(separarArtistasGrudados(['Kool & the Gang'])).toBeNull();
+    expect(separarArtistasGrudados(['Hall & Oates'])).toBeNull();
+    // Bandas com VÍRGULA no nome — o caso perigoso.
+    expect(separarArtistasGrudados(['Earth, Wind & Fire'])).toBeNull();
+    expect(separarArtistasGrudados(['Crosby, Stills, Nash & Young'])).toBeNull();
+    expect(separarArtistasGrudados(['Crosby, Stills & Nash'])).toBeNull();
+    expect(separarArtistasGrudados(['Blood, Sweat & Tears'])).toBeNull();
+    expect(separarArtistasGrudados(['Emerson, Lake & Palmer'])).toBeNull();
+    // Barra sem espaço e o padrão "X, The Y" (artigo) também são UM artista.
+    expect(separarArtistasGrudados(['AC/DC'])).toBeNull();
+    expect(separarArtistasGrudados(['Tyler, The Creator'])).toBeNull();
   });
 
   it('não mexe no que já veio separado nem em nome simples', () => {
     expect(separarArtistasGrudados(['Matuê', 'Teto'])).toBeNull();
     expect(separarArtistasGrudados(['Gabriela Rocha'])).toBeNull();
     expect(separarArtistasGrudados([])).toBeNull();
+  });
+
+  it('não esvazia a lista quando ela é só selo — preservar é melhor que ninguém', () => {
+    // Um único nome de selo, ou uma lista já separada só de selos: nada a fazer.
+    expect(separarArtistasGrudados(['MK MUSIC'])).toBeNull();
+    expect(separarArtistasGrudados(['MK MUSIC', 'Som Livre'])).toBeNull();
+    // Mas a string colada de dois selos AINDA é separada (mudou): filtrar tudo
+    // deixaria a faixa sem artista nenhum, então os selos são preservados.
+    expect(separarArtistasGrudados(['MK MUSIC, Som Livre'])).toEqual(['MK MUSIC', 'Som Livre']);
   });
 });
 
@@ -416,9 +520,8 @@ describe('limparNomeDeArtista', () => {
     expect(limparNomeDeArtista('Officialize')).toBe('Officialize');
   });
 
-  it('a separação de artistas já entrega os nomes limpos', () => {
+  it('a separação de artistas já entrega os nomes limpos (e sem o selo)', () => {
     expect(separarArtistasGrudados(['MK MUSIC, Elaine Martins Oficial'])).toEqual([
-      'MK MUSIC',
       'Elaine Martins',
     ]);
   });

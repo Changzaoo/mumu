@@ -29,7 +29,7 @@
  * as partes separadas. Nada de rede, nada de IA — a IA entra depois, e entra
  * melhor, porque recebe campos já separados em vez de uma frase inteira.
  */
-import { acharGravadora, ehGravadora } from './gravadoraComoArtista.js';
+import { acharGravadora, ehGravadora, ehSelo } from './gravadoraComoArtista.js';
 
 /**
  * Ruído que canal põe no nome do vídeo e que não é parte de nada.
@@ -229,8 +229,14 @@ export function separarNomes(texto: string): string[] {
       // A barra exige espaço dos dois lados. Sem isso "AC/DC" virava DOIS
       // artistas — "AC" e "DC" — cada um com sua prateleira, sua foto e seu
       // voto de gênero, e nenhum deles existe.
+      //
+      // "vs" e "x" EXIGEM espaço dos DOIS lados (`\s+…\s+`, não `\s*`): o time de
+      // funk "MC PP da VS" terminava com "VS", e como o antigo `\bvs\b` fechava
+      // borda no fim da string, o nome era decepado para "MC PP da" — um artista
+      // que não existe. Com espaço obrigatório depois, um "VS" no fim não é mais
+      // confundido com o "vs" de "Alok vs. Sevenn".
       .split(
-        /\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bvs\b\.?|\bcom\b|\be\b|\band\b|\bx\b)\s*|\s+\/\s+/i,
+        /\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bcom\b|\be\b|\band\b)\s*|\s+(?:vs\.?|x)\s+|\s+\/\s+/i,
       )
       .map((n) => limparNomeDeArtista(n))
       .filter((n) => n.length > 1 && n.length < 60)
@@ -279,17 +285,140 @@ export function limparNomeDeArtista(nome: string): string {
  * Devolve `null` quando não há nada a separar, para quem chama distinguir
  * "já estava certo" de "separei".
  */
+/**
+ * Artigo que marca a 2ª parte como CONTINUAÇÃO do nome, não um novo artista.
+ *
+ * "Tyler, The Creator" é UM artista, e a vírgula ali é parte do nome. O sinal é
+ * o pedaço depois da vírgula começar com artigo seguido de mais palavra —
+ * "The Creator", "Os Paralamas". Sem a palavra depois, "The" sozinho não conta.
+ */
+const ARTIGO_DE_CONTINUACAO = /^(?:the|a|o|os|as|la|los|le|les)\s+\S/i;
+
+/** Marcadores de convidado — separam quem canta, e nunca protegem grupo. */
+const CONVIDADO_EM_LISTA = /\s*\b(?:feat|ft|part|participacao|participação)\b\.?\s*:?\s+/i;
+
+/**
+ * QUEBRA UMA STRING EM NOMES, RESPEITANDO O QUE É BANDA DE VERDADE.
+ *
+ * Separa só por VÍRGULA e por feat/ft/part — os cortes que numa lista de
+ * artistas quase sempre querem dizer "e mais um". Nunca separa por "&", "/", "e",
+ * "x" nem "vs".
+ *
+ * O SINAL DECISIVO É O "&". Existe banda com VÍRGULA no nome — "Earth, Wind &
+ * Fire", "Crosby, Stills, Nash & Young", "Blood, Sweat & Tears" — e nelas o "&"
+ * conectando os últimos elementos é o padrão clássico de nome de banda: as
+ * vírgulas ali são parte do nome, não uma lista de colaboração. Uma colaboração
+ * usa vírgula/feat e NÃO termina em "& Fulano". Então um trecho que contém "&"
+ * fica INTEIRO — quebrá-lo inventaria artistas que não existem.
+ *
+ * Protege ainda "X, The Y": o pedaço depois da vírgula começando com artigo é a
+ * continuação do nome ("Tyler, The Creator"), não um segundo artista.
+ *
+ * Na dúvida, NÃO separa: colar uma colaboração é um aborrecimento pequeno;
+ * quebrar uma banda real é o erro a evitar.
+ */
+function quebrarListaDeNomes(texto: string): string[] {
+  const saida: string[] = [];
+  for (const trecho of texto.split(CONVIDADO_EM_LISTA)) {
+    const t = trecho.trim();
+    if (!t) continue;
+    // Contém "&" → é nome de banda, fica inteiro.
+    if (t.includes('&')) {
+      saida.push(t);
+      continue;
+    }
+    const porVirgula = t.split(',');
+    for (let i = 0; i < porVirgula.length; i += 1) {
+      const parte = porVirgula[i]!.trim();
+      if (!parte) continue;
+      // A religação por artigo só vale DENTRO da mesma vírgula (i > 0): um artigo
+      // abrindo um trecho de convidado ("X feat. The Weeknd") é gente, não
+      // continuação.
+      if (i > 0 && saida.length > 0 && ARTIGO_DE_CONTINUACAO.test(parte)) {
+        saida[saida.length - 1] = `${saida[saida.length - 1]}, ${parte}`;
+      } else {
+        saida.push(parte);
+      }
+    }
+  }
+  return saida;
+}
+
+/**
+ * DEDUPLICA nomes que só diferem por acento, pontuação, ©/™ ou caixa, mantendo a
+ * grafia mais limpa: "Ms. Toi"/"Ms Toi" colapsam num só, e "Costi"/"Costi ©"
+ * ficam como "Costi". A ordem de primeira aparição é preservada.
+ */
+function deduplicarNomes(nomes: string[]): string[] {
+  const escolhido = new Map<string, string>();
+  const ordem: string[] = [];
+  for (const nome of nomes) {
+    const k = chave(nome);
+    if (!k) continue;
+    const atual = escolhido.get(k);
+    if (atual === undefined) {
+      escolhido.set(k, nome);
+      ordem.push(k);
+    } else if (sujeiraDoNome(nome) < sujeiraDoNome(atual)) {
+      escolhido.set(k, nome);
+    }
+  }
+  return ordem.map((k) => escolhido.get(k)!);
+}
+
+/** Quanto de lixo tipográfico um nome carrega — menor é mais limpo. */
+function sujeiraDoNome(nome: string): number {
+  let s = 0;
+  if (/[©®™]/.test(nome)) s += 100;
+  if (/^[^\p{L}\p{N}]|[^\p{L}\p{N}]$/u.test(nome.trim())) s += 10;
+  return s;
+}
+
+/**
+ * UM CAMPO DE ARTISTA QUE, NA VERDADE, TRAZ VÁRIOS — agora separado de verdade.
+ *
+ * No banco, `artists` costuma ter UM item cujo nome é a lista inteira:
+ *
+ *   [{ name: "Snoop Dogg, Dr. Dre, D'Angelo" }]      ← um item, três nomes
+ *   [{ name: "Ton Carfi, Rocket Music Brazil" }]     ← um item, um cantor + selo
+ *
+ * A versão antiga só quebrava quando alguma parte era selo (`ehGravadora`), então
+ * a lista pura de cantores — o caso comum — ficava grudada: cada lista virava um
+ * "artista" só, bagunçando prateleira, foto e voto de gênero. Agora ela sempre
+ * quebra a lista, PROTEGE o grupo de verdade (`&`, `/`, "X, The Y"), FILTRA o
+ * selo escondido no meio (vira label, não quem canta) e DEDUPLICA a grafia suja.
+ *
+ * Devolve `null` só quando não há NADA a fazer (já separado e limpo), para quem
+ * chama distinguir "já estava certo" de "separei".
+ */
 export function separarArtistasGrudados(nomes: readonly string[]): string[] | null {
-  if (nomes.length !== 1) return null; // já vieram separados
-  const unico = nomes[0]?.trim();
-  if (!unico) return null;
-  const partes = separarNomes(unico);
-  // "Simon & Garfunkel", "Tyler, The Creator" e "AC/DC" são UM artista com
-  // separador no nome. Não há como distinguir pelo texto, então o critério é
-  // conservador: só separa quando alguma das partes é reconhecidamente um selo.
-  // Fora esse caso, o nome fica inteiro — quebrar uma dupla real é pior.
-  if (partes.length < 2 || !partes.some((p) => ehGravadora(p))) return null;
-  return partes;
+  const bruto = nomes
+    .map((n) => (typeof n === 'string' ? n.trim() : ''))
+    .filter((n) => n.length > 0);
+  if (bruto.length === 0) return null;
+
+  // 1) Cada item pode ser uma lista colada: quebra todos em nomes soltos.
+  const soltos: string[] = [];
+  for (const item of bruto) {
+    for (const nome of quebrarListaDeNomes(item)) {
+      const limpo = limparNomeDeArtista(nome);
+      if (limpo.length > 1 && limpo.length < 60) soltos.push(limpo);
+    }
+  }
+  if (soltos.length === 0) return null;
+
+  // 2) O selo escondido no meio da lista vira label, não quem canta. Mas se
+  //    filtrar esvaziaria tudo (era só selo), preserva o que há — deixar a faixa
+  //    sem artista nenhum é pior do que um selo a mais.
+  const semSelo = soltos.filter((n) => !ehSelo(n));
+  const candidatos = semSelo.length > 0 ? semSelo : soltos;
+
+  // 3) Deduplica a grafia suja ("Costi" no lugar de "Costi ©").
+  const final = deduplicarNomes(candidatos);
+
+  // 4) Só reporta trabalho quando MUDOU de verdade — senão devolve null.
+  const igual = final.length === bruto.length && final.every((n, i) => n === bruto[i]);
+  return igual ? null : final;
 }
 
 /**
