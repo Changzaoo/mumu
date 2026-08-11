@@ -222,6 +222,40 @@ function clearEndTimer(): void {
   endTimerTrackId = null;
 }
 
+// ── troca de faixa com a TELA APAGADA (a causa central deste conserto) ────
+// O avanço padrão (gapless, crossfade=0) só começa a próxima faixa DEPOIS que a
+// atual chega ao fim — no evento 'ended'. Naquele instante o elemento que
+// tocava já parou e o próximo ainda não começou: existe um vão de silêncio.
+//
+// Com a tela apagada esse vão é fatal. O sistema operacional entende o silêncio
+// como "este app parou de tocar" e desativa a sessão de mídia da página; aí o
+// play() do próximo elemento é RECUSADO (política de autoplay em segundo plano),
+// e no iPhone o processo é suspenso logo depois do 'ended' — nada mais roda até
+// o usuário acender a tela. Era por isso que a música parava e só a próxima só
+// começava ao ligar a tela.
+//
+// A cura é não deixar a sessão cair: começar a próxima faixa um instante ANTES
+// de a atual acabar, enquanto o áudio AINDA está saindo. O play() do próximo
+// vira uma CONTINUAÇÃO de uma sessão ativa — e isso o sistema permite, tanto no
+// Android quanto no iOS. Fazemos isso só com a tela apagada; no primeiro plano o
+// 'ended' nativo entrega gapless perfeito e não há por que encurtar a faixa.
+//
+// O gatilho é UM temporizador só, mirado em ~LEAD antes do fim e (re)armado
+// quando a faixa carrega, quando o playhead se move e quando a tela apaga.
+// Temporizador único sobrevive ao estrangulamento de segundo plano muito melhor
+// que polling; e a página, com áudio audível, mantém temporizadores vivos.
+let handoffTimer: ReturnType<typeof setTimeout> | null = null;
+let handoffDoneTrackId: string | null = null;
+/** Antecedência da troca: começa a próxima ~0,9s antes do fim da atual. */
+const BG_HANDOFF_LEAD_MS = 900;
+/** Blend curtíssimo no Android (via grafo Web Audio); no iOS a troca é seca. */
+const BG_HANDOFF_XF = 0.4;
+
+function clearHandoffTimer(): void {
+  if (handoffTimer !== null) clearTimeout(handoffTimer);
+  handoffTimer = null;
+}
+
 /**
  * Ponte para as ações da store, que são criadas ANTES de `initPlayerEngine`
  * existir. Fica nula até o engine subir — nos testes que não inicializam o
@@ -514,12 +548,14 @@ export const usePlayerStore = create<PlayerState>()(
         preloadRequested = false;
         crossfadeTriggered = false;
         syntheticEndHandledTrackId = null;
+        handoffDoneTrackId = null;
         previewGateFired = false;
         pendingResumeSeek = null; // troca de faixa normal — sem seek de retomada
         lastProgressCommit = 0;
         fallbackTried = new Set();
         fallbackAttempts = 0;
         clearLoadWatchdog();
+        clearHandoffTimer();
         set({
           currentTrack: track,
           queueIndex: index,
@@ -937,7 +973,13 @@ export function initPlayerEngine(): void {
   // Última chance de gravar a posição ao sair/minimizar o app.
   window.addEventListener('pagehide', () => saveResume(true));
   document.addEventListener('visibilitychange', () => {
-    if (document.hidden) saveResume(true);
+    if (document.hidden) {
+      saveResume(true);
+      // A tela acabou de apagar: rearma a troca antecipada com o "quanto falta"
+      // de AGORA. Sem isto, apagar a tela nos últimos segundos deixava a faixa
+      // sem a rede de segurança da troca e ela caía no vão de silêncio do fim.
+      rearmEndTimer?.();
+    }
   });
 
   // OS lock-screen / notification controls + background-play signalling.
@@ -1041,7 +1083,13 @@ export function initPlayerEngine(): void {
     }
 
     // Gapless: preload the upcoming track near the end.
-    if (gapless && !preloadRequested && duration > 0 && remaining <= 12) {
+    //
+    // Com a tela apagada preload SEMPRE, mesmo com gapless desligado: a troca em
+    // segundo plano (ver `armHandoffTimer`) precisa promover um elemento já
+    // pronto — pedir a rede no instante da troca travaria o play() no vão de
+    // silêncio, que é justamente o bug que este preload evita.
+    const hidden = typeof document !== 'undefined' && document.hidden;
+    if ((gapless || hidden) && !preloadRequested && duration > 0 && remaining <= 12) {
       preloadRequested = true;
       const upcoming =
         state.queue[state.queueIndex + 1] ?? (state.repeat === 'all' ? state.queue[0] : undefined);
@@ -1128,7 +1176,94 @@ export function initPlayerEngine(): void {
       restante * 1000 + END_TIMER_SLACK_MS,
     );
   };
-  rearmEndTimer = armEndTimer;
+
+  /**
+   * Começa a PRÓXIMA faixa um instante antes de a atual acabar, para o sistema
+   * nunca ver silêncio na troca com a tela apagada (ver o bloco de comentário em
+   * `handoffTimer`). Só age com `document.hidden`: no primeiro plano o 'ended'
+   * nativo já entrega gapless perfeito.
+   */
+  const doHandoff = (): void => {
+    handoffTimer = null;
+    const s = store.getState();
+    const track = s.currentTrack;
+    if (!track || !s.isPlaying) return;
+    // Tela acesa: deixa o 'ended' nativo cuidar — começar antes só encurtaria a
+    // faixa à toa e estragaria o gapless de álbuns.
+    if (typeof document !== 'undefined' && !document.hidden) return;
+    if (handoffDoneTrackId === track.id) return;
+    if (s.repeat === 'one') return; // repetir-uma: o 'ended' re-busca a posição 0
+    // Crossfade configurado já começa a próxima cedo sozinho (bloco no
+    // 'timeupdate') — não duplicar a troca.
+    if (useSettingsStore.getState().crossfadeSeconds > 0) return;
+
+    const nextIndex =
+      s.queueIndex + 1 < s.queue.length
+        ? s.queueIndex + 1
+        : s.repeat === 'all' && s.queue.length > 0
+          ? 0
+          : -1;
+    if (nextIndex < 0) return; // fim da fila: deixa a atual terminar de verdade
+    const next = s.queue[nextIndex];
+    if (!next) return;
+    // Uma faixa só em repeat-all cairia aqui apontando para si mesma: recarregar
+    // cedo cortaria a cauda e re-buscaria a rede à toa. Deixa o 'ended' religar.
+    if (next.id === track.id) return;
+
+    // A duração pode ter sido subestimada (stream em chunks revela o tamanho
+    // real tarde): se ainda falta bastante, não corta — só remarca.
+    const restante = audioEngine.getDuration() - audioEngine.getPosition();
+    if (restante > BG_HANDOFF_LEAD_MS / 1000 + 2) {
+      armHandoffTimer();
+      return;
+    }
+
+    handoffDoneTrackId = track.id;
+    playRecorded = false;
+    preloadRequested = false;
+    lastProgressCommit = 0;
+    // Blend curto: no Android o grafo Web Audio cruza as duas por BG_HANDOFF_XF;
+    // no iOS (sem grafo) o engine faz corte seco — mas emitido enquanto a atual
+    // ainda tocava, então o play() da próxima é continuação de sessão ATIVA, que
+    // o sistema permite. É essa a diferença para o caminho antigo, que só
+    // chamava play() DEPOIS do fim, com a sessão já derrubada.
+    audioEngine.load(next, { autoplay: true, crossfadeSeconds: BG_HANDOFF_XF });
+    store.setState({
+      currentTrack: next,
+      queueIndex: nextIndex,
+      isPlaying: true,
+      progress: 0,
+      buffered: 0,
+      duration: next.durationMs / 1000,
+    });
+  };
+
+  /**
+   * (Re)arma a troca antecipada, mirada em BG_HANDOFF_LEAD_MS antes do fim.
+   * Único e distante, resiste ao estrangulamento de segundo plano; a checagem
+   * de `document.hidden` fica no disparo, não aqui, porque a tela pode apagar
+   * DEPOIS de armado.
+   */
+  const armHandoffTimer = (): void => {
+    clearHandoffTimer();
+    if (typeof window === 'undefined') return;
+    const s = store.getState();
+    const track = s.currentTrack;
+    if (!track || !s.isPlaying) return;
+    if (audioEngine.currentTrack?.id !== track.id) return; // engine ainda na anterior
+    if (handoffDoneTrackId === track.id) return;
+    const duration = audioEngine.getDuration();
+    if (!Number.isFinite(duration) || duration <= 0) return;
+    if (duration < 2) return; // faixa curta demais para antecipar: fica no 'ended'
+    const restante = duration - audioEngine.getPosition();
+    handoffTimer = setTimeout(doHandoff, Math.max(0, restante * 1000 - BG_HANDOFF_LEAD_MS));
+  };
+
+  const rearmTimers = (): void => {
+    armEndTimer();
+    armHandoffTimer();
+  };
+  rearmEndTimer = rearmTimers;
 
   audioEngine.on('loaded', ({ duration }) => {
     clearLoadWatchdog();
@@ -1149,7 +1284,7 @@ export function initPlayerEngine(): void {
       audioEngine.seek(at);
       store.setState({ progress: at });
     }
-    armEndTimer();
+    rearmTimers();
   });
 
   audioEngine.on('buffering', ({ buffering }) => {
@@ -1186,21 +1321,26 @@ export function initPlayerEngine(): void {
   audioEngine.on('interrupted', () => {
     clearLoadWatchdog();
     clearEndTimer();
+    clearHandoffTimer();
     store.setState({ isPlaying: false, isBuffering: false });
     saveResume(true);
   });
 
   audioEngine.on('ended', () => {
     clearEndTimer();
+    clearHandoffTimer();
     advanceFromTrackEnd();
   });
 
-  // Play/pause e seek mudam o "quanto falta": o alvo do temporizador tem que
-  // acompanhar, senão ele dispara no meio da música depois de uma pausa longa.
+  // Play/pause e seek mudam o "quanto falta": os alvos dos temporizadores têm
+  // que acompanhar, senão disparam no meio da música depois de uma pausa longa.
   store.subscribe((state, prev) => {
     if (state.isPlaying !== prev.isPlaying || state.currentTrack?.id !== prev.currentTrack?.id) {
-      if (state.isPlaying) armEndTimer();
-      else clearEndTimer();
+      if (state.isPlaying) rearmTimers();
+      else {
+        clearEndTimer();
+        clearHandoffTimer();
+      }
     }
   });
 }

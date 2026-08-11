@@ -1,97 +1,112 @@
 /**
  * UM CONSERTO QUE NÃO ALCANÇA O APARELHO NÃO É UM CONSERTO.
  *
- * O erro do Firestore continuou aparecendo no celular horas depois de a correção
- * estar publicada. O motivo não era a correção: era o atualizador do PWA.
+ * O erro continuava aparecendo horas depois da correção publicada. O motivo não
+ * era a correção: era o atualizador do PWA, que só aplicava a versão nova quando
+ * a música parava — e para quem ouve o tempo todo, "parar" era nunca.
  *
- * Ele aplica a versão nova na hora quando nada está tocando — certo. Mas quando
- * há música tocando ele só avisava e ia embora, e NINGUÉM voltava para aplicar:
- * `onNeedRefresh` dispara uma vez por worker novo, e a trava do aviso garantia
- * que nem o aviso se repetisse. Quem ouve música com o app aberto (o uso normal)
- * ficava preso no build antigo por tempo indeterminado.
+ * Agora o service worker é `autoUpdate` (skipWaiting + clientsClaim): o worker
+ * novo assume as abas SOZINHO, e quando assume o navegador dispara
+ * `controllerchange`. É aí que a página se recarrega para pegar o bundle novo —
+ * preservando a música (grava a retomada TOCANDO antes de recarregar). Não
+ * depende mais de o usuário pausar; vale para todo aparelho, automaticamente.
  *
- * A regra travada aqui: tocando, fica um vigia; a música parou, a versão nova
- * entra.
+ * As regras travadas aqui:
+ *  - worker novo assumiu (controllerchange) com um worker ANTERIOR no controle
+ *    → recarrega (é uma atualização);
+ *  - primeira visita (nenhum worker anterior) → NÃO recarrega (seria refresh à
+ *    toa na abertura);
+ *  - tocando → grava a retomada antes de recarregar;
+ *  - recarrega UMA vez só, mesmo se o evento repetir.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-const { updateSW, opcoes, estadoPlayer, ouvintes } = vi.hoisted(() => ({
-  updateSW: vi.fn(),
-  opcoes: { atual: null as { onNeedRefresh?: () => void } | null },
-  estadoPlayer: { isPlaying: false },
-  ouvintes: new Set<(estado: { isPlaying: boolean }) => void>(),
-}));
+const { updateSW, prepararRetomadaTocando, estadoPlayer, swListeners, reload, controller } =
+  vi.hoisted(() => ({
+    updateSW: vi.fn(),
+    prepararRetomadaTocando: vi.fn(),
+    estadoPlayer: { isPlaying: false },
+    swListeners: new Map<string, (e?: unknown) => void>(),
+    reload: vi.fn(),
+    controller: { atual: null as unknown },
+  }));
 
 vi.mock('virtual:pwa-register', () => ({
-  registerSW: (opts: { onNeedRefresh?: () => void }) => {
-    opcoes.atual = opts;
-    return updateSW;
-  },
+  registerSW: () => updateSW,
 }));
 
 vi.mock('@/stores/playerStore', () => ({
-  usePlayerStore: {
-    getState: () => estadoPlayer,
-    subscribe: (fn: (estado: { isPlaying: boolean }) => void) => {
-      ouvintes.add(fn);
-      return () => ouvintes.delete(fn);
-    },
-  },
+  usePlayerStore: { getState: () => estadoPlayer },
+  prepararRetomadaTocando,
 }));
 
-vi.mock('@/stores/notificationsStore', () => ({ pushNotification: vi.fn() }));
-
-/** Simula o player mudando de estado. */
-function tocando(valor: boolean): void {
-  estadoPlayer.isPlaying = valor;
-  for (const fn of [...ouvintes]) fn(estadoPlayer);
+/** Dispara o controllerchange como o navegador faz quando o worker novo assume. */
+function workerNovoAssume(): void {
+  swListeners.get('controllerchange')?.();
 }
 
 describe('a versão nova chega ao aparelho', () => {
-  beforeEach(async () => {
+  beforeEach(() => {
     vi.resetModules();
     updateSW.mockClear();
-    ouvintes.clear();
+    prepararRetomadaTocando.mockClear();
+    reload.mockClear();
+    swListeners.clear();
     estadoPlayer.isPlaying = false;
+    controller.atual = {}; // por padrão JÁ havia um worker no controle (é atualização)
+
+    Object.defineProperty(navigator, 'serviceWorker', {
+      configurable: true,
+      value: {
+        get controller() {
+          return controller.atual;
+        },
+        addEventListener: (tipo: string, fn: (e?: unknown) => void) => swListeners.set(tipo, fn),
+      },
+    });
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { reload },
+    });
+  });
+
+  it('worker novo assume → recarrega para pegar o bundle novo', async () => {
     const { initPwaUpdater } = await import('@/pwa');
     initPwaUpdater();
+    workerNovoAssume();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it('parado: aplica na hora', () => {
-    opcoes.atual?.onNeedRefresh?.();
-    expect(updateSW).toHaveBeenCalledWith(true);
+  it('primeira visita (sem worker anterior) → NÃO recarrega', async () => {
+    controller.atual = null; // nada controlava a página ainda
+    const { initPwaUpdater } = await import('@/pwa');
+    initPwaUpdater();
+    workerNovoAssume();
+    expect(reload).not.toHaveBeenCalled();
   });
 
-  it('tocando: NÃO corta a música', () => {
+  it('tocando → grava a retomada ANTES de recarregar (a música volta)', async () => {
     estadoPlayer.isPlaying = true;
-    opcoes.atual?.onNeedRefresh?.();
-    expect(updateSW).not.toHaveBeenCalled();
+    const { initPwaUpdater } = await import('@/pwa');
+    initPwaUpdater();
+    workerNovoAssume();
+    expect(prepararRetomadaTocando).toHaveBeenCalledTimes(1);
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  // ── O DEFEITO ────────────────────────────────────────────────────────────
-  it('tocando e depois pausado: aplica sozinho — antes ficava preso para sempre', () => {
-    estadoPlayer.isPlaying = true;
-    opcoes.atual?.onNeedRefresh?.();
-    expect(updateSW).not.toHaveBeenCalled();
-
-    tocando(false); // o usuário pausou
-
-    expect(updateSW).toHaveBeenCalledWith(true);
+  it('parado → recarrega sem gravar retomada', async () => {
+    const { initPwaUpdater } = await import('@/pwa');
+    initPwaUpdater();
+    workerNovoAssume();
+    expect(prepararRetomadaTocando).not.toHaveBeenCalled();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 
-  it('continuar tocando não dispara nada', () => {
-    estadoPlayer.isPlaying = true;
-    opcoes.atual?.onNeedRefresh?.();
-    tocando(true); // trocou de faixa, seguiu tocando
-    expect(updateSW).not.toHaveBeenCalled();
-  });
-
-  it('o vigia se desfaz depois de aplicar — não aplica duas vezes', () => {
-    estadoPlayer.isPlaying = true;
-    opcoes.atual?.onNeedRefresh?.();
-    tocando(false);
-    tocando(true);
-    tocando(false);
-    expect(updateSW).toHaveBeenCalledTimes(1);
+  it('recarrega UMA vez só, mesmo se o evento repetir', async () => {
+    const { initPwaUpdater } = await import('@/pwa');
+    initPwaUpdater();
+    workerNovoAssume();
+    workerNovoAssume();
+    expect(reload).toHaveBeenCalledTimes(1);
   });
 });
