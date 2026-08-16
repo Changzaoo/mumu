@@ -32,6 +32,12 @@ import {
 } from '@/lib/devices/presence';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from '@/components/ui/dropdown-menu';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -195,6 +201,44 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
         </ul>
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * Etiqueta "tocando em {aparelho}" que a barra mostra quando espelha um remoto.
+ * Clicar abre a única ação que faz sentido: trazer a reprodução para cá — o
+ * gesto de usuário que o navegador exige para tocar áudio.
+ */
+export function RemoteDeviceChip({
+  deviceId,
+  deviceName,
+  className,
+}: {
+  deviceId: string;
+  deviceName: string;
+  className?: string;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger asChild>
+        <button
+          type="button"
+          aria-label={`Tocando em ${deviceName} — opções`}
+          className={cn(
+            'flex items-center gap-1 text-[11px] font-medium text-accent transition-opacity hover:opacity-80',
+            className,
+          )}
+        >
+          <MonitorSpeaker className="size-3 shrink-0" />
+          <span className="truncate">{deviceName}</span>
+        </button>
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="start">
+        <DropdownMenuItem onSelect={() => void transferPlaybackHere(deviceId)}>
+          <Play className="mr-2 size-4" /> Tocar neste dispositivo
+        </DropdownMenuItem>
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }
 

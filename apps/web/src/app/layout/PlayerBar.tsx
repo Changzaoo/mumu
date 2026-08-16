@@ -17,13 +17,12 @@ import {
 } from 'lucide-react';
 import { Fragment } from 'react';
 import { LikeButton } from '@/components/media/LikeButton';
-import { DevicePickerButton } from '@/components/media/DevicePicker';
+import { DevicePickerButton, RemoteDeviceChip } from '@/components/media/DevicePicker';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
 import { IconButton } from '@/components/ui/icon-button';
 import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
-import { MonitorSpeaker } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { useNowPlaying } from '@/lib/devices/useNowPlaying';
@@ -135,12 +134,13 @@ export function PlayerBar() {
                   </Fragment>
                 ))}
               </p>
-              {/* Onde está tocando — pequeno, só quando é outro aparelho. */}
-              {track.source === 'remote' && track.deviceName && (
-                <span className="mt-0.5 flex items-center gap-1 text-[11px] font-medium text-accent">
-                  <MonitorSpeaker className="size-3 shrink-0" />
-                  <span className="truncate">{track.deviceName}</span>
-                </span>
+              {/* Onde está tocando — pequeno, clicável ("Tocar neste dispositivo"). */}
+              {track.source === 'remote' && track.deviceName && track.deviceId && (
+                <RemoteDeviceChip
+                  deviceId={track.deviceId}
+                  deviceName={track.deviceName}
+                  className="mt-0.5"
+                />
               )}
             </div>
             {/* Curtir só faz sentido para a faixa carregada AQUI. */}

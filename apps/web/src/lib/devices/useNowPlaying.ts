@@ -39,6 +39,8 @@ export interface NowPlaying {
   duration: number;
   /** Nome do aparelho quando é remoto; `null` quando é aqui. */
   deviceName: string | null;
+  /** Id do aparelho remoto (para "tocar neste dispositivo"); `null` se local. */
+  deviceId: string | null;
   toggle: () => void;
   next: () => void;
   prev: () => void;
@@ -53,7 +55,11 @@ export function useNowPlaying(): NowPlaying | null {
   const localProgress = usePlayerStore((s) => s.progress);
   const localDuration = usePlayerStore((s) => s.duration);
 
-  const remoto = localTrack ? null : dispositivoRemotoAtivo();
+  const remoto = dispositivoRemotoAtivo();
+  // A barra segue QUEM ESTÁ TOCANDO. Um remoto ativamente tocando ganha de uma
+  // faixa local carregada e PARADA — senão a música do outro aparelho virava uma
+  // pílula flutuante enquanto a barra mostrava a faixa pausada daqui.
+  const espelharRemoto = Boolean(remoto?.track && remoto.isPlaying && !localPlaying);
 
   // Pulso só quando ESPELHANDO um remoto tocando: reavalia a posição estimada
   // uma vez por segundo para o seek andar. Sem faixa remota, não gasta timer.
@@ -64,7 +70,7 @@ export function useNowPlaying(): NowPlaying | null {
     return () => clearInterval(id);
   }, [remoto, remoto?.isPlaying]);
 
-  if (localTrack) {
+  if (localTrack && !espelharRemoto) {
     const p = usePlayerStore.getState();
     return {
       source: 'local',
@@ -75,6 +81,7 @@ export function useNowPlaying(): NowPlaying | null {
       progress: localProgress,
       duration: localDuration,
       deviceName: null,
+      deviceId: null,
       toggle: p.toggle,
       next: p.next,
       prev: p.prev,
@@ -95,6 +102,7 @@ export function useNowPlaying(): NowPlaying | null {
       progress: posicaoEstimada(remoto),
       duration: remoto.duration,
       deviceName: remoto.name,
+      deviceId: id,
       toggle: () => void sendCommand(id, remoto.isPlaying ? 'pause' : 'play'),
       next: () => void sendCommand(id, 'next'),
       prev: () => void sendCommand(id, 'prev'),
