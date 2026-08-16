@@ -5,7 +5,6 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AudioLines,
   ChevronDown,
-  Film,
   Gauge,
   ListMusic,
   MicVocal,
@@ -95,7 +94,6 @@ export function NowPlaying() {
   const setSleepTimer = useSettingsStore((s) => s.setSleepTimer);
 
   const [visualizer, setVisualizer] = useState(false);
-  const [miniclip, setMiniclip] = useState(false);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const likes = useTrackLikes();
   const isTouch = useMediaQuery('(pointer: coarse)');
@@ -152,16 +150,19 @@ export function NowPlaying() {
             }}
           />
 
-          {/* Miniclip — a "living cover" ambient background (Spotify Canvas-like). */}
-          {miniclip && track.coverUrl && (
+          {/* Fundo: a CAPA da música borrada, sempre — como nos players de
+              celular. O scale-110 esconde a borda transparente que o blur deixa,
+              e o scrim por cima garante a legibilidade do texto sobre capa clara.
+              Em aparelho fraco o guard de perf tira só o blur (a capa fica). */}
+          {track.coverUrl && (
             <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <img
                 src={track.coverUrl}
                 alt=""
-                className="size-full object-cover opacity-40 blur-2xl"
+                className="size-full scale-110 object-cover opacity-45 blur-2xl"
                 style={{ animation: 'kenburns 22s ease-in-out infinite' }}
               />
-              <div className="absolute inset-0 bg-bg/50" />
+              <div className="absolute inset-0 bg-bg/55" />
             </div>
           )}
 
@@ -397,14 +398,6 @@ export function NowPlaying() {
                   }}
                 >
                   <AudioLines />
-                </IconButton>
-                <IconButton
-                  aria-label="Miniclip"
-                  size="sm"
-                  active={miniclip}
-                  onClick={() => setMiniclip((v) => !v)}
-                >
-                  <Film />
                 </IconButton>
                 <IconButton
                   aria-label="Equalizador"
