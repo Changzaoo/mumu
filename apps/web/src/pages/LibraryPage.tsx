@@ -169,22 +169,22 @@ export default function LibraryPage() {
   const term = filter.trim().toLowerCase();
 
   const localArtists = useMemo(() => {
-    const all = localLibrary.artists();
+    const all = localLibrary.artistsOwned();
     return term ? all.filter((a) => a.name.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
   const localGenres = useMemo(() => {
-    const all = localLibrary.genreGroups();
+    const all = localLibrary.genreGroupsOwned();
     return term ? all.filter((g) => g.genre.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
   const localLabels = useMemo(() => {
-    const all = localLibrary.labelGroups();
+    const all = localLibrary.labelGroupsOwned();
     return term ? all.filter((l) => l.name.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
   // Álbuns que você REALMENTE tem faixa. Antes esta aba trazia a discografia
   // inteira do iTunes de cada artista: dezenas de álbuns sem uma única música
   // sua, que abriam vazios. Álbum sem faixa não é biblioteca, é catálogo.
   const discography = useMemo(() => {
-    const all = localLibrary.albumGroups();
+    const all = localLibrary.albumGroupsOwned();
     return term ? all.filter((a) => `${a.title} ${a.artist}`.toLowerCase().includes(term)) : all;
   }, [libEntries, term]);
   const filtered = useMemo(() => {

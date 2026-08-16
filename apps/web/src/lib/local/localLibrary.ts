@@ -1416,9 +1416,9 @@ export function albumKeyForTrack(track: TrackDto): string | null {
  * its album has 2+ tracks OR the album name differs from the track name (a
  * genuine release, not an auto "Title - Single"). Everything else is a single.
  */
-function computeAlbumGroups(): LocalAlbum[] {
+function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlbum[] {
   const byKey = new Map<string, LocalAlbum>();
-  for (const entry of read()) {
+  for (const entry of entries) {
     const t = entry.track;
     const title = t.album?.title?.trim();
     if (!title) continue;
@@ -1451,6 +1451,33 @@ export function albumGroups(): LocalAlbum[] {
   return ensureGroups().albums;
 }
 
+/**
+ * SÓ O QUE É SEU — exclui o acervo do app (as faixas emprestadas, marcadas com
+ * `origem: 'catalogo'`). "Sua Biblioteca" é o que o usuário adicionou; o catálogo
+ * grátis vive no Início e no Descobrir, não aqui. Sem isto, buscar na biblioteca
+ * despejava o acervo inteiro do app, que não é do usuário.
+ *
+ * Não memoizado (recalcula a cada chamada): a lista da biblioteca já usa
+ * `useMemo` na página, e as telas de acervo (Início/Descobrir) seguem usando as
+ * versões memoizadas acima, que continuam somando tudo.
+ */
+function ownedEntries(): LibraryEntry[] {
+  return read().filter((e) => e.origem !== 'catalogo');
+}
+
+export function albumGroupsOwned(): LocalAlbum[] {
+  return computeAlbumGroups(ownedEntries());
+}
+export function artistsOwned(): LocalArtist[] {
+  return computeArtists(ownedEntries());
+}
+export function genreGroupsOwned(): LocalGenre[] {
+  return computeGenreGroups(ownedEntries());
+}
+export function labelGroupsOwned(): LocalLabel[] {
+  return computeLabelGroups(ownedEntries());
+}
+
 export function albumByKey(key: string): LocalAlbum | null {
   return albumGroups().find((a) => a.key === key) ?? null;
 }
@@ -1475,9 +1502,9 @@ export function artists(): LocalArtist[] {
   return ensureGroups().artists;
 }
 
-function computeArtists(): LocalArtist[] {
+function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[] {
   const byName = new Map<string, LocalArtist>();
-  for (const entry of read()) {
+  for (const entry of entries) {
     for (const artist of entry.track.artists) {
       const name = artist.name?.trim();
       if (!name || name === 'Desconhecido') continue;
@@ -1529,9 +1556,9 @@ export function genreGroups(): LocalGenre[] {
   return ensureGroups().genres;
 }
 
-function computeGenreGroups(): LocalGenre[] {
+function computeGenreGroups(entries: readonly LibraryEntry[] = read()): LocalGenre[] {
   const byKey = new Map<string, LocalGenre>();
-  for (const entry of read()) {
+  for (const entry of entries) {
     const g = entry.track.genre?.trim();
     if (!g) continue;
     const key = g.toLowerCase();
@@ -1559,9 +1586,9 @@ export function labelGroups(): LocalLabel[] {
   return ensureGroups().labels;
 }
 
-function computeLabelGroups(): LocalLabel[] {
+function computeLabelGroups(entries: readonly LibraryEntry[] = read()): LocalLabel[] {
   const byKey = new Map<string, LocalLabel>();
-  for (const entry of read()) {
+  for (const entry of entries) {
     const name = entry.track.label?.trim();
     if (!name) continue;
     const key = normName(name);
