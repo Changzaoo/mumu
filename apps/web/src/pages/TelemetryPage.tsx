@@ -547,6 +547,23 @@ function InsightTile({
   );
 }
 
+/**
+ * A MELHOR IDENTIFICAÇÃO POSSÍVEL DE CADA APARELHO.
+ *
+ * Sem login, a linha mostrava só "uid anon:XXX" — um hash que não diz nada.
+ * A telemetria já coleta o modelo real (Android via UA Client Hints), o SO do
+ * desktop e o navegador; é isso que aparece agora. Um visitante deixa de ser um
+ * código ilegível e passa a ser "moto g34 5G" ou "Windows 11 · Chrome". Quando
+ * há conta, o e-mail vem na frente e o aparelho o acompanha — o que também
+ * distingue os vários aparelhos da MESMA pessoa (antes, três linhas idênticas).
+ */
+function identificacao(t: TelemetryDoc): string {
+  const modelo = t.deviceModel && !/não exposto|not exposed/i.test(t.deviceModel) ? t.deviceModel : null;
+  const aparelho = [modelo ?? t.platform, t.browser].filter(Boolean).join(' · ');
+  if (t.email) return aparelho ? `${t.email} · ${aparelho}` : t.email;
+  return aparelho || `uid ${t.uid.slice(0, 8)}…`;
+}
+
 /** Linha compacta (modo Lista) — expande para o card completo ao clicar. */
 function UserRow({
   t,
@@ -576,7 +593,7 @@ function UserRow({
             <span className="truncate text-[13px] font-semibold text-fg">{title}</span>
           </span>
           <span className="block truncate pl-4 text-[11px] text-fg-muted">
-            {t.email ?? `uid ${t.uid.slice(0, 8)}…`}
+            {identificacao(t)}
           </span>
         </span>
         <SegmentBadge name={seg.primary} />
@@ -629,7 +646,7 @@ function UserCard({ t }: { t: TelemetryDoc }) {
         <div className="min-w-0">
           <h2 className="truncate text-base font-bold text-fg">{title}</h2>
           <p className="truncate text-[12px] text-fg-muted">
-            {t.email ?? `uid ${t.uid.slice(0, 8)}…`}
+            {identificacao(t)}
             {t.pwaInstalled ? ' · app instalado' : ''}
           </p>
         </div>
@@ -1163,16 +1180,26 @@ function Summary({ docs }: { docs: TelemetryDoc[] }) {
     (t) => t.lastSeenAt && Date.now() - new Date(t.lastSeenAt).getTime() < 3 * 60_000,
   ).length;
   const totalSeconds = docs.reduce((a, t) => a + (t.totalSeconds ?? 0), 0);
-  const speeds = docs.map((t) => t.netDownMbps).filter((v): v is number => v != null);
-  const avgDown = speeds.length
-    ? Math.round((speeds.reduce((a, b) => a + b, 0) / speeds.length) * 10) / 10
-    : null;
   const plays = docs.reduce((a, t) => a + (t.totalPlays ?? 0), 0);
+
+  // RIGOR NA CONTAGEM: "34 usuários" misturava três coisas diferentes.
+  //
+  //  - CONTAS: pessoas de verdade, contadas por e-mail ÚNICO (a mesma pessoa com
+  //    três aparelhos era três "usuários" — agora é uma).
+  //  - VISITANTES: aparelhos anônimos que fizeram ALGO (ouviram, clicaram) —
+  //    gente real sem conta.
+  //  - Fantasmas (anônimo, 0 tempo e 0 play) não entram em nenhuma das duas: são
+  //    aberturas de página sem uso, e contá-los como "usuários" era o inchaço.
+  const contas = new Set(docs.filter((t) => t.email).map((t) => t.email)).size;
+  const teveAtividade = (t: TelemetryDoc): boolean =>
+    (t.totalSeconds ?? 0) > 0 || (t.totalPlays ?? 0) > 0;
+  const visitantes = docs.filter((t) => !t.email && teveAtividade(t)).length;
+
   const tiles = [
-    { label: 'Usuários', value: String(docs.length) },
+    { label: 'Contas', value: String(contas) },
+    { label: 'Visitantes', value: String(visitantes) },
     { label: 'Online agora', value: String(online) },
     { label: 'Tempo somado', value: formatHours(totalSeconds) },
-    { label: 'Download médio', value: avgDown != null ? `${avgDown} Mbps` : '—' },
     { label: 'Plays somados', value: String(plays) },
   ];
   return (
