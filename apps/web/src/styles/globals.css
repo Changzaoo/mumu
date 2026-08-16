@@ -196,15 +196,47 @@
    Glass — DESIGN.md §3, with solid fallback.
    ────────────────────────────────────────────────────────────── */
 @utility glass {
-  /* Mostly opaque so menus/bars stay legible over busy content. */
-  background: hsl(var(--bg-elevated) / 0.92);
-  backdrop-filter: blur(24px) saturate(140%);
-  -webkit-backdrop-filter: blur(24px) saturate(140%);
-  border: 1px solid hsl(var(--fg) / 0.06);
+  /* Material translúcido estilo Apple: mais transparente que antes, blur forte
+     e SATURATE alto (a "vibrancy" — as cores atrás vazam e o vidro ganha vida),
+     mais um brilho de 1px no topo (inset) que é o que o olho lê como "vidro". */
+  background: hsl(var(--bg-elevated) / 0.72);
+  backdrop-filter: blur(30px) saturate(180%);
+  -webkit-backdrop-filter: blur(30px) saturate(180%);
+  border: 1px solid hsl(var(--fg) / 0.08);
+  box-shadow:
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.06),
+    0 10px 34px -14px hsl(var(--bg-deep) / 0.7);
 
   @supports not (backdrop-filter: blur(1px)) {
-    background: hsl(var(--bg-elevated));
+    background: hsl(var(--bg-elevated) / 0.98);
   }
+}
+
+/* Variante para as BARRAS sempre visíveis (player, abas): um pouco mais opaca,
+   porque texto e controles precisam continuar legíveis mesmo sobre conteúdo
+   claro passando atrás. */
+@utility glass-strong {
+  background: hsl(var(--bg-elevated) / 0.85);
+  backdrop-filter: blur(34px) saturate(180%);
+  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  border: 1px solid hsl(var(--fg) / 0.08);
+  box-shadow:
+    inset 0 1px 0 0 hsl(0 0% 100% / 0.06),
+    0 -8px 30px -18px hsl(var(--bg-deep) / 0.8);
+
+  @supports not (backdrop-filter: blur(1px)) {
+    background: hsl(var(--bg-elevated) / 0.98);
+  }
+}
+
+/* O FUNDO ATRÁS DO VIDRO. Vidro sobre uma cor chapada não é vidro — é plástico
+   fosco. Estes brilhos radiais bem sutis dão profundidade para o blur refratar,
+   sem custo por-quadro (gradiente é pintado uma vez, não é backdrop-filter). */
+@utility ambiente-vidro {
+  background-color: hsl(var(--bg-deep));
+  background-image:
+    radial-gradient(48rem 34rem at 10% -10%, hsl(var(--info) / 0.08), transparent 62%),
+    radial-gradient(42rem 30rem at 110% 0%, hsl(var(--info) / 0.05), transparent 58%);
 }
 
 /* ──────────────────────────────────────────────────────────────
@@ -222,10 +254,12 @@
    O atributo vem de `lib/perf/dispositivo.ts`, decidido uma vez no boot. Aqui
    as superfícies viram fundo chapado: perde-se o vidro, ganha-se a rolagem.
    ────────────────────────────────────────────────────────────── */
-:root[data-perf='baixo'] .glass {
+:root[data-perf='baixo'] .glass,
+:root[data-perf='baixo'] .glass-strong {
   background: hsl(var(--bg-elevated));
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
+  box-shadow: none;
 }
 
 /* O mesmo desfoque escrito como utilitário Tailwind (`backdrop-blur-sm` nos

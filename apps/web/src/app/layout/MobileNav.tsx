@@ -94,7 +94,7 @@ export function MobileNav() {
         // encostado em cima delas, esse degradê passou a ser o vão por onde a
         // página aparecia entre as duas peças. Fundo chapado, altura exata:
         // as abas e o player viram um bloco só.
-        className="fixed inset-x-0 bottom-0 z-40 bg-bg-elevated pb-[env(safe-area-inset-bottom)] md:hidden"
+        className="glass-strong fixed inset-x-0 bottom-0 z-40 pb-[env(safe-area-inset-bottom)] md:hidden"
       >
         {/* 64px-tall targets with 28px glyphs — comfortably above Apple's 44pt
             minimum touch size; labels readable at arm's length. */}

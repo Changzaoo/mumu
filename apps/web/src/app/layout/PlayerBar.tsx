@@ -100,7 +100,7 @@ export function PlayerBar() {
           // Agora ele é a última LINHA do layout. O menu e o conteúdo dividem a
           // linha de cima, o player fica embaixo dos dois, e a sobreposição
           // deixa de ser possível por construção — não por acerto de medida.
-          className="glass hidden h-[88px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-4 rounded-xl border-0 px-4 md:grid"
+          className="glass-strong hidden h-[88px] shrink-0 grid-cols-[minmax(0,1fr)_minmax(0,2fr)_minmax(0,1fr)] items-center gap-4 rounded-xl border-0 px-4 md:grid"
         >
           {/* Left — track identity */}
           <div className="flex min-w-0 items-center gap-3">

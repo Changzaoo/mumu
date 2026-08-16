@@ -98,7 +98,7 @@ export function AppShell() {
           agora são painéis arredondados sobre um fundo mais profundo, com
           calhas entre eles. No celular a moldura some (`p-0`): margem em tela
           pequena é espaço roubado de conteúdo. */}
-      <div className="flex h-dvh flex-col overflow-hidden bg-bg-deep p-0 text-fg md:gap-2 md:p-2">
+      <div className="ambiente-vidro flex h-dvh flex-col overflow-hidden p-0 text-fg md:gap-2 md:p-2">
         <div className="flex min-h-0 flex-1 md:gap-2">
           <Sidebar />
 

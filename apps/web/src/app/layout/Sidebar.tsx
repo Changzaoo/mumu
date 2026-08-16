@@ -193,7 +193,7 @@ export function Sidebar() {
         // Painel próprio dentro da moldura: cantos arredondados e sem a borda
         // direita, que só fazia sentido quando menu e conteúdo eram a mesma
         // folha coladas. A separação agora é a calha entre os painéis.
-        'hidden shrink-0 flex-col overflow-hidden rounded-xl bg-bg-elevated md:flex',
+        'glass hidden shrink-0 flex-col overflow-hidden rounded-xl md:flex',
         collapsed ? 'w-18' : 'w-75',
       )}
     >

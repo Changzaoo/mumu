@@ -39,7 +39,7 @@ export function MediaCard({
   className,
   ...props
 }: MediaCardProps) {
-  const rounded = shape === 'round' ? 'rounded-full' : 'rounded-lg';
+  const rounded = shape === 'round' ? 'rounded-full' : 'rounded-xl';
   // A play-only card (no route) plays when tapped anywhere — no hunting for the
   // little corner button.
   const clickable = Boolean(onPlay) && !to;
@@ -52,7 +52,14 @@ export function MediaCard({
   useEffect(() => setBroken(false), [imageUrl]);
 
   const art = (
-    <div className={cn('relative aspect-square overflow-hidden bg-fg/6', rounded)}>
+    <div
+      className={cn(
+        // Capa estilo Apple: cantos suaves, sombra macia e um aro de 1px que
+        // recorta a arte do fundo mesmo em capa clara.
+        'relative aspect-square overflow-hidden bg-fg/6 shadow-[0_8px_22px_-10px_rgba(0,0,0,0.45)] ring-1 ring-fg/5',
+        rounded,
+      )}
+    >
       {previewOnly && (
         <span
           aria-label="Prévia de 30 segundos"
@@ -120,7 +127,7 @@ export function MediaCard({
   return (
     <div
       className={cn(
-        'group w-40 shrink-0 snap-start rounded-xl p-3 transition-colors duration-200 hover:bg-fg/5 md:w-44',
+        'group w-40 shrink-0 snap-start rounded-xl p-3 transition-[colors,transform] duration-200 hover:-translate-y-0.5 hover:bg-fg/5 md:w-44',
         // Cards fora da viewport (prateleiras longas) não são renderizados —
         // essencial em celulares com pouca RAM.
         '[content-visibility:auto] [contain-intrinsic-size:10rem_13.5rem]',

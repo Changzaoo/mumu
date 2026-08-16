@@ -45,7 +45,7 @@ export function MiniPlayer() {
           // Agora o fundo é exatamente a altura das abas, e só os cantos de
           // CIMA são arredondados: as duas peças leem como um bloco só, que é o
           // que a borda inferior arredondada contrariava mesmo sem vão nenhum.
-          className="glass fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 h-16 overflow-hidden rounded-b-none rounded-t-xl border-x-0 md:hidden"
+          className="glass-strong fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 h-16 overflow-hidden rounded-b-none rounded-t-xl border-x-0 md:hidden"
         >
           {/* Swipe lateral (Spotify): arrastar para a ESQUERDA pula para a
               próxima, para a DIREITA volta — solta e o card volta ao lugar. */}
