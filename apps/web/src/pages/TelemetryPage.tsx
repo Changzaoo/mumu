@@ -133,6 +133,22 @@ interface TelemetryDoc {
   };
   accountCreatedAt?: string;
   downloadsCount?: number;
+  // ── agrupamento por conta (preenchido em `agruparPorConta`) ──
+  /** Os aparelhos desta conta, quando ela tem mais de um. */
+  aparelhos?: AparelhoDaConta[];
+  /** Quantos aparelhos a conta tem (1 quando não agrupada). */
+  qtdAparelhos?: number;
+  /** Quantos deles estão online agora. */
+  aparelhosOnline?: number;
+}
+
+/** Um aparelho dentro de uma conta agrupada. */
+interface AparelhoDaConta {
+  uid: string;
+  nome: string;
+  online: boolean;
+  lastSeenAt?: string;
+  plays: number;
 }
 
 const WEEKDAYS = ['Dom', 'Seg', 'Ter', 'Qua', 'Qui', 'Sex', 'Sáb'];
@@ -557,11 +573,101 @@ function InsightTile({
  * há conta, o e-mail vem na frente e o aparelho o acompanha — o que também
  * distingue os vários aparelhos da MESMA pessoa (antes, três linhas idênticas).
  */
+/** Só o APARELHO — modelo real (Android), SO+navegador (desktop), ou o uid curto. */
+function nomeDoAparelho(t: TelemetryDoc): string {
+  const modelo =
+    t.deviceModel && !/não exposto|not exposed/i.test(t.deviceModel) ? t.deviceModel : null;
+  return [modelo ?? t.platform, t.browser].filter(Boolean).join(' · ') || `uid ${t.uid.slice(0, 8)}…`;
+}
+
 function identificacao(t: TelemetryDoc): string {
-  const modelo = t.deviceModel && !/não exposto|not exposed/i.test(t.deviceModel) ? t.deviceModel : null;
-  const aparelho = [modelo ?? t.platform, t.browser].filter(Boolean).join(' · ');
-  if (t.email) return aparelho ? `${t.email} · ${aparelho}` : t.email;
-  return aparelho || `uid ${t.uid.slice(0, 8)}…`;
+  const aparelho = nomeDoAparelho(t);
+  // Conta agrupada com vários aparelhos: o e-mail identifica a pessoa; os
+  // aparelhos aparecem no selo e no card, não espremidos aqui.
+  if (t.email && (t.qtdAparelhos ?? 1) > 1) return t.email;
+  if (t.email) return `${t.email} · ${aparelho}`;
+  return aparelho;
+}
+
+const ONLINE_MS = 3 * 60_000;
+function estaOnline(t: { lastSeenAt?: string }): boolean {
+  return Boolean(t.lastSeenAt && Date.now() - new Date(t.lastSeenAt).getTime() < ONLINE_MS);
+}
+
+/** Soma dois mapas numéricos chave→valor (histogramas, cliques, páginas). */
+function somarMapa(
+  a: Record<string, number> | undefined,
+  b: Record<string, number> | undefined,
+): Record<string, number> | undefined {
+  if (!a && !b) return undefined;
+  const out: Record<string, number> = { ...(a ?? {}) };
+  for (const [k, v] of Object.entries(b ?? {})) out[k] = (out[k] ?? 0) + v;
+  return out;
+}
+
+/**
+ * UMA LINHA POR PESSOA, não por aparelho.
+ *
+ * A telemetria é gravada por `deviceId` — então quem usa o app no celular e no
+ * computador virava DUAS linhas da mesma pessoa. Aqui as linhas de uma conta
+ * (mesmo e-mail) viram UMA: os números somam (tempo, plays, histogramas,
+ * páginas, cliques) e a lista de aparelhos vai junto, para o painel mostrar
+ * "3 aparelhos · 1 ativo" e, no detalhe, quais são. Anônimo não agrupa — cada
+ * aparelho sem conta é uma pessoa que a gente não tem como saber se é a mesma.
+ */
+function agruparPorConta(docs: TelemetryDoc[]): TelemetryDoc[] {
+  const grupos = new Map<string, TelemetryDoc[]>();
+  for (const t of docs) {
+    const chave = t.email ? `e:${t.email.toLowerCase()}` : `u:${t.uid}`;
+    const lista = grupos.get(chave);
+    if (lista) lista.push(t);
+    else grupos.set(chave, [t]);
+  }
+
+  const recente = (a: TelemetryDoc, b: TelemetryDoc): number =>
+    new Date(b.lastSeenAt ?? 0).getTime() - new Date(a.lastSeenAt ?? 0).getTime();
+
+  const contas: TelemetryDoc[] = [];
+  for (const grupo of grupos.values()) {
+    if (grupo.length === 1) {
+      contas.push(grupo[0]!);
+      continue;
+    }
+    const ord = [...grupo].sort(recente);
+    const base = ord[0]!; // representante = aparelho visto por último
+    contas.push({
+      ...base,
+      totalSeconds: grupo.reduce((s, t) => s + (t.totalSeconds ?? 0), 0),
+      totalPlays: grupo.reduce((s, t) => s + (t.totalPlays ?? 0), 0),
+      totalClicks: grupo.reduce((s, t) => s + (t.totalClicks ?? 0), 0),
+      hourHistogram: grupo.reduce<Record<string, number> | undefined>(
+        (m, t) => somarMapa(m, t.hourHistogram),
+        undefined,
+      ),
+      weekdayHistogram: grupo.reduce<Record<string, number> | undefined>(
+        (m, t) => somarMapa(m, t.weekdayHistogram),
+        undefined,
+      ),
+      pageSeconds: grupo.reduce<Record<string, number> | undefined>(
+        (m, t) => somarMapa(m, t.pageSeconds),
+        undefined,
+      ),
+      clickCounts: grupo.reduce<Record<string, number> | undefined>(
+        (m, t) => somarMapa(m, t.clickCounts),
+        undefined,
+      ),
+      qtdAparelhos: grupo.length,
+      aparelhosOnline: grupo.filter(estaOnline).length,
+      aparelhos: ord.map((t) => ({
+        uid: t.uid,
+        nome: nomeDoAparelho(t),
+        online: estaOnline(t),
+        lastSeenAt: t.lastSeenAt,
+        plays: t.totalPlays ?? 0,
+      })),
+    });
+  }
+  return contas.sort(recente);
 }
 
 /** Linha compacta (modo Lista) — expande para o card completo ao clicar. */
@@ -591,6 +697,18 @@ function UserRow({
               aria-label={online ? 'Online' : 'Offline'}
             />
             <span className="truncate text-[13px] font-semibold text-fg">{title}</span>
+            {(t.qtdAparelhos ?? 1) > 1 && (
+              <span
+                className="inline-flex shrink-0 items-center gap-1 rounded-full bg-fg/8 px-1.5 py-0.5 text-[10px] font-medium text-fg-muted"
+                title={`${t.qtdAparelhos} aparelhos${t.aparelhosOnline ? `, ${t.aparelhosOnline} ativo(s)` : ''}`}
+              >
+                <MonitorSmartphone className="size-3" />
+                {t.qtdAparelhos}
+                {t.aparelhosOnline ? (
+                  <span className="text-accent">· {t.aparelhosOnline} ativo</span>
+                ) : null}
+              </span>
+            )}
           </span>
           <span className="block truncate pl-4 text-[11px] text-fg-muted">
             {identificacao(t)}
@@ -674,6 +792,42 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           </span>
         ))}
       </div>
+
+      {/* Aparelhos desta conta — quando a pessoa usa mais de um. */}
+      {t.aparelhos && t.aparelhos.length > 1 && (
+        <div>
+          <SectionTitle icon={MonitorSmartphone}>
+            {`${t.aparelhos.length} aparelhos${
+              t.aparelhosOnline
+                ? ` · ${t.aparelhosOnline} ativo${t.aparelhosOnline > 1 ? 's' : ''}`
+                : ''
+            }`}
+          </SectionTitle>
+          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+            {t.aparelhos.map((ap) => (
+              <div
+                key={ap.uid}
+                className="flex items-center gap-2 rounded-lg border border-border bg-fg/2 px-3 py-2"
+              >
+                <span
+                  className={cn(
+                    'size-2 shrink-0 rounded-full',
+                    ap.online ? 'bg-accent' : 'bg-fg/20',
+                  )}
+                  aria-label={ap.online ? 'Ativo' : 'Inativo'}
+                />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-[12px] font-medium text-fg">{ap.nome}</span>
+                  <span className="block truncate text-[11px] text-fg-subtle">
+                    {ap.online ? 'ativo agora' : `visto ${formatWhen(ap.lastSeenAt)}`}
+                    {ap.plays ? ` · ${ap.plays} plays` : ''}
+                  </span>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Identidade */}
       <div>
@@ -1371,6 +1525,9 @@ export default function TelemetryPage() {
     });
   }, [docs, query, platformFilter, categoryFilter]);
 
+  // UMA LINHA POR PESSOA: agrupa os aparelhos da mesma conta depois de filtrar.
+  const contasView = useMemo(() => agruparPorConta(filteredDocs), [filteredDocs]);
+
   const categories = [
     'Ouvinte pesado',
     'Colecionador',
@@ -1517,14 +1674,14 @@ export default function TelemetryPage() {
                 </option>
               ))}
             </select>
-            {filteredDocs.length !== docs.length && (
+            {contasView.length !== docs.length && (
               <span className="text-[12px] text-fg-subtle">
-                {filteredDocs.length} de {docs.length}
+                {contasView.length} de {docs.length}
               </span>
             )}
           </div>
 
-          {filteredDocs.length === 0 && (
+          {contasView.length === 0 && (
             <EmptyState
               icon={Search}
               title="Nenhum usuário encontrado"
@@ -1533,9 +1690,9 @@ export default function TelemetryPage() {
           )}
 
           {/* Lista compacta — escala para centenas de usuários; clique expande. */}
-          {view === 'lista' && filteredDocs.length > 0 && (
+          {view === 'lista' && contasView.length > 0 && (
             <div className="space-y-1.5">
-              {filteredDocs.map((t) => (
+              {contasView.map((t) => (
                 <UserRow
                   key={t.uid}
                   t={t}
@@ -1547,10 +1704,10 @@ export default function TelemetryPage() {
           )}
 
           {/* Agrupado por categoria de comportamento. */}
-          {view === 'categorias' && filteredDocs.length > 0 && (
+          {view === 'categorias' && contasView.length > 0 && (
             <div className="space-y-6">
               {Object.entries(
-                filteredDocs.reduce<Record<string, TelemetryDoc[]>>((groups, t) => {
+                contasView.reduce<Record<string, TelemetryDoc[]>>((groups, t) => {
                   const { primary } = categorize(t);
                   (groups[primary] ??= []).push(t);
                   return groups;
@@ -1581,9 +1738,9 @@ export default function TelemetryPage() {
           )}
 
           {/* Cards completos (o modo de estudo profundo). */}
-          {view === 'detalhes' && filteredDocs.length > 0 && (
+          {view === 'detalhes' && contasView.length > 0 && (
             <div className="grid gap-4 xl:grid-cols-2">
-              {filteredDocs.map((t) => (
+              {contasView.map((t) => (
                 <UserCard key={t.uid} t={t} />
               ))}
             </div>
