@@ -19,6 +19,17 @@ export interface AsrWord {
   startMs: number;
 }
 
+/**
+ * Um SEGMENTO ouvido no áudio (whisper): um trecho de ~30 s com seu texto e a
+ * janela de tempo [startMs, endMs). É o relógio GROSSO do caminho pt-BR — o
+ * whisper não dá tempo por palavra, só por segmento.
+ */
+export interface AsrSegment {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 /** Uma palavra da letra com o instante em que ela é CANTADA. */
 export interface TimedWord {
   text: string;
@@ -37,6 +48,83 @@ export interface AlignedLine {
    * destaque anda junto com a voz, que é o que "sincronizada" quer dizer.
    */
   words?: TimedWord[];
+}
+
+/**
+ * Espalha linhas de texto dentro de um intervalo [startMs, endMs), dando a cada
+ * linha um tempo proporcional ao seu comprimento — linha maior, mais tempo.
+ *
+ * É a distribuição HONESTA de quem só tem a janela do segmento, não o tempo
+ * exato de cada verso: o karaokê acende a LINHA certa dentro dos ~30 s, sem
+ * fingir precisão de palavra que o whisper não deu. Devolve só tempo de linha.
+ */
+export function spreadLinesOverSpan(
+  lines: string[],
+  startMs: number,
+  endMs: number,
+): AlignedLine[] {
+  const clean = lines.map((l) => l.trim()).filter(Boolean);
+  if (clean.length === 0) return [];
+  const peso = (l: string): number => Math.max(1, l.length);
+  const total = clean.reduce((s, l) => s + peso(l), 0);
+  const span = Math.max(0, endMs - startMs);
+  let acc = 0;
+  return clean.map((text) => {
+    const timeMs = Math.round(startMs + (span * acc) / total);
+    acc += peso(text);
+    return { timeMs, text };
+  });
+}
+
+/**
+ * Dá tempo de LINHA a uma letra plana usando os SEGMENTOS do whisper.
+ *
+ * O texto continua vindo da fonte confiável (LRCLIB); os segmentos só dizem
+ * QUANDO cada janela de ~30 s acontece. Repartimos as linhas da letra entre os
+ * segmentos proporcional à densidade de canto de cada janela (nº de caracteres
+ * que o whisper ouviu ali — janela com mais texto recebe mais linhas), e dentro
+ * de cada janela espalhamos por comprimento. Sem tempo por palavra: melhor uma
+ * linha aproximada no intervalo certo que a letra plana parada.
+ *
+ * Devolve null quando não há material para casar (sem linhas ou sem segmentos).
+ */
+export function alignLinesToSegments(
+  plainLines: string[],
+  segments: AsrSegment[],
+): AlignedLine[] | null {
+  const lines = plainLines.map((l) => l.trim()).filter(Boolean);
+  const segs = segments.filter((s) => /[\p{L}\p{N}]/u.test(s.text) && s.endMs > s.startMs);
+  if (lines.length === 0 || segs.length === 0) return null;
+
+  const pesos = segs.map((s) => Math.max(1, s.text.replace(/\s+/g, '').length));
+  const totalPeso = pesos.reduce((a, b) => a + b, 0);
+
+  const out: AlignedLine[] = [];
+  let idx = 0;
+  segs.forEach((seg, i) => {
+    // Último segmento leva o que sobrou — arredondamento não pode perder linha.
+    const cota =
+      i === segs.length - 1
+        ? lines.length - idx
+        : Math.round((lines.length * pesos[i]!) / totalPeso);
+    const fatia = lines.slice(idx, idx + Math.max(0, cota));
+    idx += fatia.length;
+    out.push(...spreadLinesOverSpan(fatia, seg.startMs, seg.endMs));
+  });
+  // Sobra por arredondamento vai para a última janela.
+  if (idx < lines.length) {
+    const ultimo = segs[segs.length - 1]!;
+    out.push(...spreadLinesOverSpan(lines.slice(idx), ultimo.startMs, ultimo.endMs));
+  }
+  if (out.length === 0) return null;
+
+  // Monotonicidade: tempo que anda para trás faz o destaque pular.
+  let last = 0;
+  for (const line of out) {
+    if (line.timeMs < last) line.timeMs = last;
+    last = line.timeMs;
+  }
+  return out;
 }
 
 /** Normalização agressiva: só o que importa para comparar duas palavras. */

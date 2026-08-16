@@ -303,17 +303,36 @@ export interface TranscribedWord {
   startMs: number;
 }
 
+/** Segmento (~30 s) reconhecido no áudio, com sua janela de tempo. É o que o
+ *  whisper devolve para pt-BR — texto sem tempo por palavra, só por janela. */
+export interface TranscribedSegment {
+  text: string;
+  startMs: number;
+  endMs: number;
+}
+
 /**
- * Transcreve áudio COM tempo por palavra (proxy do importer → Riva).
+ * Resultado da transcrição: OU palavras com tempo (inglês, via parakeet-tdt),
+ * OU segmentos com janela (pt-BR/outros, via whisper). Só um dos dois vem
+ * preenchido — o motor foi escolhido no servidor pelo idioma.
+ */
+export interface TranscribeResult {
+  words?: TranscribedWord[];
+  segments?: TranscribedSegment[];
+}
+
+/**
+ * Transcreve áudio para sincronizar letra (proxy do importer → Riva/NVCF).
  *
- * Serve para dar tempo a uma letra que só tem texto — o texto continua vindo
- * da fonte confiável; daqui sai apenas o relógio. Devolve null quando o
- * serviço não está disponível: a letra segue exibida sem sincronia.
+ * O texto exibido continua vindo da fonte confiável quando ela existe; daqui
+ * sai o RELÓGIO. Inglês volta com tempo por palavra; pt-BR volta com tempo por
+ * segmento (o whisper não dá palavra). Devolve null quando o serviço não está
+ * disponível: a letra segue exibida sem sincronia.
  */
 export async function aiTranscribe(
   audio: Blob,
   opts: { language?: string; signal?: AbortSignal } = {},
-): Promise<TranscribedWord[] | null> {
+): Promise<TranscribeResult | null> {
   try {
     const url = new URL(`${helperUrl()}/ai/transcribe`);
     if (opts.language) url.searchParams.set('language', opts.language);
@@ -327,12 +346,31 @@ export async function aiTranscribe(
       signal: opts.signal,
     });
     if (!res.ok) return null;
-    const data = (await res.json()) as { words?: unknown };
-    if (!Array.isArray(data.words)) return null;
-    return data.words
-      .map((w) => w as { text?: unknown; startMs?: unknown })
-      .filter((w) => typeof w.text === 'string' && typeof w.startMs === 'number')
-      .map((w) => ({ text: w.text as string, startMs: w.startMs as number }));
+    const data = (await res.json()) as { words?: unknown; segments?: unknown };
+    if (Array.isArray(data.words)) {
+      const words = data.words
+        .map((w) => w as { text?: unknown; startMs?: unknown })
+        .filter((w) => typeof w.text === 'string' && typeof w.startMs === 'number')
+        .map((w) => ({ text: w.text as string, startMs: w.startMs as number }));
+      if (words.length > 0) return { words };
+    }
+    if (Array.isArray(data.segments)) {
+      const segments = data.segments
+        .map((s) => s as { text?: unknown; startMs?: unknown; endMs?: unknown })
+        .filter(
+          (s) =>
+            typeof s.text === 'string' &&
+            typeof s.startMs === 'number' &&
+            typeof s.endMs === 'number',
+        )
+        .map((s) => ({
+          text: s.text as string,
+          startMs: s.startMs as number,
+          endMs: s.endMs as number,
+        }));
+      if (segments.length > 0) return { segments };
+    }
+    return null;
   } catch {
     return null;
   }

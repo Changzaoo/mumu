@@ -17,7 +17,7 @@
  *   sempre — a transcrição acontece uma vez por faixa na vida.
  */
 import type { TrackDto } from '@aurial/shared';
-import { alignLyrics } from '@/lib/lyrics/align';
+import { alignLinesToSegments, alignLyrics, spreadLinesOverSpan } from '@/lib/lyrics/align';
 import {
   cachedLyrics,
   fetchLyrics,
@@ -25,9 +25,78 @@ import {
   type Lyrics,
   type LyricLine,
 } from '@/lib/lyrics/lyrics';
-import { aiTranscribe, type TranscribedWord } from '@/lib/local/importerHelper';
+import {
+  aiTranscribe,
+  type TranscribedSegment,
+  type TranscribedWord,
+} from '@/lib/local/importerHelper';
 import { getAudioBlob } from '@/lib/offline/audioCache';
 import { blobFor as localLibraryBlob } from '@/lib/local/localLibrary';
+
+/**
+ * Dica de idioma para o transcritor. Inglês → parakeet-tdt (tempo por PALAVRA,
+ * o melhor karaokê). Qualquer outra coisa → 'multi', e o whisper detecta e
+ * devolve tempo por LINHA. A detecção é grosseira DE PROPÓSITO: só precisa
+ * separar "inglês" do resto (o acervo do dono é majoritariamente brasileiro).
+ */
+function dicaDeIdioma(texto: string): string {
+  const t = texto.toLowerCase();
+  // Acento é a marca mais forte de português (e de vários outros): não é inglês.
+  if (/[ãõáâàéêíóôúüçñ]/.test(t)) return 'multi';
+  const ingles = (
+    t.match(
+      /\b(the|you|and|is|to|of|in|it|my|me|we|your|are|this|that|with|for|on|be|don't|i'm|can't|love|baby|yeah)\b/g,
+    ) ?? []
+  ).length;
+  const palavras = (t.match(/[a-z']+/g) ?? []).length || 1;
+  // Densidade alta de stopwords inglesas = inglês; senão, deixa o whisper decidir.
+  return ingles / palavras > 0.12 ? 'en' : 'multi';
+}
+
+/**
+ * Quebra o BLOCO de texto de um segmento do whisper em linhas de letra.
+ *
+ * O whisper devolve ~30 s de canto como um texto corrido; letra se lê em
+ * versos. Cortamos por pontuação forte e por um teto de palavras — o mesmo
+ * critério de respiro do `palavrasEmLinhas`, mas sem tempo por palavra aqui.
+ */
+function quebrarEmLinhas(texto: string): string[] {
+  const MAX_PALAVRAS = 8;
+  const palavras = texto.split(/\s+/).filter(Boolean);
+  const linhas: string[] = [];
+  let atual: string[] = [];
+  const fechar = (): void => {
+    if (atual.length > 0) linhas.push(atual.join(' '));
+    atual = [];
+  };
+  for (const p of palavras) {
+    atual.push(p);
+    if (/[.?!;]$/.test(p) || atual.length >= MAX_PALAVRAS) fechar();
+  }
+  fechar();
+  return linhas.filter((l) => /[\p{L}\p{N}]/u.test(l));
+}
+
+/**
+ * Letra sincronizada por LINHA a partir dos segmentos do whisper — o caminho
+ * pt-BR, para quando não existe letra publicada. Cada segmento vira versos
+ * espalhados dentro da sua janela de ~30 s.
+ */
+function linhasDeSegmentos(segments: TranscribedSegment[]): LyricLine[] {
+  const out: LyricLine[] = [];
+  for (const seg of segments) {
+    for (const l of spreadLinesOverSpan(quebrarEmLinhas(seg.text), seg.startMs, seg.endMs)) {
+      out.push({ timeMs: l.timeMs, text: l.text });
+    }
+  }
+  // Monotonicidade entre segmentos: o destaque nunca anda para trás.
+  let last = 0;
+  for (const l of out) {
+    if (l.timeMs < last) l.timeMs = last;
+    last = l.timeMs;
+  }
+  return out;
+}
 
 /** Faixas em processamento — evita transcrever a mesma coisa duas vezes. */
 const inFlight = new Set<string>();
@@ -102,13 +171,16 @@ export async function transcribeToLyrics(track: TrackDto): Promise<Lyrics | null
     const audio = await localAudio(track);
     if (!audio) return null;
 
-    const words = await aiTranscribe(audio);
-    if (!words || words.length === 0) {
-      failed.add(track.id);
-      return null;
-    }
-
-    const linhas = palavrasEmLinhas(words);
+    // Sem letra publicada não há texto de referência para adivinhar o idioma:
+    // 'multi' deixa o whisper detectar (pt-BR, o caso do acervo underground) e
+    // ainda cobre inglês. Se voltar tempo por palavra, agrupamos por respiro;
+    // se voltar por segmento (whisper), espalhamos as linhas na janela.
+    const result = await aiTranscribe(audio, { language: 'multi' });
+    const linhas = result?.words?.length
+      ? palavrasEmLinhas(result.words)
+      : result?.segments?.length
+        ? linhasDeSegmentos(result.segments)
+        : [];
     // Punhado de palavras soltas não é letra — é ruído de fundo transcrito.
     if (linhas.length < 4) {
       failed.add(track.id);
@@ -149,16 +221,19 @@ export async function syncLyricsFromAudio(track: TrackDto): Promise<Lyrics | nul
     const audio = await localAudio(track);
     if (!audio) return null;
 
-    const words = await aiTranscribe(audio);
-    if (!words || words.length === 0) {
-      failed.add(track.id);
-      return null;
-    }
-
-    const aligned = alignLyrics(
-      current.lines.map((l) => l.text),
-      words,
-    );
+    // O TEXTO já é conhecido (LRCLIB) — usamos ele para escolher o motor:
+    // inglês vai ao parakeet-tdt (tempo por palavra); o resto ao whisper
+    // (tempo por linha).
+    const textoDaLetra = current.lines.map((l) => l.text).join(' ');
+    const result = await aiTranscribe(audio, { language: dicaDeIdioma(textoDaLetra) });
+    const linhasDaLetra = current.lines.map((l) => l.text);
+    // Palavra → alinhamento forçado por palavra (o melhor). Segmento → tempo de
+    // LINHA distribuído pelas janelas de ~30 s do whisper.
+    const aligned = result?.words?.length
+      ? alignLyrics(linhasDaLetra, result.words)
+      : result?.segments?.length
+        ? alignLinesToSegments(linhasDaLetra, result.segments)
+        : null;
     if (!aligned) {
       // Casou mal: provavelmente a letra é de outra gravação (ao vivo, remix)
       // ou o ASR não entendeu o idioma. Mantém a letra plana.

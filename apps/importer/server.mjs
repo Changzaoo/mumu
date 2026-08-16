@@ -43,9 +43,11 @@ import path from 'node:path';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import {
+  pickEngine,
   timestampsAreDegenerate,
   toWav16k,
   transcribeConfigured,
+  transcribeSegments,
   transcribeWords,
 } from './riva.mjs';
 
@@ -2278,6 +2280,19 @@ async function main() {
             new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('language') ||
             undefined;
           const wav = await toWav16k(audio, FFMPEG_BIN);
+          // Inglês → TDT (tempo por PALAVRA). pt-BR/outros → whisper (tempo por
+          // LINHA). A escolha mora no riva.mjs; aqui só despachamos o resultado.
+          if (pickEngine(language) === 'segment') {
+            const segments = await transcribeSegments(wav, { language });
+            if (segments.length === 0) {
+              res.writeHead(422, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Sem texto utilizável para esta faixa.' }));
+              return;
+            }
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ segments }));
+            return;
+          }
           const words = await transcribeWords(wav, { language });
           // Sem tempo útil, sincronizar produziria um karaokê que não anda —
           // melhor dizer que não deu e deixar a letra plana em paz.

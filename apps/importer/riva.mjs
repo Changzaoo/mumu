@@ -7,18 +7,32 @@
  *
  * Decisões que valem explicação:
  *
- * - **StreamingRecognize, não Recognize.** Offline vs streaming é propriedade
- *   do DEPLOY hospedado, não uma flag do cliente — e nós não controlamos o
- *   deploy. Os exemplos da NVIDIA para o modelo multilíngue usam streaming, e
- *   streaming funciona nos dois casos: mandamos o arquivo inteiro em pedaços e
- *   juntamos os resultados finais. Recognize poderia simplesmente não existir.
+ * - **parakeet-tdt-0.6b-v2 via Recognize (unário), não StreamingRecognize.**
+ *   Sondei os dois na NVCF com áudio real: a função multilíngue
+ *   `parakeet-1.1b-rnnt` (que usávamos) NUNCA devolve resultado FINAL nem
+ *   `words[]` — só hipóteses interinas sem tempo. Resultado: a transcrição
+ *   "não funcionava", devolvia zero palavra sempre. A `parakeet-tdt-0.6b-v2`
+ *   responde a `Recognize` com `is_final` implícito e `words[]` com
+ *   `start_time` de verdade — que é a razão de tudo isto existir. É unária: o
+ *   StreamingRecognize dela devolve INVALID_ARGUMENT.
  *
- * - **WAV 16 kHz mono.** Riva só aceita canal único, e lê o cabeçalho WAV
- *   sozinho quando mandamos o arquivo inteiro. O ffmpeg que já usamos no
- *   import faz a conversão.
+ * - **Áudio inteiro numa mensagem só.** Provado: uma música de 6 min (WAV
+ *   ~11,5 MB) transcreve em ~4,7 s. Basta subir o teto de mensagem do canal
+ *   (o padrão do gRPC recusaria acima de 4 MB). Sem chunking: unário não
+ *   fatia.
  *
- * - **RNNT empata tempos.** Nesta arquitetura vários tokens saem no mesmo
- *   instante, então `start_time == end_time` é NORMAL e não indica erro.
+ * - **Só inglês.** A tdt-0.6b-v2 é monolíngue (en); mandar `pt-BR` devolve
+ *   INVALID_ARGUMENT. Nenhuma função NVCF hoje dá tempo POR PALAVRA em pt-BR
+ *   (a whisper-large-v3 transcreve o texto em pt, mas sem offsets). Por isso o
+ *   idioma padrão é `en-US`; faixa em outro idioma cai fora no alinhamento e
+ *   mantém a letra plana — degradação segura.
+ *
+ * - **WAV 16 kHz mono.** Riva só aceita canal único e lê o cabeçalho WAV
+ *   sozinho (encoding/sample_rate podem ser omitidos — confirmado). O ffmpeg
+ *   que já usamos no import faz a conversão.
+ *
+ * - **TDT empata tempos.** Vários tokens saem no mesmo instante, então
+ *   `start_time == end_time` é NORMAL e não indica erro.
  */
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -29,16 +43,45 @@ const PROTO_ROOT = path.join(HERE, 'proto');
 const PROTO_FILE = 'riva/proto/riva_asr.proto';
 
 const RIVA_TARGET = process.env.RIVA_TARGET ?? 'grpc.nvcf.nvidia.com:443';
-/** parakeet-1.1b-rnnt-multilingual-asr (25 idiomas, inclui pt-BR). */
+/** parakeet-tdt-0.6b-v2 — a ÚNICA função NVCF sondada que devolve `words[]`
+ *  com tempo por palavra (offline/unária, inglês). */
 const RIVA_FUNCTION_ID =
-  process.env.RIVA_FUNCTION_ID ?? '71203149-d3b7-4460-8231-1be2543a1fca';
-/** 'multi' = detecção automática de idioma (o que os exemplos da NVIDIA usam). */
-const RIVA_LANGUAGE = process.env.RIVA_LANGUAGE ?? 'multi';
+  process.env.RIVA_FUNCTION_ID ?? 'd3fe9151-442b-4204-a70d-5fcc597fd610';
+/** en-US: a tdt-0.6b-v2 é monolíngue e recusa outros códigos com erro. */
+const RIVA_LANGUAGE = process.env.RIVA_LANGUAGE ?? 'en-US';
+
+/**
+ * whisper-large-v3 — o caminho pt-BR (e qualquer idioma que não seja inglês).
+ *
+ * Sondado com trap brasileiro real: transcreve o texto em português
+ * corretamente e AUTO-DETECTA o idioma (`language_code:["pt"]`). Não devolve
+ * tempo POR PALAVRA — só resultados por SEGMENTO de ~30 s, cada um com
+ * `audio_processed` (segundos acumulados = fim do segmento). É o relógio GROSSO
+ * que temos para o acervo brasileiro que o LRCLIB não cobre; o web distribui as
+ * linhas dentro de cada janela de 30 s (ver lib/lyrics/align.ts →
+ * spreadLinesOverSpan). Nenhuma outra função NVCF dá tempo POR PALAVRA em pt-BR.
+ */
+const WHISPER_FUNCTION_ID =
+  process.env.WHISPER_FUNCTION_ID ?? 'b702f636-f60c-4a3d-a6f4-f3568c13bd7d';
+/** 'multi' = o whisper detecta o idioma sozinho (confirmado na sondagem). */
+const WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE ?? 'multi';
+
+/**
+ * Escolhe o motor pelo idioma pedido. Inglês → TDT (tempo por palavra, o
+ * melhor karaokê). Qualquer outra coisa (pt, es, 'multi', ausente) → whisper
+ * (tempo por linha). Decidir aqui, e não no navegador, mantém o cliente burro.
+ */
+export function pickEngine(language) {
+  const lang = (language ?? '').trim().toLowerCase();
+  return lang.startsWith('en') ? 'word' : 'segment';
+}
 const SAMPLE_RATE = 16000;
-/** Pedaço enviado por vez (~0,5 s de PCM 16 kHz mono 16-bit). */
-const CHUNK_BYTES = 16000;
 /** Teto de espera — uma música de 5 min não pode pendurar o servidor. */
 const TRANSCRIBE_TIMEOUT_MS = Number(process.env.RIVA_TIMEOUT_MS ?? 180_000);
+/** Uma música inteira em WAV 16 kHz passa de 10 MB; o padrão do gRPC (4 MB)
+ *  recusaria a mensagem. Unário manda tudo de uma vez, então o canal precisa
+ *  aceitar o arquivo inteiro nos dois sentidos. */
+const MAX_MESSAGE_BYTES = 64 * 1024 * 1024;
 
 let clientPromise = null;
 
@@ -64,7 +107,10 @@ async function getClient() {
     const Asr = pkg.nvidia.riva.asr.RivaSpeechRecognition;
     return {
       grpc,
-      client: new Asr(RIVA_TARGET, grpc.credentials.createSsl()),
+      client: new Asr(RIVA_TARGET, grpc.credentials.createSsl(), {
+        'grpc.max_send_message_length': MAX_MESSAGE_BYTES,
+        'grpc.max_receive_message_length': MAX_MESSAGE_BYTES,
+      }),
     };
   })().catch((err) => {
     clientPromise = null; // permite nova tentativa numa próxima chamada
@@ -132,67 +178,96 @@ export async function transcribeWords(wavBuffer, { language } = {}) {
   metadata.add('function-id', RIVA_FUNCTION_ID);
   metadata.add('authorization', `Bearer ${apiKey}`);
 
-  return await new Promise((resolve, reject) => {
-    const words = [];
-    let settled = false;
-    const finish = (fn, arg) => {
-      if (settled) return;
-      settled = true;
-      clearTimeout(timer);
-      fn(arg);
-    };
-    const timer = setTimeout(() => {
-      try {
-        call.cancel();
-      } catch {
-        /* já encerrada */
+  // Recognize é UNÁRIO: mandamos o áudio inteiro e recebemos a resposta final
+  // de uma vez. O deadline substitui o timer manual do fluxo em streaming.
+  const deadline = new Date(Date.now() + TRANSCRIBE_TIMEOUT_MS);
+  const request = {
+    config: {
+      // encoding/sample_rate omitidos de propósito: o Riva lê o cabeçalho WAV.
+      language_code: language ?? RIVA_LANGUAGE,
+      max_alternatives: 1,
+      enable_automatic_punctuation: true,
+      enable_word_time_offsets: true, // o motivo de tudo isto existir
+      audio_channel_count: 1,
+    },
+    audio: wavBuffer,
+  };
+
+  const response = await new Promise((resolve, reject) => {
+    client.Recognize(request, metadata, { deadline }, (err, resp) => {
+      if (err) {
+        reject(new Error(`Riva: ${err.details ?? err.message ?? 'falha'} (${err.code})`));
+        return;
       }
-      finish(reject, new Error('Transcrição excedeu o tempo limite.'));
-    }, TRANSCRIBE_TIMEOUT_MS);
-
-    const call = client.StreamingRecognize(metadata);
-
-    call.on('data', (response) => {
-      for (const result of response?.results ?? []) {
-        // Só hipótese FINAL: as parciais mudam e trariam tempo instável.
-        if (!result?.is_final) continue;
-        const alternative = result.alternatives?.[0];
-        for (const w of alternative?.words ?? []) {
-          const text = typeof w?.word === 'string' ? w.word : '';
-          if (!text) continue;
-          words.push({ text, startMs: Number(w.start_time) || 0 });
-        }
-      }
+      resolve(resp);
     });
-    call.on('error', (err) => finish(reject, err));
-    call.on('end', () => finish(resolve, words));
-    call.on('status', (status) => {
-      if (status?.code !== 0 && !settled) {
-        finish(reject, new Error(`Riva: ${status?.details ?? 'falha'} (${status?.code})`));
-      }
-    });
-
-    // 1ª mensagem: só a configuração. As seguintes: só áudio.
-    call.write({
-      streaming_config: {
-        config: {
-          // encoding/sample_rate omitidos de propósito: mandamos o WAV
-          // inteiro e o Riva lê o cabeçalho.
-          language_code: language ?? RIVA_LANGUAGE,
-          max_alternatives: 1,
-          enable_automatic_punctuation: true,
-          enable_word_time_offsets: true, // o motivo de tudo isto existir
-          audio_channel_count: 1,
-        },
-        interim_results: false,
-      },
-    });
-
-    for (let offset = 0; offset < wavBuffer.length; offset += CHUNK_BYTES) {
-      call.write({ audio_content: wavBuffer.subarray(offset, offset + CHUNK_BYTES) });
-    }
-    call.end();
   });
+
+  const words = [];
+  for (const result of response?.results ?? []) {
+    const alternative = result.alternatives?.[0];
+    for (const w of alternative?.words ?? []) {
+      const text = typeof w?.word === 'string' ? w.word : '';
+      if (!text) continue;
+      words.push({ text, startMs: Number(w.start_time) || 0 });
+    }
+  }
+  return words;
+}
+
+/**
+ * Transcreve um WAV com o whisper e devolve SEGMENTOS `[{ text, startMs, endMs }]`.
+ *
+ * O whisper hospedado fatia em janelas de ~30 s e devolve um `result` por
+ * janela; `audio_processed` é o fim acumulado dela (em segundos). O começo de um
+ * segmento é o fim do anterior. Sem tempo por palavra — o texto de cada janela
+ * é distribuído em linhas do lado do web. Lança em falha.
+ */
+export async function transcribeSegments(wavBuffer, { language } = {}) {
+  const apiKey = (process.env.NVIDIA_API_KEY ?? '').trim();
+  if (!apiKey) throw new Error('NVIDIA_API_KEY ausente.');
+
+  const { grpc, client } = await getClient();
+  const metadata = new grpc.Metadata();
+  metadata.add('function-id', WHISPER_FUNCTION_ID);
+  // O whisper RECUSA código vazio (erro). 'multi' o deixa detectar sozinho.
+  metadata.add('authorization', `Bearer ${apiKey}`);
+
+  const deadline = new Date(Date.now() + TRANSCRIBE_TIMEOUT_MS);
+  const request = {
+    config: {
+      language_code: language && language !== 'multi' ? language : WHISPER_LANGUAGE,
+      max_alternatives: 1,
+      enable_automatic_punctuation: true,
+      audio_channel_count: 1,
+    },
+    audio: wavBuffer,
+  };
+
+  const response = await new Promise((resolve, reject) => {
+    client.Recognize(request, metadata, { deadline }, (err, resp) => {
+      if (err) {
+        reject(new Error(`Riva: ${err.details ?? err.message ?? 'falha'} (${err.code})`));
+        return;
+      }
+      resolve(resp);
+    });
+  });
+
+  const segments = [];
+  let prevEndMs = 0;
+  for (const result of response?.results ?? []) {
+    const text = (result.alternatives?.[0]?.transcript ?? '').trim();
+    // `audio_processed` vem em SEGUNDOS (fim acumulado do segmento).
+    const endMs = Math.round((Number(result.audio_processed) || 0) * 1000);
+    const startMs = prevEndMs;
+    if (endMs > prevEndMs) prevEndMs = endMs;
+    // Segmento sem letra/dígito (ex.: "🎶" de trecho instrumental) não vira
+    // linha, mas ainda AVANÇA o relógio para o próximo começar no lugar certo.
+    if (!/[\p{L}\p{N}]/u.test(text)) continue;
+    segments.push({ text, startMs, endMs: Math.max(endMs, startMs) });
+  }
+  return segments;
 }
 
 /**

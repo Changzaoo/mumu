@@ -1,5 +1,11 @@
 import { describe, expect, it } from 'vitest';
-import { alignLyrics, type AsrWord } from '@/lib/lyrics/align';
+import {
+  alignLinesToSegments,
+  alignLyrics,
+  spreadLinesOverSpan,
+  type AsrSegment,
+  type AsrWord,
+} from '@/lib/lyrics/align';
 
 /** Constrói palavras datadas a partir de "palavra@ms palavra@ms". */
 function words(spec: string): AsrWord[] {
@@ -126,5 +132,58 @@ describe('alignLyrics', () => {
   it('devolve null sem letra ou sem áudio transcrito', () => {
     expect(alignLyrics([], words('a@0'))).toBeNull();
     expect(alignLyrics(['alguma coisa'], [])).toBeNull();
+  });
+});
+
+// ── caminho pt-BR: tempo por LINHA (whisper não dá tempo por palavra) ──────────
+describe('spreadLinesOverSpan', () => {
+  it('a primeira linha começa no início da janela; os tempos crescem', () => {
+    const out = spreadLinesOverSpan(['aaaa', 'bbbb', 'cccc'], 0, 30_000);
+    expect(out[0]!.timeMs).toBe(0);
+    expect(out[1]!.timeMs).toBeGreaterThan(out[0]!.timeMs);
+    expect(out[2]!.timeMs).toBeGreaterThan(out[1]!.timeMs);
+    expect(out[out.length - 1]!.timeMs).toBeLessThan(30_000);
+  });
+
+  it('linha mais longa recebe mais tempo (proporcional ao comprimento)', () => {
+    // "a" curtíssima adianta muito a segunda; a longa empurra a terceira.
+    const out = spreadLinesOverSpan(['a', 'palavra bem comprida aqui', 'fim'], 0, 10_000);
+    expect(out[1]!.timeMs).toBeLessThan(1_000); // a curta quase não consome tempo
+  });
+
+  it('ignora linhas vazias e devolve lista vazia sem nada útil', () => {
+    expect(spreadLinesOverSpan(['   ', ''], 0, 5_000)).toEqual([]);
+  });
+});
+
+describe('alignLinesToSegments', () => {
+  const seg = (text: string, startMs: number, endMs: number): AsrSegment => ({
+    text,
+    startMs,
+    endMs,
+  });
+
+  it('reparte as linhas da letra entre as janelas do whisper, em ordem', () => {
+    const out = alignLinesToSegments(
+      ['linha um', 'linha dois', 'linha tres', 'linha quatro'],
+      [seg('bla bla bla bla', 0, 30_000), seg('ble ble ble ble', 30_000, 60_000)],
+    );
+    expect(out).not.toBeNull();
+    expect(out!).toHaveLength(4);
+    // texto vem da LETRA (confiável), não do ASR
+    expect(out![0]!.text).toBe('linha um');
+    // tempos não-decrescentes e dentro do total
+    for (let i = 1; i < out!.length; i++) {
+      expect(out![i]!.timeMs).toBeGreaterThanOrEqual(out![i - 1]!.timeMs);
+    }
+    // alguma linha cai na segunda janela (>=30s)
+    expect(out!.some((l) => l.timeMs >= 30_000)).toBe(true);
+    // sem tempo por palavra neste caminho
+    expect(out![0]!.words).toBeUndefined();
+  });
+
+  it('descarta segmentos só instrumentais ("🎶") e devolve null sem material', () => {
+    expect(alignLinesToSegments(['a', 'b'], [seg('🎶', 0, 30_000)])).toBeNull();
+    expect(alignLinesToSegments([], [seg('tem texto', 0, 30_000)])).toBeNull();
   });
 });
