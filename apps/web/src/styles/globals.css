@@ -315,9 +315,12 @@
 :root[data-perf='baixo'] .aurora {
   display: none;
 }
-/* Quem pediu menos movimento no sistema não leva a deriva — o fundo fica, parado. */
+/* Quem pediu menos movimento no sistema não leva a deriva — o vidro e a aurora
+   FICAM (translucidez não é movimento), só as animações param. */
 @media (prefers-reduced-motion: reduce) {
-  .aurora-blob {
+  .aurora-blob,
+  .animate-pulse,
+  .animate-spin {
     animation: none;
   }
 }

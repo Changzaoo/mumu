@@ -39,10 +39,13 @@ export function dispositivoFraco(): boolean {
   if (typeof navigator === 'undefined') return false;
   const nav = navigator as NavegadorComPistas;
 
-  // Quem pediu menos animação no sistema não quer efeito nenhum — respeitar
-  // isso é acessibilidade, não otimização, e vem antes de qualquer heurística.
-  if (window.matchMedia?.('(prefers-reduced-motion: reduce)').matches) return true;
-
+  // ANTES, "menos movimento" (prefers-reduced-motion) desligava TODO o efeito —
+  // vidro, desfoque e aurora. Mas isso confunde duas coisas: quem pede menos
+  // movimento quer parar a ANIMAÇÃO, não perder a translucidez (que não se mexe).
+  // O resultado era um PC normal, com "reduzir movimento" ligado, ficando sem
+  // nenhum efeito — "o fundo do player não funciona". Agora a redução de
+  // movimento só CONGELA a aurora (ver globals.css @media reduced-motion); o
+  // vidro continua. A decisão de rebaixar fica só para hardware fraco de fato.
   const nucleos = nav.hardwareConcurrency ?? 0;
   const memoria = nav.deviceMemory ?? 0;
 

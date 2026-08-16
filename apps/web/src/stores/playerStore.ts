@@ -668,8 +668,35 @@ export const usePlayerStore = create<PlayerState>()(
         context: null,
 
         playTrack: (track, context) => {
-          set({ queue: [track], originalQueue: [track], context: context ?? { source: 'queue' } });
+          const ctx = context ?? { source: 'queue' };
+          set({ queue: [track], originalQueue: [track], context: ctx });
           loadIndex(0, true);
+
+          // UMA música sem álbum/playlist → monta uma "rádio" de parecidas em
+          // segundo plano e emenda na fila, pra não parar após uma faixa. Fora
+          // do fluxo de podcast/rádio (lá "próxima" não é uma música parecida).
+          if (ctx.source === 'podcast' || ctx.source === 'radio') return;
+          void import('@/lib/reco/radio')
+            .then(({ construirRadio }) => {
+              const similares = construirRadio(track);
+              if (similares.length === 0) return;
+              const st = get();
+              // Só emenda se o usuário não trocou de faixa/contexto no meio tempo
+              // e a fila ainda é só a semente (não pisar numa fila real).
+              if (st.currentTrack?.id !== track.id || st.queue.length > 1) return;
+              const fila = [track, ...similares];
+              set({ queue: fila, originalQueue: fila });
+              // Conta ao guardião offline o que vem a seguir, pra já ir baixando.
+              void import('@/lib/offline/guardiaoOffline')
+                .then(({ informarContexto }) =>
+                  informarContexto({
+                    aSeguir: similares.slice(0, 8).map((t) => t.id),
+                    recentes: [track.id],
+                  }),
+                )
+                .catch(() => undefined);
+            })
+            .catch(() => undefined);
         },
 
         playQueue: (tracks, startIndex = 0, context) => {
