@@ -72,6 +72,11 @@ export type ChatTier = keyof typeof CHAT_MODELS;
 export const TASK_TIER = {
   verify: 'nano',
   genre: 'nano',
+  // O gênero do ARTISTA é conhecimento de mundo ("quem é o Alee?"), não leitura
+  // de uma faixa — a mesma classe de tarefa que a identidade, e por isso o mesmo
+  // degrau. O `nano` classifica uma música pelo nome; saber a carreira de um
+  // artista pede o modelo que raciocina.
+  artistGenre: 'super',
   cleanTitle: 'nano',
   splitArtists: 'super',
   identity: 'super',

@@ -34,7 +34,9 @@
  */
 import {
   aceitarSugestao,
+  artistasEspalhados,
   EMBED_DIMS,
+  forcarGeneroReal,
   generoDoArtista,
   lerTituloDeVideo,
   limparNomeDeArtista,
@@ -43,6 +45,8 @@ import {
   revisarGeneros as revisarGenerosDeFaixas,
   type FaixaComparavel,
   type FaixaMinima,
+  type Genre,
+  type RevisaoDeGenero,
 } from '@aurial/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
@@ -58,6 +62,7 @@ import {
   dna,
   faxineiro,
   generista,
+  generoRealDoArtista,
   identificador,
   type TrackFacts,
 } from './agents.js';
@@ -353,6 +358,7 @@ async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
   corrigidas += await revisarGeneros(docs); // regra pura, sem IA
   corrigidas += await auditarGeneros(docs); // confere o que já tem categoria
   corrigidas += await preencherGeneros(docs); // preenche quem está sem
+  corrigidas += await forcarGenerosReaisEmDocs(docs); // discografia espalhada sem maioria
   return corrigidas;
 }
 
@@ -592,6 +598,7 @@ async function curarAcervo(): Promise<number> {
   const linhas = await prisma.catalogTrack.findMany();
   if (linhas.length === 0) return 0;
 
+  const linhaById = new Map(linhas.map((l) => [l.id, l]));
   const faixas: FaixaMinima[] = linhas.map((linha) => {
     const track = (linha.data as { track?: LibraryTrack }).track ?? {};
     return {
@@ -601,31 +608,55 @@ async function curarAcervo(): Promise<number> {
       label: typeof track.label === 'string' ? track.label : null,
     };
   });
+  const faixaById = new Map(faixas.map((f) => [f.id, f]));
 
-  // A REVISÃO (regra pura, sem IA) resolve o grosso: esvazia o balde
-  // "Brasileira", padroniza grafia e corrige a faixa que destoa de toda a
-  // discografia do artista. As mesmas regras que o app usa — ver
-  // shared/ai/generoCoerencia.ts.
-  const mudancas = revisarGenerosDeFaixas(faixas);
-  let corrigidas = 0;
-  for (const mudanca of mudancas) {
-    const linha = linhas.find((l) => l.id === mudanca.id);
-    if (!linha) continue;
+  // Grava um gênero no acervo E mantém as cópias em memória (linha e faixa) em
+  // dia, para a passada seguinte enxergar a correção que a anterior já fez.
+  const gravar = async (mudanca: RevisaoDeGenero): Promise<boolean> => {
+    const linha = linhaById.get(mudanca.id);
+    if (!linha) return false;
     const dados = linha.data as { track?: Record<string, unknown> };
-    if (!dados.track) continue;
+    if (!dados.track) return false;
     try {
       await prisma.catalogTrack.update({
         where: { id: mudanca.id },
         data: { data: { ...dados, track: { ...dados.track, genre: mudanca.para } } },
       });
-      corrigidas += 1;
+      dados.track.genre = mudanca.para;
+      const faixa = faixaById.get(mudanca.id);
+      if (faixa) faixa.genre = mudanca.para;
       log.info(
         { faixa: mudanca.id, de: mudanca.de, para: mudanca.para, motivo: mudanca.motivo },
         'categoria do acervo revisada',
       );
+      return true;
     } catch (err) {
       log.warn({ err, faixa: mudanca.id }, 'falha ao revisar categoria do acervo');
+      return false;
     }
+  };
+
+  // A REVISÃO (regra pura, sem IA) resolve o grosso: esvazia o balde
+  // "Brasileira", padroniza grafia e corrige a faixa que destoa de toda a
+  // discografia do artista. As mesmas regras que o app usa — ver
+  // shared/ai/generoCoerencia.ts.
+  let corrigidas = 0;
+  for (const mudanca of revisarGenerosDeFaixas(faixas)) {
+    if (await gravar(mudanca)) corrigidas += 1;
+  }
+
+  // E DEPOIS o gênero real do artista, para a discografia espalhada que a revisão
+  // não alcança — o Alee, trap em dez gêneros. Roda sobre as faixas JÁ revisadas
+  // (mantidas em dia acima), pergunta à IA quem é cada artista espalhado e força
+  // a discografia inteira para o gênero verdadeiro. Ver `revisoesDeGeneroReal`.
+  const amostras = amostrasDeTitulos(
+    linhas.map((linha) => {
+      const track = (linha.data as { track?: LibraryTrack }).track ?? {};
+      return { artista: artistNames(track)[0], titulo: typeof track.title === 'string' ? track.title : '' };
+    }),
+  );
+  for (const mudanca of await revisoesDeGeneroReal(faixas, amostras)) {
+    if (await gravar(mudanca)) corrigidas += 1;
   }
 
   if (corrigidas > 0) log.info({ corrigidas, faixas: linhas.length }, 'acervo curado');
@@ -823,6 +854,104 @@ function faixasMinimas(docs: LibraryDoc[]): FaixaMinima[] {
       label: typeof track.label === 'string' ? track.label : null,
     };
   });
+}
+
+/**
+ * Amostra de títulos por artista principal — a IA usa para desambiguar homônimos
+ * antes de dizer o gênero do artista (há vários "Alee" no catálogo da Apple).
+ */
+function amostrasDeTitulos(
+  tracks: Array<{ artista: string | undefined; titulo: string }>,
+): Map<string, string[]> {
+  const mapa = new Map<string, string[]>();
+  for (const { artista, titulo } of tracks) {
+    if (!artista || !titulo.trim()) continue;
+    const chave = chaveDeArtista(artista);
+    if (!chave) continue;
+    const lista = mapa.get(chave) ?? [];
+    if (lista.length < 8) lista.push(titulo.trim());
+    mapa.set(chave, lista);
+  }
+  return mapa;
+}
+
+/**
+ * PASSO 4 DA CATEGORIA — O GÊNERO REAL DO ARTISTA, para a discografia espalhada.
+ *
+ * As três passadas de `revisarGeneros` apuram o gênero DENTRO da biblioteca:
+ * funcionam quando a atribuição por faixa acerta na maioria e erra num punhado.
+ * Não alcançam o defeito do Alee — 78 faixas em dez gêneros, nenhuma maioria —,
+ * onde a própria discografia virou ruído e não há voto interno para consertar.
+ *
+ * Aqui a evidência vem de FORA: `artistasEspalhados` (regra pura) aponta quem
+ * está espalhado, a IA diz o gênero PRINCIPAL do artista (podendo recusar com
+ * ECLÉTICO/DESCONHECIDO), e `forcarGeneroReal` (regra pura, com as guardas contra
+ * achatar um eclético) devolve as revisões. Racionado por `loteEmVigor()` como as
+ * demais chamadas de IA — e o conjunto ENCOLHE sozinho: assim que um artista é
+ * forçado, a discografia dele fica coerente e ele sai da lista de candidatos.
+ */
+async function revisoesDeGeneroReal(
+  faixas: FaixaMinima[],
+  amostras: Map<string, string[]>,
+): Promise<RevisaoDeGenero[]> {
+  const espalhados = artistasEspalhados(faixas).slice(0, loteEmVigor());
+  if (espalhados.length === 0) return [];
+
+  const veredictos = await Promise.all(
+    espalhados.map((a) =>
+      generoRealDoArtista(a.artista, amostras.get(chaveDeArtista(a.artista)) ?? []).catch(
+        () => null,
+      ),
+    ),
+  );
+
+  const veredicto = new Map<string, Genre>();
+  espalhados.forEach((a, i) => {
+    const g = veredictos[i];
+    if (!g) return;
+    veredicto.set(a.artista, g);
+    log.info(
+      {
+        artista: a.artista,
+        genero: g,
+        distintos: a.distintos,
+        fatia: Math.round(a.fatiaDominante * 100),
+      },
+      'gênero real do artista descoberto',
+    );
+  });
+
+  return forcarGeneroReal(faixas, veredicto);
+}
+
+/** Aplica o gênero real do artista à biblioteca de um usuário (via LibraryDoc). */
+async function forcarGenerosReaisEmDocs(docs: LibraryDoc[]): Promise<number> {
+  const amostras = amostrasDeTitulos(
+    docs.map((doc) => {
+      const track = (doc.data() as LibraryEntry).track ?? {};
+      return {
+        artista: artistNames(track)[0],
+        titulo: typeof track.title === 'string' ? track.title : '',
+      };
+    }),
+  );
+  const revisoes = await revisoesDeGeneroReal(faixasMinimas(docs), amostras);
+  if (revisoes.length === 0) return 0;
+
+  const porId = new Map(docs.map((d) => [d.id, d]));
+  let aplicadas = 0;
+  for (const r of revisoes) {
+    const doc = porId.get(r.id);
+    if (!doc) continue;
+    try {
+      await doc.ref.update({ 'track.genre': r.para });
+      aplicadas += 1;
+      log.info({ doc: doc.id, de: r.de, para: r.para, motivo: r.motivo }, 'categoria revisada');
+    } catch (err) {
+      log.warn({ err, doc: doc.id }, 'falha ao aplicar gênero real do artista');
+    }
+  }
+  return aplicadas;
 }
 
 /**

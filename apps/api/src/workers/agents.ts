@@ -14,9 +14,11 @@
 import {
   agruparDuplicatas,
   AI_BUDGET,
+  artistGenreMessages,
   batchGenreMessages,
   cosineSimilarity,
   type FaixaComparavel,
+  type Genre,
   type GrupoDuplicado,
   genreMessages,
   identityMessages,
@@ -163,6 +165,36 @@ export async function generista(tracks: TrackFacts[]): Promise<(string | null)[]
   }
 
   return out;
+}
+
+// ── Agente 3b: GÊNERO REAL DO ARTISTA — quem ele é, na vida real ────────────
+
+/**
+ * Descobre o gênero PRINCIPAL de um artista — a propriedade dele, não de cada
+ * faixa. Existe para o defeito que a coerência interna não alcança: uma
+ * discografia espalhada por muitos gêneros SEM maioria (o Alee, trap, medido em
+ * dez gêneros no acervo), onde a própria biblioteca virou ruído e não há voto
+ * confiável para consertar.
+ *
+ * Devolve um `Genre` só quando o modelo respondeu um gênero ÚNICO e confiante.
+ * ECLÉTICO (o artista transita mesmo por vários) e DESCONHECIDO (não sabe quem é)
+ * caem para `null` no parser — e `null` NÃO força nada, que é a defesa contra
+ * achatar um artista genuinamente eclético ou chutar um que o modelo não conhece.
+ *
+ * Roda no `super` (conhecimento de mundo, como a identidade). A amostra de
+ * títulos ajuda a desambiguar homônimos antes de o modelo decidir.
+ */
+export async function generoRealDoArtista(
+  artist: string,
+  sampleTitles: string[] = [],
+): Promise<Genre | null> {
+  const nome = artist.trim();
+  if (!nome) return null;
+  const resposta = await nvidiaChat(artistGenreMessages(nome, sampleTitles), {
+    model: modelFor('artistGenre'),
+    maxTokens: AI_BUDGET.genre,
+  });
+  return resposta ? parseGenre(resposta) : null;
 }
 
 // ── Agente 4: DNA — o vetor que faz busca semântica e "parecidas" ──────────

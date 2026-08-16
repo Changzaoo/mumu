@@ -366,6 +366,56 @@ export function genreMessages(title: string, artist?: string): AiMessage[] {
   ];
 }
 
+// ── Agente: o gênero PRINCIPAL de um artista ────────────────────────────────
+
+/**
+ * "Qual o gênero deste ARTISTA?" — a pergunta que conserta a discografia inteira.
+ *
+ * O classificador por faixa (`genreMessages`) decide uma música de cada vez, e
+ * quando ele erra de forma espalhada — o Alee, 78 faixas em dez gêneros, medido
+ * em produção — nenhuma passada de coerência interna salva: a própria
+ * discografia virou ruído, sem maioria para votar. A prova de que Alee é trap
+ * não está na biblioteca; está em quem ele é na vida real. É isso que se pergunta
+ * aqui.
+ *
+ * DUAS SAÍDAS DE FUGA são o que distingue erro de ecletismo, e por isso são
+ * obrigatórias no prompt:
+ *  - ECLÉTICO: o artista TRANSITA por muitos gêneros de verdade (Caetano, Beck).
+ *    Aí a discografia espalhada é fiel, não defeito, e NÃO se deve forçar nada.
+ *  - DESCONHECIDO: o modelo não sabe quem é. Chutar o gênero de um artista que
+ *    ele não conhece é o mesmo erro por faixa, agora atacado no atacado.
+ *
+ * Só um gênero ÚNICO e confiante volta como veredicto; ECLÉTICO e DESCONHECIDO
+ * caem para `null` no parser (não estão na taxonomia) e não forçam coisa alguma.
+ * A amostra de títulos ajuda a desambiguar o artista (há vários "Alee").
+ */
+export function artistGenreMessages(artist: string, sampleTitles: string[] = []): AiMessage[] {
+  const amostra = sampleTitles
+    .map((t) => t.trim())
+    .filter(Boolean)
+    .slice(0, 8);
+  return [
+    {
+      role: 'system',
+      content:
+        'Você diz qual é o gênero PRINCIPAL da carreira de um artista musical — a ' +
+        'propriedade do ARTISTA, não de uma faixa específica. Escolha UM destes: ' +
+        `${GENRE_TAXONOMY.join(', ')}. ` +
+        `Definições que você DEVE seguir: ${GLOSSARIO_DE_GENEROS} ` +
+        'Responda ECLÉTICO se o artista transita de verdade por muitos gêneros diferentes ' +
+        '(não force um só nesse caso). ' +
+        'Responda DESCONHECIDO se você não sabe quem é o artista — é preferível a um chute. ' +
+        'Responda SOMENTE com o gênero (ou ECLÉTICO, ou DESCONHECIDO), sem explicação.',
+    },
+    {
+      role: 'user',
+      content:
+        `Artista: "${artist}"` +
+        (amostra.length ? `\nAlgumas músicas dele: ${amostra.join('; ')}` : ''),
+    },
+  ];
+}
+
 /** Compara rótulos ignorando acento e pontuação: "Hip Hop/Rap" = "Hip-Hop/Rap". */
 function chaveDeGenero(valor: string): string {
   return valor
@@ -401,7 +451,11 @@ export function parseGenre(content: string): Genre | null {
   if (!limpa) return null;
   const chave = chaveDeGenero(limpa);
   if (!chave) return null;
-  // "Não sei" é uma resposta boa: preserva o buraco em vez de inventar.
-  if (/^(desconhecido|naosei|naoconheco|unknown|none|na)$/.test(chave)) return null;
+  // "Não sei" é uma resposta boa: preserva o buraco em vez de inventar. E
+  // "eclético" é a recusa a monogênero do agente de gênero do artista — o artista
+  // transita por muitos gêneros e não deve ser forçado a um só.
+  if (/^(desconhecido|naosei|naoconheco|unknown|none|na|ecletico|eclectic|diverso)$/.test(chave)) {
+    return null;
+  }
   return GENRE_TAXONOMY.find((g) => chaveDeGenero(g) === chave) ?? null;
 }

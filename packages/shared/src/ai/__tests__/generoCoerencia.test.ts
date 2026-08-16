@@ -8,7 +8,13 @@
  * os três primeiros faziam estrago de verdade.
  */
 import { describe, expect, it } from 'vitest';
-import { revisarGeneros, type FaixaMinima } from '../generoCoerencia.js';
+import {
+  artistasEspalhados,
+  forcarGeneroReal,
+  revisarGeneros,
+  type FaixaMinima,
+  type Genre,
+} from '../generoCoerencia.js';
 
 const f = (id: string, genre: string | null, artista: string): FaixaMinima => ({
   id,
@@ -228,5 +234,147 @@ describe('revisarGeneros — o gênero de carreira vem de qualquer creditado', (
       faixaCom('funk', 'Funk', ['MC Qualquer', 'Convidado Gospel']),
     ]);
     expect(mudancas.find((m) => m.id === 'funk')).toBeUndefined();
+  });
+});
+
+/**
+ * O GÊNERO REAL DO ARTISTA — a discografia espalhada que a coerência interna não
+ * alcança.
+ *
+ * O caso do Alee, medido em produção: 78 faixas em dez gêneros, nenhum passando
+ * de 28%. Não há maioria para votar; a própria discografia é ruído. A prova de
+ * que Alee é trap vem de FORA (a IA/o catálogo), entra por `veredicto`, e
+ * `forcarGeneroReal` puxa a discografia inteira. As guardas abaixo são o que
+ * impede isso de achatar um artista genuinamente eclético.
+ */
+describe('forcarGeneroReal — o gênero verdadeiro do artista', () => {
+  const v = (nome: string, genero: Genre): ReadonlyMap<string, Genre> =>
+    new Map([[nome, genero]]);
+
+  it('artista espalhado sem maioria converge para o veredicto', () => {
+    // Alee em pequeno: 4 gêneros empatados, dominante mal chega a 21%.
+    const faixas = [
+      ...varias(3, 't', 'Trap', 'Alee'),
+      ...varias(3, 'p', 'Pop', 'Alee'),
+      ...varias(3, 's', 'Sertanejo', 'Alee'),
+      ...varias(3, 'f', 'Funk', 'Alee'),
+      ...varias(2, 'x', 'Forró', 'Alee'),
+    ];
+    const revs = forcarGeneroReal(faixas, v('Alee', 'Trap'));
+    // As 11 faixas que não eram Trap são puxadas; as 3 que já eram ficam quietas.
+    expect(revs).toHaveLength(11);
+    expect(revs.every((r) => r.para === 'Trap')).toBe(true);
+    expect(revs.every((r) => r.motivo === 'genero-real-do-artista')).toBe(true);
+  });
+
+  it('no vazio de sinal, o veredicto decide até CONTRA o dominante interno', () => {
+    // Dominante Sertanejo, mas só 33% — abaixo do limiar de sinal. Alee é trap.
+    const faixas = [
+      ...varias(4, 's', 'Sertanejo', 'Alee'),
+      ...varias(3, 'p', 'Pop', 'Alee'),
+      ...varias(3, 't', 'Trap', 'Alee'),
+      ...varias(2, 'h', 'Hip-Hop/Rap', 'Alee'),
+    ];
+    const revs = forcarGeneroReal(faixas, v('Alee', 'Trap'));
+    expect(revs).toHaveLength(9); // tudo que não era Trap
+    expect(new Set(revs.map((r) => r.para))).toEqual(new Set(['Trap']));
+  });
+
+  it('maioria fraca que a 2ª passada não alcança (58%) é limpa quando o veredicto CONCORDA', () => {
+    // Brandão85 medido em produção: dominante trap em 58%, longe dos 75% que o
+    // `discrepante` exige. O veredicto concorda com o dominante e limpa a minoria.
+    const faixas = [
+      ...varias(7, 't', 'Trap', 'Brandão85'),
+      ...varias(3, 'p', 'Pop', 'Brandão85'),
+      ...varias(2, 's', 'Sertanejo', 'Brandão85'),
+    ];
+    const revs = forcarGeneroReal(faixas, v('Brandão85', 'Trap'));
+    expect(revs).toHaveLength(5);
+    expect(revs.every((r) => r.para === 'Trap')).toBe(true);
+  });
+
+  it('GUARDA — artista eclético legítimo (sem veredicto) NÃO é forçado', () => {
+    // A IA respondeu ECLÉTICO, que o parser vira `null`: o nome nem entra no mapa
+    // de veredictos, e a discografia diversa fica intacta.
+    const faixas = [
+      ...varias(3, 'm', 'MPB', 'Caetano'),
+      ...varias(3, 'r', 'Rock', 'Caetano'),
+      ...varias(3, 's', 'Samba', 'Caetano'),
+    ];
+    expect(forcarGeneroReal(faixas, new Map())).toEqual([]);
+  });
+
+  it('GUARDA — discografia coerente NÃO é achatada, mesmo com veredicto contrário', () => {
+    // 8 de 9 Trap: a atribuição por faixa está funcionando. Forçar Pop aqui seria
+    // criar o erro que o mecanismo existe para consertar.
+    const faixas = [...varias(8, 't', 'Trap', 'Coerente'), f('p1', 'Pop', 'Coerente')];
+    expect(forcarGeneroReal(faixas, v('Coerente', 'Pop'))).toEqual([]);
+  });
+
+  it('GUARDA — veredicto alucinado (gênero ausente da discografia) é recusado', () => {
+    const faixas = [
+      ...varias(3, 's', 'Sertanejo', 'X'),
+      ...varias(3, 'p', 'Pop', 'X'),
+      ...varias(3, 'f', 'Funk', 'X'),
+    ];
+    // Jazz não aparece em nenhuma faixa do artista: não se inventa gênero do nada.
+    expect(forcarGeneroReal(faixas, v('X', 'Jazz'))).toEqual([]);
+  });
+
+  it('GUARDA — veredicto que contraria uma maioria interna razoável é recusado', () => {
+    // Sertanejo de verdade em 67%: com sinal interno forte, uma opinião externa
+    // que aponta outro gênero é mais provavelmente engano sobre o artista.
+    const faixas = [
+      ...varias(6, 's', 'Sertanejo', 'Sertanejo Real'),
+      ...varias(2, 'p', 'Pop', 'Sertanejo Real'),
+      f('t1', 'Trap', 'Sertanejo Real'),
+    ];
+    expect(forcarGeneroReal(faixas, v('Sertanejo Real', 'Trap'))).toEqual([]);
+  });
+
+  it('discografia pequena demais não é forçada — pode ser azar de amostra', () => {
+    const faixas = [f('a', 'Pop', 'Novato'), f('b', 'Trap', 'Novato'), f('c', 'Funk', 'Novato')];
+    expect(forcarGeneroReal(faixas, v('Novato', 'Trap'))).toEqual([]);
+  });
+});
+
+describe('artistasEspalhados — quem vale perguntar à evidência externa', () => {
+  it('aponta o espalhado e ignora o coerente, o pequeno e o de dois gêneros', () => {
+    const espalhados = artistasEspalhados([
+      // Alee: espalhado de verdade (5 gêneros, dominante ~21%).
+      ...varias(3, 'at', 'Trap', 'Alee'),
+      ...varias(3, 'ap', 'Pop', 'Alee'),
+      ...varias(3, 'as', 'Sertanejo', 'Alee'),
+      ...varias(3, 'af', 'Funk', 'Alee'),
+      ...varias(2, 'ax', 'Forró', 'Alee'),
+      // Coerente: 8 de 9 Trap — maioria forte, a 2ª passada cuida do outlier.
+      ...varias(8, 'ct', 'Trap', 'Coerente'),
+      f('cp', 'Pop', 'Coerente'),
+      // Pouco: só 3 faixas — amostra fraca demais.
+      ...varias(3, 'po', 'Pop', 'Pouco'),
+      // DoisGeneros: 4 e 4, mas só dois gêneros — isso é escolha, não ruído.
+      ...varias(4, 'da', 'Rock', 'DoisGeneros'),
+      ...varias(4, 'db', 'Pop', 'DoisGeneros'),
+    ]);
+    const nomes = espalhados.map((e) => e.artista);
+    expect(nomes).toContain('Alee');
+    expect(nomes).not.toContain('Coerente');
+    expect(nomes).not.toContain('Pouco');
+    expect(nomes).not.toContain('DoisGeneros');
+  });
+
+  it('vem ordenado do mais espalhado (menor maioria) para o menos', () => {
+    const espalhados = artistasEspalhados([
+      // Muito espalhado: dominante ~25%.
+      ...varias(2, 'ma', 'Trap', 'Muito'),
+      ...varias(2, 'mb', 'Pop', 'Muito'),
+      ...varias(2, 'mc', 'Funk', 'Muito'),
+      ...varias(2, 'md', 'Sertanejo', 'Muito'),
+      // Menos espalhado: dominante ~57%.
+      ...varias(4, 'pa', 'Trap', 'Menos'),
+      ...varias(2, 'pb', 'Pop', 'Menos'),
+      f('pc', 'Funk', 'Menos'),
+    ]);
+    expect(espalhados[0]?.artista).toBe('Muito');
   });
 });

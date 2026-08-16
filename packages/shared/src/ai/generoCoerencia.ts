@@ -236,7 +236,14 @@ export type MotivoDaRevisao =
    * não alcança: uma discografia inteira que entrou torta, mas de um selo
    * especializado cujo catálogo prova o gênero. Ver a 4ª passada.
    */
-  | 'genero-do-selo';
+  | 'genero-do-selo'
+  /**
+   * O GÊNERO REAL DO ARTISTA, descoberto por evidência EXTERNA (IA/catálogo)
+   * quando a discografia se espalhou sem maioria e não há voto interno confiável
+   * para consertar — o caso do Alee (trap) esparramado por dez gêneros, nenhum
+   * chegando a 28%. Ver `forcarGeneroReal`.
+   */
+  | 'genero-real-do-artista';
 
 export interface RevisaoDeGenero {
   id: string;
@@ -402,4 +409,208 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
   }
 
   return [...mudancas.values()];
+}
+
+// ── O GÊNERO REAL DO ARTISTA — quando a atribuição por faixa se espalhou toda ──
+//
+// O caso que motivou tudo isto foi medido em produção: o Alee tem 78 faixas no
+// acervo, e elas estão em DEZ gêneros — Sertanejo 22, Pop 20, Hip-Hop 11,
+// Trap 9, Funk 5, Indie 4, Forró 3, Eletrônica 2, MPB 2, Lo-Fi 1. Nenhum passa
+// de 28%. Alee é um artista de TRAP; Sertanejo, Pop e Forró são erro puro.
+//
+// As passadas de `revisarGeneros` não alcançam este defeito, e é importante
+// entender por quê: elas apuram o gênero DENTRO da própria biblioteca. Quando a
+// atribuição por faixa acerta na maioria e erra num punhado, a discografia
+// aponta o certo e o outlier é devolvido (`discrepante`). Mas quando a
+// atribuição erra de forma ESPALHADA — um sorteio diferente por faixa —, a
+// própria discografia é o ruído: não há maioria para votar, e o dominante
+// (Sertanejo, com 28%) está tão errado quanto o resto. A prova não está DENTRO
+// da biblioteca; ela é EXTERNA — quem é o Alee, na vida real.
+//
+// O mecanismo em quatro linhas:
+//   1. `artistasEspalhados` acha o artista cuja discografia está espalhada e sem
+//      maioria forte (≥6 faixas, ≥3 gêneros, dominante < 75%) — o sintoma de que
+//      a atribuição por faixa falhou, e NÃO de ecletismo comum.
+//   2. Quem tem a evidência externa (o worker) pergunta à IA/catálogo o gênero
+//      PRINCIPAL desse artista — uma resposta que pode ser ECLÉTICO ou
+//      DESCONHECIDO, e nesses casos NÃO há veredicto.
+//   3. `forcarGeneroReal` puxa TODAS as faixas do artista para o gênero do
+//      veredicto.
+//   4. As guardas contra achatar um artista genuinamente eclético estão em
+//      `forcarGeneroReal`, cada uma comentada onde age.
+//
+// A descoberta é DERIVADA, não uma lista chumbada: o veredicto entra por
+// argumento, apurado por quem tem rede na mão. Aqui tudo continua função pura.
+
+/** Discografia precisa de tamanho para o espalhamento não ser azar de amostra. */
+const MIN_FAIXAS_ESPALHADO = 6;
+/** Espalhamento de verdade cobre vários gêneros; 2 gêneros é escolha, não ruído. */
+const MIN_GENEROS_ESPALHADO = 3;
+/**
+ * Acima desta fatia a discografia JÁ é coerente e um outlier solto é trabalho da
+ * 2ª passada (`discrepante`, que exige 75%). Só entra aqui o miolo bagunçado —
+ * da ausência de maioria (Alee, 28%) à maioria fraca que a 2ª passada não
+ * alcança (Brandão85, 58%, medido em produção).
+ */
+const MAX_FATIA_ESPALHADO = 0.75;
+/**
+ * Abaixo desta fatia a discografia não aponta NADA de confiável — é o ruído puro
+ * do Alee, 28% no dominante já errado. Só nesse vazio o veredicto externo decide
+ * sozinho, inclusive contra o dominante interno. Ver a guarda 3.
+ */
+const LIMIAR_SEM_SINAL_INTERNO = 0.35;
+
+export interface ArtistaEspalhado {
+  /** Nome do artista principal, como aparece na biblioteca (primeiro visto). */
+  artista: string;
+  /** Faixas dele COM gênero válido. */
+  total: number;
+  /** Quantos gêneros distintos essas faixas ocupam. */
+  distintos: number;
+  /** O gênero mais comum entre elas (pode ser o próprio erro dominante). */
+  dominante: Genre | null;
+  /** Fatia do dominante — quão longe de uma maioria a discografia está. */
+  fatiaDominante: number;
+}
+
+interface AcumuladoArtista {
+  nome: string;
+  contagem: Map<Genre, number>;
+  total: number;
+}
+
+/** Agrupa as faixas categorizadas pelo artista PRINCIPAL (`artistas[0]`). */
+function agruparPorPrincipal(faixas: readonly FaixaMinima[]): Map<string, AcumuladoArtista> {
+  const mapa = new Map<string, AcumuladoArtista>();
+  for (const faixa of faixas) {
+    const principal = faixa.artistas[0];
+    if (!principal) continue;
+    const chave = chaveArtista(principal);
+    if (!chave) continue;
+    const g = generoValido(faixa);
+    if (!g) continue;
+    let acc = mapa.get(chave);
+    if (!acc) {
+      acc = { nome: principal, contagem: new Map(), total: 0 };
+      mapa.set(chave, acc);
+    }
+    acc.contagem.set(g, (acc.contagem.get(g) ?? 0) + 1);
+    acc.total += 1;
+  }
+  return mapa;
+}
+
+function resumir(acc: AcumuladoArtista): ArtistaEspalhado {
+  let dominante: Genre | null = null;
+  let votos = 0;
+  for (const [g, n] of acc.contagem) {
+    if (n > votos) {
+      dominante = g;
+      votos = n;
+    }
+  }
+  return {
+    artista: acc.nome,
+    total: acc.total,
+    distintos: acc.contagem.size,
+    dominante,
+    fatiaDominante: acc.total ? votos / acc.total : 0,
+  };
+}
+
+/** O acumulado tem a cara de uma discografia espalhada (candidata a veredicto)? */
+function estaEspalhado(acc: AcumuladoArtista): boolean {
+  if (acc.total < MIN_FAIXAS_ESPALHADO) return false;
+  if (acc.contagem.size < MIN_GENEROS_ESPALHADO) return false;
+  return resumir(acc).fatiaDominante < MAX_FATIA_ESPALHADO;
+}
+
+/**
+ * Os artistas cuja discografia está espalhada demais para a atribuição por faixa
+ * ser confiável — a lista de quem VALE perguntar a uma evidência externa.
+ *
+ * Função pura de leitura: não muda nada, só aponta os candidatos. Quem tem rede
+ * (o worker) pega esta lista, pergunta à IA/catálogo, e devolve o veredicto para
+ * `forcarGeneroReal`. Ordenado do mais espalhado para o menos — quem tem menos
+ * maioria é o erro mais gritante e deve ser resolvido primeiro quando a cota
+ * raciona quantas perguntas cabem por volta.
+ */
+export function artistasEspalhados(faixas: readonly FaixaMinima[]): ArtistaEspalhado[] {
+  const out: ArtistaEspalhado[] = [];
+  for (const acc of agruparPorPrincipal(faixas).values()) {
+    if (!estaEspalhado(acc)) continue;
+    out.push(resumir(acc));
+  }
+  out.sort((a, b) => a.fatiaDominante - b.fatiaDominante || b.total - a.total);
+  return out;
+}
+
+/**
+ * Aplica o gênero REAL de cada artista às faixas dele — com as guardas contra
+ * achatar quem é eclético de verdade.
+ *
+ * `veredicto` mapeia NOME de artista → gênero confiante, apurado por fora (IA que
+ * respondeu um gênero certo, não ECLÉTICO nem DESCONHECIDO; ou catálogo). A
+ * chave é o nome cru — normalizamos os dois lados aqui, para o worker não
+ * precisar conhecer a forma interna.
+ *
+ * Devolve a lista de revisões (função pura); quem aplica controla o ritmo, como
+ * em `revisarGeneros`.
+ */
+export function forcarGeneroReal(
+  faixas: readonly FaixaMinima[],
+  veredicto: ReadonlyMap<string, Genre>,
+): RevisaoDeGenero[] {
+  if (veredicto.size === 0) return [];
+
+  // Normaliza as chaves do veredicto uma vez.
+  const porChave = new Map<string, Genre>();
+  for (const [nome, g] of veredicto) {
+    const chave = chaveArtista(nome);
+    if (chave) porChave.set(chave, g);
+  }
+
+  const grupos = agruparPorPrincipal(faixas);
+  // Decide, por artista, se o veredicto pode agir — e qual gênero aplicar.
+  const forcar = new Map<string, Genre>();
+  for (const [chave, acc] of grupos) {
+    const alvo = porChave.get(chave);
+    if (!alvo) continue;
+
+    // GUARDA 1 — SÓ EM DISCOGRAFIA ESPALHADA. Um artista coerente com veredicto
+    // não é achatado: se a atribuição por faixa está funcionando (maioria forte),
+    // não há erro para consertar, e forçar seria criar um. Um "pop que fez um
+    // rock" tem 90% Pop e 2 gêneros — nem chega aqui.
+    if (!estaEspalhado(acc)) continue;
+
+    // GUARDA 2 — O GÊNERO FORÇADO PRECISA JÁ EXISTIR NA DISCOGRAFIA. Sem isto,
+    // uma resposta alucinada do modelo ("Alee é Jazz") inventaria um gênero que
+    // o artista nunca tocou. Consolidar um sinal que já está lá é seguro;
+    // introduzir um sinal do nada, não.
+    if (!acc.contagem.has(alvo)) continue;
+
+    // GUARDA 3 — VEREDICTO QUE CONTRARIA UMA MAIORIA INTERNA RAZOÁVEL É RECUSADO.
+    // Quando a própria discografia aponta um dominante com algum peso (≥35%) e o
+    // modelo aponta OUTRO gênero, é mais provável que o modelo se enganou sobre o
+    // artista do que a discografia inteira. Só no vazio de sinal (o Alee, 28% num
+    // dominante já errado) o veredicto externo decide sozinho contra o dominante.
+    // Se o veredicto CONCORDA com o dominante (Brandão85, trap em 58%), ele age
+    // sempre — aí não há contradição, só a limpeza da minoria espalhada.
+    const r = resumir(acc);
+    if (alvo !== r.dominante && r.fatiaDominante >= LIMIAR_SEM_SINAL_INTERNO) continue;
+
+    forcar.set(chave, alvo);
+  }
+
+  const mudancas: RevisaoDeGenero[] = [];
+  for (const faixa of faixas) {
+    const principal = faixa.artistas[0];
+    if (!principal) continue;
+    const alvo = forcar.get(chaveArtista(principal));
+    if (!alvo) continue;
+    const atual = faixa.genre?.trim() || null;
+    if (atual === alvo) continue;
+    mudancas.push({ id: faixa.id, de: atual, para: alvo, motivo: 'genero-real-do-artista' });
+  }
+  return mudancas;
 }
