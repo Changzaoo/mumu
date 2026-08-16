@@ -26,6 +26,7 @@ import {
   seededShuffle,
 } from '@/lib/reco/recommend';
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
+import { generosDoGosto } from '@/lib/reco/generosDoGosto';
 import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
 import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
@@ -194,6 +195,15 @@ export default function HomePage() {
     () => buildAlbumRecommendations(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
     [entries, albums, history, likedCount],
+  );
+
+  // Prateleiras de gênero ordenadas pelo gosto (plays com decaimento + curtidas),
+  // no máximo 8, cada uma com variedade diária e teto por artista. Substitui o
+  // antigo despejo cru "um carrossel por gênero com todas as faixas".
+  const generosGosto = useMemo(
+    () => generosDoGosto(genres, history, localLikes.list()),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+    [entries, history, likedCount],
   );
 
   // Time de agentes (lib/reco/agents): relógio (hora × tipo de dia),
@@ -414,14 +424,15 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {/* Everything organized by genre (AI-assigned). */}
-      {genres.map((g) => (
+      {/* Gêneros ordenados pelo gosto, variados por dia (lib/reco/generosDoGosto). */}
+      {generosGosto.map((g) => (
         <SectionCarousel
           key={g.genre}
           title={g.genre}
+          subtitle={g.motivo}
           href={`/genero/${encodeURIComponent(g.genre)}`}
         >
-          {g.tracks.slice(0, 12).map((track, index) => (
+          {g.tracks.map((track, index) => (
             <MediaCard
               key={track.id}
               title={track.title}
