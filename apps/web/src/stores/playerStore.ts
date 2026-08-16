@@ -965,6 +965,19 @@ export function initPlayerEngine(): void {
 
   const store = usePlayerStore;
 
+  // Destrava o áudio no PRIMEIRO gesto (ver AudioEngine.unlock): sem isto, a
+  // primeira faixa que depende de rede é bloqueada pela política de autoplay
+  // porque o play() acontece depois do await — e "aparece parada" até o 2º
+  // clique. Auto-removível; unlock() é idempotente.
+  if (typeof document !== 'undefined') {
+    const eventos = ['pointerdown', 'keydown', 'touchend'] as const;
+    const destravar = (): void => {
+      audioEngine.unlock();
+      for (const ev of eventos) document.removeEventListener(ev, destravar, true);
+    };
+    for (const ev of eventos) document.addEventListener(ev, destravar, { capture: true });
+  }
+
   // Prefer local copies: the engine asks this resolver before the network.
   // Consults both the on-device local library and the offline-download cache.
   audioEngine.setLocalSourceResolver(

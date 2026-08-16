@@ -136,6 +136,44 @@ export class AudioEngine {
     }
   }
 
+  private audioUnlocked = false;
+
+  /**
+   * DESTRAVA O ÁUDIO NO PRIMEIRO GESTO DO USUÁRIO — o conserto do "clico e
+   * demora / aparece parado / buga".
+   *
+   * A raiz: uma faixa de catálogo ou importada resolve a fonte (cache local,
+   * URL de /stream, nó do Audius) com `await` ANTES de chamar `el.play()`.
+   * Quando o play finalmente acontece, a "ativação por gesto" do clique já
+   * expirou, e o navegador BLOQUEIA a reprodução por política de autoplay — o
+   * motor emite erro 'play', a store marca pausado, e só um SEGUNDO clique toca.
+   *
+   * A cura é padrão de mercado: no PRIMEIRO gesto da sessão, (1) já deixamos o
+   * AudioContext rodando e (2) tocamos um clipe silencioso, o que concede à
+   * página o "engajamento de mídia". A partir daí, `play()` programático —
+   * mesmo depois de um await de rede — não é mais barrado. Idempotente.
+   */
+  unlock = (): void => {
+    if (this.audioUnlocked) return;
+    this.audioUnlocked = true;
+    if (!IS_IOS) {
+      this.ensureGraph();
+      void this.ctx?.resume().catch(() => undefined);
+    }
+    try {
+      const primer = new Audio(
+        'data:audio/wav;base64,UklGRiQAAABXQVZFZm10IBAAAAABAAEAESsAACJWAAACABAAZGF0YQAAAAA=',
+      );
+      primer.volume = 0.0001;
+      void primer
+        .play()
+        .then(() => primer.pause())
+        .catch(() => undefined);
+    } catch {
+      /* sem primer: no pior caso, o comportamento de antes */
+    }
+  };
+
   // ── Web Audio graph ────────────────────────────────────────────
   private ctx: AudioContext | null = null;
   private webAudioFailed = false;
