@@ -98,7 +98,16 @@ export function AppShell() {
           agora são painéis arredondados sobre um fundo mais profundo, com
           calhas entre eles. No celular a moldura some (`p-0`): margem em tela
           pequena é espaço roubado de conteúdo. */}
-      <div className="ambiente-vidro flex h-dvh flex-col overflow-hidden p-0 text-fg md:gap-2 md:p-2">
+      <div className="ambiente-vidro relative isolate flex h-dvh flex-col overflow-hidden p-0 text-fg md:gap-2 md:p-2">
+        {/* Fundo vivo: brilhos que derivam devagar atrás do vidro (globals.css
+            .aurora). Fica atrás de tudo (-z-1); o conteúdo central (main) é
+            opaco e o esconde, então só aparece refratado pelas superfícies de
+            vidro — o fundo do player, do menu e das abas. */}
+        <div className="aurora" aria-hidden="true">
+          <span className="aurora-blob aurora-1" />
+          <span className="aurora-blob aurora-2" />
+          <span className="aurora-blob aurora-3" />
+        </div>
         <div className="flex min-h-0 flex-1 md:gap-2">
           <Sidebar />
 

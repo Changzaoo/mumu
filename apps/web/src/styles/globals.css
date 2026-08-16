@@ -216,9 +216,12 @@
    porque texto e controles precisam continuar legíveis mesmo sobre conteúdo
    claro passando atrás. */
 @utility glass-strong {
-  background: hsl(var(--bg-elevated) / 0.85);
-  backdrop-filter: blur(34px) saturate(180%);
-  -webkit-backdrop-filter: blur(34px) saturate(180%);
+  /* 0.80, não mais opaco: estas barras (player, abas) ficam sobre a moldura e a
+     AURORA — não sobre conteúdo rolando — então podem revelar o fundo vivo sem
+     custo de legibilidade. */
+  background: hsl(var(--bg-elevated) / 0.8);
+  backdrop-filter: blur(34px) saturate(185%);
+  -webkit-backdrop-filter: blur(34px) saturate(185%);
   border: 1px solid hsl(var(--fg) / 0.08);
   box-shadow:
     inset 0 1px 0 0 hsl(0 0% 100% / 0.06),
@@ -237,6 +240,86 @@
   background-image:
     radial-gradient(48rem 34rem at 10% -10%, hsl(var(--info) / 0.08), transparent 62%),
     radial-gradient(42rem 30rem at 110% 0%, hsl(var(--info) / 0.05), transparent 58%);
+}
+
+/* ──────────────────────────────────────────────────────────────
+   AURORA — o fundo VIVO atrás do vidro.
+
+   Três brilhos coloridos que derivam devagar (25–38s, ida e volta suave). Como
+   ficam ATRÁS das superfícies de vidro, o backdrop-filter do glass os borra e
+   refrata: o fundo do player deixa de ser preto morto e vira uma parede que
+   respira, no ritmo calmo que a Apple usa nos papéis dinâmicos.
+
+   Só `transform` (composto na GPU, sem relayout/repaint do fundo em si). O custo
+   real é o glass re-borrar por quadro — por isso a aurora SOME em aparelho fraco
+   e congela quando o sistema pede menos movimento. */
+.aurora {
+  position: absolute;
+  inset: 0;
+  z-index: -1;
+  overflow: hidden;
+  pointer-events: none;
+}
+.aurora-blob {
+  position: absolute;
+  width: 46rem;
+  height: 46rem;
+  border-radius: 9999px;
+  filter: blur(20px);
+  will-change: transform;
+  opacity: 0.65;
+}
+.aurora-1 {
+  top: -14rem;
+  left: -10rem;
+  background: radial-gradient(circle at center, hsl(var(--info) / 0.5), transparent 65%);
+  animation: aurora-deriva-1 27s ease-in-out infinite;
+}
+.aurora-2 {
+  bottom: -16rem;
+  right: -8rem;
+  background: radial-gradient(circle at center, hsl(266 90% 62% / 0.42), transparent 65%);
+  animation: aurora-deriva-2 33s ease-in-out infinite;
+}
+.aurora-3 {
+  top: 20%;
+  right: 12%;
+  width: 34rem;
+  height: 34rem;
+  background: radial-gradient(circle at center, hsl(190 95% 55% / 0.32), transparent 66%);
+  animation: aurora-deriva-1 38s ease-in-out infinite reverse;
+}
+@keyframes aurora-deriva-1 {
+  0% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+  50% {
+    transform: translate3d(9%, 7%, 0) scale(1.14);
+  }
+  100% {
+    transform: translate3d(-6%, -4%, 0) scale(1);
+  }
+}
+@keyframes aurora-deriva-2 {
+  0% {
+    transform: translate3d(5%, 3%, 0) scale(1.1);
+  }
+  50% {
+    transform: translate3d(-9%, -7%, 0) scale(1);
+  }
+  100% {
+    transform: translate3d(5%, 3%, 0) scale(1.1);
+  }
+}
+/* Aparelho fraco: fundo vivo é a primeira coisa que sai. */
+:root[data-perf='baixo'] .aurora {
+  display: none;
+}
+/* Quem pediu menos movimento no sistema não leva a deriva — o fundo fica, parado. */
+@media (prefers-reduced-motion: reduce) {
+  .aurora-blob {
+    animation: none;
+  }
 }
 
 /* ──────────────────────────────────────────────────────────────
