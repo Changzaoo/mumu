@@ -151,18 +151,21 @@ export function NowPlaying() {
           />
 
           {/* Fundo: a CAPA da música borrada, sempre — como nos players de
-              celular. O scale-110 esconde a borda transparente que o blur deixa,
-              e o scrim por cima garante a legibilidade do texto sobre capa clara.
-              Em aparelho fraco o guard de perf tira só o blur (a capa fica). */}
+              celular. scale-125 esconde a borda transparente do blur; opacidade
+              alta pra ler claramente como "a capa" mesmo numa tela grande de PC,
+              onde o conteúdo central fica pequeno no meio de muita margem. O
+              scrim é um degradê (mais forte embaixo, onde ficam os controles)
+              para a legibilidade. Em aparelho fraco o guard de perf tira só o
+              blur (a capa continua). */}
           {track.coverUrl && (
             <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <img
                 src={track.coverUrl}
                 alt=""
-                className="size-full scale-110 object-cover opacity-45 blur-2xl"
-                style={{ animation: 'kenburns 22s ease-in-out infinite' }}
+                className="size-full scale-125 object-cover opacity-70 blur-3xl"
+                style={{ animation: 'kenburns 24s ease-in-out infinite' }}
               />
-              <div className="absolute inset-0 bg-bg/55" />
+              <div className="absolute inset-0 bg-gradient-to-b from-bg/35 via-bg/45 to-bg/80" />
             </div>
           )}
 
