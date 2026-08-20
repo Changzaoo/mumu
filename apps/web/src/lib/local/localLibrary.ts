@@ -1418,7 +1418,7 @@ export function albumKeyForTrack(track: TrackDto): string | null {
  */
 function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlbum[] {
   const byKey = new Map<string, LocalAlbum>();
-  for (const entry of entries) {
+  for (const entry of collapseForDisplay(entries)) {
     const t = entry.track;
     const title = t.album?.title?.trim();
     if (!title) continue;
@@ -1486,7 +1486,7 @@ export function albumByKey(key: string): LocalAlbum | null {
 export function singles(): TrackDto[] {
   const inAlbum = new Set<string>();
   for (const album of albumGroups()) for (const t of album.tracks) inAlbum.add(t.id);
-  return read()
+  return collapseForDisplay(read())
     .map((e) => e.track)
     .filter((t) => !inAlbum.has(t.id));
 }
@@ -1504,7 +1504,7 @@ export function artists(): LocalArtist[] {
 
 function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[] {
   const byName = new Map<string, LocalArtist>();
-  for (const entry of entries) {
+  for (const entry of collapseForDisplay(entries)) {
     for (const artist of entry.track.artists) {
       const name = artist.name?.trim();
       if (!name || name === 'Desconhecido') continue;
@@ -1528,7 +1528,7 @@ function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[
 /** All tracks credited to an artist (by name). */
 export function artistTracks(name: string): TrackDto[] {
   const key = normName(name);
-  return read()
+  return collapseForDisplay(read())
     .map((e) => e.track)
     .filter((t) => t.artists.some((a) => normName(a.name) === key));
 }
@@ -1558,7 +1558,7 @@ export function genreGroups(): LocalGenre[] {
 
 function computeGenreGroups(entries: readonly LibraryEntry[] = read()): LocalGenre[] {
   const byKey = new Map<string, LocalGenre>();
-  for (const entry of entries) {
+  for (const entry of collapseForDisplay(entries)) {
     const g = entry.track.genre?.trim();
     if (!g) continue;
     const key = g.toLowerCase();
@@ -1576,7 +1576,7 @@ function computeGenreGroups(entries: readonly LibraryEntry[] = read()): LocalGen
 /** All library tracks of a given genre (by name, case-insensitive). */
 export function genreTracks(genre: string): TrackDto[] {
   const key = genre.trim().toLowerCase();
-  return read()
+  return collapseForDisplay(read())
     .map((e) => e.track)
     .filter((t) => (t.genre ?? '').trim().toLowerCase() === key);
 }
@@ -1588,7 +1588,7 @@ export function labelGroups(): LocalLabel[] {
 
 function computeLabelGroups(entries: readonly LibraryEntry[] = read()): LocalLabel[] {
   const byKey = new Map<string, LocalLabel>();
-  for (const entry of entries) {
+  for (const entry of collapseForDisplay(entries)) {
     const name = entry.track.label?.trim();
     if (!name) continue;
     const key = normName(name);
@@ -1608,7 +1608,7 @@ function computeLabelGroups(entries: readonly LibraryEntry[] = read()): LocalLab
 export function labelTracks(label: string): TrackDto[] {
   const key = normName(label);
   if (!key) return [];
-  return read()
+  return collapseForDisplay(read())
     .map((e) => e.track)
     .filter((t) => normName(t.label?.trim() ?? '') === key);
 }
@@ -1717,6 +1717,58 @@ function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
   const sb = score(b);
   if (sa !== sb) return sa > sb ? a : b;
   return (a.addedAt || '') <= (b.addedAt || '') ? a : b; // older wins ties
+}
+
+/**
+ * Mesma lógica de `dedupeLibrary` (chave por música + 2ª passada título/duração
+ * com um lado anônimo), mas SEM APAGAR NADA — só decide quem representa o grupo
+ * na tela. Existe porque a limpeza de verdade roda tarde: é o quinto de seis
+ * passes seriais no `requestIdleCallback` do boot, cada um percorrendo a
+ * biblioteca inteira com pausas entre itens (varredura de capas, catálogo,
+ * upload, reprocessamento). Numa biblioteca grande isso pode levar minutos ou
+ * nunca terminar a tempo (o idle nunca sobra com música tocando + import na
+ * fila), e o usuário via "faixa duplicada pra caralho" a sessão inteira mesmo
+ * com o armazenamento correto por baixo. Toda tela que lista faixas (álbuns,
+ * artistas, gêneros, selos, avulsas) passa por aqui antes de renderizar.
+ */
+function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
+  const porChave = new Map<string, LibraryEntry>();
+  const ordem: string[] = [];
+  for (const e of entries) {
+    // Faixa sem chave segura (título genérico) nunca colide com nada — cada
+    // uma fica com a própria chave e nenhuma corre risco de sumir da tela.
+    const key = dedupeKey(e.track) ?? `id:${e.track.id}`;
+    const prev = porChave.get(key);
+    if (!prev) {
+      porChave.set(key, e);
+      ordem.push(key);
+      continue;
+    }
+    porChave.set(key, preferredEntry(prev, e));
+  }
+
+  // 2ª passada: mesma música, um lado sem artista — ver o comentário irmão em
+  // `dedupeLibrary`. Aqui só decide qual chave "vence" a exibição; a outra
+  // some da lista renderizada, mas continua intacta no registro.
+  const porTituloDuracao = new Map<string, string>();
+  for (const key of [...ordem]) {
+    const e = porChave.get(key);
+    if (!e) continue;
+    const td = tituloDuracaoKey(e.track);
+    if (!td) continue;
+    const outraChave = porTituloDuracao.get(td);
+    if (!outraChave) {
+      porTituloDuracao.set(td, key);
+      continue;
+    }
+    const outra = porChave.get(outraChave);
+    if (!outra) continue;
+    if (artistaEhDesconhecido(outra.track) === artistaEhDesconhecido(e.track)) continue;
+    porChave.set(outraChave, preferredEntry(outra, e));
+    porChave.delete(key);
+  }
+
+  return ordem.filter((k) => porChave.has(k)).map((k) => porChave.get(k) as LibraryEntry);
 }
 
 /**
@@ -2092,11 +2144,22 @@ function scheduleBackgroundCuration(): void {
   const run = (): void =>
     void (async () => {
       marcarBoot('curadoria-inicio');
-      // CAPAS PRIMEIRO. Antes esta era a ÚLTIMA de cinco varreduras em série, e
+      // DEDUP PRIMEIRO. As telas já colapsam duplicata na exibição
+      // (`collapseForDisplay`), mas isso não libera espaço nem limpa o
+      // registro — e este passe era o QUINTO de seis, atrás de quatro
+      // varreduras que percorrem a biblioteca inteira faixa a faixa com pausa
+      // entre itens (capas, catálogo, upload, reprocessamento). Numa
+      // biblioteca grande a limpeza de verdade podia nunca chegar a rodar
+      // numa sessão — o registro carregava peso morto (e a cota de
+      // armazenamento) indefinidamente. Não depende de nada das varreduras
+      // seguintes: só do registro, já carregado antes de `hydrate` chamar
+      // esta função.
+      await dedupeLibrary().catch(() => 0);
+      // CAPAS DEPOIS. Antes esta era a última de cinco varreduras em série, e
       // a primeira delas (backfillRemote) percorre a biblioteca inteira fazendo
       // upload faixa a faixa com pausa entre elas — numa biblioteca grande, ou
       // com o importador fora do ar, a vez das capas simplesmente nunca chegava.
-      // É o que o usuário VÊ na tela; vem na frente.
+      // É o que o usuário VÊ na tela; vem na frente das demais.
       // `repairMissingAudio` NÃO roda aqui — ver a própria função. Em resumo:
       // no celular toda faixa está "sem áudio local" por design, então no boot
       // ele saía baixando a biblioteca inteira para um aparelho que deveria
@@ -2112,7 +2175,7 @@ function scheduleBackgroundCuration(): void {
       // calada as cinco varreduras seguintes — inclusive a 2ª passada de capas.
       await backfillRemote().catch(() => undefined);
       await reprocessExisting().catch(() => undefined);
-      await dedupeLibrary().catch(() => 0); // collapse same-song duplicates
+      await dedupeLibrary().catch(() => 0); // 2ª passada: pega o que colidiu durante as varreduras
       await redriveFromSource().catch(() => false); // real metadata from the source
       await backfillCovers().catch(() => undefined); // 2ª passada: nomes já corrigidos
       await auditAttributions().catch(() => undefined); // AI spot-checks a few
