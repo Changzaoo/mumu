@@ -22,6 +22,19 @@ import type { ArtistDto, TrackDto } from '@aurial/shared';
 const APP_NAME = 'Aurial';
 const HOST_KEY = 'aurial:audius-host';
 const FALLBACK_HOST = 'https://discoveryprovider.audius.co';
+// Nó de descoberta morto pode não devolver erro nenhum — só pendurar a conexão
+// sem soltar bytes. Sem teto aqui, `fetch` nunca rejeita, o watchdog de rede
+// não existe para chamadas de catálogo, e a UI trava esperando para sempre em
+// vez de rotacionar para outro nó. 8s cobre um nó lento de verdade sem deixar
+// quem clica numa faixa morta esperando eternamente por um "indisponível".
+const FETCH_TIMEOUT_MS = 8_000;
+
+/** `fetch` com teto — nó de descoberta que só pendura vira falha, não trava. */
+function fetchWithTimeout(url: string, ms = FETCH_TIMEOUT_MS): Promise<Response> {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), ms);
+  return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
+}
 
 export class CatalogError extends Error {
   constructor(message: string, cause?: unknown) {
@@ -58,7 +71,7 @@ export async function getHost(): Promise<string> {
   }
 
   try {
-    const res = await fetch('https://api.audius.co');
+    const res = await fetchWithTimeout('https://api.audius.co');
     if (res.ok) {
       const body = (await res.json()) as { data?: string[] };
       const host = body.data?.[0];
@@ -90,7 +103,7 @@ let hostListPromise: Promise<string[]> | null = null;
 function fetchHostList(): Promise<string[]> {
   return (hostListPromise ??= (async () => {
     try {
-      const res = await fetch('https://api.audius.co');
+      const res = await fetchWithTimeout('https://api.audius.co');
       if (!res.ok) return [];
       const body = (await res.json()) as { data?: string[] };
       return (body.data ?? []).map((h) => h.replace(/\/$/, ''));
@@ -133,7 +146,7 @@ async function fetchData<T>(path: string, params: QueryParams = {}): Promise<T> 
 
   let res: Response;
   try {
-    res = await fetch(url.toString());
+    res = await fetchWithTimeout(url.toString());
   } catch (cause) {
     throw new CatalogError('Não foi possível conectar ao catálogo de músicas.', cause);
   }
