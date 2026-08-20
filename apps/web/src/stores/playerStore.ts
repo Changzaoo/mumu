@@ -182,12 +182,34 @@ export function setOnPlayRecorded(callback: ((input: RecordPlayInput) => void) |
 // IndexedDB bloqueado), a promise memoizada NÃO pode ficar rejeitada para
 // sempre — todo load aguarda por ela, e uma rejeição eterna mataria TODA a
 // reprodução em silêncio.
-let localAudioReadyPromise: Promise<unknown> | null = null;
+// Hidratadas em SEPARADO (não mais um Promise.all único) porque a biblioteca
+// local sozinha já mede até ~3s de boot com uma coleção grande (ver o
+// comentário em cima de `indexarAudioLocal`, em localLibrary.ts) — e ISSO
+// segurava toda faixa nova, mesmo faixas de catálogo/Audius que jamais têm
+// entrada na biblioteca local. Era uma fatia real do "demora demais" do
+// usuário: 3s de espera à toa antes de sequer pedir a URL de stream.
+let hydrateLibraryPromise: Promise<unknown> | null = null;
+function localLibraryReady(): Promise<unknown> {
+  return (hydrateLibraryPromise ??= hydrateLocalLibrary().catch(() => undefined));
+}
+let hydrateDownloadsPromise: Promise<unknown> | null = null;
+function downloadsReady(): Promise<unknown> {
+  return (hydrateDownloadsPromise ??= hydrateDownloads().catch(() => undefined));
+}
+/** Ambas — usado só no pré-aquecimento do boot, fora do caminho de carga. */
 function localAudioReady(): Promise<unknown> {
-  return (localAudioReadyPromise ??= Promise.all([
-    hydrateLocalLibrary().catch(() => undefined),
-    hydrateDownloads().catch(() => undefined),
-  ]));
+  return Promise.all([localLibraryReady(), downloadsReady()]);
+}
+/**
+ * O que este ID PODE precisar do cofre local antes de tocar: a biblioteca
+ * local só guarda faixas `local:` (ver `localLibrary.ts`), então esperar por
+ * ela para uma faixa de catálogo é espera pura. Downloads offline valem para
+ * qualquer faixa — esses sempre esperamos.
+ */
+function localSourcesReady(trackId: string): Promise<unknown> {
+  return trackId.startsWith('local:')
+    ? Promise.all([localLibraryReady(), downloadsReady()])
+    : downloadsReady();
 }
 
 // Per-loaded-track flags (reset on every load).
@@ -283,10 +305,22 @@ const MAX_FALLBACK_ATTEMPTS = 3;
 // faixa genuinamente quebrada é chato; desistir de uma que ia tocar é perder a
 // música. Quem realmente não existe responde 404 na hora e nem chega aqui.
 const LOAD_WATCHDOG_MS = 60_000;
+// Faixas de catálogo (Audius) e streams diretos NÃO passam pela reextração do
+// cofre — quem não respondeu em ~18s está morta de verdade (host caído, CORS
+// bloqueado sem nem gerar 'error'), não "reconstruindo". Usar os mesmos 60s
+// do cofre nelas era a própria causa da demora: o spinner girava um minuto
+// inteiro antes de sequer tentar o próximo nó do Audius.
+const CATALOG_LOAD_WATCHDOG_MS = 18_000;
 // Depois que a faixa JÁ tocou, checagens mais curtas detectam travamento no
 // meio (o elemento emite 'waiting' e nunca mais volta) — antes disso o player
 // ficava eternamente no spinner sem nenhum erro.
 const STALL_CHECK_MS = 10_000;
+
+/** Só faixa local passa pela reextração de 20-25s do cofre — dá o teto de
+ *  60s só a ela. Qualquer outra fonte usa o teto curto. */
+function initialWatchdogMs(trackId: string): number {
+  return trackId.startsWith('local:') ? LOAD_WATCHDOG_MS : CATALOG_LOAD_WATCHDOG_MS;
+}
 let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
 let lastWatchdogPos = -1;
 let stallStrikes = 0;
@@ -447,7 +481,7 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
     isBuffering: true,
   }));
   audioEngine.load(resolved, { autoplay: s.isPlaying });
-  armLoadWatchdog(resolved.id);
+  armLoadWatchdog(resolved.id, initialWatchdogMs(resolved.id));
   return true;
 }
 
@@ -498,7 +532,7 @@ function armLoadWatchdog(trackId: string, delayMs = LOAD_WATCHDOG_MS): void {
 
     // ── ainda não tocou: vigia CARREGAMENTO pendurado ──────────────
     if (audioEngine.getBufferedEnd() > 0) {
-      armLoadWatchdog(trackId); // dados chegando — só está lento, espera mais
+      armLoadWatchdog(trackId, initialWatchdogMs(trackId)); // dados chegando — só está lento, espera mais
       return;
     }
     void (async () => {
@@ -600,7 +634,7 @@ export const usePlayerStore = create<PlayerState>()(
         // rebuilding, and a downloaded track must NEVER go to the server.
         set({ isBuffering: true });
         void (async () => {
-          await localAudioReady();
+          await localSourcesReady(track.id);
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
 
           // `ensureLocalAudioUrl` abre o arquivo AGORA se ele existir. O boot
@@ -626,7 +660,7 @@ export const usePlayerStore = create<PlayerState>()(
           if (track.streamUrl || !track.id.startsWith('local:')) {
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();
-            armLoadWatchdog(track.id);
+            armLoadWatchdog(track.id, initialWatchdogMs(track.id));
             return;
           }
 
@@ -642,7 +676,7 @@ export const usePlayerStore = create<PlayerState>()(
           }
           audioEngine.load(resolved, { autoplay, crossfadeSeconds });
           applyEngineSettings();
-          armLoadWatchdog(track.id);
+          armLoadWatchdog(track.id, initialWatchdogMs(track.id)); // sempre local: aqui — teto de 60s
         })().catch(() => {
           // Nada aqui pode deixar a faixa "carregando" para sempre.
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
