@@ -15,7 +15,11 @@ import { subscribeAuth } from '@/lib/firebase';
 import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
-import { hydrateDownloads, localAudioUrl } from '@/features/downloads/downloadManager';
+import {
+  hydrateDownloads,
+  localAudioUrl,
+  rebaixarAoFalhar,
+} from '@/features/downloads/downloadManager';
 import {
   ensureLocalAudioUrl,
   hasLocalAudio,
@@ -482,6 +486,10 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
   }));
   audioEngine.load(resolved, { autoplay: s.isPlaying });
   armLoadWatchdog(resolved.id, initialWatchdogMs(resolved.id));
+  // A fonte antiga apodreceu, mas esta acabou de funcionar: baixa uma cópia
+  // LOCAL agora para a próxima reprodução vir do disco e nunca mais tropeçar no
+  // link morto. Melhor esforço, em segundo plano — não atrapalha o play atual.
+  rebaixarAoFalhar(resolved);
   return true;
 }
 

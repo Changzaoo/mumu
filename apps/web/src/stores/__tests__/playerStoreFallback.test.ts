@@ -77,6 +77,7 @@ vi.mock('@/lib/local/localLibrary', () => ({
 vi.mock('@/features/downloads/downloadManager', () => ({
   hydrateDownloads: vi.fn(() => Promise.resolve()),
   localAudioUrl: vi.fn(() => null),
+  rebaixarAoFalhar: vi.fn(),
 }));
 
 const buildStreamUrl = vi.fn<(url: string) => Promise<string | null>>(() => Promise.resolve(null));

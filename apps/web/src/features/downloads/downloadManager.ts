@@ -162,6 +162,39 @@ async function fetchAudioBlob(
   }
 }
 
+/** Faixas já mandadas rebaixar por ERRO DE REPRODUÇÃO nesta sessão — evita
+ *  refazer o pedido a cada evento de erro repetido da mesma faixa. */
+const rebaixaPorErro = new Set<string>();
+
+/**
+ * REBAIXAR AO FALHAR.
+ *
+ * Quando uma fonte remota morre no meio da reprodução, o player já rotaciona
+ * para uma fonte viva na hora para a música não travar (ver
+ * `attemptSourceFallback` no playerStore). Mas isso conserta só ESTA vez: a
+ * próxima reprodução cairia no mesmo link podre e daria o mesmo erro.
+ *
+ * Aqui aproveitamos a fonte fresca que ACABOU de funcionar para baixar uma
+ * cópia LOCAL da faixa. Da próxima vez ela toca do disco — o link morto nunca
+ * mais é tentado, e de quebra a faixa passa a existir offline. Melhor esforço:
+ * sem rede, sem fonte, já baixada ou já em download, não faz nada; falha de
+ * download cai no `scheduleAutoRetry` normal, com o teto de tentativas de lá.
+ *
+ * `track` deve trazer uma fonte VIVA (fresca), não a URL que acabou de morrer —
+ * quem chama resolve isso antes (token novo / nó de descoberta vivo).
+ */
+export function rebaixarAoFalhar(track: TrackDto): void {
+  if (!cacheSupported()) return;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+  const url = track.downloadUrl ?? track.streamUrl;
+  if (!url) return;
+  if (isDownloaded(track.id) || inFlight.has(track.id)) return;
+  if (rebaixaPorErro.has(track.id)) return;
+  rebaixaPorErro.add(track.id);
+  const alvo = track.downloadUrl ? track : { ...track, downloadUrl: url };
+  void downloadTrack(alvo).catch(() => undefined); // já emite estado e reagenda
+}
+
 export async function downloadTrack(track: TrackDto): Promise<void> {
   const downloadUrl = track.downloadUrl;
   if (!downloadUrl || !cacheSupported()) return;
@@ -291,6 +324,9 @@ export async function removeDownloadedTrack(trackId: string): Promise<void> {
   if (timer) clearTimeout(timer);
   autoRetryTimers.delete(trackId);
   autoRetries.delete(trackId);
+  // Libera o "rebaixar ao falhar" desta faixa: se ela tornar a dar erro depois
+  // de removida, pode baixar de novo em vez de ficar travada pela marca antiga.
+  rebaixaPorErro.delete(trackId);
   emit();
 }
 
