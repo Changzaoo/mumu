@@ -57,14 +57,91 @@ export function dispositivoFraco(): boolean {
   return false;
 }
 
+/** Chave onde guardamos "este aparelho já provou que trava". */
+const CHAVE_REBAIXADO = 'aurial:perf-baixo';
+
+/** Aplica o modo leve agora e lembra dele para os próximos boots. */
+function rebaixar(): void {
+  if (typeof document === 'undefined') return;
+  if (document.documentElement.getAttribute('data-perf') === 'baixo') return;
+  document.documentElement.setAttribute('data-perf', 'baixo');
+  try {
+    window.localStorage.setItem(CHAVE_REBAIXADO, '1');
+  } catch {
+    /* quota — tudo bem, no máximo re-decide no próximo boot */
+  }
+}
+
 /**
  * Carimba o resultado no `<html>` para o CSS decidir sozinho.
  *
- * Chamado uma vez no boot. Reavaliar depois não faria sentido: núcleo e memória
- * não mudam, e trocar o visual no meio da sessão chamaria mais atenção que o
- * travamento que se quer evitar.
+ * Três fontes decidem, nesta ordem: (1) a MEMÓRIA de sessões passadas — se este
+ * aparelho já travou uma vez, começa leve e nem tenta o vidro de novo; (2) a
+ * heurística de hardware (núcleos/memória); (3) o monitor de quadros, que roda
+ * depois e pega o que os dois primeiros não viram.
  */
 export function marcarDesempenho(): void {
   if (typeof document === 'undefined') return;
-  if (dispositivoFraco()) document.documentElement.setAttribute('data-perf', 'baixo');
+  let lembrado = false;
+  try {
+    lembrado = window.localStorage.getItem(CHAVE_REBAIXADO) === '1';
+  } catch {
+    /* sem localStorage: cai na heurística */
+  }
+  if (lembrado || dispositivoFraco()) rebaixar();
+}
+
+/**
+ * O QUE A HEURÍSTICA NÃO VÊ: o travamento de verdade.
+ *
+ * Núcleos e memória são um palpite grosseiro. Um celular com 4 núcleos e 4 GB
+ * passa no teste e mesmo assim engasga rolando a lista, porque o custo do
+ * `backdrop-filter` é da GPU/compositor, não da CPU — e disso o navegador não
+ * conta nada. O jeito honesto de saber se trava é MEDIR os quadros.
+ *
+ * Um observador de `requestAnimationFrame` acompanha o intervalo entre quadros.
+ * Enquanto está tudo fluido, não faz nada. Se acumular quadros longos de sobra
+ * numa janela curta — sinal de rolagem engasgando, não de uma pausa isolada de
+ * GC — rebaixa na hora e PARA de medir: a decisão é de mão única (nunca volta a
+ * subir no meio da sessão, que seria pior que o travamento) e fica lembrada para
+ * o próximo boot já nascer leve.
+ *
+ * Só roda em aparelho ainda NÃO rebaixado — quem já está no modo leve não tem o
+ * que medir.
+ */
+export function monitorarDesempenho(): void {
+  if (typeof document === 'undefined' || typeof requestAnimationFrame === 'undefined') return;
+  if (document.documentElement.getAttribute('data-perf') === 'baixo') return;
+
+  // Um quadro a 60fps dura ~16,7ms. Acima de 50ms (menos de ~20fps) é engasgo
+  // visível; abaixo disso pode ser só a tela em 30/45Hz ou uma variação boba.
+  const QUADRO_RUIM = 50;
+  // Quantos engasgos numa mesma janela deslizante bastam para condenar. Um só é
+  // ruído (GC, uma imagem grande decodificando); um punhado seguido é travamento.
+  const LIMITE = 8;
+  // Tamanho da janela: engasgos velhos "expiram" para não somar uma pausa de
+  // agora com outra de dez segundos atrás.
+  const JANELA_MS = 4_000;
+
+  let anterior = performance.now();
+  let ruins: number[] = [];
+
+  const passo = (agora: number): void => {
+    const delta = agora - anterior;
+    anterior = agora;
+
+    // Só conta enquanto a aba está visível: aba em segundo plano tem rAF
+    // estrangulado de propósito, e isso não é o usuário vendo travamento.
+    if (!document.hidden && delta > QUADRO_RUIM) {
+      ruins.push(agora);
+      ruins = ruins.filter((t) => agora - t <= JANELA_MS);
+      if (ruins.length >= LIMITE) {
+        rebaixar();
+        return; // condenado: para de medir
+      }
+    }
+    requestAnimationFrame(passo);
+  };
+
+  requestAnimationFrame(passo);
 }

@@ -40,16 +40,21 @@ export function SpectrumVisualizer({ className, barCount = 56 }: SpectrumVisuali
       canvas.height = Math.round(height * dpr);
       ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
     };
+    // Mudar o tamanho do canvas o apaga. Enquanto tocando, o próximo quadro do
+    // laço redesenha; parado, não há laço, então repintamos a baseline aqui.
+    const onResize = (): void => {
+      resize();
+      if (!isPlaying) paintFrame();
+    };
     resize();
-    const observer = new ResizeObserver(resize);
+    const observer = new ResizeObserver(onResize);
     observer.observe(canvas);
 
     const accent = readToken('--accent');
     const analyser = audioEngine.analyser;
     const bins = analyser ? new Uint8Array(analyser.frequencyBinCount) : null;
 
-    const draw = (): void => {
-      raf = requestAnimationFrame(draw);
+    const paintFrame = (): void => {
       if (width === 0 || document.hidden) return;
       ctx.clearRect(0, 0, width, height);
 
@@ -86,6 +91,25 @@ export function SpectrumVisualizer({ className, barCount = 56 }: SpectrumVisuali
         }
         ctx.globalAlpha = 1;
       }
+    };
+
+    // Parado, a baseline é ESTÁTICA: pinta uma vez e devolve a GPU ao sistema.
+    // Manter um rAF a 60fps só para redesenhar as mesmas barrinhas era custo
+    // permanente pelo tempo todo em que a música não está tocando — que é a
+    // maior parte do tempo. O efeito re-roda quando `isPlaying` muda, então
+    // basta voltar a agendar o laço quando de fato há som para animar.
+    if (!isPlaying) {
+      // Espera um quadro para o canvas ter tamanho após o resize inicial.
+      raf = requestAnimationFrame(paintFrame);
+      return () => {
+        cancelAnimationFrame(raf);
+        observer.disconnect();
+      };
+    }
+
+    const draw = (): void => {
+      raf = requestAnimationFrame(draw);
+      paintFrame();
     };
     raf = requestAnimationFrame(draw);
 

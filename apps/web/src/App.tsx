@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { marcarDesempenho } from '@/lib/perf/dispositivo';
+import { marcarDesempenho, monitorarDesempenho } from '@/lib/perf/dispositivo';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { ReactQueryDevtools } from '@tanstack/react-query-devtools';
 import { MotionConfig } from 'framer-motion';
@@ -45,6 +45,10 @@ export default function App() {
     // ligado e o travamento apareceria justamente na abertura, que é quando
     // mais incomoda. Ver lib/perf/dispositivo.ts.
     marcarDesempenho();
+    // A heurística acima é um palpite; o monitor abaixo é a medição. Ele fica de
+    // olho nos quadros e, se a rolagem engasgar de verdade, rebaixa na hora e
+    // lembra disso para os próximos boots. Ver lib/perf/dispositivo.ts.
+    monitorarDesempenho();
     // O player é o único que sobe na hora: ele restaura "de onde parou" e
     // precisa estar de pé antes de qualquer toque no botão de play.
     initPlayerEngine();
