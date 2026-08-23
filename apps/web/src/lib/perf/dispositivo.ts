@@ -123,12 +123,25 @@ export function monitorarDesempenho(): void {
   // agora com outra de dez segundos atrás.
   const JANELA_MS = 4_000;
 
+  // ATÉ QUANDO MEDIR. Antes o observador ficava ligado a SESSÃO INTEIRA: um
+  // `requestAnimationFrame` acordando o app sessenta vezes por segundo, para
+  // sempre, só para o caso de um engasgo aparecer na terceira hora de uso. Isso
+  // é o próprio problema que ele veio diagnosticar — sessenta despertares por
+  // segundo custam bateria e mantêm o navegador sem poder ociar a página.
+  //
+  // Meio minuto basta: no primeiro boot cabem a montagem da tela, a primeira
+  // rolagem e a primeira reprodução, que é justamente onde o travamento
+  // aparece. Se passou por isso liso, este aparelho aguenta.
+  const DURACAO_MS = 30_000;
+
   let anterior = performance.now();
+  const inicio = anterior;
   let ruins: number[] = [];
 
   const passo = (agora: number): void => {
     const delta = agora - anterior;
     anterior = agora;
+    if (agora - inicio > DURACAO_MS) return; // passou no teste: para de medir
 
     // Só conta enquanto a aba está visível: aba em segundo plano tem rAF
     // estrangulado de propósito, e isso não é o usuário vendo travamento.

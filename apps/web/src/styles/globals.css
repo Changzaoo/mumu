@@ -266,20 +266,19 @@
   height: 46rem;
   border-radius: 9999px;
   filter: blur(20px);
-  will-change: transform;
   opacity: 0.65;
 }
 .aurora-1 {
   top: -14rem;
   left: -10rem;
   background: radial-gradient(circle at center, hsl(var(--info) / 0.5), transparent 65%);
-  animation: aurora-deriva-1 27s ease-in-out infinite;
+  transform: translate3d(-6%, -4%, 0) scale(1.04);
 }
 .aurora-2 {
   bottom: -16rem;
   right: -8rem;
   background: radial-gradient(circle at center, hsl(266 90% 62% / 0.42), transparent 65%);
-  animation: aurora-deriva-2 33s ease-in-out infinite;
+  transform: translate3d(2%, -1%, 0) scale(1.05);
 }
 .aurora-3 {
   top: 20%;
@@ -287,6 +286,42 @@
   width: 34rem;
   height: 34rem;
   background: radial-gradient(circle at center, hsl(190 95% 55% / 0.32), transparent 66%);
+  transform: translate3d(0, 2%, 0) scale(1.02);
+}
+
+/* ─── A DERIVA É OPCIONAL, E ESTE É O CONSERTO DO "PESADO EM TODO APARELHO" ───
+
+   A aurora parada custa ZERO por quadro: é um gradiente pintado uma vez.
+   A aurora DERIVANDO custa o app inteiro, e não por causa dela.
+
+   O comentário lá em cima já dizia: "o custo real é o glass re-borrar por
+   quadro". A conta que faltava fazer é que a deriva garante que o fundo esteja
+   SEMPRE mudando — e toda superfície de vidro (barra do player, mini player,
+   abas, topo) tem `backdrop-filter: blur(30px) saturate(180%)`, que o
+   compositor precisa RECALCULAR sempre que o que está atrás muda. Ou seja: os
+   três brilhos obrigavam o navegador a reborrar quatro superfícies grandes
+   sessenta vezes por segundo, do boot ao fechamento, com o app parado na tela.
+   Isso é GPU e bateria queimadas o tempo todo, em aparelho forte também — que é
+   exatamente o relato de "sobrecarrega todos os dispositivos".
+
+   O que se perde: um movimento de 15% ao longo de meio minuto, que ninguém
+   percebe sem procurar. O que se ganha: com o app parado, o app fica PARADO.
+   A profundidade do vidro continua inteira — os brilhos seguem lá, refratados,
+   só que fixos.
+
+   Quem quiser o movimento de volta liga "movimento completo" nas configurações
+   (`data-motion='cheio'`, ver settingsStore) — e aí não leva em aparelho já
+   rebaixado, que é onde ele mais doeria. */
+:root[data-motion='cheio']:not([data-perf='baixo']) .aurora-blob {
+  will-change: transform;
+}
+:root[data-motion='cheio']:not([data-perf='baixo']) .aurora-1 {
+  animation: aurora-deriva-1 27s ease-in-out infinite;
+}
+:root[data-motion='cheio']:not([data-perf='baixo']) .aurora-2 {
+  animation: aurora-deriva-2 33s ease-in-out infinite;
+}
+:root[data-motion='cheio']:not([data-perf='baixo']) .aurora-3 {
   animation: aurora-deriva-1 38s ease-in-out infinite reverse;
 }
 @keyframes aurora-deriva-1 {

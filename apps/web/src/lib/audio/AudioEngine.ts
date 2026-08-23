@@ -82,7 +82,28 @@ interface HowlInternals {
 
 interface HowlerInternals {
   _html5AudioPool?: HTMLAudioElement[];
+  _canPlayEvent?: string;
 }
+
+// ── POR QUE A MÚSICA DEMORAVA TANTO PARA COMEÇAR ─────────────────
+//
+// O Howler decide "o som está pronto" ouvindo `canplaythrough`. Esse evento não
+// significa "dá para começar": significa "o navegador estima que dá para tocar
+// a faixa INTEIRA sem parar para carregar de novo". Em rede de celular isso é,
+// na prática, esperar boa parte do arquivo baixar — e o `play()` que a gente
+// chama no clique fica ENFILEIRADO atrás dele (ver `_playLock` no howler.js).
+// Resultado: o dedo toca no play e o som só sai segundos depois, com o spinner
+// girando à toa em cima de um áudio que já podia estar tocando.
+//
+// `canplay` é o evento certo: dispara em readyState 3 (HAVE_FUTURE_DATA) — há
+// dados suficientes para começar AGORA e continuar carregando durante a
+// reprodução, que é exatamente como um player de streaming deve se comportar.
+// Se a rede não acompanhar, o elemento emite 'waiting' e o spinner aparece aí,
+// no momento certo — esse caminho já existe em `attachBufferingEvents`.
+//
+// Trocado no objeto global do Howler porque é de lá que tanto o carregamento
+// quanto o `play()` pendurado leem o nome do evento.
+(Howler as unknown as HowlerInternals)._canPlayEvent = 'canplay';
 
 /** createMediaElementSource is once-per-element; Howler pools elements. */
 const mediaSourceCache = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();

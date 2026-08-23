@@ -2,9 +2,27 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { MonitorSpeaker, Music, Pause, Play, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
 import { useTrackLikes } from '@/features/library/api';
-import { useNowPlaying } from '@/lib/devices/useNowPlaying';
+import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
+
+/**
+ * O FIO DE PROGRESSO, ISOLADO.
+ *
+ * Ele é a única coisa aqui que muda cinco vezes por segundo. Sozinho num
+ * componente-folha, o React repinta uma <div> de 2px em vez do mini player
+ * inteiro — que carrega arrasto do framer-motion e um `AnimatePresence`.
+ * Mesmo motivo do `PlayerSeek` na barra grande. Ver `useNowPlayingProgress`.
+ */
+function MiniProgress() {
+  const { progress, duration } = useNowPlayingProgress();
+  const pct = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
+  return (
+    <div aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-fg/10">
+      <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
+    </div>
+  );
+}
 
 /**
  * 64px mini player docked above the mobile tabs (<768px).
@@ -20,14 +38,10 @@ export function MiniPlayer() {
 
   const track = np;
   const isPlaying = np?.isPlaying ?? false;
-  const progress = np?.progress ?? 0;
-  const duration = np?.duration ?? 0;
   const toggle = np?.toggle ?? (() => undefined);
   const next = np?.next ?? (() => undefined);
   const prev = np?.prev ?? (() => undefined);
   const artistas = np?.artists.map((a) => a.name).join(', ') ?? '';
-
-  const pct = duration > 0 ? Math.min(100, (progress / duration) * 100) : 0;
 
   return (
     <AnimatePresence>
@@ -120,10 +134,7 @@ export function MiniPlayer() {
               <SkipForward className="size-5 fill-current" />
             </button>
           </motion.div>
-          {/* progress hairline */}
-          <div aria-hidden className="absolute inset-x-0 bottom-0 h-0.5 bg-fg/10">
-            <div className="h-full bg-accent" style={{ width: `${pct}%` }} />
-          </div>
+          <MiniProgress />
         </motion.div>
       )}
     </AnimatePresence>

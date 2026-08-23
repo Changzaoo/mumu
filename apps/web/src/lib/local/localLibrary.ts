@@ -105,6 +105,45 @@ export interface LibraryEntry {
 
 // ── in-memory state ─────────────────────────────────────────────
 const blobUrls = new Map<string, string>();
+
+/**
+ * QUANTOS ÁUDIOS ABERTOS AO MESMO TEMPO — e por que existe um teto.
+ *
+ * `URL.createObjectURL` não é um endereço: é uma ALÇA que segura o arquivo
+ * inteiro vivo até alguém soltar. O mapa acima nunca soltava nada. Numa sessão
+ * longa — ouvir a biblioteca, deixar tocando a tarde toda — ele acumulava uma
+ * alça por faixa já tocada, e nenhuma delas volta a ser usada. Uma biblioteca
+ * de quatro mil faixas de 8 MB terminava o dia segurando o que já tinha
+ * passado, e é isso que aparece como "buga a memória RAM".
+ *
+ * O teto é generoso de propósito. Sessenta cabem folgado numa fila inteira e
+ * numa página de álbum, e reabrir uma alça descartada é barato — o arquivo
+ * continua no cofre, só a alça foi solta.
+ */
+const MAX_URLS_ABERTAS = 60;
+
+/**
+ * Registra a alça e solta as mais antigas quando passar do teto.
+ *
+ * A ordem do `Map` é a de inserção, e `lembrarUrl` re-insere a cada uso: as
+ * primeiras chaves são sempre as MENOS usadas recentemente. Por construção,
+ * então, a faixa que está tocando e a que está pré-carregada — as duas últimas
+ * a serem tocadas — nunca estão na ponta que é descartada. Isso importa: soltar
+ * a alça do áudio que está tocando emudeceria a música na hora.
+ */
+function lembrarUrl(id: string, url: string): void {
+  blobUrls.delete(id); // reposiciona no fim da fila (mais recente)
+  blobUrls.set(id, url);
+  while (blobUrls.size > MAX_URLS_ABERTAS) {
+    const maisAntiga = blobUrls.keys().next();
+    if (maisAntiga.done) break;
+    const velha = blobUrls.get(maisAntiga.value);
+    blobUrls.delete(maisAntiga.value);
+    if (velha) URL.revokeObjectURL(velha);
+    // `audioLocal` NÃO é mexido: os bytes continuam no cofre. Só a alça saiu, e
+    // `ensureLocalAudioUrl` reabre sozinho no próximo play.
+  }
+}
 const listeners = new Set<() => void>();
 let cache: LibraryEntry[] | null = null;
 /** Derivados caros (álbuns/artistas/gêneros) memoizados até a próxima write() —
@@ -465,7 +504,10 @@ async function blobExists(id: string): Promise<boolean> {
  */
 export async function ensureLocalAudioUrl(id: string): Promise<string | null> {
   const pronto = blobUrls.get(id);
-  if (pronto) return pronto;
+  if (pronto) {
+    lembrarUrl(id, pronto); // consultar conta como uso — ver `lembrarUrl`
+    return pronto;
+  }
   if (!audioLocal.has(id) && !(await blobExists(id).catch(() => false))) return null;
   const blob = await getBlob(id).catch(() => null);
   if (!blob) {
@@ -473,7 +515,7 @@ export async function ensureLocalAudioUrl(id: string): Promise<string | null> {
     return null;
   }
   const url = URL.createObjectURL(blob);
-  blobUrls.set(id, url);
+  lembrarUrl(id, url);
   audioLocal.add(id);
   return url;
 }
@@ -605,7 +647,7 @@ function localTrackDto(
 }
 
 function addEntry(entry: LibraryEntry, blob: Blob): void {
-  blobUrls.set(entry.track.id, URL.createObjectURL(blob));
+  lembrarUrl(entry.track.id, URL.createObjectURL(blob));
   write([entry, ...read().filter((e) => e.track.id !== entry.track.id)]);
   // NUNCA sincronizar object URL: ele só vale nesta aba, e no outro aparelho
   // viraria uma capa morta que ainda por cima BLOQUEIA a reidratação (a
@@ -1297,9 +1339,16 @@ export function entryFor(id: string): LibraryEntry | null {
   return read().find((e) => e.track.id === id) ?? null;
 }
 
-/** Faixas do registro cujo áudio NÃO está neste aparelho. */
+/**
+ * Faixas do registro cujo áudio NÃO está neste aparelho.
+ *
+ * Pergunta pelos BYTES (`audioLocal`), não pela alça aberta. Enquanto o mapa de
+ * alças era eterno as duas coisas coincidiam; com o teto de `lembrarUrl` uma
+ * alça descartada passaria a se parecer com faixa sem áudio, e esta lista
+ * mandaria rebaixar coisa que está inteirinha no cofre.
+ */
 export function tracksMissingAudio(): LibraryEntry[] {
-  return read().filter((e) => !blobUrls.has(e.track.id));
+  return read().filter((e) => !audioLocal.has(e.track.id));
 }
 
 /**
@@ -1350,7 +1399,7 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
   // não há o que baixar.
   const local = await getBlob(id).catch(() => null);
   if (local) {
-    if (!blobUrls.has(id)) blobUrls.set(id, URL.createObjectURL(local));
+    lembrarUrl(id, blobUrls.get(id) ?? URL.createObjectURL(local));
     audioLocal.add(id);
     return true;
   }
@@ -1367,7 +1416,7 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
       const blob = await res.blob();
       if (!blob.size) continue;
       await putBlob(id, blob); // já confere que ficou gravado
-      blobUrls.set(id, URL.createObjectURL(blob));
+      lembrarUrl(id, URL.createObjectURL(blob));
       audioLocal.add(id);
       return true;
     } catch {
@@ -1613,9 +1662,19 @@ export function labelTracks(label: string): TrackDto[] {
     .filter((t) => normName(t.label?.trim() ?? '') === key);
 }
 
-/** Object URL for a local track, or null when its audio is not available. */
+/**
+ * Object URL for a local track, or null when its audio is not available.
+ *
+ * Consultar TAMBÉM conta como uso. É por aqui que o player pega a faixa que vai
+ * tocar agora, e sem essa marca ela envelheceria parada no fim da fila enquanto
+ * toca — até ser descartada por outras sessenta consultas e emudecer no meio.
+ * Ver `lembrarUrl`.
+ */
 export function localAudioUrl(id: string): string | null {
-  return blobUrls.get(id) ?? null;
+  const url = blobUrls.get(id);
+  if (!url) return null;
+  lembrarUrl(id, url);
+  return url;
 }
 
 /** Raw bytes for a local track (for sending over P2P). */

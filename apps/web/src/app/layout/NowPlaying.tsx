@@ -61,6 +61,46 @@ function useWaveform(trackId: string | undefined) {
 }
 
 /**
+ * O BLOCO DE BUSCA, ISOLADO — e aqui o desperdício era o pior dos três.
+ *
+ * A `NowPlaying` fica SEMPRE montada (ver AppShell): fechada, ela não desenha
+ * nada, mas o corpo do componente roda inteiro a cada mudança de estado que ela
+ * assina — e uma delas era o progresso, que muda cinco vezes por segundo, para
+ * sempre, enquanto houver música. Ou seja: cor dominante, consultas, media
+ * queries e uma dúzia de assinaturas sendo reavaliadas cinco vezes por segundo
+ * para desenhar exatamente nada, com a tela cheia FECHADA.
+ *
+ * Trazendo o relógio para cá, quem acorda cinco vezes por segundo é este
+ * componentezinho — e só quando a tela cheia está aberta, porque é só aí que
+ * ele existe na árvore.
+ */
+function NowPlayingSeek({
+  trackId,
+  onSeek,
+}: {
+  trackId: string | undefined;
+  onSeek: (seconds: number) => void;
+}) {
+  const progress = usePlayerStore((s) => s.progress);
+  const duration = usePlayerStore((s) => s.duration);
+  const buffered = usePlayerStore((s) => s.buffered);
+  const { data: waveform } = useWaveform(trackId);
+
+  if (waveform && waveform.peaks.length > 0) {
+    return (
+      <>
+        <WaveformSeeker peaks={waveform.peaks} duration={duration} onSeek={onSeek} />
+        <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-fg-muted">
+          <span>{formatTime(progress)}</span>
+          <span>{formatTime(duration)}</span>
+        </div>
+      </>
+    );
+  }
+  return <SeekSlider value={progress} duration={duration} buffered={buffered} onSeek={onSeek} />;
+}
+
+/**
  * Theater mode (DESIGN §7): fullscreen sheet with ambient artwork glow,
  * waveform seek, transport, lyrics pane, spectrum visualizer, sleep timer
  * and playback-rate menus. Drag down to dismiss (mobile).
@@ -75,9 +115,6 @@ export function NowPlaying() {
 
   const track = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
-  const progress = usePlayerStore((s) => s.progress);
-  const duration = usePlayerStore((s) => s.duration);
-  const buffered = usePlayerStore((s) => s.buffered);
   const volume = usePlayerStore((s) => s.volume);
   const muted = usePlayerStore((s) => s.muted);
   const repeat = usePlayerStore((s) => s.repeat);
@@ -100,7 +137,6 @@ export function NowPlaying() {
   const isDesktopQueue = useMediaQuery('(min-width: 1024px)');
   const dominant = useDominantColor(track?.coverUrl);
   const glow = track?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
-  const { data: waveform } = useWaveform(open ? track?.id : undefined);
   const { data: credits } = useQuery({
     queryKey: ['credits', track?.id],
     enabled: open && Boolean(track),
@@ -336,22 +372,7 @@ export function NowPlaying() {
 
               {/* Seek: waveform when peaks exist, slider otherwise */}
               <div className="w-full">
-                {waveform && waveform.peaks.length > 0 ? (
-                  <>
-                    <WaveformSeeker peaks={waveform.peaks} duration={duration} onSeek={seek} />
-                    <div className="mt-1 flex justify-between font-mono text-[11px] tabular-nums text-fg-muted">
-                      <span>{formatTime(progress)}</span>
-                      <span>{formatTime(duration)}</span>
-                    </div>
-                  </>
-                ) : (
-                  <SeekSlider
-                    value={progress}
-                    duration={duration}
-                    buffered={buffered}
-                    onSeek={seek}
-                  />
-                )}
+                <NowPlayingSeek trackId={track.id} onSeek={seek} />
               </div>
 
               {/* Transport */}

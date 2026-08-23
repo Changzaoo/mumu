@@ -25,7 +25,7 @@ import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
-import { useNowPlaying } from '@/lib/devices/useNowPlaying';
+import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 
@@ -42,6 +42,20 @@ function LocalLikeButton() {
 }
 
 /**
+ * A BARRA DE BUSCA, ISOLADA — e é o isolamento que interessa aqui.
+ *
+ * Este é o único pedaço do player que muda cinco vezes por segundo. Enquanto
+ * ele morava dentro da `PlayerBar`, a barra inteira era reconstruída nesse
+ * ritmo. Aqui embaixo não há mais nada: o React repinta um slider e dois
+ * relógios, e o resto do player fica parado. Ver `useNowPlayingProgress`.
+ */
+function PlayerSeek({ onSeek }: { onSeek: (seconds: number) => void }) {
+  const { progress, duration } = useNowPlayingProgress();
+  const buffered = usePlayerStore((s) => s.buffered);
+  return <SeekSlider value={progress} duration={duration} buffered={buffered} onSeek={onSeek} />;
+}
+
+/**
  * Fixed bottom player (DESIGN §7): 88px glass, 3 columns —
  * [art + track + like] [transport + seek] [queue/lyrics/EQ/volume/fullscreen].
  * Hidden until the first track, then springs up. Desktop only (≥768px).
@@ -52,7 +66,6 @@ export function PlayerBar() {
   // música para o aparelho certo (ver `useNowPlaying`).
   const np = useNowPlaying();
   const isBuffering = usePlayerStore((s) => s.isBuffering && s.currentTrack !== null);
-  const buffered = usePlayerStore((s) => s.buffered);
   const muted = usePlayerStore((s) => s.muted);
   const repeat = usePlayerStore((s) => s.repeat);
   const shuffle = usePlayerStore((s) => s.shuffle);
@@ -66,8 +79,6 @@ export function PlayerBar() {
 
   const track = np;
   const isPlaying = np?.isPlaying ?? false;
-  const progress = np?.progress ?? 0;
-  const duration = np?.duration ?? 0;
   const toggle = np?.toggle ?? (() => undefined);
   const next = np?.next ?? (() => undefined);
   const prev = np?.prev ?? (() => undefined);
@@ -190,7 +201,7 @@ export function PlayerBar() {
                 )}
               </IconButton>
             </div>
-            <SeekSlider value={progress} duration={duration} buffered={buffered} onSeek={seek} />
+            <PlayerSeek onSeek={seek} />
           </div>
 
           {/* Right — utilities */}

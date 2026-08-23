@@ -80,13 +80,20 @@ export function resolveTheme(theme: ThemeSetting): 'dark' | 'light' {
 }
 
 function applyDomSettings(
-  state: Pick<SettingsState, 'theme' | 'fontScale' | 'highContrast'>,
+  state: Pick<SettingsState, 'theme' | 'fontScale' | 'highContrast' | 'reducedMotion'>,
 ): void {
   if (typeof document === 'undefined') return;
   const root = document.documentElement;
   const resolved = resolveTheme(state.theme);
   root.classList.toggle('dark', resolved === 'dark');
   root.classList.toggle('hc', state.highContrast);
+  // A PREFERÊNCIA DE MOVIMENTO PRECISA CHEGAR AO CSS, não só ao framer-motion.
+  //
+  // Ela já governava as animações de componente (MotionConfig em App.tsx), mas a
+  // aurora é uma animação de CSS puro: quem escolhia "sem movimento" continuava
+  // com os três brilhos derivando atrás do vidro. Carimbar aqui deixa a folha de
+  // estilo decidir sozinha, sem re-render. Ver `.aurora-blob` em globals.css.
+  root.setAttribute('data-motion', state.reducedMotion === 'off' ? 'cheio' : 'reduzido');
   root.style.setProperty('--font-scale', String(state.fontScale));
   // Keep the browser chrome color in sync (PWA polish).
   const meta = document.querySelector<HTMLMetaElement>('meta[name="theme-color"]:not([media])');
@@ -149,7 +156,10 @@ export const useSettingsStore = create<SettingsState>()(
         set({ highContrast });
         applyDomSettings(get());
       },
-      setReducedMotion: (reducedMotion) => set({ reducedMotion }),
+      setReducedMotion: (reducedMotion) => {
+        set({ reducedMotion });
+        applyDomSettings(get());
+      },
       setNotifications: (notifications) => set({ notifications }),
       setPrivateSession: (privateSession) => set({ privateSession }),
     }),
