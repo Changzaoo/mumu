@@ -675,6 +675,21 @@ async function blobStoreReady() {
 let cofreForaDesde = null;
 
 /**
+ * POR QUE O ÚLTIMO UPLOAD FOI RECUSADO — lido por `GET /cofre/estado`.
+ *
+ * Upload recusado é silencioso do lado de fora: o app tenta, toma um status, e
+ * a faixa simplesmente nunca ganha cópia. Foi assim que o acervo passou semanas
+ * recebendo faixas SEM áudio sem ninguém perceber. Guardar a última recusa (e
+ * quando) transforma "não sei por que parou" numa resposta de uma linha.
+ */
+let ultimaRecusaDeUpload = null;
+
+function anotarRecusaDeUpload(motivo) {
+  ultimaRecusaDeUpload = { motivo, quando: new Date().toISOString() };
+  log('upload recusado:', motivo);
+}
+
+/**
  * RECONSTRUÇÃO SOB DEMANDA — o cofre volta a ter a faixa que ele mesmo jogou
  * fora.
  *
@@ -1459,6 +1474,74 @@ async function main() {
         return;
       }
 
+      // ── ESTADO DO COFRE (autenticado) ───────────────────────────────────
+      //
+      // POR QUE ISTO EXISTE. O cofre falha de formas que não aparecem em lugar
+      // nenhum: o marcador some e todo upload vira 503; o cartão enche e a
+      // gravação é recusada; uma poda antiga levou metas junto com os bytes e
+      // aquelas faixas viraram 404 permanente. Nenhuma dessas coisas dá para
+      // ver de fora — e foi assim que o acervo passou semanas sem receber uma
+      // cópia nova sem ninguém notar (nada com data posterior a 2026-08-09
+      // tinha áudio no cofre).
+      //
+      // `bins` x `metas` é o par que conta a história: meta sem bin é faixa
+      // podada que SABE se refazer; bin sem meta é lixo invisível; e a queda de
+      // `metas` abaixo do tamanho do acervo é a marca da poda antiga.
+      //
+      // Autenticado porque revela espaço em disco e tamanho do acervo — não é
+      // segredo, mas também não é da conta de quem só está ouvindo música.
+      if (req.method === 'GET' && pathname === '/cofre/estado') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        const pronto = await blobStoreReady();
+        let livreBytes = null;
+        let totalBytes = null;
+        try {
+          const fs = await statfs(BLOB_DIR);
+          livreBytes = fs.bavail * fs.bsize;
+          totalBytes = fs.blocks * fs.bsize;
+        } catch {
+          /* sistema de arquivos mudo — os contadores abaixo ainda valem */
+        }
+        let bins = 0;
+        let metas = 0;
+        let bytesEmBins = 0;
+        try {
+          for (const nome of await readdir(BLOB_DIR)) {
+            if (nome.endsWith('.bin')) {
+              bins += 1;
+              const st = await stat(path.join(BLOB_DIR, nome)).catch(() => null);
+              if (st) bytesEmBins += st.size;
+            } else if (nome.endsWith('.json')) metas += 1;
+          }
+        } catch {
+          /* diretório ilegível: é exatamente o que `pronto: false` já diz */
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            pronto,
+            dirExterno: BLOB_DIR_EXTERNAL,
+            marcadores: BLOB_MARKERS,
+            tetoBytes: MAX_BLOB_BYTES,
+            folgaMinimaBytes: MIN_LIVRE_BYTES,
+            livreBytes,
+            totalBytes,
+            bins,
+            metas,
+            bytesEmBins,
+            // Podadas que sabem se refazer. Se `metas` < faixas do acervo, a
+            // diferença é dano permanente da poda antiga.
+            podadasComMeta: Math.max(metas - bins, 0),
+            ultimaFalhaDeUpload: ultimaRecusaDeUpload,
+          }),
+        );
+        return;
+      }
+
       // ── Real artist photo lookup (Deezer, server-side to dodge CORS) ─────
       if (req.method === 'GET' && pathname === '/artist-image') {
         if (!(await authorize(req))) {
@@ -1794,11 +1877,13 @@ async function main() {
         // ainda sobe vira ERR_HTTP2_PROTOCOL_ERROR no navegador em vez do
         // status real (ver drainBody).
         if (!(await authorize(req))) {
+          anotarRecusaDeUpload('403 acesso negado');
           await rejectUpload(req, res, 403, { error: 'Acesso negado.' });
           return;
         }
         // USB fora do ar → recusa em vez de gravar no disco raiz por engano.
         if (!(await blobStoreReady())) {
+          anotarRecusaDeUpload('503 cofre indisponível (marcador ausente / disco desmontado)');
           await rejectUpload(req, res, 503, { error: 'Armazenamento de blobs indisponível.' });
           return;
         }
@@ -1825,6 +1910,7 @@ async function main() {
         // ESPAÇO REAL, não só o teto contábil: o cofre divide o disco com coisas
         // que não são dele e que crescem sozinhas. Ver `garantirEspaco`.
         if (!(await garantirEspaco(buf.length))) {
+          anotarRecusaDeUpload('507 sem espaço no cofre');
           res.writeHead(507, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Sem espaço em disco no cofre.' }));
           return;
@@ -1861,6 +1947,7 @@ async function main() {
           res.end(JSON.stringify({ error: 'Falha ao salvar.' }));
           return;
         }
+        ultimaRecusaDeUpload = null; // gravou: a recusa anterior deixou de valer
         log('blob stored:', id, `${(buf.length / 1024 / 1024).toFixed(1)}MB`);
         void sweepBlobStore(); // mantém o cofre dentro do teto (LRU)
         res.writeHead(200, { 'Content-Type': 'application/json' });
