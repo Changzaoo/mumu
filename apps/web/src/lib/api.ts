@@ -8,8 +8,9 @@
  */
 import type { ApiErrorBody } from '@aurial/shared';
 import { getIdToken } from '@/lib/firebase';
+import { API_BASE_URL } from '@/lib/apiBase';
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const BASE_URL = API_BASE_URL;
 
 export class ApiError extends Error {
   readonly code: string;

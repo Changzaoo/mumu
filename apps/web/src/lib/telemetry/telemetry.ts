@@ -34,9 +34,10 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+import { API_BASE_URL } from '@/lib/apiBase';
 
 /** Mesma base das demais chamadas — ver lib/sync/catalogoApi.ts. */
-const API_BASE = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const API_BASE = API_BASE_URL;
 const apiBaseUrl = (): string => API_BASE;
 
 const HEARTBEAT_MS = 30_000;

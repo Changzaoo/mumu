@@ -36,8 +36,9 @@ import {
 } from '@/features/library/api';
 import { getIdToken } from '@/lib/firebase';
 import { cn, formatBytes } from '@/lib/utils';
+import { API_BASE_URL } from '@/lib/apiBase';
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const BASE_URL = API_BASE_URL;
 const ACCEPT = ACCEPTED_AUDIO_EXT.join(',');
 
 const STATUS_LABEL: Record<UploadStatus, string> = {

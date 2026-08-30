@@ -27,8 +27,9 @@
 import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { getIdToken } from '@/lib/firebase';
 import { registrarErro, registrarSnapshot } from '@/lib/sync/syncStatus';
+import { API_BASE_URL } from '@/lib/apiBase';
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const BASE_URL = API_BASE_URL;
 const COLECAO = 'catalogo';
 
 /** De quanto em quanto tempo perguntamos "mudou?". Barato: quase sempre 304. */

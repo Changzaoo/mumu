@@ -48,9 +48,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getIdToken } from '@/lib/firebase';
-
-/** Mesma base das demais chamadas — ver lib/sync/catalogoApi.ts. */
-const API_BASE = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+import { API_BASE_URL } from '@/lib/apiBase';
 import { computeInsights } from '@/lib/telemetry/insights';
 import { cn, formatBytes } from '@/lib/utils';
 import type {
@@ -59,6 +57,9 @@ import type {
   SessionLogEntry,
   TopEntry,
 } from '@/lib/telemetry/telemetry';
+
+/** Mesma base das demais chamadas — ver lib/sync/catalogoApi.ts. */
+const API_BASE = API_BASE_URL;
 
 interface TelemetryDoc {
   uid: string;
@@ -577,7 +578,9 @@ function InsightTile({
 function nomeDoAparelho(t: TelemetryDoc): string {
   const modelo =
     t.deviceModel && !/não exposto|not exposed/i.test(t.deviceModel) ? t.deviceModel : null;
-  return [modelo ?? t.platform, t.browser].filter(Boolean).join(' · ') || `uid ${t.uid.slice(0, 8)}…`;
+  return (
+    [modelo ?? t.platform, t.browser].filter(Boolean).join(' · ') || `uid ${t.uid.slice(0, 8)}…`
+  );
 }
 
 function identificacao(t: TelemetryDoc): string {
@@ -710,9 +713,7 @@ function UserRow({
               </span>
             )}
           </span>
-          <span className="block truncate pl-4 text-[11px] text-fg-muted">
-            {identificacao(t)}
-          </span>
+          <span className="block truncate pl-4 text-[11px] text-fg-muted">{identificacao(t)}</span>
         </span>
         <SegmentBadge name={seg.primary} />
         <span className="hidden text-[12px] text-fg-muted sm:block">

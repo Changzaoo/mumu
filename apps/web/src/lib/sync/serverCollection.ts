@@ -31,6 +31,7 @@
  * sincronia completa, nunca um dado.
  */
 import { getIdToken } from '@/lib/firebase';
+import { API_BASE_URL } from '@/lib/apiBase';
 import { confirmar, enfileirar, pendentes } from '@/lib/sync/filaOffline';
 import {
   registrarErro,
@@ -39,7 +40,7 @@ import {
   registrarUsuario,
 } from '@/lib/sync/syncStatus';
 
-const BASE_URL = (import.meta.env.VITE_API_URL ?? '/api/v1').replace(/\/$/, '');
+const BASE_URL = API_BASE_URL;
 /** De quanto em quanto tempo perguntamos por novidades de outros aparelhos. */
 const SINCRONIA_MS = 60_000;
 /** Itens por requisição — a fila de um aparelho novo sobe em blocos. */
