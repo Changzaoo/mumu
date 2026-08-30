@@ -93,6 +93,8 @@ describe('varrerUmaVez — as travas', () => {
     vi.restoreAllMocks();
     env.IMPORTER_URL = 'http://importer:8790';
     env.IMPORT_SERVICE_TOKEN = 'x'.repeat(48);
+    env.VARREDURA_HORA_INICIO = 3;
+    env.VARREDURA_HORA_FIM = 6;
   });
 
   const madrugada = new Date('2026-08-30T04:00:00');
@@ -146,6 +148,54 @@ describe('varrerUmaVez — as travas', () => {
     const r = await varrerUmaVez(madrugada);
     expect(r.rodou).toBe(false);
     expect(r.motivo).toBe('cofre não respondeu');
+  });
+
+  it('APAGÃO DA FONTE: desiste em vez de enterrar a fila inteira', async () => {
+    // 2026-08-30: o YouTube limitou a sessão e passou a responder "Video
+    // unavailable" para TUDO. O importador lia isso como faixa morta e mandava
+    // `permanent: true`; a varredura carimbava `reparoImpossivel`, que é para
+    // sempre. Uma hora ruim teria convertido centenas de faixas vivas em faixas
+    // oficialmente mortas. Falha isolada é faixa; falha em série é o mundo.
+    //
+    // A janela vai aberta (início === fim) porque o laço reconfere o horário com
+    // o relógio de parede a cada faixa — de propósito, para não invadir a manhã
+    // de quem já está ouvindo. Sem isto o teste só passaria entre 3h e 6h.
+    env.VARREDURA_HORA_INICIO = 0;
+    env.VARREDURA_HORA_FIM = 0;
+    // A pausa entre faixas é de 5 s de verdade — educação com quem está
+    // ouvindo, não algo a testar aqui. Sem encurtá-la, provar a trava custaria
+    // 40 s de espera parada.
+    vi.stubGlobal('setTimeout', ((fn: () => void) => {
+      fn();
+      return 0;
+    }) as unknown as typeof setTimeout);
+    const { prisma } = await import('../infra/db/prisma.js');
+    const { upsertCatalogTrack } = await import('../modules/catalog/catalog.repository.js');
+    vi.mocked(upsertCatalogTrack).mockClear();
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce(
+      Array.from({ length: 60 }, (_, i) => ({
+        id: `t${i}`,
+        data: { sourceUrl: 'https://www.youtube.com/watch?v=x' },
+      })),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/cofre/estado')) {
+          return { ok: true, json: async () => ({ pronto: true, livreBytes: 50_000_000_000 }) };
+        }
+        // Todo import nasce morto, como no apagão real.
+        return { ok: false, status: 400, json: async () => ({}) };
+      }),
+    );
+
+    const r = await varrerUmaVez(new Date());
+
+    expect(r.rodou).toBe(true);
+    expect(r.motivo).toMatch(/seguidas/);
+    // O essencial: quase nada foi carimbado. Sem a trava seriam 60.
+    expect(vi.mocked(upsertCatalogTrack).mock.calls.length).toBeLessThan(10);
+    vi.unstubAllGlobals();
   });
 
   it('com folga e sem candidatas, roda e não repara nada', async () => {

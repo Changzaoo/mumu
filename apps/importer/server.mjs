@@ -459,6 +459,13 @@ async function importToMp3(ytdlp, url, quality) {
 
 function interpret(stderr) {
   const s = stderr.toLowerCase();
+  // ANTES de 'video unavailable', porque o YouTube usa a MESMA frase para dizer
+  // "este vídeo morreu" e "você pediu demais, volte em uma hora". A segunda é
+  // temporária e global; classificá-la como permanente marca faixas boas como
+  // irrecuperáveis para sempre. Aconteceu: uma reconstrução em massa levou um
+  // rate-limit e a varredura carimbou faixas vivas como mortas.
+  if (s.includes('rate-limited') || s.includes('rate limited') || s.includes('try again later'))
+    return 'O YouTube limitou a sessão por excesso de pedidos. Tente mais tarde.';
   if (s.includes('not a bot') || s.includes('confirm you'))
     return 'O YouTube pediu verificação (muitos downloads seguidos). Aguarde alguns minutos ou configure cookies.';
   if (s.includes('private video') || s.includes('sign in') || s.includes('login'))

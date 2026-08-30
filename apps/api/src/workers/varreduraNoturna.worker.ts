@@ -66,6 +66,21 @@ const PAUSA_ENTRE_FAIXAS_MS = 5_000;
  */
 const PASSO_DO_PROGRESSO = 25;
 
+/**
+ * Quantas faixas seguidas podem falhar antes de a varredura desistir da noite.
+ *
+ * Falha isolada é faixa morta; falha em sequência é o MUNDO fora do ar — fonte
+ * bloqueando por excesso de pedidos, rede caída, importador doente. A diferença
+ * importa porque a varredura carimba `reparoImpossivel`, e esse carimbo é para
+ * sempre: insistir durante um bloqueio global converte centenas de faixas vivas
+ * em faixas oficialmente mortas.
+ *
+ * Foi assim que se perdeu terreno em 2026-08-30: o YouTube limitou a sessão e
+ * respondeu "Video unavailable" para tudo. Sem esta trava, uma hora ruim
+ * queimaria a fila inteira.
+ */
+const FALHAS_SEGUIDAS_PARA_DESISTIR = 8;
+
 interface Candidata {
   id: string;
   data: CatalogEntry;
@@ -309,6 +324,9 @@ export async function varrerUmaVez(agora = new Date()): Promise<{
   let reparadas = 0;
   let falhas = 0;
   let impossiveis = 0;
+  let motivoDaParada: string | undefined;
+
+  let seguidas = 0;
 
   for (const c of fila) {
     // A janela é conferida a CADA faixa: uma varredura que começou às 5h50 não
@@ -323,11 +341,23 @@ export async function varrerUmaVez(agora = new Date()): Promise<{
       logger.warn({ trackId: c.id, err }, 'varredura: faixa falhou');
       desfecho = 'falhou';
     }
-    if (desfecho === 'reparada') reparadas++;
-    else if (desfecho === 'falhou') falhas++;
-    else {
-      impossiveis++;
-      await marcarImpossivel(c).catch(() => undefined);
+    if (desfecho === 'reparada') {
+      reparadas++;
+      seguidas = 0;
+    } else {
+      seguidas++;
+      // A trava vem ANTES de carimbar: se já estamos numa sequência de falhas,
+      // esta faixa provavelmente é vítima do mesmo apagão, e não uma faixa
+      // morta. Melhor tentá-la amanhã do que enterrá-la hoje.
+      if (seguidas >= FALHAS_SEGUIDAS_PARA_DESISTIR) {
+        motivoDaParada = `${seguidas} falhas seguidas — parece apagão da fonte, não faixa morta`;
+        break;
+      }
+      if (desfecho === 'falhou') falhas++;
+      else {
+        impossiveis++;
+        await marcarImpossivel(c).catch(() => undefined);
+      }
     }
     const feitas = reparadas + falhas + impossiveis;
     if (feitas % PASSO_DO_PROGRESSO === 0) {
@@ -339,8 +369,11 @@ export async function varrerUmaVez(agora = new Date()): Promise<{
     await esperar(PAUSA_ENTRE_FAIXAS_MS);
   }
 
-  logger.info({ reparadas, falhas, impossiveis, fila: fila.length }, 'varredura noturna concluída');
-  return { rodou: true, reparadas, falhas, impossiveis };
+  logger.info(
+    { reparadas, falhas, impossiveis, fila: fila.length, parouPor: motivoDaParada },
+    'varredura noturna concluída',
+  );
+  return { rodou: true, motivo: motivoDaParada, reparadas, falhas, impossiveis };
 }
 
 export function startVarreduraNoturnaWorker(): () => void {
