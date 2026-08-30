@@ -56,6 +56,16 @@ const POLL_MS = 3_000;
  */
 const PAUSA_ENTRE_FAIXAS_MS = 5_000;
 
+/**
+ * De quantas em quantas faixas a varredura diz onde está.
+ *
+ * O resumo final só sai quando a fila inteira acaba — com teto de milhares de
+ * faixas, isso são horas de silêncio total, indistinguíveis de um agente
+ * travado. Este passo é o batimento cardíaco: barato, e a única forma de
+ * acompanhar uma reconstrução longa enquanto ela acontece.
+ */
+const PASSO_DO_PROGRESSO = 25;
+
 interface Candidata {
   id: string;
   data: CatalogEntry;
@@ -319,6 +329,13 @@ export async function varrerUmaVez(agora = new Date()): Promise<{
       impossiveis++;
       await marcarImpossivel(c).catch(() => undefined);
     }
+    const feitas = reparadas + falhas + impossiveis;
+    if (feitas % PASSO_DO_PROGRESSO === 0) {
+      logger.info(
+        { reparadas, falhas, impossiveis, feitas, fila: fila.length },
+        'varredura em andamento',
+      );
+    }
     await esperar(PAUSA_ENTRE_FAIXAS_MS);
   }
 
@@ -343,6 +360,11 @@ export function startVarreduraNoturnaWorker(): () => void {
     if (parado || rodando) return; // nunca duas varreduras ao mesmo tempo
     rodando = true;
     void varrerUmaVez()
+      // Uma recusa silenciosa é o pior desfecho possível: o agente parece
+      // trabalhar e não trabalha. Se ela declinou, o motivo vai para o log.
+      .then((r) => {
+        if (!r.rodou) logger.info({ motivo: r.motivo }, 'varredura declinou esta batida');
+      })
       .catch((err) => logger.error({ err }, 'varredura noturna falhou'))
       .finally(() => {
         rodando = false;
