@@ -98,3 +98,65 @@ describe('quem baixa primeiro', () => {
     expect(ids(ordem)).toEqual(['a']);
   });
 });
+
+describe('ordemDeDownload — os álbuns que a pessoa mandou guardar', () => {
+  /** Duas faixas do MESMO álbum: a chave é `titulo|artista` normalizado. */
+  function doAlbum(id: string, titulo: string, artista: string): LibraryEntry {
+    return entrada(id, {
+      track: makeTrack(id, {
+        album: { id: `a-${titulo}`, title: titulo, slug: titulo, coverUrl: null },
+        artists: [{ id: `x-${artista}`, name: artista, slug: artista, imageUrl: null }],
+      }),
+    });
+  }
+
+  const guardado1 = doAlbum('g1', 'Guardado', 'Djavan');
+  const guardado2 = doAlbum('g2', 'Guardado', 'Djavan');
+  const outro = doAlbum('o1', 'Outro', 'Djavan');
+  const CHAVE = new Set(['guardado|djavan']);
+
+  it('o álbum marcado vem antes do resto da biblioteca', () => {
+    const fila = ordemDeDownload([outro, guardado1, guardado2], semContexto, nenhumTem, CHAVE);
+    expect(fila.slice(0, 2).map((e) => e.track.id)).toEqual(['g1', 'g2']);
+  });
+
+  it('mas NUNCA antes do que está tocando agora', () => {
+    // Errar aqui é errar na cara da pessoa, com o aparelho na mão: ela mandou
+    // tocar uma coisa e o app foi baixar outra.
+    const fila = ordemDeDownload(
+      [outro, guardado1, guardado2],
+      { aSeguir: ['o1'], recentes: [] },
+      nenhumTem,
+      CHAVE,
+    );
+    expect(fila[0]!.track.id).toBe('o1');
+  });
+
+  it('o álbum vem INTEIRO — meio álbum no avião não é álbum offline', () => {
+    const fila = ordemDeDownload([outro, guardado1, guardado2], semContexto, nenhumTem, CHAVE);
+    const ids = fila.map((e) => e.track.id);
+    expect(ids.indexOf('g2')).toBeLessThan(ids.indexOf('o1'));
+  });
+
+  it('sem marca nenhuma, a ordem é exatamente a de antes', () => {
+    const entradas = [outro, guardado1, guardado2];
+    const antes = ordemDeDownload(entradas, semContexto, nenhumTem);
+    const depois = ordemDeDownload(entradas, semContexto, nenhumTem, new Set());
+    expect(depois.map((e) => e.track.id)).toEqual(antes.map((e) => e.track.id));
+  });
+
+  it('marca de álbum que não existe na biblioteca não quebra nada', () => {
+    const fila = ordemDeDownload([outro], semContexto, nenhumTem, new Set(['fantasma|ninguem']));
+    expect(fila.map((e) => e.track.id)).toEqual(['o1']);
+  });
+
+  it('não duplica faixa que já estava na fila de reprodução', () => {
+    const fila = ordemDeDownload(
+      [guardado1, guardado2],
+      { aSeguir: ['g1'], recentes: [] },
+      nenhumTem,
+      CHAVE,
+    );
+    expect(fila.map((e) => e.track.id)).toEqual(['g1', 'g2']);
+  });
+});

@@ -14,10 +14,11 @@
 import { z } from 'zod';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { noContent, ok } from '../../core/http/respond.js';
-import { ValidationError } from '../../core/errors/index.js';
+import { NotFoundError, ValidationError } from '../../core/errors/index.js';
 import {
   catalogEtag,
   deleteCatalogTrack,
+  getCatalogTrack,
   listCatalog,
   upsertCatalogTrack,
   upsertCatalogTracks,
@@ -69,6 +70,28 @@ export const catalogController = {
     // velha em cache intermediário seria indistinguível de "sumiu do acervo".
     res.setHeader('Cache-Control', 'no-cache');
     ok(res, snapshot.entries);
+  }),
+
+  /**
+   * UMA faixa inteira — o "quando clicar, aí sim entregar o conteúdo".
+   *
+   * A listagem entrega o que a tela desenha: título, capa, artista, álbum,
+   * duração e um bit dizendo se toca. O endereço de onde sai o som, o link de
+   * origem e o hash ficam aqui, e chegam UMA por vez, no momento em que alguém
+   * vai de fato tocar. Antes, cinco mil URLs desciam para que se usassem vinte.
+   *
+   * Sem login, pelo mesmo motivo da listagem: é o acervo que dá o que ouvir
+   * antes de criar conta. E cache longo é seguro porque a resposta é imutável
+   * na prática — quando a cópia muda de endereço, o ETag da listagem muda e o
+   * app volta aqui.
+   */
+  detail: asyncHandler(async (req, res) => {
+    const id = String(req.params.id ?? '').trim();
+    if (!id) throw new ValidationError('Faixa sem id.');
+    const entrada = await getCatalogTrack(id);
+    if (!entrada) throw new NotFoundError('Faixa não encontrada no acervo.');
+    res.setHeader('Cache-Control', 'no-cache');
+    ok(res, entrada);
   }),
 
   upsert: asyncHandler(async (req, res) => {

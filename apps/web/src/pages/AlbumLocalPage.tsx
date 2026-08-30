@@ -3,13 +3,15 @@
  * metadata. `key` is localLibrary's album key (normalised title|artist).
  */
 import { useMemo, useSyncExternalStore } from 'react';
+import { toast } from 'sonner';
 import { Link, useParams } from 'react-router';
-import { Disc3, Play, Share2 } from 'lucide-react';
+import { ArrowDownToLine, Check, Disc3, Play, Share2 } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
+import * as albunsOffline from '@/lib/local/albunsOffline';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -18,6 +20,14 @@ const EMPTY: localLibrary.LibraryEntry[] = [];
 export default function AlbumLocalPage() {
   const { key = '' } = useParams<{ key: string }>();
   const albumKey = decodeURIComponent(key);
+  // Reativo porque a marca pode mudar em outra aba (mesma origem, mesmo
+  // localStorage) e o botão precisa contar a verdade sem recarregar a página.
+  const fixados = useSyncExternalStore(
+    albunsOffline.subscribe,
+    albunsOffline.lista,
+    albunsOffline.lista,
+  );
+  const guardado = fixados.has(albumKey);
   const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
   const album = useMemo(() => localLibrary.albumByKey(albumKey), [entries, albumKey]);
 
@@ -74,6 +84,33 @@ export default function AlbumLocalPage() {
               className="inline-flex h-10 items-center gap-2 rounded-full bg-accent px-5 text-sm font-semibold text-accent-fg transition-transform hover:scale-[1.03]"
             >
               <Play className="size-4 fill-current" /> Tocar
+            </button>
+            {/* A ÚNICA COISA MANUAL QUE SOBROU no download, e de propósito.
+                O botão de baixar faixa por faixa saiu porque a automação já
+                cobre aquilo: o guardião baixa o que está tocando e vai
+                preenchendo o resto sozinho. O que ele não tem como adivinhar é
+                o disco que você quer GARANTIDO antes de ficar sem sinal — isso
+                não está no que você tocou nem no que vai tocar, está no que
+                você planeja. Ver lib/local/albunsOffline.ts. */}
+            <button
+              type="button"
+              aria-pressed={guardado}
+              aria-label={guardado ? 'Guardado para ouvir offline' : 'Guardar para ouvir offline'}
+              onClick={() => {
+                const agora = albunsOffline.alternar(albumKey);
+                toast(
+                  agora
+                    ? 'Guardado — as faixas baixam em segundo plano'
+                    : 'Não será mais garantido offline',
+                );
+              }}
+              className={
+                guardado
+                  ? 'grid size-10 place-items-center rounded-full border border-accent bg-accent/15 text-accent'
+                  : 'grid size-10 place-items-center rounded-full border border-border text-fg transition-colors hover:bg-fg/5'
+              }
+            >
+              {guardado ? <Check className="size-4" /> : <ArrowDownToLine className="size-4" />}
             </button>
             <button
               type="button"

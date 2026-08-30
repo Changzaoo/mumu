@@ -30,7 +30,40 @@ vi.mock('../core/logger.js', () => ({
 vi.mock('../infra/db/prisma.js', () => ({ prisma: { $queryRaw: vi.fn(async () => []) } }));
 vi.mock('../modules/catalog/catalog.repository.js', () => ({ upsertCatalogTrack: vi.fn() }));
 
-const { dentroDaJanela, varrerUmaVez } = await import('./varreduraNoturna.worker.js');
+const { dentroDaJanela, folgaReal, varrerUmaVez } = await import('./varreduraNoturna.worker.js');
+
+describe('folgaReal', () => {
+  it('DISCO VAZIO E TETO CHEIO: manda o teto — foi o bug real', () => {
+    // Estado medido no servidor em 2026-08-30: 3,93 GB livres no disco e 92 MB
+    // de folga sob o teto. Olhando só o disco, a varredura teria rodado a noite
+    // inteira expulsando uma faixa a cada faixa que trouxesse de volta.
+    expect(
+      folgaReal({
+        livreBytes: 4_221_714_432,
+        tetoBytes: 19_327_352_832,
+        bytesEmBins: 19_230_541_183,
+      }),
+    ).toBe(96_811_649);
+  });
+
+  it('TETO FOLGADO E DISCO CHEIO: manda o disco', () => {
+    expect(folgaReal({ livreBytes: 50_000_000, tetoBytes: 1e12, bytesEmBins: 1 })).toBe(50_000_000);
+  });
+
+  it('cofre acima do teto não devolve folga negativa', () => {
+    expect(folgaReal({ livreBytes: 9e9, tetoBytes: 100, bytesEmBins: 500 })).toBe(0);
+  });
+
+  it('usa o que existe quando falta um dos números', () => {
+    expect(folgaReal({ livreBytes: 123 })).toBe(123);
+    expect(folgaReal({ tetoBytes: 1000, bytesEmBins: 400 })).toBe(600);
+  });
+
+  it('sem número nenhum é "não sei" — e não sei vale como não trabalhe', () => {
+    expect(folgaReal({})).toBeNull();
+    expect(folgaReal({ tetoBytes: 1000 })).toBeNull();
+  });
+});
 
 describe('dentroDaJanela', () => {
   it('janela normal: 3h às 6h', () => {

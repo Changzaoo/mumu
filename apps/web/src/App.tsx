@@ -62,6 +62,7 @@ export default function App() {
     // para o usuário, mas fora da frente da tela.
     let pararPesquisador: (() => void) | null = null;
     let pararReparador: (() => void) | null = null;
+    let pararAssimilador: (() => void) | null = null;
     let cancelado = false;
     void (async () => {
       const [
@@ -73,6 +74,7 @@ export default function App() {
         genero,
         pesquisador,
         reparador,
+        detalhe,
         guardiao,
         biblioteca,
       ] = await Promise.all([
@@ -84,6 +86,7 @@ export default function App() {
         import('@/lib/local/genreAgent'),
         import('@/lib/local/pesquisador'),
         import('@/lib/local/reparador'),
+        import('@/lib/local/detalheDaFaixa'),
         import('@/lib/offline/guardiaoOffline'),
         import('@/lib/local/localLibrary'),
       ]);
@@ -115,6 +118,11 @@ export default function App() {
       // por rodada, e ele nunca se declara consertado — quem encerra o caso é o
       // player, quando sai som. Ver lib/local/reparador.ts.
       pararReparador = reparador.iniciarReparador();
+      // Assimilador: adianta o CONTEÚDO das faixas que estão prestes a tocar,
+      // para que apertar play não espere uma ida à rede. Ele nunca corre atrás
+      // do acervo inteiro — isso desfaria o ganho de memória em câmera lenta.
+      // Ver lib/local/detalheDaFaixa.ts.
+      pararAssimilador = detalhe.iniciarAssimilador();
     })();
 
     // App de verdade no celular: sem menu de long-press do navegador (abrir em
@@ -130,6 +138,7 @@ export default function App() {
       cancelado = true;
       pararPesquisador?.();
       pararReparador?.();
+      pararAssimilador?.();
       document.removeEventListener('contextmenu', blockContextMenu);
       cleanupSettings?.();
     };

@@ -63,7 +63,42 @@ interface Candidata {
 
 interface EstadoDoCofre {
   pronto?: boolean;
+  /** Espaço livre no DISCO onde o cofre mora. */
   livreBytes?: number;
+  /** Teto que o cofre se impõe, independente do disco. */
+  tetoBytes?: number;
+  /** Quanto o cofre já ocupa desses bytes. */
+  bytesEmBins?: number;
+}
+
+/**
+ * A FOLGA QUE VALE É A MENOR DAS DUAS — e confundi-las é fácil.
+ *
+ * O cofre tem dois limites, e eles não andam juntos:
+ *
+ *   • o DISCO, que pode estar vazio;
+ *   • o TETO que o cofre se impõe (`tetoBytes`), que é o que dispara a poda LRU.
+ *
+ * Medido no servidor em 2026-08-30: 3,93 GB livres no disco e apenas 92 MB de
+ * folga sob o teto (19,23 de 19,33 GB ocupados). Olhar só o disco diria "pode
+ * trabalhar à vontade" enquanto, na verdade, cada faixa trazida de volta
+ * expulsaria outra na hora. A varredura andaria a noite inteira para deixar o
+ * acervo exatamente como estava — e o log mostraria centenas de reparos.
+ *
+ * Por isso a folga real é o MENOR dos dois: quem estiver mais apertado é quem
+ * manda. Quando um dos números não vem, ele não conta — mas se NENHUM vier, a
+ * resposta é `null`, e `null` significa "não sei", que aqui vale como "não
+ * trabalhe": apostar a noite num palpite é o oposto do que este guarda existe
+ * para fazer.
+ */
+export function folgaReal(estado: EstadoDoCofre): number | null {
+  const noDisco = typeof estado.livreBytes === 'number' ? estado.livreBytes : null;
+  const sobOTeto =
+    typeof estado.tetoBytes === 'number' && typeof estado.bytesEmBins === 'number'
+      ? Math.max(0, estado.tetoBytes - estado.bytesEmBins)
+      : null;
+  const candidatos = [noDisco, sobOTeto].filter((v): v is number => v !== null);
+  return candidatos.length === 0 ? null : Math.min(...candidatos);
 }
 
 function baseInterna(): string {
@@ -93,7 +128,7 @@ async function folgaDoCofre(): Promise<number | null> {
     if (!res.ok) return null;
     const estado = (await res.json()) as EstadoDoCofre;
     if (!estado.pronto) return null;
-    return typeof estado.livreBytes === 'number' ? estado.livreBytes : null;
+    return folgaReal(estado);
   } catch {
     return null;
   }

@@ -26,7 +26,14 @@
  *    baixar a esmo garante que o que você vai ouvir agora seja justamente o que
  *    faltou. Daí a ordem de prioridade abaixo — que é função pura e testada.
  */
-import { garantirAudioLocal, hasLocalAudio, list, subscribe } from '@/lib/local/localLibrary';
+import * as albunsOffline from '@/lib/local/albunsOffline';
+import {
+  albumKeyForTrack,
+  garantirAudioLocal,
+  hasLocalAudio,
+  list,
+  subscribe,
+} from '@/lib/local/localLibrary';
 import type { LibraryEntry } from '@/lib/local/localLibrary';
 
 /** Espera entre downloads — o aparelho e o túnel de casa agradecem. */
@@ -48,7 +55,16 @@ const POR_RODADA = 25;
 const FATIA_DA_COTA = 0.5;
 
 export interface ContextoDeEscuta {
-  /** Ids na fila atual, do próximo em diante — vão tocar em segundos. */
+  /**
+   * A FILA INTEIRA daqui para a frente, na ordem em que vai tocar.
+   *
+   * Já foi só "as próximas 7". A intenção era boa — priorizar o que toca em
+   * segundos — mas o efeito era que sair do alcance do sinal no meio de uma
+   * playlist parava a música na oitava faixa, que é exatamente a situação em
+   * que o offline precisava existir. Mandar a fila toda não cria rajada: o
+   * guardião continua baixando uma por vez, com respiro, e parando na cota. O
+   * que muda é que ele passa a saber para onde a lista vai.
+   */
   aSeguir: string[];
   /** Ids tocados recentemente, do mais recente para o mais antigo. */
   recentes: string[];
@@ -61,9 +77,13 @@ export interface ContextoDeEscuta {
  * offline funciona" de "o offline funciona para faixas que você não ia ouvir".
  *
  * A ordem é a do risco de decepção:
- *   1. o que toca daqui a pouco (a fila) — errar aqui é errar na cara da pessoa;
- *   2. o que ela ouve sempre (o histórico) — é o que ela vai procurar sem sinal;
- *   3. o resto da biblioteca, do mais novo para o mais velho.
+ *   1. o que toca daqui a pouco (a fila inteira) — errar aqui é errar na cara
+ *      da pessoa, e ela está com o aparelho na mão;
+ *   2. os álbuns que ela MARCOU para levar (lib/local/albunsOffline) — é a
+ *      única prioridade que a automação não tem como adivinhar sozinha, porque
+ *      não está no que ela tocou nem no que vai tocar: está no que ela planeja;
+ *   3. o que ela ouve sempre (o histórico) — é o que vai procurar sem sinal;
+ *   4. o resto da biblioteca, do mais novo para o mais velho.
  *
  * Fica de fora quem já tem áudio aqui e quem NÃO TEM ROTA nenhuma para baixar
  * (nem cópia no importador, nem link de origem). Essa segunda exclusão importa:
@@ -74,9 +94,17 @@ export function ordemDeDownload(
   entradas: readonly LibraryEntry[],
   contexto: ContextoDeEscuta,
   jaTem: (id: string) => boolean,
+  /** Chaves de álbum que a pessoa marcou para levar (ver albunsOffline). */
+  fixados: ReadonlySet<string> = new Set(),
 ): LibraryEntry[] {
   const candidatas = entradas.filter(
-    (e) => !jaTem(e.track.id) && (e.remoteUrl || e.sourceUrl) && !e.track.previewOnly,
+    // `tocavel` cobre a entrada MAGRA do acervo, que não traz mais URL — só o
+    // bit. Sem ele, o guardião concluiria que nada tem rota e o offline pararia
+    // de existir para o acervo inteiro.
+    (e) =>
+      !jaTem(e.track.id) &&
+      (e.remoteUrl || e.sourceUrl || e.tocavel === true) &&
+      !e.track.previewOnly,
   );
   const porId = new Map(candidatas.map((e) => [e.track.id, e]));
 
@@ -90,6 +118,14 @@ export function ordemDeDownload(
   };
 
   for (const id of contexto.aSeguir) empurrar(id);
+  // Os álbuns marcados vêm inteiros, na ordem em que aparecem na biblioteca —
+  // um álbum pela metade no avião não é "álbum disponível offline".
+  if (fixados.size > 0) {
+    for (const entrada of candidatas) {
+      const chave = albumKeyForTrack(entrada.track);
+      if (chave && fixados.has(chave)) empurrar(entrada.track.id);
+    }
+  }
   for (const id of contexto.recentes) empurrar(id);
   for (const entrada of candidatas) empurrar(entrada.track.id);
   return fila;
@@ -138,7 +174,10 @@ async function rodada(): Promise<void> {
   if (rodando || !podeTrabalhar()) return;
   rodando = true;
   try {
-    const alvos = ordemDeDownload(list(), contexto, hasLocalAudio).slice(0, POR_RODADA);
+    const alvos = ordemDeDownload(list(), contexto, hasLocalAudio, albunsOffline.lista()).slice(
+      0,
+      POR_RODADA,
+    );
     for (const entrada of alvos) {
       if (!podeTrabalhar()) break;
       if (!(await cabeMaisAudio())) break;

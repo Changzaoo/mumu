@@ -30,6 +30,7 @@ import {
   setTrackDuration,
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
+import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 
@@ -89,6 +90,11 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
   if (!track.id.startsWith('local:')) return track;
   // OFFLINE: nunca sai atrás de rede — sem áudio local, a faixa é indisponível.
   if (typeof navigator !== 'undefined' && !navigator.onLine) return track;
+  // ENTRADA MAGRA: a listagem do acervo não traz mais URL nenhuma, só o bit que
+  // diz que a faixa toca. É AQUI, no caminho do play, que o conteúdo é buscado
+  // — uma faixa por vez, no clique, em vez de cinco mil na abertura. Quando o
+  // assimilador já passou por ela (o caso comum), isto volta na hora, sem rede.
+  if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) await garantirDetalhe(track.id);
   const remote = remoteUrlFor(track.id);
   if (remote) return { ...track, streamUrl: remote };
   const sourceUrl = sourceUrlFor(track.id);
@@ -806,8 +812,16 @@ export const usePlayerStore = create<PlayerState>()(
         void import('@/lib/offline/guardiaoOffline')
           .then(({ informarContexto }) => {
             const { queue, queueIndex } = get();
+            // O assimilador adianta o CONTEÚDO do que vem a seguir; o guardião
+            // adianta os BYTES. Mesma fila, dois adiantamentos diferentes.
+            informarFila(queue.slice(queueIndex + 1).map((t) => t.id));
             informarContexto({
-              aSeguir: queue.slice(queueIndex + 1, queueIndex + 8).map((t) => t.id),
+              // A FILA INTEIRA, não as próximas sete. O corte antigo fazia a
+              // música parar na oitava faixa de uma playlist quando o sinal
+              // sumia — justamente a situação para a qual o offline existe. O
+              // guardião continua baixando uma por vez e parando na cota; só
+              // passa a saber para onde a lista vai.
+              aSeguir: queue.slice(queueIndex + 1).map((t) => t.id),
               recentes: [track.id],
             });
           })
@@ -924,7 +938,7 @@ export const usePlayerStore = create<PlayerState>()(
               void import('@/lib/offline/guardiaoOffline')
                 .then(({ informarContexto }) =>
                   informarContexto({
-                    aSeguir: similares.slice(0, 8).map((t) => t.id),
+                    aSeguir: similares.map((t) => t.id),
                     recentes: [track.id],
                   }),
                 )

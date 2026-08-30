@@ -94,6 +94,22 @@ export interface LibraryEntry {
   /** SHA-256 of the audio bytes — catches identical files imported twice. */
   contentHash?: string;
   /**
+   * EXISTE CÓPIA PARA TOCAR? — o bit que substitui as URLs na listagem.
+   *
+   * A entrada do acervo chega MAGRA: sem `remoteUrl`, sem `track.streamUrl`,
+   * sem `sourceUrl`. Esses campos só fazem sentido para uma faixa de cada vez,
+   * e desciam multiplicados por cinco mil — ~1,5 MB e 25 mil propriedades no
+   * heap de um celular para que se usassem, no máximo, algumas dezenas por
+   * sessão. Agora eles chegam em `GET /catalogo/:id`, no clique.
+   *
+   * Só que uma coisa PRECISA ser sabida para desenhar a lista: se a faixa toca.
+   * O app esconde entrada sem cópia, porque card que promete som e responde 404
+   * é pior que card ausente. `tocavel` carrega exatamente isso num bit.
+   *
+   * Ausente nas entradas do próprio aparelho: essas já têm as URLs de verdade.
+   */
+  tocavel?: boolean;
+  /**
    * Veio do ACERVO DO APP (curado pelo admin), não deste aparelho.
    *
    * Marca o que é emprestado: não sobe para a nuvem privada do usuário, não
@@ -870,7 +886,10 @@ function applyRemoteBatch(upserts: Array<[string, LibraryEntry]>, deletes: strin
  */
 function temComoTocar(e: LibraryEntry, mortas: Map<string, string>): boolean {
   const fonte = e.remoteUrl ?? e.track.streamUrl;
-  if (!fonte) return false;
+  // MAGRA E TOCÁVEL: a entrada do acervo não traz mais URL — traz o bit. Sem
+  // este ramo, o enxugamento da listagem esconderia o acervo INTEIRO, porque
+  // toda entrada pareceria "sem cópia". Ver `tocavel` em LibraryEntry.
+  if (!fonte) return e.tocavel === true;
   return mortas.get(e.track.id) !== fonte;
 }
 
@@ -1041,6 +1060,40 @@ function patchEntry(id: string, next: LibraryEntry): void {
   // aqui, o acervo dos usuários ficaria congelado na metadata torta do momento
   // da importação, e a correção nunca chegaria neles.
   publicarNoCatalogo(storableEntry(next));
+}
+
+/**
+ * HIDRATA a entrada com o que veio de `GET /catalogo/:id` — e só isso.
+ *
+ * Estritamente LOCAL, e essa é a diferença que importa em relação ao
+ * `patchEntry`: aquele republica no acervo e sobe para a nuvem, o que aqui
+ * seria um eco — devolver ao servidor exatamente o dado que ele acabou de
+ * mandar, faixa por faixa, gerando escrita e invalidação de ETag para todo
+ * mundo a cada vez que alguém aperta play.
+ *
+ * Nunca sobrescreve o que já existe: se o aparelho já tem a URL (entrada
+ * própria, ou faixa já hidratada), o que está aqui é mais fresco que a
+ * resposta que estava em voo.
+ */
+export function hidratarEntrada(id: string, extras: Partial<LibraryEntry>): void {
+  const atual = read().find((e) => e.track.id === id);
+  if (!atual) return;
+  const track = extras.track ? { ...atual.track, ...extras.track } : atual.track;
+  const proximo: LibraryEntry = {
+    ...atual,
+    remoteUrl: atual.remoteUrl ?? extras.remoteUrl,
+    sourceUrl: atual.sourceUrl ?? extras.sourceUrl,
+    contentHash: atual.contentHash ?? extras.contentHash,
+    mimeType: atual.mimeType || extras.mimeType || '',
+    sizeBytes: atual.sizeBytes || extras.sizeBytes || 0,
+    track: {
+      ...track,
+      // `?? null` fecha o tipo: a faixa aceita `string | null`, e um `undefined`
+      // vindo de um detalhe sem cópia romperia o contrato do TrackDto.
+      streamUrl: atual.track.streamUrl ?? extras.track?.streamUrl ?? null,
+    },
+  };
+  write(read().map((e) => (e.track.id === id ? proximo : e)));
 }
 
 /**
