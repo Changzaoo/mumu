@@ -3,6 +3,7 @@
  * Firestore space, and detaches on logout. Call once on app boot.
  */
 import { subscribeAuth } from '@/lib/firebase';
+import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localHistory from '@/lib/local/localHistory';
@@ -31,5 +32,6 @@ export function initCloudSync(): void {
     localPlaylists.setUser(uid);
     localLibrary.setUser(uid);
     gostoInicial.setUser(uid);
+    faixasQueFalharam.setUser(uid);
   });
 }

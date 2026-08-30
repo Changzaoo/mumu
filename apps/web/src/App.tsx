@@ -61,6 +61,7 @@ export default function App() {
     // paralelo com a renderização; alguns milissegundos mais tarde, invisíveis
     // para o usuário, mas fora da frente da tela.
     let pararPesquisador: (() => void) | null = null;
+    let pararReparador: (() => void) | null = null;
     let cancelado = false;
     void (async () => {
       const [
@@ -71,6 +72,7 @@ export default function App() {
         presenca,
         genero,
         pesquisador,
+        reparador,
         guardiao,
         biblioteca,
       ] = await Promise.all([
@@ -81,6 +83,7 @@ export default function App() {
         import('@/lib/devices/presence'),
         import('@/lib/local/genreAgent'),
         import('@/lib/local/pesquisador'),
+        import('@/lib/local/reparador'),
         import('@/lib/offline/guardiaoOffline'),
         import('@/lib/local/localLibrary'),
       ]);
@@ -106,6 +109,12 @@ export default function App() {
       pararPesquisador = pesquisador.iniciarPesquisador(
         () => useSettingsStore.getState().pesquisadorAtivo,
       );
+      // Reparador: LIGADO, e a diferença para o pesquisador é o consentimento.
+      // O pesquisador sai atrás de música que ninguém pediu; este só rebaixa de
+      // novo faixa que a pessoa mandou tocar e que falhou na cara dela. Poucas
+      // por rodada, e ele nunca se declara consertado — quem encerra o caso é o
+      // player, quando sai som. Ver lib/local/reparador.ts.
+      pararReparador = reparador.iniciarReparador();
     })();
 
     // App de verdade no celular: sem menu de long-press do navegador (abrir em
@@ -120,6 +129,7 @@ export default function App() {
     return () => {
       cancelado = true;
       pararPesquisador?.();
+      pararReparador?.();
       document.removeEventListener('contextmenu', blockContextMenu);
       cleanupSettings?.();
     };

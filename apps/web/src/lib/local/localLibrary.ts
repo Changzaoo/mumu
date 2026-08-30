@@ -1116,6 +1116,39 @@ export function setTrackGenre(id: string, genre: string | null): void {
   patchEntry(id, { ...cur, track: { ...cur.track, genre } });
 }
 
+/**
+ * DEVOLVE A DURAÇÃO QUE FALTAVA — medida no áudio, não adivinhada.
+ *
+ * 1.714 faixas do acervo (34%) chegaram com `durationMs` zerado: a importação
+ * não conseguiu medir, e o campo ficou vazio para sempre porque nada nunca o
+ * revisitava. O estrago é maior do que parece, e aparece em três lugares:
+ *
+ *  - na TELA, como "0:00" no lugar do tempo total;
+ *  - na LETRA, porque o LRCLIB casa por duração. Sem ela, o caminho exato
+ *    (`/api/get`) é pulado e sobra só a busca difusa, que exige que o nome do
+ *    artista bata — frágil justamente nas faixas cuja metadata veio torta do
+ *    YouTube, que são as mesmas que perderam a duração;
+ *  - na FILA, onde crossfade e gapless dependem de saber quanto falta.
+ *
+ * E o dado estava disponível de graça o tempo todo: o elemento de áudio sabe a
+ * duração exata no instante em que carrega. Só faltava alguém escrever de volta.
+ *
+ * NUNCA SOBRESCREVE DURAÇÃO BOA: só preenche o que está zerado. Uma medição do
+ * navegador em stream parcial pode vir menor que a real, e trocar um valor
+ * correto por um medido seria piorar o que já estava certo.
+ */
+export function setTrackDuration(id: string, durationMs: number): void {
+  if (!Number.isFinite(durationMs) || durationMs < 1000) return;
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur) return;
+  if ((cur.track.durationMs ?? 0) > 0) return; // já tinha: não se mexe
+  const track = { ...cur.track, durationMs: Math.round(durationMs) };
+  patchEntry(id, { ...cur, track });
+  // Com a duração no lugar, a letra passa a ter o caminho exato disponível —
+  // vale tentar de novo agora, e não só na próxima vez que alguém abrir a faixa.
+  queueLyricsSync(track);
+}
+
 /** Enrich a list of ids one at a time (gentle on the iTunes endpoint). */
 async function enrichSequentially(ids: string[]): Promise<void> {
   for (const id of ids) {

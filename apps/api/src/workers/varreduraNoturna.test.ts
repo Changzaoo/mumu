@@ -1,0 +1,130 @@
+/**
+ * DUAS COISAS PRECISAM SER ÓBVIAS NESTE AGENTE.
+ *
+ * A primeira é a JANELA. "Madrugada" quase sempre atravessa a meia-noite, e
+ * `hora >= inicio && hora < fim` — a forma que todo mundo escreve primeiro —
+ * responde `false` a noite inteira quando o início é 22 e o fim é 5. O agente
+ * simplesmente nunca rodaria, sem erro nenhum no log.
+ *
+ * A segunda é a FOLGA NO COFRE. O cofre é menor que o acervo, então num cofre
+ * cheio cada faixa reparada expulsa outra pelo LRU: a varredura gastaria a noite
+ * para deixar o acervo exatamente como estava. Não trabalhar, nesse caso, é o
+ * comportamento correto — e é o que estes testes travam.
+ */
+import { beforeEach, describe, expect, it, vi } from 'vitest';
+
+const env = {
+  IMPORTER_URL: 'http://importer:8790',
+  IMPORTER_PUBLIC_URL: 'https://importer.exemplo',
+  IMPORT_SERVICE_TOKEN: 'x'.repeat(48),
+  VARREDURA_HORA_INICIO: 3,
+  VARREDURA_HORA_FIM: 6,
+  VARREDURA_MAX_POR_NOITE: 80,
+  VARREDURA_FOLGA_MINIMA_BYTES: 2_000_000_000,
+};
+
+vi.mock('../config/index.js', () => ({ env }));
+vi.mock('../core/logger.js', () => ({
+  logger: { info: vi.fn(), warn: vi.fn(), error: vi.fn() },
+}));
+vi.mock('../infra/db/prisma.js', () => ({ prisma: { $queryRaw: vi.fn(async () => []) } }));
+vi.mock('../modules/catalog/catalog.repository.js', () => ({ upsertCatalogTrack: vi.fn() }));
+
+const { dentroDaJanela, varrerUmaVez } = await import('./varreduraNoturna.worker.js');
+
+describe('dentroDaJanela', () => {
+  it('janela normal: 3h às 6h', () => {
+    expect(dentroDaJanela(2, 3, 6)).toBe(false);
+    expect(dentroDaJanela(3, 3, 6)).toBe(true);
+    expect(dentroDaJanela(5, 3, 6)).toBe(true);
+    expect(dentroDaJanela(6, 3, 6)).toBe(false); // fim é exclusivo
+  });
+
+  it('janela que ATRAVESSA a meia-noite: 22h às 5h', () => {
+    // O caso que a forma ingênua erra — e erra em silêncio, nunca rodando.
+    expect(dentroDaJanela(23, 22, 5)).toBe(true);
+    expect(dentroDaJanela(0, 22, 5)).toBe(true);
+    expect(dentroDaJanela(4, 22, 5)).toBe(true);
+    expect(dentroDaJanela(5, 22, 5)).toBe(false);
+    expect(dentroDaJanela(12, 22, 5)).toBe(false);
+    expect(dentroDaJanela(21, 22, 5)).toBe(false);
+  });
+
+  it('início igual ao fim significa o dia inteiro', () => {
+    for (const h of [0, 7, 13, 23]) expect(dentroDaJanela(h, 0, 0)).toBe(true);
+  });
+});
+
+describe('varrerUmaVez — as travas', () => {
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    env.IMPORTER_URL = 'http://importer:8790';
+    env.IMPORT_SERVICE_TOKEN = 'x'.repeat(48);
+  });
+
+  const madrugada = new Date('2026-08-30T04:00:00');
+
+  it('sem IMPORTER_URL não faz nada e diz por quê', async () => {
+    env.IMPORTER_URL = '';
+    const r = await varrerUmaVez(madrugada);
+    expect(r.rodou).toBe(false);
+    expect(r.motivo).toMatch(/IMPORTER_URL/);
+  });
+
+  it('sem crachá de máquina não faz nada', async () => {
+    // O importador é fechado por conta do Firebase; sem o token de serviço toda
+    // chamada voltaria 403 e a varredura seria uma metralhadora de recusas.
+    env.IMPORT_SERVICE_TOKEN = '';
+    const r = await varrerUmaVez(madrugada);
+    expect(r.rodou).toBe(false);
+    expect(r.motivo).toMatch(/IMPORT_SERVICE_TOKEN/);
+  });
+
+  it('fora da janela não trabalha', async () => {
+    const meioDia = new Date('2026-08-30T12:00:00');
+    const r = await varrerUmaVez(meioDia);
+    expect(r.rodou).toBe(false);
+    expect(r.motivo).toBe('fora da janela');
+  });
+
+  it('COFRE CHEIO: não repara, porque reparar expulsaria outra faixa', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ pronto: true, livreBytes: 100_000_000 }), // 100 MB
+      })),
+    );
+    const r = await varrerUmaVez(madrugada);
+    expect(r.rodou).toBe(false);
+    expect(r.motivo).toMatch(/sem folga/);
+    expect(r.reparadas).toBe(0);
+  });
+
+  it('cofre que não responde não é tratado como cofre vazio', async () => {
+    // Silêncio do cofre não é permissão: sem saber a folga, trabalhar seria
+    // apostar a noite num palpite.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => {
+        throw new Error('sem rede');
+      }),
+    );
+    const r = await varrerUmaVez(madrugada);
+    expect(r.rodou).toBe(false);
+    expect(r.motivo).toBe('cofre não respondeu');
+  });
+
+  it('com folga e sem candidatas, roda e não repara nada', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => ({
+        ok: true,
+        json: async () => ({ pronto: true, livreBytes: 50_000_000_000 }),
+      })),
+    );
+    const r = await varrerUmaVez(madrugada);
+    expect(r.rodou).toBe(true);
+    expect(r.reparadas).toBe(0);
+  });
+});

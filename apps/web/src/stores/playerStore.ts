@@ -27,9 +27,36 @@ import {
   localAudioUrl as localLibraryAudioUrl,
   remoteUrlFor,
   reportDeadRemote,
+  setTrackDuration,
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
+import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
+
+/** Faixas cuja duração já foi escrita de volta nesta sessão — o 'timeupdate'
+ *  dispara várias vezes por segundo e a gravação é em disco. */
+const duracaoJaAnotada = new Set<string>();
+
+/**
+ * A duração real, medida pelo elemento de áudio, volta para a biblioteca.
+ *
+ * É o conserto de um dado que se perdeu na importação e que nada revisitava:
+ * sem ele a faixa mostra "0:00" e perde o caminho exato da busca de letra, que
+ * casa por duração. Ver `setTrackDuration` em lib/local/localLibrary.ts — é lá
+ * que mora a regra de nunca sobrescrever duração boa.
+ */
+function anotarDuracaoMedida(duration: number): void {
+  if (!Number.isFinite(duration) || duration <= 1) return;
+  const atual = usePlayerStore.getState().currentTrack;
+  if (!atual || duracaoJaAnotada.has(atual.id)) return;
+  if ((atual.durationMs ?? 0) > 0) return;
+  duracaoJaAnotada.add(atual.id);
+  try {
+    setTrackDuration(atual.id, duration * 1000);
+  } catch {
+    /* metadata nunca interrompe a reprodução */
+  }
+}
 import { nextAudiusHost } from '@/lib/catalog/audius';
 import { streamUrlFor } from '@/lib/catalog/map';
 
@@ -409,6 +436,45 @@ function resetDeadRun(): void {
 }
 
 /**
+ * ANOTA O CASO — aqui, e não antes.
+ *
+ * Este é o funil ÚNICO de morte do player: só se chega nele depois de a cadeia
+ * inteira de fontes ter sido tentada e esgotada. Registrar mais cedo encheria o
+ * mapa de faixas que a tentativa seguinte resolveu, e um mapa cheio de casos
+ * falsos é pior que mapa nenhum — ele manda o reparador baixar de novo coisa
+ * que já funciona.
+ *
+ * O motivo sai do estado da cadeia, porque é ele que decide o que fazer depois:
+ *  - tinha os BYTES aqui e mesmo assim não tocou → o arquivo é que está ruim,
+ *    e baixar de novo é exatamente o conserto certo;
+ *  - não tinha NADA para tentar → a faixa não tem conserto por reimportação, e
+ *    a resposta honesta é parar de anunciá-la;
+ *  - tinha fonte e ela morreu → é o caso comum (cópia podada do cofre), e o
+ *    caminho de volta é o `sourceUrl`.
+ */
+function registrarNoMapa(track: TrackDto | null): void {
+  if (!track) return;
+  try {
+    const audioLocal = hasLocalAudio(track.id);
+    const remota = Boolean(remoteUrlFor(track.id));
+    const origem = sourceUrlFor(track.id);
+    const motivo = audioLocal
+      ? 'erro-de-midia'
+      : !remota && !origem && !track.streamUrl
+        ? 'sem-fonte'
+        : 'fonte-morta';
+    faixasQueFalharam.registrar(track, motivo, {
+      tinhaAudioLocal: audioLocal,
+      tinhaCopiaRemota: remota,
+      sourceUrl: origem ?? undefined,
+    });
+  } catch {
+    // Diagnóstico NUNCA pode derrubar a reprodução: se o registro falhar (cota
+    // cheia, armazenamento bloqueado), o player segue pulando como sempre fez.
+  }
+}
+
+/**
  * Fim da linha para a faixa ATUAL (todas as fontes falharam): se a fila tem
  * próxima e estávamos tocando, PULA para ela em vez de parar tudo.
  *
@@ -418,6 +484,7 @@ function resetDeadRun(): void {
  */
 function failCurrentTrack(message: string): void {
   const s = usePlayerStore.getState();
+  registrarNoMapa(s.currentTrack);
   consecutiveDeadTracks++;
   if (deadRunStartedAt === 0) deadRunStartedAt = Date.now();
 
@@ -1227,11 +1294,25 @@ export function initPlayerEngine(): void {
   });
 
   audioEngine.on('timeupdate', ({ position, duration }) => {
+    anotarDuracaoMedida(duration);
     const state = store.getState();
 
     // Som saindo = fila saudável. Zerar aqui (e não só no 'loaded') cobre a
     // faixa PRÉ-CARREGADA promovida, que não redispara 'loaded'.
-    if (position > 0) resetDeadRun();
+    if (position > 0) {
+      resetDeadRun();
+      // Saiu som: se esta faixa estava no mapa de falhas, o caso está
+      // encerrado. É a ÚNICA prova aceitável de reparo — "o importador disse
+      // que baixou" não é a mesma coisa que "a pessoa ouviu".
+      const tocando = usePlayerStore.getState().currentTrack;
+      if (tocando) {
+        try {
+          faixasQueFalharam.marcarReparada(tocando.id);
+        } catch {
+          /* diagnóstico nunca interrompe a reprodução */
+        }
+      }
+    }
 
     // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
     if (!signedIn && position >= PREVIEW_SECONDS) firePreviewGate();

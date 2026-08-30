@@ -12,6 +12,7 @@ import { createNotificationsWorker } from './notifications.worker.js';
 import { startCurationWorker } from './curation.worker.js';
 import { startArmazenamentoWorker } from './armazenamento.worker.js';
 import { startAcervoFielWorker } from './acervoFiel.worker.js';
+import { startVarreduraNoturnaWorker } from './varreduraNoturna.worker.js';
 
 const connection = createBullConnection();
 
@@ -49,6 +50,12 @@ const stopArmazenamento = startArmazenamentoWorker();
 // jogar fora o `sourceUrl`, que é o caminho de volta. Ver acervoFiel.worker.
 const stopAcervoFiel = startAcervoFielWorker();
 
+// A varredura de madrugada é a outra metade do acervo fiel: aquele ESCONDE o
+// que não toca, esta TRAZ DE VOLTA o que ainda tem caminho de origem. Só sobe
+// quando o importador e o crachá de máquina estão configurados, e só trabalha
+// com folga no cofre — ver varreduraNoturna.worker.
+const stopVarredura = startVarreduraNoturnaWorker();
+
 logger.info(
   {
     queues: workers.map((w) => w.name),
@@ -72,6 +79,7 @@ async function shutdown(signal: string): Promise<void> {
   stopCuration();
   stopArmazenamento();
   stopAcervoFiel();
+  stopVarredura();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

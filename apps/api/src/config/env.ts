@@ -141,6 +141,62 @@ const envSchema = z
     /** Só re-audita uma faixa depois disso (evita reprocessar a mesma sempre). */
     CURATION_RECHECK_DAYS: z.coerce.number().int().min(1).default(30),
 
+    // ── Varredura de madrugada (ver varreduraNoturna.worker) ────────────────
+    /**
+     * Onde o importador atende, VISTO DE DENTRO do container da API.
+     *
+     * Vazio desliga a varredura inteira — é o interruptor geral. Preferir o
+     * endereço interno (o importador roda na mesma máquina) a passar pelo
+     * túnel público: sair para a internet e voltar para o mesmo host paga
+     * latência e trava numa proteção de bot que não existe aqui dentro.
+     */
+    IMPORTER_URL: optionalString,
+    /**
+     * O endereço PÚBLICO do importador — o que os navegadores usam.
+     *
+     * Existe separado do `IMPORTER_URL` porque a varredura GRAVA a URL da cópia
+     * dentro do acervo, e essa URL vai parar no celular de quem ouve. Montá-la
+     * com o endereço interno (`localhost`, IP de rede docker) produziria um
+     * acervo cheio de links que só funcionam de dentro do servidor: reparo que
+     * parece ter dado certo no log e não toca em lugar nenhum. Vazio = usa o
+     * `IMPORTER_URL`, o que só é correto quando os dois são o mesmo endereço.
+     */
+    IMPORTER_PUBLIC_URL: optionalString,
+    /**
+     * O crachá de máquina para falar com o importador (`IMPORT_SERVICE_TOKEN`
+     * em apps/importer/server.mjs). Sem ele a varredura não sobe: o importador
+     * é fechado por conta do Firebase e um worker não tem conta.
+     */
+    IMPORT_SERVICE_TOKEN: optionalString,
+    /**
+     * A JANELA — por que "de madrugada" e não "o tempo todo".
+     *
+     * Reimportar é a coisa mais cara que esta máquina faz: um yt-dlp por faixa,
+     * baixando da internet, na MESMA máquina que serve o áudio de quem está
+     * ouvindo. Rodando de dia, o conserto de faixas que ninguém pediu agora
+     * competiria com a música que alguém pediu agora. Hora local do servidor.
+     */
+    VARREDURA_HORA_INICIO: z.coerce.number().int().min(0).max(23).default(3),
+    VARREDURA_HORA_FIM: z.coerce.number().int().min(0).max(23).default(6),
+    /** Teto de faixas por noite: uma varredura previsível é melhor que uma
+     *  rápida, e o acervo não vai a lugar nenhum. */
+    VARREDURA_MAX_POR_NOITE: z.coerce.number().int().min(1).default(80),
+    /**
+     * FOLGA MÍNIMA NO COFRE, em bytes, para a varredura valer a pena.
+     *
+     * O cofre é MENOR que o acervo (18 GB de teto para ~42 GB de música), e
+     * podar é regime normal. Num cofre cheio, cada faixa que a varredura traz
+     * de volta expulsa outra pelo LRU — mil reparos numa noite produziriam mil
+     * faixas quebradas novas, e a manhã seguinte pareceria idêntica à anterior.
+     * Sem esta folga a varredura NÃO roda, e diz no log por quê: um agente que
+     * anda em círculos gastando banda é pior que um agente parado.
+     */
+    VARREDURA_FOLGA_MINIMA_BYTES: z.coerce
+      .number()
+      .int()
+      .min(0)
+      .default(2 * 1024 * 1024 * 1024),
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {

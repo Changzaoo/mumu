@@ -58,6 +58,51 @@ const HOST = process.env.HOST ?? '127.0.0.1';
 // Optional shared secret (legacy fallback). Prefer Firebase gating below.
 const IMPORT_TOKEN = (process.env.IMPORT_TOKEN ?? '').trim();
 
+/**
+ * TOKEN DE SERVIÇO — como uma MÁQUINA entra aqui.
+ *
+ * O portão deste importador é o Firebase: exige um usuário de verdade, com
+ * e-mail verificado e na lista. Isso é certo para gente e impossível para um
+ * worker — um processo no servidor não tem conta, não tem e-mail e não tem como
+ * assinar um token do Firebase. Enquanto só existiu esse portão, todo reparo do
+ * acervo dependia de alguém abrir o app e esbarrar na faixa quebrada; a
+ * varredura de madrugada simplesmente não tinha por onde entrar.
+ *
+ * Este é o crachá da máquina, e três propriedades o sustentam:
+ *
+ *  1. É OPT-IN. Sem `IMPORT_SERVICE_TOKEN` no ambiente, `SERVICE_TOKEN` fica
+ *     vazio, `ehTokenDeServico` responde `false` sempre, e o portão continua
+ *     exatamente como era. Nenhum caminho novo se abre por acidente.
+ *  2. TEM PISO DE TAMANHO. Este segredo vale importação e escrita no cofre — é
+ *     acesso de dono, sem rosto. Um valor curto seria quebrável por força bruta
+ *     contra um endpoint que está na internet, então um token fraco é RECUSADO
+ *     na partida, com aviso no log, em vez de aceito em silêncio: proteção que
+ *     existe só no papel é pior que proteção nenhuma, porque engana quem confia.
+ *  3. COMPARA EM TEMPO CONSTANTE. `===` entre strings volta no primeiro byte
+ *     diferente, e essa diferença é medível pela rede — dá para descobrir o
+ *     segredo byte a byte. O sha256 dos dois lados iguala o comprimento (que é
+ *     o que `timingSafeEqual` exige para não lançar) e faz acerto e erro
+ *     levarem o mesmo tempo.
+ */
+const SERVICE_TOKEN_MIN = 32;
+const SERVICE_TOKEN_BRUTO = (process.env.IMPORT_SERVICE_TOKEN ?? '').trim();
+const SERVICE_TOKEN =
+  SERVICE_TOKEN_BRUTO.length === 0 || SERVICE_TOKEN_BRUTO.length >= SERVICE_TOKEN_MIN
+    ? SERVICE_TOKEN_BRUTO
+    : '';
+if (SERVICE_TOKEN_BRUTO && !SERVICE_TOKEN) {
+  console.warn(
+    `[importer] IMPORT_SERVICE_TOKEN ignorado: exige ao menos ${SERVICE_TOKEN_MIN} caracteres.`,
+  );
+}
+
+function ehTokenDeServico(valor) {
+  if (!SERVICE_TOKEN || typeof valor !== 'string' || valor.length === 0) return false;
+  const a = crypto.createHash('sha256').update(valor).digest();
+  const b = crypto.createHash('sha256').update(SERVICE_TOKEN).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
 // ── Firebase auth gate ──────────────────────────────────────────────────────
 // Two Firebase-gated modes, both requiring a valid Firebase ID token (knowing
 // the URL grants nothing, and no shared secret ships in the browser bundle):
@@ -1043,6 +1088,9 @@ async function rejectUpload(req, res, status, payload) {
  * for the streaming endpoint, since an <audio> element can't send headers.
  */
 async function authorizeToken(token) {
+  // Antes do portão do Firebase, e por necessidade: o worker não tem conta para
+  // apresentar, então checar o crachá depois seria nunca checar.
+  if (ehTokenDeServico(token)) return true;
   if (FIREBASE_GATED) {
     if (!token) return false;
     try {
@@ -1215,6 +1263,8 @@ const log = (...a) => console.log('[aurial-importer]', ...a);
  */
 async function authorize(req) {
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  // Ver `ehTokenDeServico`: crachá de máquina, opt-in, antes do portão de gente.
+  if (ehTokenDeServico(bearer) || ehTokenDeServico(req.headers['x-aurial-service'])) return true;
   if (FIREBASE_GATED) {
     if (!bearer) return false;
     try {

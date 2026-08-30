@@ -28,6 +28,10 @@ const COLECOES = new Set([
   'playlists',
   'playlistTracks',
   'gosto',
+  // 'falhas' é o mapa das faixas que não tocaram, um caso por faixa. Ele sobe
+  // para cá porque uma falha que morre no aparelho de quem ouviu não vira
+  // conserto — ver apps/web/src/lib/local/faixasQueFalharam.ts.
+  'falhas',
 ]);
 
 function nomeDaColecao(bruto: unknown): string {
