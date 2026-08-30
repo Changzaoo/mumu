@@ -11,6 +11,7 @@ import { createLyricSyncWorker } from './lyricSync.worker.js';
 import { createNotificationsWorker } from './notifications.worker.js';
 import { startCurationWorker } from './curation.worker.js';
 import { startArmazenamentoWorker } from './armazenamento.worker.js';
+import { startAcervoFielWorker } from './acervoFiel.worker.js';
 
 const connection = createBullConnection();
 
@@ -42,8 +43,19 @@ const stopCuration = env.CURATION_ENABLED ? startCurationWorker() : () => undefi
 // vezes em que este servidor encheu, o sintoma não pareceu disco.
 const stopArmazenamento = startArmazenamentoWorker();
 
+// O acervo não pode anunciar cópia que não existe: uma poda antiga do cofre
+// levou a meta junto com os bytes e deixou faixas que respondem 404 para
+// sempre. Este agente varre devagar e para de anunciar as que sumiram — sem
+// jogar fora o `sourceUrl`, que é o caminho de volta. Ver acervoFiel.worker.
+const stopAcervoFiel = startAcervoFielWorker();
+
 logger.info(
-  { queues: workers.map((w) => w.name), curadoria: env.CURATION_ENABLED, armazenamento: true },
+  {
+    queues: workers.map((w) => w.name),
+    curadoria: env.CURATION_ENABLED,
+    armazenamento: true,
+    acervoFiel: true,
+  },
   'Aurial workers started',
 );
 
@@ -59,6 +71,7 @@ async function shutdown(signal: string): Promise<void> {
 
   stopCuration();
   stopArmazenamento();
+  stopAcervoFiel();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

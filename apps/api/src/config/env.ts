@@ -123,6 +123,21 @@ const envSchema = z
       .int()
       .min(60_000)
       .default(60 * 60_000),
+
+    /**
+     * De quanto em quanto tempo o agente do acervo confere se as cópias do
+     * cofre ainda servem (ver `acervoFiel.worker`).
+     *
+     * Cinco minutos, com lote pequeno, dá a volta no acervo em algumas horas —
+     * de propósito. O cofre roda na MESMA máquina que serve música: descobrir
+     * uma cópia morta uma hora mais tarde não custa nada, sufocar o importador
+     * no meio de uma reprodução custa.
+     */
+    ACERVO_FIEL_INTERVAL_MS: z.coerce
+      .number()
+      .int()
+      .min(30_000)
+      .default(5 * 60_000),
     /** Só re-audita uma faixa depois disso (evita reprocessar a mesma sempre). */
     CURATION_RECHECK_DAYS: z.coerce.number().int().min(1).default(30),
 
