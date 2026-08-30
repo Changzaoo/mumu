@@ -271,6 +271,41 @@ const kbpsFor = (quality) => QUALITY_KBPS[quality] ?? 320;
  * Conferindo na hora, o arquivo pode ser colocado, trocado ou removido com o
  * serviço no ar, e a pior hipótese é voltar ao comportamento de antes.
  */
+/**
+ * QUAL CLIENTE DO YOUTUBE PEDIR — e por que isto virou obrigatório.
+ *
+ * O yt-dlp resolvia o formato normalmente e só então o download dos BYTES
+ * levava `HTTP Error 403: Forbidden`. Como a resolução funcionava, tudo parecia
+ * certo: cookies válidos, PO token gerado, formato 251 escolhido — e o cano
+ * morria 2 segundos depois, sem uma linha dizendo o motivo.
+ *
+ * O estrago disso foi o acervo inteiro. A reconstrução de faixa podada É um
+ * download; com ela quebrada, toda faixa que a poda tinha levado virava 404
+ * permanente para quem ouve. Medido no servidor em 2026-08-30, no log do
+ * importador: 285 reconstruções tentadas, 285 falhadas — cem por cento.
+ *
+ * Testados um a um contra o mesmo vídeo, com os mesmos cookies:
+ *   default        → 403 Forbidden ao baixar
+ *   web            → "Requested format is not available"
+ *   ios            → "Requested format is not available"
+ *   tv             → "The page needs to be reloaded"
+ *   mweb           → 403 Forbidden
+ *   web_embedded   → BAIXOU (confirmado em 3 vídeos diferentes)
+ *
+ * `default` fica na lista DEPOIS do que funciona: ele não atrapalha (os
+ * formatos dos dois clientes entram no mesmo balaio, e o resultado foi
+ * byte-a-byte idêntico ao de `web_embedded` sozinho) e é a rede de segurança
+ * para o vídeo que proíbe embed, onde `web_embedded` não tem o que oferecer.
+ *
+ * Sobrescrevível por env: quando o YouTube mudar de novo — e ele muda —, dá
+ * para trocar o cliente sem republicar o serviço.
+ */
+function extractorArgs() {
+  const clientes = process.env.YTDLP_PLAYER_CLIENT ?? 'web_embedded,default';
+  if (!clientes.trim()) return [];
+  return ['--extractor-args', `youtube:player_client=${clientes.trim()}`];
+}
+
 function cookieArgs() {
   const caminho = process.env.YTDLP_COOKIES;
   if (!caminho || !existsSync(caminho)) return [];
@@ -306,6 +341,7 @@ async function importToMp3(ytdlp, url, quality) {
     // Optional YouTube cookies (Netscape cookies.txt) to pass the "not a bot"
     // gate on large batches — set YTDLP_COOKIES to the file path.
     ...cookieArgs(),
+    ...extractorArgs(),
     '-f',
     'bestaudio/best',
     '-x',
@@ -777,6 +813,7 @@ async function reconstruirBlob(id, meta) {
       '--no-playlist',
       '--no-warnings',
       ...cookieArgs(),
+      ...extractorArgs(),
       '-o',
       '-',
       meta.sourceUrl,
@@ -1037,6 +1074,7 @@ async function dumpJson(ytdlp, url) {
     // cookies, ao contrário de listPlaylist e importToMp3. Sem isto, a leitura
     // de metadados falha primeiro que o download, que é o inverso do esperado.
     ...cookieArgs(),
+    ...extractorArgs(),
     url,
   ];
   const out = await new Promise((resolve, reject) => {
@@ -1069,6 +1107,7 @@ async function listPlaylist(ytdlp, url) {
     '--dump-single-json',
     ...(MAX_PLAYLIST > 0 ? ['--playlist-end', String(MAX_PLAYLIST)] : []),
     ...cookieArgs(),
+    ...extractorArgs(),
     url,
   ];
   const stdout = await new Promise((resolve, reject) => {
@@ -2150,6 +2189,7 @@ async function main() {
             '--no-playlist',
             '--no-warnings',
             ...cookieArgs(),
+            ...extractorArgs(),
             '-o',
             '-',
             url,
