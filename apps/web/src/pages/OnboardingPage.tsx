@@ -163,7 +163,7 @@ export default function OnboardingPage() {
   const itens = noPasso1 ? todosGeneros.length : todosArtistas.length;
 
   return (
-    <div className="relative flex min-h-dvh flex-col overflow-hidden bg-bg">
+    <div className="relative flex h-dvh flex-col overflow-hidden bg-bg">
       <div
         aria-hidden
         className="pointer-events-none absolute -left-40 -top-40 size-[36rem] rounded-full bg-accent opacity-20 blur-[120px]"
@@ -173,65 +173,84 @@ export default function OnboardingPage() {
         className="pointer-events-none absolute -bottom-48 -right-40 size-[36rem] rounded-full bg-info opacity-15 blur-[120px]"
       />
 
-      <header className="relative z-10 mx-auto w-full max-w-4xl px-5 pb-4 pt-8">
-        <AurialLogo />
-        <p className="mt-6 text-[13px] font-medium uppercase tracking-wide text-fg-muted">
-          Passo {noPasso1 ? 1 : 2} de 2
-        </p>
-        <h1 className="mt-1 text-2xl font-semibold text-fg sm:text-3xl">
-          {noPasso1 ? 'O que você gosta de ouvir?' : 'Escolha alguns artistas'}
-        </h1>
-        <p className="mt-2 max-w-prose text-sm text-fg-muted">
-          {noPasso1
-            ? 'Escolha os estilos que combinam com você. Serve para a primeira tela já fazer sentido — depois ela se ajusta sozinha ao que você realmente ouvir.'
-            : 'Quem você escolher aqui ganha uma prateleira própria na Home. Pode deixar em branco se não reconhecer ninguém.'}
-        </p>
-      </header>
-
-      <main className="relative z-10 mx-auto w-full max-w-4xl flex-1 px-5 pb-40">
-        {carregando ? (
-          <div className="flex flex-col items-center gap-3 py-20 text-center text-sm text-fg-muted">
-            <Loader2 className="size-5 animate-spin" aria-hidden />
-            Carregando o acervo…
-          </div>
-        ) : itens === 0 ? (
-          // O acervo chegou e não há o que oferecer. Dizer isso é melhor que uma
-          // grade vazia com um botão desabilitado, que parece defeito.
-          <p className="py-20 text-center text-sm text-fg-muted">
-            Ainda não há {noPasso1 ? 'gêneros' : 'artistas'} suficientes no acervo para escolher.
-            Você pode seguir e voltar a isto depois.
+      {/* O SCROLLER É DAQUI, e ele não é opcional.
+          No toque o documento inteiro é FIXO de propósito (globals.css, dentro
+          de `@media (pointer: coarse)`: html e body viram `position: fixed` com
+          `overflow: hidden`, para matar o rubber-band do navegador). Quem rola
+          no app são os contêineres internos — na casca, o main. Esta tela mora
+          FORA da casca, então precisa oferecer o seu: sem isso a grade
+          transborda e fica inalcançável no celular. No desktop nada disso
+          aparece, porque a regra vale só para ponteiro grosso — foi por isso
+          que passou batido. */}
+      <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-y-none">
+        <header className="mx-auto w-full max-w-4xl px-5 pb-4 pt-8">
+          <AurialLogo />
+          <p className="mt-6 text-[13px] font-medium uppercase tracking-wide text-fg-muted">
+            Passo {noPasso1 ? 1 : 2} de 2
           </p>
-        ) : noPasso1 ? (
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-            {todosGeneros.map((g) => (
-              <Cartao
-                key={g.genre}
-                titulo={g.genre}
-                imagem={g.coverUrl}
-                marcado={generos.includes(g.genre)}
-                onClick={() => setGeneros((atual) => alternar(atual, g.genre))}
-              />
-            ))}
-          </div>
-        ) : (
-          <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
-            {todosArtistas.map((a) => (
-              <Cartao
-                key={a.name}
-                titulo={a.name}
-                imagem={a.coverUrl}
-                redondo
-                marcado={artistas.includes(a.name)}
-                onClick={() => setArtistas((atual) => alternar(atual, a.name))}
-              />
-            ))}
-          </div>
-        )}
-      </main>
+          <h1 className="mt-1 text-2xl font-semibold text-fg sm:text-3xl">
+            {noPasso1 ? 'O que você gosta de ouvir?' : 'Escolha alguns artistas'}
+          </h1>
+          <p className="mt-2 max-w-prose text-sm text-fg-muted">
+            {noPasso1
+              ? 'Escolha os estilos que combinam com você. Serve para a primeira tela já fazer sentido — depois ela se ajusta sozinha ao que você realmente ouvir.'
+              : 'Quem você escolher aqui ganha uma prateleira própria na Home. Pode deixar em branco se não reconhecer ninguém.'}
+          </p>
+        </header>
 
-      {/* A barra é fixa porque a grade rola: sem ela colada, quem escolhesse um
-          gênero lá em cima teria de rolar até o fim para descobrir como seguir. */}
-      <footer className="glass fixed inset-x-0 bottom-0 z-20 border-t border-fg/10 px-5 py-4">
+        <main className="mx-auto w-full max-w-4xl px-5 pb-8">
+          {carregando ? (
+            <div className="flex flex-col items-center gap-3 py-20 text-center text-sm text-fg-muted">
+              <Loader2 className="size-5 animate-spin" aria-hidden />
+              Carregando o acervo…
+            </div>
+          ) : itens === 0 ? (
+            // O acervo chegou e não há o que oferecer. Dizer isso é melhor que uma
+            // grade vazia com um botão desabilitado, que parece defeito.
+            <p className="py-20 text-center text-sm text-fg-muted">
+              Ainda não há {noPasso1 ? 'gêneros' : 'artistas'} suficientes no acervo para escolher.
+              Você pode seguir e voltar a isto depois.
+            </p>
+          ) : noPasso1 ? (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+              {todosGeneros.map((g) => (
+                <Cartao
+                  key={g.genre}
+                  titulo={g.genre}
+                  imagem={g.coverUrl}
+                  marcado={generos.includes(g.genre)}
+                  onClick={() => setGeneros((atual) => alternar(atual, g.genre))}
+                />
+              ))}
+            </div>
+          ) : (
+            <div className="grid grid-cols-3 gap-2 sm:grid-cols-4 md:grid-cols-6">
+              {todosArtistas.map((a) => (
+                <Cartao
+                  key={a.name}
+                  titulo={a.name}
+                  imagem={a.coverUrl}
+                  redondo
+                  marcado={artistas.includes(a.name)}
+                  onClick={() => setArtistas((atual) => alternar(atual, a.name))}
+                />
+              ))}
+            </div>
+          )}
+        </main>
+      </div>
+
+      {/* A barra fica sempre à vista porque a grade rola: sem isso, quem
+          escolhesse um gênero lá em cima teria de rolar até o fim para
+          descobrir como seguir.
+
+          Ela NÃO é `fixed` — é a última linha do layout, a mesma lição que o
+          PlayerBar aprendeu na casca. `fixed` dentro de um body que já é
+          `position: fixed` no toque se ancora na janela, não no quadro do app,
+          e escorrega quando o teclado abre ou a barra do navegador se recolhe.
+          O `env(safe-area-inset-bottom)` mantém os botões acima do indicador de
+          home do iPhone. */}
+      <footer className="glass relative z-20 shrink-0 border-t border-fg/10 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4">
           <Button variant="ghost" onClick={noPasso1 ? pular : () => setPasso('generos')}>
             {noPasso1 ? 'Agora não' : 'Voltar'}
