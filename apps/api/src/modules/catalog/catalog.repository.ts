@@ -84,12 +84,33 @@ export function comCamposDoServidor(
   return saida;
 }
 
+/**
+ * O ACERVO JÁ MONTADO, guardado em memória enquanto ele não muda.
+ *
+ * Montar a resposta não é de graça: são 5.053 linhas lidas do Postgres, cada
+ * uma com uma coluna JSON que o Prisma desserializa, e depois a limpeza campo a
+ * campo. Medido de fora, em produção: **1,5 s até o primeiro byte** — e isso
+ * acontecia INTEIRO de novo para cada pessoa que abrisse o app, ainda que nada
+ * tivesse mudado no acervo entre uma e outra.
+ *
+ * A chave do cache é o próprio ETag, que já existia e já é barato de calcular
+ * (uma agregação que o índice de `updatedAt` resolve): mesma assinatura, mesma
+ * resposta. Qualquer escrita no acervo muda a assinatura e o cache cai sozinho
+ * no pedido seguinte — não há invalidação manual para alguém esquecer.
+ *
+ * Custo: uma cópia do acervo na memória do processo (~6 MB depois que o `dna`
+ * saiu). O que ele economiza é justamente o trecho que aparece como app parado,
+ * esperando a primeira faixa.
+ */
+let emMemoria: { etag: string; entries: CatalogEntry[] } | null = null;
+
 export async function listCatalog(): Promise<CatalogSnapshot> {
-  const [rows, etag] = await Promise.all([
-    prisma.catalogTrack.findMany({ orderBy: { updatedAt: 'desc' } }),
-    catalogEtag(),
-  ]);
-  return { entries: rows.map((r) => semCamposDoServidor(r.data as CatalogEntry)), etag };
+  const etag = await catalogEtag();
+  if (emMemoria?.etag === etag) return { entries: emMemoria.entries, etag };
+  const rows = await prisma.catalogTrack.findMany({ orderBy: { updatedAt: 'desc' } });
+  const entries = rows.map((r) => semCamposDoServidor(r.data as CatalogEntry));
+  emMemoria = { etag, entries };
+  return { entries, etag };
 }
 
 /** Publica (ou atualiza) uma faixa. O id é o do cliente — ver o schema. */
