@@ -69,3 +69,62 @@ describe('generosDoGosto', () => {
     expect(a[0]!.tracks.map((t) => t.id)).toEqual(b[0]!.tracks.map((t) => t.id));
   });
 });
+
+describe('generosDoGosto — a semente do onboarding', () => {
+  const genres = [grupo('Pop', 30), grupo('Trap', 20), grupo('Rock', 10), grupo('Jazz', 5)];
+  const now = new Date('2026-08-16T12:00:00Z');
+
+  it('no primeiro dia, o gênero escolhido passa na frente do maior do acervo', () => {
+    // Sem histórico nem curtida, a ordem cairia no tamanho: Pop (30) primeiro.
+    // É exatamente o caso que o onboarding existe para consertar.
+    const semSemente = generosDoGosto(genres, [], [], { now });
+    expect(semSemente[0]!.genre).toBe('Pop');
+
+    const out = generosDoGosto(genres, [], [], { now, sementes: ['Jazz'] });
+    expect(out[0]!.genre).toBe('Jazz');
+    expect(out[0]!.motivo).toBe('Você escolheu ao entrar');
+  });
+
+  it('o comportamento real vence a escolha — quem disse rock e ouve trap vê trap', () => {
+    const history = Array.from({ length: 30 }, (_, i) => ({
+      track: faixa(`Trap-${i}`, 'Trap', 'Y'),
+      playedAt: now.toISOString(),
+    }));
+    const out = generosDoGosto(genres, history, [], { now, sementes: ['Rock'] });
+    expect(out[0]!.genre).toBe('Trap');
+    expect(out[0]!.motivo).toBe('Porque você ouve bastante');
+  });
+
+  it('a escolha perde força à medida que o histórico cresce, sem sumir de vez', () => {
+    const posicaoDoJazz = (plays: number): number => {
+      const history = Array.from({ length: plays }, (_, i) => ({
+        track: faixa(`Pop-${i}`, 'Pop', 'Z'),
+        playedAt: now.toISOString(),
+      }));
+      const out = generosDoGosto(genres, history, [], { now, sementes: ['Jazz'] });
+      return out.findIndex((p) => p.genre === 'Jazz');
+    };
+    // Sem histórico manda; com histórico de sobra deixa de mandar…
+    expect(posicaoDoJazz(0)).toBe(0);
+    expect(posicaoDoJazz(60)).toBeGreaterThan(0);
+    // …mas continua presente: o palpite vira desempate, não vira lixo.
+    expect(posicaoDoJazz(60)).toBeGreaterThanOrEqual(0);
+  });
+
+  it('gênero escolhido que não existe no acervo não inventa prateleira', () => {
+    const out = generosDoGosto(genres, [], [], { now, sementes: ['K-pop'] });
+    expect(out.map((p) => p.genre)).not.toContain('K-pop');
+    expect(out.length).toBeGreaterThan(0);
+  });
+
+  it('casa a escolha mesmo com diferença de caixa', () => {
+    const out = generosDoGosto(genres, [], [], { now, sementes: ['jazz  '] });
+    expect(out[0]!.genre).toBe('Jazz');
+  });
+
+  it('sem semente, a ordem é exatamente a de antes', () => {
+    const antes = generosDoGosto(genres, [], [], { now });
+    const depois = generosDoGosto(genres, [], [], { now, sementes: [] });
+    expect(depois.map((p) => p.genre)).toEqual(antes.map((p) => p.genre));
+  });
+});

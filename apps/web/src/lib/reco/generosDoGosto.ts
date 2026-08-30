@@ -39,6 +39,33 @@ const MEIA_VIDA_MS = 30 * 24 * 60 * 60 * 1000;
 /** Curtir é sinal forte de gosto — vale vários plays. */
 const BONUS_CURTIDA = 2;
 
+/**
+ * O QUE VALE A ESCOLHA DO ONBOARDING, E COMO ELA É ESQUECIDA.
+ *
+ * `PESO_SEMENTE` é o peso do gênero escolhido quando não existe comportamento
+ * nenhum. 6 fica acima de três curtidas (BONUS_CURTIDA = 2) e muito acima da
+ * base logarítmica de tamanho — o suficiente para o que a pessoa escolheu
+ * passar na frente do maior gênero do acervo, que é exatamente o problema do
+ * primeiro dia.
+ *
+ * `MEIA_FORCA_SEMENTE` é a massa de comportamento real que corta esse peso pela
+ * metade: ~10 equivale a uma dezena de plays recentes ou cinco curtidas. O
+ * decaimento é suave e nunca chega a zero de vez, então a escolha continua
+ * desempatando gêneros parecidos muito depois de ter deixado de mandar.
+ *
+ * Isto é o que separa um PALPITE de uma CONFIGURAÇÃO: quem escolheu "rock" ao
+ * entrar e passa um mês ouvindo samba vê samba, sem precisar achar uma tela de
+ * ajuste para se corrigir.
+ */
+const PESO_SEMENTE = 6;
+const MEIA_FORCA_SEMENTE = 10;
+
+/** Gêneros vêm da mesma biblioteca, mas comparar sem caixa evita que uma
+ *  diferença de maiúscula faça a escolha da pessoa não casar com nada. */
+function chaveGenero(g: string): string {
+  return g.toLowerCase().trim();
+}
+
 /** FNV-1a: hash estável de string → semente por gênero (varia o embaralho). */
 function hashStr(s: string): number {
   let h = 2166136261;
@@ -62,6 +89,8 @@ export function generosDoGosto(
     porGenero?: number;
     maxPorArtista?: number;
     now?: Date;
+    /** Gêneros que a pessoa escolheu no onboarding (lib/local/gostoInicial). */
+    sementes?: readonly string[];
   } = {},
 ): PrateleiraDeGenero[] {
   const maxGeneros = opts.maxGeneros ?? 8;
@@ -90,18 +119,25 @@ export function generosDoGosto(
 
   const totalAfin = [...afinidade.values()].reduce((a, b) => a + b, 0);
 
+  // A semente entra DEPOIS da soma do comportamento real, e o seu peso é função
+  // dessa soma — é assim que ela manda no dia zero e some sozinha depois.
+  const escolhidos = new Set((opts.sementes ?? []).map(chaveGenero));
+  const forcaDaSemente =
+    escolhidos.size === 0 ? 0 : PESO_SEMENTE / (1 + totalAfin / MEIA_FORCA_SEMENTE);
+
   const pontuados = genres.map((g) => {
     const af = afinidade.get(g.genre) ?? 0;
+    const sem = escolhidos.has(chaveGenero(g.genre)) ? forcaDaSemente : 0;
     // Base logarítmica pelo tamanho: garante ordem sensata no cold start sem
     // deixar um gênero gigante atropelar o gosto de quem já ouve.
     const base = Math.log2(g.tracks.length + 1) * 0.15;
-    return { g, score: af + base, af };
+    return { g, score: af + sem + base, af, sem };
   });
   pontuados.sort((a, b) => b.score - a.score);
 
   const dia = daySeed(opts.now ?? new Date());
   const out: PrateleiraDeGenero[] = [];
-  for (const { g, af } of pontuados.slice(0, maxGeneros)) {
+  for (const { g, af, sem } of pontuados.slice(0, maxGeneros)) {
     if (g.tracks.length === 0) continue;
 
     const alvo = Math.min(porGenero, g.tracks.length);
@@ -131,12 +167,16 @@ export function generosDoGosto(
       }
     }
 
+    // O que a pessoa FAZ explica melhor que o que ela DISSE — por isso o motivo
+    // de comportamento vem primeiro, e o da escolha só aparece enquanto a
+    // semente ainda pesa mais que a afinidade medida daquele gênero.
     const forte = totalAfin > 0 && af / totalAfin >= 0.15;
-    out.push({
-      genre: g.genre,
-      tracks: escolha,
-      motivo: forte ? 'Porque você ouve bastante' : undefined,
-    });
+    const motivo = forte
+      ? 'Porque você ouve bastante'
+      : sem > af
+        ? 'Você escolheu ao entrar'
+        : undefined;
+    out.push({ genre: g.genre, tracks: escolha, motivo });
   }
   return out;
 }

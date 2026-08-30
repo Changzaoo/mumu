@@ -18,7 +18,17 @@ import { listDelta, tombstoneItems, upsertItems } from './collections.repository
  * Lista fechada de propósito: sem ela, um cliente adulterado (ou um bug de
  * digitação) criaria coleções novas indefinidamente na tabela de todo mundo.
  */
-const COLECOES = new Set(['library', 'likes', 'likedTracks', 'playlists', 'playlistTracks']);
+// 'gosto' guarda UM documento por pessoa (id fixo 'inicial'): os gêneros e
+// artistas escolhidos no onboarding. Sem ele na lista, o app perguntaria de
+// novo em cada aparelho — ver apps/web/src/lib/local/gostoInicial.ts.
+const COLECOES = new Set([
+  'library',
+  'likes',
+  'likedTracks',
+  'playlists',
+  'playlistTracks',
+  'gosto',
+]);
 
 function nomeDaColecao(bruto: unknown): string {
   const nome = String(bruto ?? '').trim();

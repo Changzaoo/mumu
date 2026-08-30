@@ -1,9 +1,11 @@
-import { useEffect, useRef, useState } from 'react';
-import { Outlet, useLocation } from 'react-router';
+import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Navigate, Outlet, useLocation } from 'react-router';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
 import { ShareDialogHost } from '@/components/media/ShareDialog';
+import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
+import * as gostoInicial from '@/lib/local/gostoInicial';
 import { recordNavigation } from '@/lib/telemetry/telemetry';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -16,6 +18,37 @@ import { QueuePanel } from '@/app/layout/QueuePanel';
 import { ScrollContainerContext } from '@/app/layout/scroll-context';
 import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
+
+/**
+ * ROTAS QUE NUNCA SAO INTERROMPIDAS PELO ONBOARDING.
+ *
+ * Um link compartilhado (`/s/:id`) chega de fora, muitas vezes de alguém que só
+ * quer ouvir aquela música; sequestrar essa chegada para uma pergunta é a forma
+ * mais rápida de a pessoa fechar a aba. E `/diagnostico` existe justamente para
+ * quando a sessão está quebrada — atravessá-lo com um redirecionamento que
+ * DEPENDE do estado da sessão tiraria do ar a ferramenta que serve para
+ * investigar esse estado.
+ */
+const SEM_INTERRUPCAO = ['/s/', '/diagnostico', '/compartilhar'];
+
+/**
+ * Falta perguntar o gosto a esta pessoa, aqui e agora?
+ *
+ * A pergunta é feita na casca, e não só na tela de login, porque quem já estava
+ * logado antes desta tela existir nunca mais passa pelo `/login` — e é
+ * exatamente quem mais se beneficia de responder. O "Agora não" grava a
+ * resposta vazia, então ninguém fica preso no laço.
+ */
+function usePrecisaEscolherGosto(pathname: string): boolean {
+  const { user, loading } = useAuthUser();
+  const respondeu = useSyncExternalStore(
+    gostoInicial.subscribe,
+    gostoInicial.respondeu,
+    () => true, // no servidor não se redireciona nada
+  );
+  if (loading || !user || respondeu) return false;
+  return !SEM_INTERRUPCAO.some((p) => pathname === p || pathname.startsWith(p));
+}
 
 /** Screen-reader live region announcing track changes (DESIGN §10). */
 function TrackAnnouncer() {
@@ -48,6 +81,7 @@ function TrackAnnouncer() {
  */
 export function AppShell() {
   const location = useLocation();
+  const precisaEscolherGosto = usePrecisaEscolherGosto(location.pathname);
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
   const scrollRef = useRef<HTMLElement | null>(null);
   const queueOpen = useUiStore((s) => s.queueOpen);
@@ -90,6 +124,11 @@ export function AppShell() {
       el.removeEventListener('touchmove', onMove);
     };
   }, [scrollEl]);
+
+  // Depois de TODOS os hooks: um retorno antecipado mais acima mudaria a ordem
+  // deles entre renders, que é o jeito clássico de quebrar as regras do React
+  // com um redirecionamento condicional.
+  if (precisaEscolherGosto) return <Navigate to="/onboarding" replace />;
 
   return (
     <ScrollContainerContext.Provider value={scrollEl}>

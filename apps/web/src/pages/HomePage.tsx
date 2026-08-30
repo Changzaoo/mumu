@@ -16,6 +16,7 @@ import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import * as localHistory from '@/lib/local/localHistory';
+import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localPlaylists from '@/lib/local/localPlaylists';
@@ -27,6 +28,7 @@ import {
 } from '@/lib/reco/recommend';
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
 import { generosDoGosto } from '@/lib/reco/generosDoGosto';
+import { prateleiraDaSemente } from '@/lib/reco/semente';
 import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
 import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
@@ -186,6 +188,33 @@ export default function HomePage() {
   // memoizado no módulo, muda quando a biblioteca/histórico/dia mudam.
   // `likedCount` entra nas deps de propósito: curtir é o sinal de gosto mais
   // forte (peso ×3) e sem ele a prateleira não reagia a likes.
+  // A ESCOLHA DO ONBOARDING. Reativa porque ela pode chegar DEPOIS da primeira
+  // pintura — vinda de outro aparelho pela sincronia — e a Home tem de se
+  // reordenar quando isso acontece, e não só na próxima abertura.
+  const semente = useSyncExternalStore(
+    gostoInicial.subscribe,
+    gostoInicial.snapshot,
+    gostoInicial.snapshot,
+  );
+
+  /**
+   * A prateleira dos artistas que a pessoa escolheu ao entrar.
+   *
+   * Fica no topo de propósito, acima até de "Feito para você": no primeiro dia
+   * é a única coisa na tela que ela reconhece como resposta ao que acabou de
+   * dizer. Some sozinha quando a escolha não casa com nada tocável — prateleira
+   * vazia é pior que prateleira ausente.
+   */
+  const daSemente = useMemo(
+    () =>
+      prateleiraDaSemente(
+        entries.map((e) => e.track),
+        semente.artistas,
+      ),
+
+    [entries, semente.artistas],
+  );
+
   const recos = useMemo(
     () => buildRecommendations(),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
@@ -201,9 +230,9 @@ export default function HomePage() {
   // no máximo 8, cada uma com variedade diária e teto por artista. Substitui o
   // antigo despejo cru "um carrossel por gênero com todas as faixas".
   const generosGosto = useMemo(
-    () => generosDoGosto(genres, history, localLikes.list()),
+    () => generosDoGosto(genres, history, localLikes.list(), { sementes: semente.generos }),
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, history, likedCount],
+    [entries, history, likedCount, semente.generos],
   );
 
   // Time de agentes (lib/reco/agents): relógio (hora × tipo de dia),
@@ -319,6 +348,22 @@ export default function HomePage() {
               imageUrl={track.coverUrl}
               playing={currentTrack?.id === track.id && isPlaying}
               onPlay={() => playQueue(recentTracks, index, { source: 'home' })}
+            />
+          ))}
+        </SectionCarousel>
+      )}
+
+      {/* O que a pessoa escolheu ao entrar (lib/reco/semente). */}
+      {daSemente.length > 0 && (
+        <SectionCarousel title="Dos seus artistas" subtitle="Escolhidos por você ao entrar">
+          {daSemente.map((track, index) => (
+            <MediaCard
+              key={track.id}
+              title={track.title}
+              subtitle={trackArtistNames(track)}
+              imageUrl={track.coverUrl}
+              playing={currentTrack?.id === track.id && isPlaying}
+              onPlay={() => playQueue(daSemente, index, { source: 'library', sourceId: 'semente' })}
             />
           ))}
         </SectionCarousel>

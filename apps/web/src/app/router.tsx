@@ -58,6 +58,7 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/search', 'SearchPage'],
   ['/radios', 'RadiosPage'],
   ['/liked', 'LikedPage'],
+  ['/onboarding', 'OnboardingPage'],
   ['/login', 'LoginPage'],
   ['/admin', 'AdminPage'],
   ['/mix', 'MixPage'],
@@ -173,6 +174,10 @@ export const router = createBrowserRouter([
     children: [
       // Auth lives OUTSIDE the shell.
       { path: '/login', element: page('LoginPage') },
+      // O onboarding também fica fora da casca, e pelo mesmo motivo do login:
+      // menu, player e abas oferecem uma dezena de saídas para uma tela cujo
+      // propósito é receber UMA resposta. Ver OnboardingPage.
+      { path: '/onboarding', element: page('OnboardingPage') },
       {
         element: <AppShell />,
         children: [
