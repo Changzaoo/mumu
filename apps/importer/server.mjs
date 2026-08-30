@@ -520,8 +520,10 @@ const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.co
 );
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b';
 // Embeddings multilíngues (26 idiomas, inclui pt-BR) — 2048 dims, contexto 8k.
-const NVIDIA_EMBED_MODEL =
-  process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/llama-nemotron-embed-1b-v2';
+// O modelo anterior (`llama-nemotron-embed-1b-v2`) chegou ao fim da vida em
+// 2026-08-25 e responde `410 Gone`. O substituto foi conferido contra a API:
+// está vivo e devolve as mesmas 2048 dimensões. Ver `EMBED_MODEL` no shared.
+const NVIDIA_EMBED_MODEL = process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/nemotron-3-embed-1b';
 // A NVIDIA não documenta o teto de lote do endpoint hospedado; 32 é
 // conservador o bastante para não tomar 4xx e grande o bastante para não
 // transformar uma biblioteca em centenas de requisições.

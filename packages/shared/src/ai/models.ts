@@ -54,8 +54,23 @@ export const SAFETY_MODEL = 'nvidia/llama-3.1-nemoguard-8b-content-safety';
  * Embeddings de texto — 2048 dimensões, ~240ms. É o mesmo modelo que o
  * importer já usa no `/ai/embed`, então navegador e servidor produzem vetores
  * no MESMO espaço e dá para comparar um com o outro.
+ *
+ * O ANTERIOR MORREU. `nvidia/llama-nemotron-embed-1b-v2` chegou ao fim da vida
+ * em 2026-08-25 e passou a responder `410 Gone` — visto no log do importador,
+ * repetido a cada tentativa. Enquanto isso durou, nenhum vetor novo foi gerado:
+ * o `dna` das faixas novas ficava vazio e a recomendação semântica parava de
+ * aprender, sem erro nenhum na tela.
+ *
+ * O substituto foi conferido contra a API antes de entrar aqui — está na lista
+ * de modelos vivos e devolve 2048 dimensões, o mesmo `EMBED_DIMS`, então nada
+ * quebra estruturalmente.
+ *
+ * RESSALVA HONESTA: dimensão igual não é espaço igual. Vetor gravado pelo
+ * modelo antigo não é comparável com vetor do novo, então a semelhança fica
+ * degradada até o acervo ser reembedado. É transitório e é melhor que o estado
+ * atual, em que simplesmente não se gera vetor nenhum.
  */
-export const EMBED_MODEL = 'nvidia/llama-nemotron-embed-1b-v2';
+export const EMBED_MODEL = 'nvidia/nemotron-3-embed-1b';
 export const EMBED_DIMS = 2048;
 
 /**
