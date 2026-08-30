@@ -101,6 +101,20 @@ export interface LibraryEntry {
    * para todo mundo. Entrada sem esta marca é do próprio usuário.
    */
   origem?: 'catalogo';
+  /**
+   * Cópia do cofre que JÁ FOI PROVADA MORTA neste aparelho (404/403 conferido
+   * em `reportDeadRemote`, nunca por suposição).
+   *
+   * Sem guardar isto, o app reaprendia a mesma decepção toda sessão: a
+   * sincronia seguinte trazia a entrada de volta com a MESMA URL podre, ela
+   * reaparecia nas prateleiras e a pessoa levava outro silêncio na cara. Com a
+   * marca, o acervo converge — o que já se mostrou mudo não volta.
+   *
+   * Guarda a URL, e não um sim/não, de propósito: no dia em que o cofre
+   * republicar a faixa com uma URL NOVA, ela deixa de casar com esta e a faixa
+   * volta sozinha ao acervo. A marca é uma cicatriz, não uma sentença.
+   */
+  remoteMorta?: string;
 }
 
 // ── in-memory state ─────────────────────────────────────────────
@@ -719,6 +733,8 @@ export function reportDeadRemote(id: string, deadUrl: string): void {
     const { remoteUrl: _dead, ...rest } = atual;
     patchEntry(id, {
       ...rest,
+      // A cicatriz sobrevive à próxima sincronia do acervo — ver `remoteMorta`.
+      remoteMorta: deadUrl,
       track: {
         ...atual.track,
         streamUrl: atual.track.streamUrl === deadUrl ? null : atual.track.streamUrl,
@@ -832,7 +848,36 @@ function applyRemoteBatch(upserts: Array<[string, LibraryEntry]>, deletes: strin
  *    também — senão o app acumularia para sempre tudo que já foi publicado, e
  *    tirar uma faixa do ar não teria efeito nenhum.
  */
-export function aplicarCatalogo(entradas: LibraryEntry[]): void {
+/**
+ * O ACERVO SÓ ACEITA O QUE TEM COMO TOCAR.
+ *
+ * Uma entrada do acervo é uma faixa EMPRESTADA: o áudio dela não está neste
+ * aparelho, então a única forma de ouvi-la é a cópia servida pelo cofre
+ * (`remoteUrl`, que vira `track.streamUrl`). Entrada sem essa cópia não é uma
+ * faixa — é um card que, para QUALQUER pessoa que apertar play, devolve
+ * silêncio.
+ *
+ * Medido no acervo em 2026-08-30: 1.215 das 5.053 entradas chegavam sem cópia
+ * nenhuma, e como a Home ordena por data de adição, as 50 mais recentes eram
+ * TODAS assim — a primeira prateleira que a pessoa vê era 100% muda. Era essa
+ * a cara de "nenhuma música toca".
+ *
+ * Filtrar aqui, na porta, vale mais do que esconder em cada tela: Início,
+ * Descobrir, busca, artista, álbum, recomendações e fila bebem todos desta
+ * mesma lista. O dono não perde nada — as faixas DELE entram por outro caminho
+ * (`origem !== 'catalogo'`, com o áudio no próprio aparelho) e nunca passam por
+ * este filtro.
+ */
+function temComoTocar(e: LibraryEntry, mortas: Map<string, string>): boolean {
+  const fonte = e.remoteUrl ?? e.track.streamUrl;
+  if (!fonte) return false;
+  return mortas.get(e.track.id) !== fonte;
+}
+
+export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
+  const mortas = new Map<string, string>();
+  for (const e of read()) if (e.remoteMorta) mortas.set(e.track.id, e.remoteMorta);
+  const entradas = todasAsEntradas.filter((e) => temComoTocar(e, mortas));
   const doCatalogo = new Map(entradas.map((e) => [e.track.id, e]));
   const atuais = read();
   const idsLocais = new Set(atuais.map((e) => e.track.id));

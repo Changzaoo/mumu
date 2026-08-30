@@ -336,28 +336,152 @@ function clearLoadWatchdog(): void {
   stallStrikes = 0;
 }
 
+/**
+ * SONDA A CÓPIA EM PARALELO COM O CARREGAMENTO — e por que isso vale um pedido.
+ *
+ * Descobrir que a cópia morreu ESPERANDO o elemento de áudio desistir custava
+ * ~4,5 s por faixa (medido: seis mortas seguidas levaram 27 s até sair som).
+ * O elemento nem chega a registrar erro — ele fica em readyState 0 até um
+ * temporizador lá em cima concluir que não vem nada.
+ *
+ * Um `Range: bytes=0-0` responde em ~300 ms e é conclusivo: o cofre devolve
+ * 404/403 quando não tem o que servir. Rodando junto com o `load`, a faixa
+ * morta é descartada quase na hora e a fila anda; a faixa viva não paga nada
+ * além de um byte, e o `load` que já estava em curso continua normalmente.
+ *
+ * 404/403 = morte é a MESMA regra de `reportDeadRemote`; qualquer outra
+ * resposta (inclusive demora e erro de rede) não prova nada e é ignorada — é o
+ * cofre reconstruindo, e quem manda nesse caso continua sendo o watchdog.
+ */
+function sondarFonteEmParalelo(track: TrackDto, index: number): void {
+  const url = track.streamUrl;
+  if (!url || !/^https?:/.test(url)) return;
+  void (async () => {
+    let morta = false;
+    try {
+      const res = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+      morta = res.status === 404 || res.status === 403;
+    } catch {
+      return; // rede caiu / CORS: não é prova de nada
+    }
+    if (!morta) return;
+    const s = usePlayerStore.getState();
+    // A sonda é velha se o usuário já trocou de faixa — ou se, contra todas as
+    // probabilidades, esta começou a tocar mesmo assim. Nunca cortar som.
+    if (s.queueIndex !== index || s.currentTrack?.id !== track.id) return;
+    if (audioEngine.getPosition() > 0) return;
+    clearLoadWatchdog();
+    const handled = await attemptSourceFallback(s.currentTrack ?? track);
+    if (handled) return;
+    failCurrentTrack('Faixa indisponível.');
+  })();
+}
+
 // Uma faixa morta no meio da fila NÃO pode parar a música (Spotify pula e
-// segue). Zerado quando uma faixa carrega; 3 mortes seguidas = para honesto
-// (provável problema geral: sem rede, servidor fora…), não um loop de pulos.
+// segue). Zerado quando sai som de verdade.
 let consecutiveDeadTracks = 0;
-const MAX_DEAD_TRACK_SKIPS = 3;
+/** Quando começou a sequência de mortes em curso (0 = não há sequência). */
+let deadRunStartedAt = 0;
+
+/**
+ * ATÉ ONDE O PLAYER ANDA ATRÁS DE SOM — e por que virou tempo, não contagem.
+ *
+ * O teto antigo era três mortes seguidas. Ele existia por um motivo certo:
+ * numa queda geral (sem rede, cofre fora do ar) TODA faixa falha, e varrer a
+ * fila inteira seria trocar um erro honesto por um loop de pulos. Mas ele
+ * supunha que faixa morta fosse exceção — e deixou de ser: com boa parte das
+ * cópias do cofre podada, três mortes seguidas é rotina estatística, e o player
+ * desistia no meio de uma fila que tinha música viva logo adiante.
+ *
+ * Tempo separa os dois casos, e contagem não separa. Uma sequência ruim de
+ * faixas custa uma ida à rede por faixa e o player atravessa dezenas dentro do
+ * orçamento; uma queda geral estoura o orçamento sem nunca produzir som, e aí
+ * parar é a resposta certa. O teto de contagem fica só como trava contra falha
+ * INSTANTÂNEA (que não consome tempo) virar laço quente de CPU.
+ */
+const DEAD_RUN_BUDGET_MS = 20_000;
+const MAX_DEAD_TRACK_SKIPS = 40;
+
+/** Zera a sequência de mortes — só quem produz som de verdade chama isto. */
+function resetDeadRun(): void {
+  consecutiveDeadTracks = 0;
+  deadRunStartedAt = 0;
+}
 
 /**
  * Fim da linha para a faixa ATUAL (todas as fontes falharam): se a fila tem
- * próxima e estávamos tocando, avisa e PULA para ela em vez de parar tudo.
+ * próxima e estávamos tocando, PULA para ela em vez de parar tudo.
+ *
+ * O AVISO SAI UMA VEZ POR SEQUÊNCIA, não por faixa. Um toast a cada pulo
+ * transformava a travessia de uma sequência ruim numa pilha de reclamações na
+ * tela — barulho sobre um problema que o app já está resolvendo sozinho.
  */
 function failCurrentTrack(message: string): void {
   const s = usePlayerStore.getState();
   consecutiveDeadTracks++;
+  if (deadRunStartedAt === 0) deadRunStartedAt = Date.now();
+
   const hasNext = s.queueIndex + 1 < s.queue.length || (s.repeat === 'all' && s.queue.length > 1);
-  if (s.isPlaying && hasNext && consecutiveDeadTracks <= MAX_DEAD_TRACK_SKIPS) {
-    const title = s.currentTrack?.title ?? 'faixa';
-    void import('sonner').then(({ toast }) => toast(`"${title}" indisponível — pulando.`));
-    s.next();
+  // SEM REDE não é sequência ruim, é queda geral: parar na primeira é honesto e
+  // poupa a fila inteira de tentativas que já se sabe que vão falhar.
+  const online = typeof navigator === 'undefined' || navigator.onLine;
+  const dentroDoOrcamento =
+    Date.now() - deadRunStartedAt < DEAD_RUN_BUDGET_MS &&
+    consecutiveDeadTracks <= MAX_DEAD_TRACK_SKIPS;
+
+  if (s.isPlaying && online && dentroDoOrcamento) {
+    if (consecutiveDeadTracks === 1) {
+      const title = s.currentTrack?.title ?? 'faixa';
+      void import('sonner').then(({ toast }) => toast(`"${title}" indisponível — pulando.`));
+    }
+    if (hasNext) {
+      s.next();
+      return;
+    }
+    // FILA DE UMA FAIXA SÓ e ela morreu. Parar aqui era exatamente o silêncio
+    // na cara de quem clicou numa música avulsa — e o app JÁ promete uma rádio
+    // de parecidas nesse fluxo (ver `playTrack`), só que montada em segundo
+    // plano: quando a semente morre antes de a rádio chegar, não havia para
+    // onde ir. Antecipa a rádio AGORA, para que dar play sempre acabe em som.
+    void continuarNumaParecida(s.currentTrack, message);
     return;
   }
+  pararComErro(message);
+}
+
+function pararComErro(message: string): void {
   usePlayerStore.setState({ isPlaying: false, isBuffering: false });
   void import('sonner').then(({ toast }) => toast.error(message));
+}
+
+/**
+ * A semente morreu e a fila acabou: emenda numa parecida em vez de calar.
+ *
+ * Usa a MESMA rádio que `playTrack` monta em segundo plano — não é um caminho
+ * novo de recomendação, é o mesmo, antecipado para o momento em que ele faz
+ * falta. Se não houver parecida nenhuma, aí sim para e avisa: inventar som que
+ * não tem a ver com o pedido seria pior do que a verdade.
+ */
+async function continuarNumaParecida(morta: TrackDto | null, message: string): Promise<void> {
+  if (!morta) {
+    pararComErro(message);
+    return;
+  }
+  try {
+    const { construirRadio } = await import('@/lib/reco/radio');
+    const similares = construirRadio(morta).filter((t) => t.id !== morta.id);
+    const st = usePlayerStore.getState();
+    if (st.currentTrack?.id !== morta.id) return; // o usuário já trocou de faixa
+    if (similares.length === 0) {
+      pararComErro(message);
+      return;
+    }
+    const fila = [morta, ...similares];
+    usePlayerStore.setState({ queue: fila, originalQueue: fila });
+    usePlayerStore.getState().next();
+  } catch {
+    pararComErro(message);
+  }
 }
 
 // ── retomar de onde parou (Spotify-like) ────────────────────────
@@ -669,6 +793,7 @@ export const usePlayerStore = create<PlayerState>()(
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();
             armLoadWatchdog(track.id, initialWatchdogMs(track.id));
+            sondarFonteEmParalelo(track, index);
             return;
           }
 
@@ -1106,7 +1231,7 @@ export function initPlayerEngine(): void {
 
     // Som saindo = fila saudável. Zerar aqui (e não só no 'loaded') cobre a
     // faixa PRÉ-CARREGADA promovida, que não redispara 'loaded'.
-    if (position > 0) consecutiveDeadTracks = 0;
+    if (position > 0) resetDeadRun();
 
     // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
     if (!signedIn && position >= PREVIEW_SECONDS) firePreviewGate();

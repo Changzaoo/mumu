@@ -1,9 +1,11 @@
 /**
  * Duas regras de convivência que o player quebrava:
  *
- * 1. Faixa morta faz PULAR, não faz varrer a fila. O teto de 3 pulos seguidos
- *    existia mas nunca era atingido, porque o contador zerava a cada 'loaded' —
- *    e 'loaded' dispara mesmo na faixa que vai falhar logo depois.
+ * 1. Faixa morta faz PULAR, e a caminhada atrás de som tem ORÇAMENTO DE TEMPO,
+ *    não uma contagem fixa: uma sequência ruim de cópias podadas se atravessa,
+ *    uma queda geral (ou ficar sem rede) para logo. O contador não pode zerar
+ *    no 'loaded' — ele dispara mesmo na faixa que vai falhar logo depois; só
+ *    som saindo de verdade zera.
  *
  * 2. Quando outro app toma o áudio, aceitar. O player não ficava sabendo da
  *    pausa do sistema e o watchdog chamava play() de volta, roubando o alto-
@@ -50,6 +52,16 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     },
   };
   return { audioEngine: engine, AudioEngine: class {} };
+});
+
+/** O player avisa por toast; o teste conta os avisos para provar que não spama. */
+const toastCalls: string[] = [];
+vi.mock('sonner', () => {
+  const toast = Object.assign((msg: string) => void toastCalls.push(msg), {
+    error: (msg: string) => void toastCalls.push(`error:${msg}`),
+    success: (msg: string) => void toastCalls.push(`success:${msg}`),
+  });
+  return { toast };
 });
 
 vi.mock('@/lib/api', () => ({
@@ -110,6 +122,7 @@ const initialState = usePlayerStore.getState();
 beforeEach(() => {
   usePlayerStore.setState(initialState, true);
   vi.clearAllMocks();
+  toastCalls.length = 0;
   enginePlaying = true;
   // O contador de mortes seguidas vive no módulo e só zera com som saindo.
   // Sem isto, um teste que esgota os 3 pulos deixa o seguinte já no limite.
@@ -131,24 +144,64 @@ describe('faixa morta pula, mas não varre a fila', () => {
     });
   };
 
-  it('para depois de 3 mortes seguidas em vez de percorrer a fila inteira', async () => {
+  it('atravessa uma sequência ruim em vez de desistir na terceira', async () => {
+    // Boa parte das cópias do cofre está podada: três mortes seguidas é rotina,
+    // e parar aí deixava a pessoa sem som com música viva logo adiante.
     const tracks = fila(10);
     usePlayerStore.getState().playQueue(tracks, 0);
     await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
 
-    for (let i = 0; i < 3; i += 1) await matarFaixaAtual();
+    for (let i = 0; i < 5; i += 1) await matarFaixaAtual();
 
-    // A quarta morte não pode mais pular: o player para e avisa.
-    const quarta = usePlayerStore.getState().currentTrack!;
-    emit('loaded', { track: quarta, duration: 180 });
-    emit('error', { message: 'fonte morta', track: quarta, kind: 'load' });
-
-    await vi.waitFor(() => expect(usePlayerStore.getState().isPlaying).toBe(false));
-    // Parou na 4ª — não varreu as 10.
-    expect(usePlayerStore.getState().queueIndex).toBeLessThan(5);
+    expect(usePlayerStore.getState().isPlaying).toBe(true);
+    expect(usePlayerStore.getState().queueIndex).toBeGreaterThanOrEqual(5);
   });
 
-  it('som saindo zera o contador: uma faixa boa no meio devolve os 3 pulos', async () => {
+  it('avisa UMA vez por sequência, não a cada pulo', async () => {
+    const tracks = fila(10);
+    usePlayerStore.getState().playQueue(tracks, 0);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+
+    for (let i = 0; i < 4; i += 1) await matarFaixaAtual();
+
+    // Um toast de "pulando" para a sequência inteira — o resto seria barulho
+    // sobre um problema que o app já está resolvendo sozinho.
+    expect(toastCalls.length).toBe(1);
+  });
+
+  it('não varre a fila inteira: a caminhada tem teto', async () => {
+    // A trava contra laço quente continua de pé — falha instantânea não pode
+    // virar varredura de milhares de faixas.
+    const tracks = fila(200);
+    usePlayerStore.getState().playQueue(tracks, 0);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+
+    for (let i = 0; i < 45 && usePlayerStore.getState().isPlaying; i += 1) {
+      await matarFaixaAtual().catch(() => undefined);
+    }
+
+    await vi.waitFor(() => expect(usePlayerStore.getState().isPlaying).toBe(false));
+    expect(usePlayerStore.getState().queueIndex).toBeLessThan(60);
+  });
+
+  it('sem rede para na primeira: queda geral não é sequência ruim', async () => {
+    const tracks = fila(10);
+    usePlayerStore.getState().playQueue(tracks, 0);
+    await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
+
+    const online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(false);
+    try {
+      const atual = usePlayerStore.getState().currentTrack!;
+      emit('loaded', { track: atual, duration: 180 });
+      emit('error', { message: 'fonte morta', track: atual, kind: 'load' });
+      await vi.waitFor(() => expect(usePlayerStore.getState().isPlaying).toBe(false));
+      expect(usePlayerStore.getState().queueIndex).toBe(0);
+    } finally {
+      online.mockRestore();
+    }
+  });
+
+  it('som saindo zera o contador: uma faixa boa no meio renova o orçamento', async () => {
     const tracks = fila(10);
     usePlayerStore.getState().playQueue(tracks, 0);
     await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
