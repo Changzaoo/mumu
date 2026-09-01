@@ -16,6 +16,8 @@ import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
+  ensureDownloadedAudioUrl,
+  hasDownloadedAudio,
   hydrateDownloads,
   localAudioUrl,
   rebaixarAoFalhar,
@@ -84,6 +86,14 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
   // porque o object URL ainda não tinha sido criado.
   if (hasLocalAudio(track.id)) {
     await ensureLocalAudioUrl(track.id);
+    return track;
+  }
+  // O mesmo raciocínio para o que foi BAIXADO do acervo. `hasDownloadedAudio`
+  // pergunta ao registro, não ao mapa de alças: desde que o mapa ganhou teto,
+  // alça fechada não significa mais "não baixada", e tratar assim mandaria para
+  // a rede justamente a faixa que a pessoa baixou para não depender dela.
+  if (hasDownloadedAudio(track.id)) {
+    await ensureDownloadedAudioUrl(track.id);
     return track;
   }
   if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id) || track.streamUrl) return track;
@@ -855,7 +865,17 @@ export const usePlayerStore = create<PlayerState>()(
           // travava segundos), então a primeira reprodução de cada faixa paga
           // esse custo — uma vez, só para a que foi pedida. Sem esta linha a
           // faixa baixada iria para a rede, que é o pior erro possível aqui.
-          const local = (await ensureLocalAudioUrl(track.id)) ?? localAudioUrl(track.id);
+          //
+          // `ensureDownloadedAudioUrl` é a MESMA ideia do outro lado do cofre.
+          // O boot também deixou de abrir os downloads todos (era ele quem
+          // estourava a RAM), então quem foi baixado do acervo precisa da mesma
+          // reabertura sob demanda. Sem ela, a faixa baixada só tocaria uma vez
+          // por sessão — depois de a alça ser podada, cairia na rede, e offline
+          // simplesmente emudeceria.
+          const local =
+            (await ensureLocalAudioUrl(track.id)) ??
+            (await ensureDownloadedAudioUrl(track.id)) ??
+            localAudioUrl(track.id);
           if (local) {
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();
@@ -1395,7 +1415,34 @@ export function initPlayerEngine(): void {
       preloadRequested = true;
       const upcoming =
         state.queue[state.queueIndex + 1] ?? (state.repeat === 'all' ? state.queue[0] : undefined);
-      audioEngine.preloadNext(upcoming ?? null);
+      if (!upcoming) {
+        audioEngine.preloadNext(null);
+      } else {
+        // ABRE A ALÇA DA PRÓXIMA ANTES DE PEDIR O PRELOAD.
+        //
+        // O resolver local do engine (`setLocalSourceResolver`) é SÍNCRONO: ele
+        // só sabe das alças já abertas. Como os dois cofres passaram a abrir sob
+        // demanda — e agora ambos com teto —, a próxima faixa da fila
+        // tipicamente NÃO tem alça aberta: ela ainda não tocou nesta sessão. O
+        // resolver responderia "não tenho" e o preload sairia para a rede,
+        // mesmo com o arquivo aqui do lado.
+        //
+        // Offline, isso é a faixa baixada falhando. Com a tela apagada, é
+        // exatamente o vão de silêncio que este preload existe para evitar —
+        // `armHandoffTimer` promove um elemento que nunca ficou pronto. Os 12
+        // segundos de antecedência pagam esta reabertura com folga.
+        void (async () => {
+          await ensureLocalAudioUrl(upcoming.id).catch(() => null);
+          await ensureDownloadedAudioUrl(upcoming.id).catch(() => null);
+          // A fila pode ter mudado durante o await (pular, trocar de playlist);
+          // preload da faixa errada desperdiça rede e ocupa o elemento reserva.
+          const agora = store.getState();
+          const aindaEhAProxima =
+            (agora.queue[agora.queueIndex + 1] ?? (agora.repeat === 'all' ? agora.queue[0] : null))
+              ?.id === upcoming.id;
+          if (aindaEhAProxima) audioEngine.preloadNext(upcoming);
+        })();
+      }
     }
 
     // Crossfade: start the next track early and blend.

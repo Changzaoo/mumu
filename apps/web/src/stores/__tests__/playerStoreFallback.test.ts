@@ -77,6 +77,12 @@ vi.mock('@/lib/local/localLibrary', () => ({
 vi.mock('@/features/downloads/downloadManager', () => ({
   hydrateDownloads: vi.fn(() => Promise.resolve()),
   localAudioUrl: vi.fn(() => null),
+  // Nada baixado neste aparelho — mesma premissa do resto do arquivo. As duas
+  // respostas precisam concordar: `hasDownloadedAudio` falso com
+  // `ensureDownloadedAudioUrl` devolvendo URL descreveria um estado que não
+  // existe, e o teste passaria por um caminho que o app nunca percorre.
+  hasDownloadedAudio: vi.fn(() => false),
+  ensureDownloadedAudioUrl: vi.fn(() => Promise.resolve(null)),
   rebaixarAoFalhar: vi.fn(),
 }));
 

@@ -20,12 +20,7 @@ import {
   putAudio,
   requestPersistentStorage,
 } from '@/lib/offline/audioCache';
-import {
-  addDownload,
-  getDownloads,
-  isDownloaded,
-  removeDownload,
-} from '@/features/downloads/registry';
+import { addDownload, isDownloaded, removeDownload } from '@/features/downloads/registry';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'error';
 
@@ -39,6 +34,53 @@ const inFlight = new Map<string, number>(); // trackId → progress 0..1
 const failed = new Set<string>();
 const blobUrls = new Map<string, string>();
 const listeners = new Set<() => void>();
+
+/**
+ * QUANTAS ALÇAS DE ÁUDIO FICAM ABERTAS AO MESMO TEMPO — e por que existe teto.
+ *
+ * `URL.createObjectURL` não é um endereço: é uma ALÇA que segura o arquivo
+ * inteiro vivo enquanto ninguém a solta. Este mapa nunca soltava nada, e
+ * `hydrateDownloads` abria uma alça POR FAIXA BAIXADA logo no boot. Cem faixas
+ * offline de 8 MB são ~800 MB presos antes de a primeira tela pintar — o
+ * aparelho fraco morre aí, e é isso que aparece como "estoura a RAM e mata a
+ * página".
+ *
+ * `localLibrary` já tinha aprendido esta lição e ganhou o mesmo teto (lá também
+ * são 60). Este módulo é a SEGUNDA cópia do mapa e ficou de fora do conserto —
+ * por isso o sintoma continuou depois de a biblioteca ser corrigida. Os dois
+ * mapas existem porque guardam coisas diferentes (biblioteca do usuário × o que
+ * foi baixado do acervo), mas a armadilha é idêntica.
+ *
+ * O teto é generoso de propósito: 60 cobrem uma fila inteira e uma página de
+ * álbum, e reabrir uma alça descartada é barato — os bytes continuam no
+ * IndexedDB, só a alça foi solta (ver `ensureDownloadedAudioUrl`).
+ */
+const MAX_URLS_ABERTAS = 60;
+
+/**
+ * Registra a alça e solta as mais antigas quando passar do teto.
+ *
+ * A ordem do `Map` é a de inserção e esta função re-insere a cada uso, então as
+ * primeiras chaves são sempre as MENOS usadas recentemente. Por construção a
+ * faixa que toca agora e a pré-carregada — as duas últimas a entrar — nunca
+ * estão na ponta descartada: soltar a alça do áudio em reprodução emudeceria a
+ * música na hora.
+ */
+function lembrarUrl(trackId: string, url: string): void {
+  blobUrls.delete(trackId); // reposiciona no fim da fila (mais recente)
+  blobUrls.set(trackId, url);
+  while (blobUrls.size > MAX_URLS_ABERTAS) {
+    const maisAntiga = blobUrls.keys().next();
+    if (maisAntiga.done) break;
+    const velha = blobUrls.get(maisAntiga.value);
+    blobUrls.delete(maisAntiga.value);
+    if (velha) URL.revokeObjectURL(velha);
+    // O registro NÃO é mexido: a faixa continua baixada e os bytes continuam no
+    // IndexedDB. Só a alça saiu, e `ensureDownloadedAudioUrl` reabre no próximo
+    // play. É por isso que `downloadStateOf` pergunta ao registro, e não a este
+    // mapa — senão a faixa despejada daqui apareceria como "não baixada".
+  }
+}
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -69,9 +111,60 @@ export function downloadStateOf(trackId: string): DownloadState {
   return { status: 'idle', progress: 0 };
 }
 
-/** Local object URL for a downloaded track, or null when not cached. */
+/**
+ * Alça já aberta NESTA sessão, ou null.
+ *
+ * Cuidado ao usar isto como "a faixa está baixada?": não é. Desde que o mapa
+ * ganhou teto, `null` aqui significa apenas "a alça não está aberta agora" —
+ * pode ser uma faixa perfeitamente baixada cuja alça foi descartada, ou uma que
+ * nunca foi aberta neste boot. Quem quer saber se os bytes existem pergunta a
+ * `hasDownloadedAudio`; quem quer TOCAR chama `ensureDownloadedAudioUrl`.
+ */
 export function localAudioUrl(trackId: string): string | null {
   return blobUrls.get(trackId) ?? null;
+}
+
+/**
+ * Os bytes desta faixa estão neste aparelho? Responde SEM abrir o arquivo.
+ *
+ * Existe para separar as duas perguntas que `localAudioUrl` misturava. É a
+ * pergunta barata e síncrona, boa para decidir se vale esperar pelo caminho
+ * local em vez de sair para a rede.
+ */
+export function hasDownloadedAudio(trackId: string): boolean {
+  return isDownloaded(trackId);
+}
+
+/**
+ * Abre a alça desta faixa AGORA, se os bytes existirem aqui.
+ *
+ * É o par do teto de `lembrarUrl`: com o mapa limitado, a alça de uma faixa
+ * baixada pode não estar aberta, e o caminho do play precisa de um jeito de
+ * reabrir antes de cogitar a rede. Uma faixa baixada indo buscar bytes no
+ * servidor é o pior erro deste módulo — offline ela simplesmente emudece.
+ *
+ * Também é aqui que o registro se conserta: se o navegador despejou os bytes
+ * (a quota é do navegador, não nossa), a entrada é removida em vez de continuar
+ * anunciando um download que não toca. Essa poda ficava no boot e varria tudo;
+ * agora acontece na faixa que foi pedida, quando a verdade importa.
+ */
+export async function ensureDownloadedAudioUrl(trackId: string): Promise<string | null> {
+  const aberta = blobUrls.get(trackId);
+  if (aberta) {
+    lembrarUrl(trackId, aberta); // marca como recém-usada, não deixa ser podada
+    return aberta;
+  }
+  if (!isDownloaded(trackId) || !cacheSupported()) return null;
+
+  const blob = await getAudioBlob(trackId).catch(() => null);
+  if (!blob) {
+    removeDownload(trackId);
+    emit();
+    return null;
+  }
+  const url = URL.createObjectURL(blob);
+  lembrarUrl(trackId, url);
+  return url;
 }
 
 const MAX_DOWNLOAD_TRIES = 3;
@@ -243,7 +336,7 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
       // abort de quota rejeita aqui e nunca registramos uma faixa fantasma.
       await putAudio(track.id, blob);
       addDownload(track, blob.size);
-      blobUrls.set(track.id, URL.createObjectURL(blob));
+      lembrarUrl(track.id, URL.createObjectURL(blob));
       // O áudio acabou de chegar ao aparelho: além de cachear a letra, é AQUI
       // que ela pode ganhar sincronia (a transcrição precisa do arquivo local).
       // Vai para uma fila serial — baixar uma playlist não pode virar uma
@@ -333,20 +426,28 @@ export async function removeDownloadedTrack(trackId: string): Promise<void> {
 let hydratePromise: Promise<void> | null = null;
 
 /**
- * Rebuild the object-URL map from IndexedDB on boot so downloaded tracks
- * are immediately playable (including offline). Drops registry entries whose
- * audio the browser has evicted. Memoized: callers may `await` it before
- * deciding a playback source (idempotent, instant after the first run).
+ * Marca que o subsistema de downloads pode responder. NÃO abre mais arquivo.
+ *
+ * ESTA FUNÇÃO ERA O ESTOURO DE MEMÓRIA. Ela varria o registro inteiro no boot e
+ * fazia, por faixa baixada, um `getAudioBlob` seguido de `createObjectURL` —
+ * uma alça permanente para cada arquivo, todas de uma vez, antes de a primeira
+ * tela pintar. Com 100 faixas offline de 8 MB isso são ~800 MB presos num
+ * aparelho que talvez tenha 2 GB, e o navegador mata a aba. Pior: `playerStore`
+ * espera por ela (`downloadsReady`) ANTES de cada carga de faixa, então o custo
+ * era pago no caminho crítico do play, não num canto ocioso.
+ *
+ * O registro é síncrono (localStorage), então não há nada a hidratar: quem quer
+ * saber se a faixa está baixada pergunta a `hasDownloadedAudio`, e quem vai
+ * tocar chama `ensureDownloadedAudioUrl`, que abre UMA alça — a da faixa
+ * pedida. A promessa continua existindo porque `playerStore` a aguarda e porque
+ * ela é o ponto natural para o dia em que o registro deixar de ser síncrono;
+ * resolver na hora é o comportamento certo, não um atalho.
+ *
+ * A poda de entradas cujos bytes o navegador despejou saiu daqui e virou
+ * preguiçosa (ver `ensureDownloadedAudioUrl`). Varrer tudo no boot para achar
+ * as despejadas custava exatamente o que este conserto veio remover, e a
+ * resposta só importa na faixa que alguém pediu.
  */
 export function hydrateDownloads(): Promise<void> {
-  return (hydratePromise ??= (async () => {
-    if (!cacheSupported()) return;
-    for (const entry of getDownloads()) {
-      if (blobUrls.has(entry.track.id)) continue;
-      const blob = await getAudioBlob(entry.track.id).catch(() => null);
-      if (blob) blobUrls.set(entry.track.id, URL.createObjectURL(blob));
-      else removeDownload(entry.track.id);
-    }
-    emit();
-  })());
+  return (hydratePromise ??= Promise.resolve());
 }

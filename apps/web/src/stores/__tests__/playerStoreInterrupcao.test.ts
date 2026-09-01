@@ -94,6 +94,9 @@ vi.mock('@/lib/local/localLibrary', () => ({
 vi.mock('@/features/downloads/downloadManager', () => ({
   hydrateDownloads: vi.fn(() => Promise.resolve()),
   localAudioUrl: vi.fn(() => null),
+  // Sem cópia local: é a premissa deste arquivo (a faixa está morta de verdade).
+  hasDownloadedAudio: vi.fn(() => false),
+  ensureDownloadedAudioUrl: vi.fn(() => Promise.resolve(null)),
   rebaixarAoFalhar: vi.fn(),
 }));
 
