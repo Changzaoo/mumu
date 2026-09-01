@@ -184,8 +184,9 @@ describe('varrerUmaVez — as travas', () => {
         if (String(url).includes('/cofre/estado')) {
           return { ok: true, json: async () => ({ pronto: true, livreBytes: 50_000_000_000 }) };
         }
-        // Todo import nasce morto, como no apagão real.
-        return { ok: false, status: 400, json: async () => ({}) };
+        // 500 = a fonte não respondeu direito. Transiente, que é o que denuncia
+        // apagão — 400 significaria "link não suportado", faixa morta.
+        return { ok: false, status: 500, json: async () => ({}) };
       }),
     );
 
@@ -209,5 +210,51 @@ describe('varrerUmaVez — as travas', () => {
     const r = await varrerUmaVez(madrugada);
     expect(r.rodou).toBe(true);
     expect(r.reparadas).toBe(0);
+  });
+});
+
+describe('apagão x cauda ruim da fila', () => {
+  const madrugada = new Date();
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    env.IMPORTER_URL = 'http://importer:8790';
+    env.IMPORT_SERVICE_TOKEN = 'x'.repeat(48);
+    env.VARREDURA_HORA_INICIO = 0;
+    env.VARREDURA_HORA_FIM = 0;
+  });
+
+  it('FAIXA MORTA EM SÉRIE NÃO É APAGÃO — a varredura segue', async () => {
+    // Medido em produção: a trava disparou com o importador no ar e o YouTube
+    // respondendo normalmente. A fila tinha chegado na cauda de vídeos
+    // removidos. Contá-los como apagão fazia a varredura parar a cada 8 faixas
+    // e andar quatro por rodada.
+    vi.stubGlobal('setTimeout', ((fn: () => void) => {
+      fn();
+      return 0;
+    }) as unknown as typeof setTimeout);
+    const { prisma } = await import('../infra/db/prisma.js');
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce(
+      Array.from({ length: 30 }, (_, i) => ({
+        id: `morta${i}`,
+        data: { sourceUrl: 'https://www.youtube.com/watch?v=x' },
+      })),
+    );
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        if (String(url).includes('/cofre/estado')) {
+          return { ok: true, json: async () => ({ pronto: true, livreBytes: 50_000_000_000 }) };
+        }
+        // 400 = link não suportado: a fonte RESPONDEU, e disse que morreu.
+        return { ok: false, status: 400, json: async () => ({}) };
+      }),
+    );
+
+    const r = await varrerUmaVez(madrugada);
+
+    expect(r.motivo).toBeUndefined();
+    expect(r.impossiveis).toBe(30);
+    vi.unstubAllGlobals();
   });
 });

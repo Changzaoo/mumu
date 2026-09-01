@@ -78,6 +78,11 @@ const PASSO_DO_PROGRESSO = 25;
  * Foi assim que se perdeu terreno em 2026-08-30: o YouTube limitou a sessão e
  * respondeu "Video unavailable" para tudo. Sem esta trava, uma hora ruim
  * queimaria a fila inteira.
+ *
+ * SÓ FALHA TRANSIENTE CONTA. Um vídeo removido de verdade devolve
+ * `permanent: true`, e uma sequência deles significa apenas que a fila chegou
+ * na sua cauda ruim — não que o mundo caiu. Contá-los fazia a varredura parar a
+ * cada 8 faixas e andar quatro por rodada, com a fonte perfeitamente no ar.
  */
 const FALHAS_SEGUIDAS_PARA_DESISTIR = 8;
 
@@ -344,20 +349,23 @@ export async function varrerUmaVez(agora = new Date()): Promise<{
     if (desfecho === 'reparada') {
       reparadas++;
       seguidas = 0;
-    } else {
+    } else if (desfecho === 'falhou') {
+      // Falha TRANSIENTE: a fonte não respondeu, ou respondeu que está ocupada.
+      // É isto — e só isto — que denuncia apagão.
       seguidas++;
-      // A trava vem ANTES de carimbar: se já estamos numa sequência de falhas,
+      // A trava vem ANTES de carimbar: numa sequência de falhas transientes,
       // esta faixa provavelmente é vítima do mesmo apagão, e não uma faixa
       // morta. Melhor tentá-la amanhã do que enterrá-la hoje.
       if (seguidas >= FALHAS_SEGUIDAS_PARA_DESISTIR) {
         motivoDaParada = `${seguidas} falhas seguidas — parece apagão da fonte, não faixa morta`;
         break;
       }
-      if (desfecho === 'falhou') falhas++;
-      else {
-        impossiveis++;
-        await marcarImpossivel(c).catch(() => undefined);
-      }
+      falhas++;
+    } else {
+      // Vídeo removido, privado ou link não suportado: a fonte respondeu, e
+      // respondeu que a faixa morreu. Não zera nem alimenta a trava.
+      impossiveis++;
+      await marcarImpossivel(c).catch(() => undefined);
     }
     const feitas = reparadas + falhas + impossiveis;
     if (feitas % PASSO_DO_PROGRESSO === 0) {

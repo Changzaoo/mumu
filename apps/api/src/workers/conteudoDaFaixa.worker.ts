@@ -80,11 +80,12 @@ export interface ConteudoDaFaixa extends AnaliseDeConteudo {
  * Sem este número, corrigir um falso positivo consertaria só as faixas novas e
  * deixaria a música injustamente marcada assim para sempre.
  *
- * 2: entrou a busca verificada. A primeira rodada real deixou 93 de 120 faixas
- *    sem veredito porque só o casamento literal era aceito — essas precisam ser
- *    reexaminadas, senão o trabalho novo só valeria para faixa nova.
+ * 2: entrou a busca verificada.
+ * 3: a duração deixou de ser obrigatória. As versões 1 e 2 desistiam ANTES de
+ *    consultar qualquer coisa quando a faixa não tinha duração — e 1.677 das
+ *    5.058 não têm. Era essa, e não o casamento, a causa dos 77% sem veredito.
  */
-export const VERSAO_DO_LEXICO = 2;
+export const VERSAO_DO_LEXICO = 3;
 
 function textoDaLetra(corpo: {
   plainLyrics?: string | null;
@@ -117,6 +118,19 @@ function tituloBase(titulo: string): string {
   return chave(titulo.replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s-\s.*$/, ' '));
 }
 
+/**
+ * O QUANTO TEMOS CERTEZA DE QUE A LETRA É DESTA FAIXA.
+ *
+ * `certa`: artista, título e duração conferem — é a gravação.
+ * `fraca`: só artista e título, porque NÓS não sabemos a duração (1.677 faixas
+ *          do acervo estão sem ela). Quase sempre é a mesma canção, mas pode
+ *          ser um remix com verso convidado.
+ *
+ * A assimetria que isso obriga está em `veredictoDe`: identificação fraca pode
+ * CONDENAR, nunca ABSOLVER.
+ */
+export type Confianca = 'certa' | 'fraca';
+
 export interface IdentidadeDaFaixa {
   titulo: string;
   artista: string;
@@ -131,6 +145,29 @@ export interface IdentidadeDaFaixa {
  * versões podem ter letra diferente. Pura para poder ser testada, porque é aqui
  * que um erro vira "letra de funk atribuída a um louvor".
  */
+/** Mesmo artista e mesmo título-base, sem olhar duração. Ver `Confianca`. */
+export function mesmoNomeEArtista(alvo: IdentidadeDaFaixa, candidata: IdentidadeDaFaixa): boolean {
+  if (chave(alvo.artista) !== chave(candidata.artista)) return false;
+  return tituloBase(alvo.titulo) === tituloBase(candidata.titulo);
+}
+
+/**
+ * O VEREDITO, DADA A CONFIANÇA NA IDENTIFICAÇÃO.
+ *
+ * A regra: identificação fraca pode CONDENAR, nunca ABSOLVER.
+ *
+ * É a mesma assimetria do título no classificador, e pelo mesmo motivo. Se a
+ * letra que achamos tem palavrão, a faixa é suspeita o bastante para ficar fora
+ * de uma fila sensível — errar aqui custa uma música a menos. Se a letra está
+ * limpa mas pode não ser desta gravação, chamar a faixa de `limpo` a libera
+ * para o rádio de louvor com base num palpite — e errar ali custa a pessoa.
+ */
+export function veredictoDe(analise: AnaliseDeConteudo, confianca: Confianca): AnaliseDeConteudo {
+  if (confianca === 'certa') return analise;
+  if (analise.veredicto === 'explicito') return analise;
+  return { veredicto: 'desconhecido', categorias: [], achados: [] };
+}
+
 export function mesmaGravacao(alvo: IdentidadeDaFaixa, candidata: IdentidadeDaFaixa): boolean {
   if (chave(alvo.artista) !== chave(candidata.artista)) return false;
   if (tituloBase(alvo.titulo) !== tituloBase(candidata.titulo)) return false;
@@ -155,24 +192,29 @@ async function letraDaFaixa(track: {
   title?: string;
   artists?: Array<{ name?: string }>;
   durationMs?: number;
-}): Promise<string | null> {
+}): Promise<{ texto: string; confianca: Confianca } | null> {
   const titulo = (track.title ?? '').trim();
   const artista = (track.artists?.[0]?.name ?? '').trim();
-  if (!titulo || !artista || !track.durationMs) return null;
-  const duracaoS = Math.round(track.durationMs / 1000);
-  const alvo: IdentidadeDaFaixa = { titulo, artista, duracaoS };
+  if (!titulo || !artista) return null;
+  // 1.677 das 5.058 faixas do acervo estão sem duração, e a exigência dela
+  // fazia o agente devolver `null` ANTES de qualquer consulta — foi o que
+  // manteve 77% do acervo sem veredito mesmo depois de a busca ficar boa.
+  const duracaoS = track.durationMs ? Math.round(track.durationMs / 1000) : null;
+  const alvo: IdentidadeDaFaixa = { titulo, artista, duracaoS: duracaoS ?? 0 };
 
   const cabecalhos = { 'User-Agent': 'Aurial (classificacao de conteudo)' };
 
   // 1) Casamento literal. Quando responde, é ele mesmo — sem verificação.
-  const exata = new URL(LRCLIB_EXATO);
-  exata.searchParams.set('track_name', titulo);
-  exata.searchParams.set('artist_name', artista);
-  exata.searchParams.set('duration', String(duracaoS));
-  const res = await fetch(exata, { headers: cabecalhos, signal: AbortSignal.timeout(15_000) });
-  if (res.ok) {
-    const texto = textoDaLetra((await res.json()) as LinhaDaLrclib).trim();
-    if (texto) return texto;
+  if (duracaoS !== null) {
+    const exata = new URL(LRCLIB_EXATO);
+    exata.searchParams.set('track_name', titulo);
+    exata.searchParams.set('artist_name', artista);
+    exata.searchParams.set('duration', String(duracaoS));
+    const res = await fetch(exata, { headers: cabecalhos, signal: AbortSignal.timeout(15_000) });
+    if (res.ok) {
+      const texto = textoDaLetra((await res.json()) as LinhaDaLrclib).trim();
+      if (texto) return { texto, confianca: 'certa' };
+    }
   }
 
   // 2) Busca — e aqui NADA é aceito sem passar por `mesmaGravacao`.
@@ -190,9 +232,15 @@ async function letraDaFaixa(track: {
       artista: linha.artistName ?? '',
       duracaoS: Math.round(linha.duration ?? -1),
     };
-    if (!mesmaGravacao(alvo, identidade)) continue;
+    // Sem duração nossa, `mesmaGravacao` não pode conferir a terceira exigência.
+    // Artista e título iguais são identificação FRACA: quase sempre é a mesma
+    // canção, mas pode ser um remix com verso convidado — e essa diferença é
+    // justamente palavrão a mais.
+    const confere =
+      duracaoS !== null ? mesmaGravacao(alvo, identidade) : mesmoNomeEArtista(alvo, identidade);
+    if (!confere) continue;
     const texto = textoDaLetra(linha).trim();
-    if (texto) return texto;
+    if (texto) return { texto, confianca: duracaoS !== null ? 'certa' : 'fraca' };
   }
   return null;
 }
@@ -228,7 +276,7 @@ export async function classificarUmaRodada(): Promise<{
 
   for (const faixa of fila) {
     const track = (faixa.data as { track?: Record<string, unknown> }).track ?? {};
-    let letra: string | null = null;
+    let letra: { texto: string; confianca: Confianca } | null = null;
     try {
       letra = await letraDaFaixa(track as Parameters<typeof letraDaFaixa>[0]);
     } catch {
@@ -238,7 +286,10 @@ export async function classificarUmaRodada(): Promise<{
       continue;
     }
 
-    const analise = classificarFaixa({ titulo: String(track.title ?? ''), letra });
+    const analise = veredictoDe(
+      classificarFaixa({ titulo: String(track.title ?? ''), letra: letra?.texto ?? null }),
+      letra?.confianca ?? 'certa',
+    );
     const conteudo: ConteudoDaFaixa = {
       ...analise,
       em: new Date().toISOString(),

@@ -16,7 +16,8 @@ vi.mock('../core/logger.js', () => ({
 vi.mock('../infra/db/prisma.js', () => ({ prisma: { $queryRaw: vi.fn(async () => []) } }));
 vi.mock('../modules/catalog/catalog.repository.js', () => ({ upsertCatalogTrack: vi.fn() }));
 
-const { mesmaGravacao } = await import('./conteudoDaFaixa.worker.js');
+const { mesmaGravacao, mesmoNomeEArtista, veredictoDe } =
+  await import('./conteudoDaFaixa.worker.js');
 
 const alvo = { titulo: 'Coração Valente', artista: 'Ministério Vida', duracaoS: 210 };
 
@@ -81,5 +82,43 @@ describe('mesmaGravacao', () => {
     expect(
       mesmaGravacao(alvo, { titulo: 'Coração Valente', artista: 'Ministério Vida', duracaoS: -1 }),
     ).toBe(false);
+  });
+});
+
+describe('veredictoDe — identificação fraca condena, não absolve', () => {
+  // 1.677 das 5.058 faixas do acervo estão sem duração. Exigi-la fazia o agente
+  // desistir ANTES de consultar qualquer coisa, e foi isso — não o casamento —
+  // que manteve 77% do acervo sem veredito.
+  //
+  // Sem a duração, artista e título iguais quase sempre são a mesma canção, mas
+  // podem ser um remix com verso convidado. A assimetria abaixo é o preço de
+  // usar essa identificação sem abrir mão da garantia.
+  const explicita = { veredicto: 'explicito' as const, categorias: [], achados: ['caralho'] };
+  const limpa = { veredicto: 'limpo' as const, categorias: [], achados: [] };
+
+  it('com identificação CERTA, o veredito passa como está', () => {
+    expect(veredictoDe(limpa, 'certa').veredicto).toBe('limpo');
+    expect(veredictoDe(explicita, 'certa').veredicto).toBe('explicito');
+  });
+
+  it('com identificação FRACA, ainda CONDENA', () => {
+    // Errar aqui custa uma música a menos numa fila.
+    expect(veredictoDe(explicita, 'fraca').veredicto).toBe('explicito');
+  });
+
+  it('com identificação FRACA, NUNCA absolve', () => {
+    // Chamar de `limpo` uma faixa cuja letra pode não ser dela a liberaria para
+    // o rádio de louvor com base em palpite. Errar ali custa a pessoa.
+    expect(veredictoDe(limpa, 'fraca').veredicto).toBe('desconhecido');
+  });
+
+  it('mesmoNomeEArtista ignora duração mas não perdoa artista', () => {
+    const alvo = { titulo: 'Canção', artista: 'Fulano', duracaoS: 0 };
+    expect(
+      mesmoNomeEArtista(alvo, { titulo: 'Canção (Ao Vivo)', artista: 'FULANO', duracaoS: 0 }),
+    ).toBe(true);
+    expect(mesmoNomeEArtista(alvo, { titulo: 'Canção', artista: 'Outro', duracaoS: 0 })).toBe(
+      false,
+    );
   });
 });
