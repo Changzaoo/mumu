@@ -404,6 +404,13 @@ function sondarFonteEmParalelo(track: TrackDto, index: number): void {
     try {
       const res = await fetch(url, { headers: { Range: 'bytes=0-0' } });
       morta = res.status === 404 || res.status === 403;
+      // FECHA O CORPO. Sem isto a resposta fica aberta puxando bytes que
+      // ninguém lê — e num servidor que ignora o `Range` (o `/stream` do
+      // ajudante ignora, ele anuncia `Accept-Ranges: none`) isso é a FAIXA
+      // INTEIRA baixando em paralelo, disputando a banda do celular com o
+      // áudio que está tentando começar. A sonda existe para acelerar a
+      // reprodução; deixar o corpo aberto a fazia atrapalhar.
+      await res.body?.cancel().catch(() => undefined);
     } catch {
       return; // rede caiu / CORS: não é prova de nada
     }
@@ -836,6 +843,33 @@ export const usePlayerStore = create<PlayerState>()(
             });
           })
           .catch(() => undefined);
+
+        // AQUECE AS PRÓXIMAS NO IMPORTADOR.
+        //
+        // O guardião do offline adianta os BYTES; isto adianta a EXTRAÇÃO, que
+        // é onde o tempo estava. O `/stream` do ajudante gastava 12,9s até o
+        // primeiro byte, e ~99% disso era o yt-dlp resolvendo a faixa — com a
+        // resolução já feita, o mesmo pedido responde em 0,08s (medido no
+        // próprio servidor). Avisando enquanto a faixa atual toca, a próxima
+        // começa quase instantânea.
+        //
+        // Só as três seguintes, e só as `local:` — faixa de catálogo não passa
+        // pelo ajudante, e uma fila inteira viraria uma rajada de extrações que
+        // o YouTube limita por IP.
+        void (async () => {
+          const { queue, queueIndex } = get();
+          const proximas = queue.slice(queueIndex, queueIndex + 4);
+          if (proximas.length === 0) return;
+          const [{ sourceUrlFor }, { aquecerFontes }] = await Promise.all([
+            import('@/lib/local/localLibrary'),
+            import('@/lib/local/importerHelper'),
+          ]);
+          const fontes = proximas
+            .filter((t) => t.id.startsWith('local:'))
+            .map((t) => sourceUrlFor(t.id))
+            .filter((u): u is string => Boolean(u));
+          if (fontes.length > 0) await aquecerFontes(fontes);
+        })().catch(() => undefined);
 
         // A letra da faixa que está começando fura a fila de transcrição. Sem
         // isto, quem abrisse a letra do que está tocando esperava atrás da

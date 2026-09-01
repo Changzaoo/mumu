@@ -28,13 +28,20 @@ export interface Lyrics {
 }
 
 interface CachedLyricsEntry {
-  lyrics: Lyrics;
+  /**
+   * `null` = JÁ PROCURAMOS E NÃO EXISTE. Sem isso, toda vez que uma faixa sem
+   * letra tocava o app refazia a busca inteira — doze idas ao LRCLIB e ainda
+   * uma chamada de IA —, e o resultado era o mesmo nada de sempre.
+   */
+  lyrics: Lyrics | null;
   /**
    * Fingerprint da faixa usada para buscar essa letra.
    * Quando título/artista mudam (ex.: metadado corrigido), uma letra antiga
    * pode virar incorreta e precisa ser recarregada.
    */
   fingerprint: string;
+  /** Quando a busca voltou vazia. Só existe em entrada NEGATIVA. */
+  vazioEm?: number;
 }
 
 const CACHE_KEY = 'aurial:lyrics-cache';
@@ -278,10 +285,14 @@ export function writeLyrics(trackId: string, lyrics: Lyrics): void {
 
 /** Todas as letras em cache — combustível da busca por trecho de letra. */
 export function lyricsCacheEntries(): Array<[string, Lyrics]> {
-  return Object.entries(readCache()).map(([trackId, cached]) => [
-    trackId,
-    'lyrics' in cached ? cached.lyrics : cached,
-  ]);
+  const saida: Array<[string, Lyrics]> = [];
+  for (const [trackId, cached] of Object.entries(readCache())) {
+    const letra = 'lyrics' in cached ? cached.lyrics : cached;
+    // As entradas negativas ("procuramos e não existe") não são letra nenhuma:
+    // deixá-las passar aqui quebraria a busca por trecho.
+    if (letra) saida.push([trackId, letra]);
+  }
+  return saida;
 }
 
 // ── fetch ───────────────────────────────────────────────────────
@@ -311,6 +322,44 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
   const artistCandidates: Array<string | undefined> = [...names, undefined];
   const titleCandidates = Array.from(new Set([cleanTitle, rawTitle].filter(Boolean)));
 
+  /**
+   * TODAS AS TENTATIVAS DE UMA VEZ, E A ESCOLHA DEPOIS.
+   *
+   * Estes dois laços eram `await` dentro de `for` dentro de `for`: até seis
+   * idas ao LRCLIB uma ESPERANDO A OUTRA, e mais seis na busca solta — doze
+   * viagens em fila indiana antes de a letra aparecer. Num celular, com ~400ms
+   * cada, isso é a letra levando vários segundos para uma faixa que o servidor
+   * já tinha respondido na primeira.
+   *
+   * O número de pedidos é o MESMO (a lista de candidatos não mudou, e a
+   * cortesia com o LRCLIB é a mesma); o que muda é que eles correm juntos e o
+   * custo total vira o do mais lento, não a soma de todos.
+   *
+   * A ORDEM DE PREFERÊNCIA É PRESERVADA, e isso é o que impede a paralelização
+   * de virar uma regressão de qualidade: os candidatos vêm ordenados do mais
+   * confiável (título limpo + artista principal) para o menos, e a escolha
+   * continua percorrendo essa ordem. Aceitar "a primeira resposta que chegar"
+   * seria deixar a rede escolher a letra — que é exatamente como letra errada
+   * se instala.
+   */
+  const combinacoes = titleCandidates.flatMap((title) =>
+    artistCandidates.map((artist) => ({ title, artist })),
+  );
+
+  const escolher = (achados: Array<Lyrics | null>): { synced: Lyrics | null; plain: Lyrics | null } => {
+    let synced: Lyrics | null = null;
+    let plain: Lyrics | null = null;
+    for (const achado of achados) {
+      if (!achado) continue;
+      if (achado.synced) {
+        synced ??= achado;
+      } else {
+        plain ??= achado;
+      }
+    }
+    return { synced, plain };
+  };
+
   const get = async (title: string, artist: string | undefined): Promise<Lyrics | null> => {
     if (!durationSec) return null;
     const url = new URL('https://lrclib.net/api/get');
@@ -328,41 +377,48 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
   };
 
   // Exact get() across title × artist candidates — prefer a synced hit.
-  let plainFallback: Lyrics | null = null;
-  for (const title of titleCandidates) {
-    for (const artist of artistCandidates) {
-      const found = await get(title, artist).catch(() => null);
-      if (found?.synced) return found;
-      if (found && !plainFallback) plainFallback = found;
-    }
-  }
+  const exatos = escolher(
+    await Promise.all(combinacoes.map(({ title, artist }) => get(title, artist).catch(() => null))),
+  );
+  if (exatos.synced) return exatos.synced;
+  let plainFallback: Lyrics | null = exatos.plain;
 
   // Fuzzy search — pick the best SYNCED row (compare title + any artist).
-  const search = async (title: string, artist: string | undefined): Promise<LrclibRow[] | null> => {
+  const search = async (title: string, artist: string | undefined): Promise<Lyrics | null> => {
     const url = new URL('https://lrclib.net/api/search');
     url.searchParams.set('track_name', title);
     if (artist) url.searchParams.set('artist_name', artist);
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
     if (!res.ok) return null;
     const rows = (await res.json()) as LrclibRow[];
-    return Array.isArray(rows) ? rows : null;
+    if (!Array.isArray(rows) || rows.length === 0) return null;
+    // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
+    // duração) — a busca é full-text solta e devolve músicas alheias.
+    const synced = rows.find((r) => r.syncedLyrics && rowMatches(r, title, names, durationSec));
+    if (synced) return toLyrics(synced);
+    const plain = rows.find((r) => rowMatches(r, title, names, durationSec));
+    return plain ? toLyrics(plain) : null;
   };
 
-  for (const title of titleCandidates) {
-    for (const artist of artistCandidates) {
-      const rows = await search(title, artist).catch(() => null);
-      if (!rows || rows.length === 0) continue;
-      // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
-      // duração) — a busca é full-text solta e devolve músicas alheias.
-      const synced = rows.find((r) => r.syncedLyrics && rowMatches(r, title, names, durationSec));
-      if (synced) return toLyrics(synced);
-      const plain = rows.find((r) => rowMatches(r, title, names, durationSec));
-      if (plain && !plainFallback) plainFallback = toLyrics(plain);
-    }
-  }
+  const soltos = escolher(
+    await Promise.all(
+      combinacoes.map(({ title, artist }) => search(title, artist).catch(() => null)),
+    ),
+  );
+  if (soltos.synced) return soltos.synced;
+  plainFallback ??= soltos.plain;
 
   return plainFallback;
 }
+
+/**
+ * Quanto vale uma resposta "essa faixa não tem letra".
+ *
+ * Não é para sempre: o LRCLIB é colaborativo e ganha letras novas todo dia.
+ * Uma semana é o meio-termo — a faixa que tocou ontem não refaz a busca, e a
+ * que ficou meses sem letra volta a ser perguntada.
+ */
+const VALIDADE_DO_VAZIO_MS = 7 * 24 * 3600_000;
 
 /**
  * Resolve lyrics for a track: cache → LRCLIB. Never throws; returns null when
@@ -373,7 +429,16 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
   const rawCached = readCache()[track.id];
   if (rawCached) {
     if ('lyrics' in rawCached) {
-      if (rawCached.fingerprint === fingerprint) return rawCached.lyrics;
+      if (rawCached.fingerprint === fingerprint) {
+        // Entrada NEGATIVA ainda no prazo: nada de rede. É o que impede uma
+        // faixa sem letra de refazer a busca inteira a cada reprodução.
+        if (rawCached.lyrics === null) {
+          const vazioEm = rawCached.vazioEm ?? 0;
+          if (Date.now() - vazioEm < VALIDADE_DO_VAZIO_MS) return null;
+        } else {
+          return rawCached.lyrics;
+        }
+      }
       // Sem rede, usa o cache mesmo antigo em vez de falhar em branco.
       if (typeof navigator !== 'undefined' && !navigator.onLine) return rawCached.lyrics;
     } else {
@@ -399,12 +464,12 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
         });
       }
     }
-    if (lyrics) {
-      writeCache({
-        ...readCache(),
-        [track.id]: { lyrics, fingerprint } satisfies CachedLyricsEntry,
-      });
-    }
+    writeCache({
+      ...readCache(),
+      [track.id]: lyrics
+        ? ({ lyrics, fingerprint } satisfies CachedLyricsEntry)
+        : ({ lyrics: null, fingerprint, vazioEm: Date.now() } satisfies CachedLyricsEntry),
+    });
     return lyrics;
   } catch {
     return null;

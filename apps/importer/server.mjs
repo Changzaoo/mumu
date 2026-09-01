@@ -357,6 +357,164 @@ function cookieArgs() {
   return ['--cookies', caminho];
 }
 
+// ── URLS DIRETAS JÁ RESOLVIDAS — o conserto do "demora 10 a 20 segundos" ─────
+//
+// O QUE FOI MEDIDO. O `/stream` monta `yt-dlp -o - | ffmpeg`, e o ouvinte
+// espera o primeiro byte sair do ffmpeg. Medindo esse instante em duas faixas:
+//
+//   pipeline atual (yt-dlp baixando)          11,4 s  e  16,8 s
+//   só a extração (`yt-dlp -g`)                6,7 s  e  17,6 s
+//   ffmpeg lendo a URL DIRETA já resolvida     0,28 s e   0,50 s
+//
+// Ou seja: quase TODO o tempo de espera é o yt-dlp resolvendo a faixa — buscar
+// a página do YouTube e decifrar o player JS —, não a música chegando. Depois
+// de resolvida, o áudio começa em menos de meio segundo. É uma diferença de
+// ~40×, e é a explicação inteira do sintoma.
+//
+// A URL que o yt-dlp devolve é assinada e vale horas. Guardá-la significa que a
+// extração acontece UMA vez por faixa em vez de uma vez por play.
+//
+// POR QUE 3 HORAS. O YouTube assina por ~6h. Metade disso é a folga: uma URL
+// que expira no meio do caminho não é um erro cosmético — é a música parando.
+// Quem chega perto do fim do prazo prefere reextrair.
+const URL_DIRETA_TTL_MS = Number(process.env.URL_DIRETA_TTL_MS ?? 3 * 3600_000);
+/** Teto do cache. Uma entrada são duas strings; o teto é contra vazamento. */
+const URL_DIRETA_MAX = 500;
+
+/** sourceUrl → { direta, expira } */
+const urlsDiretas = new Map();
+/** sourceUrl → Promise em curso. Dois ouvintes na mesma faixa extraem UMA vez. */
+const resolucoesEmCurso = new Map();
+
+/**
+ * Extrair é a operação que o YouTube limita POR IP. Sem teto, aquecer uma
+ * playlist inteira viraria uma rajada que derruba o IP para tudo — inclusive
+ * para os imports normais. É o mesmo raciocínio de `MAX_RECONSTRUCOES`.
+ */
+const MAX_RESOLUCOES = Number(process.env.MAX_RESOLUCOES ?? 3);
+let resolucoesAtivas = 0;
+
+/** Teto de tempo de UMA extração: yt-dlp pendurado não pode ocupar vaga eterna. */
+const RESOLUCAO_TIMEOUT_MS = Number(process.env.RESOLUCAO_TIMEOUT_MS ?? 45_000);
+
+function guardarUrlDireta(sourceUrl, direta) {
+  urlsDiretas.delete(sourceUrl); // reposiciona no fim (a ordem do Map é LRU aqui)
+  urlsDiretas.set(sourceUrl, { direta, expira: Date.now() + URL_DIRETA_TTL_MS });
+  while (urlsDiretas.size > URL_DIRETA_MAX) {
+    const maisAntiga = urlsDiretas.keys().next();
+    if (maisAntiga.done) break;
+    urlsDiretas.delete(maisAntiga.value);
+  }
+}
+
+/** A URL direta em cache, ou null se não houver ou já ter vencido. */
+function urlDiretaEmCache(sourceUrl) {
+  const entrada = urlsDiretas.get(sourceUrl);
+  if (!entrada) return null;
+  if (entrada.expira <= Date.now()) {
+    urlsDiretas.delete(sourceUrl);
+    return null;
+  }
+  return entrada.direta;
+}
+
+/** Descarta a URL de uma faixa — usado quando ela falha na hora de tocar. */
+function esquecerUrlDireta(sourceUrl) {
+  urlsDiretas.delete(sourceUrl);
+}
+
+/**
+ * A URL de áudio direta desta origem, do cache ou extraindo agora.
+ *
+ * Devolve null quando não dá para resolver (origem morta, teto de
+ * simultaneidade, tempo esgotado) — e null aqui NÃO é fatal: quem chama volta
+ * para o caminho antigo (`yt-dlp -o - | ffmpeg`), que é lento mas funciona.
+ * Esta função só pode tornar as coisas mais rápidas, nunca quebrá-las.
+ */
+async function resolverUrlDireta(sourceUrl) {
+  if (!hostSupported(sourceUrl)) return null;
+  const emCache = urlDiretaEmCache(sourceUrl);
+  if (emCache) return emCache;
+
+  const emCurso = resolucoesEmCurso.get(sourceUrl);
+  if (emCurso) return emCurso;
+  if (resolucoesAtivas >= MAX_RESOLUCOES) return null;
+
+  resolucoesAtivas += 1;
+  const tarefa = (async () => {
+    const binario = await resolveYtdlp();
+    // `-g` só RESOLVE: imprime a URL e sai, sem baixar um byte de áudio.
+    const args = [
+      '-f',
+      'bestaudio/best',
+      '--no-playlist',
+      '--no-warnings',
+      ...cookieArgs(),
+      ...extractorArgs(),
+      '-g',
+      sourceUrl,
+    ];
+    const direta = await new Promise((resolve) => {
+      const p = spawn(binario, args, { windowsHide: true });
+      let saida = '';
+      let terminou = false;
+      const encerrar = (valor) => {
+        if (terminou) return;
+        terminou = true;
+        clearTimeout(relogio);
+        resolve(valor);
+      };
+      const relogio = setTimeout(() => {
+        try {
+          p.kill('SIGKILL');
+        } catch {
+          /* já morreu */
+        }
+        encerrar(null);
+      }, RESOLUCAO_TIMEOUT_MS);
+      p.stdout.on('data', (c) => {
+        saida += c;
+      });
+      p.stderr.resume();
+      p.on('error', () => encerrar(null));
+      p.on('close', (code) => {
+        // `-g` pode imprimir VÁRIAS linhas (vídeo e áudio separados). Com
+        // `-f bestaudio` a primeira é a que interessa.
+        const primeira = saida.trim().split(/\r?\n/)[0]?.trim() ?? '';
+        encerrar(code === 0 && /^https?:\/\//.test(primeira) ? primeira : null);
+      });
+    });
+    if (direta) guardarUrlDireta(sourceUrl, direta);
+    return direta;
+  })()
+    .catch(() => null)
+    .finally(() => {
+      resolucoesAtivas -= 1;
+      resolucoesEmCurso.delete(sourceUrl);
+    });
+
+  resolucoesEmCurso.set(sourceUrl, tarefa);
+  return tarefa;
+}
+
+/**
+ * Argumentos de reconexão do ffmpeg ao ler uma URL da CDN do YouTube.
+ *
+ * Sem eles, uma queda momentânea no meio do arquivo encerra o ffmpeg e a música
+ * para no meio sem erro nenhum. PRECISAM vir antes do `-i` — são opções de
+ * entrada, e o ffmpeg ignora em silêncio o que vier depois.
+ */
+const RECONEXAO_FFMPEG = [
+  '-reconnect',
+  '1',
+  '-reconnect_streamed',
+  '1',
+  '-reconnect_on_network_error',
+  '1',
+  '-reconnect_delay_max',
+  '5',
+];
+
 async function importToMp3(ytdlp, url, quality) {
   const dir = await mkdtemp(path.join(tmpdir(), 'aurial-import-'));
   const args = [
@@ -811,6 +969,21 @@ const reconstruindo = new Map();
  * cofre nunca mais reconstruir nada.
  */
 const RECONSTRUCAO_TIMEOUT_MS = Number(process.env.RECONSTRUCAO_TIMEOUT_MS ?? 180_000);
+
+/**
+ * VEREDITO DA ÚLTIMA RECONSTRUÇÃO, por id de blob.
+ *
+ * Existe porque a reconstrução saiu da frente do ouvinte (ver o `GET /blob/`):
+ * como o pedido não espera mais pelo resultado, ele precisa de outro jeito de
+ * descobrir que a origem morreu. Sem isto, uma faixa cuja origem sumiu
+ * responderia 503 para sempre e o app nunca limparia o link morto.
+ *
+ * Só o `false` — a extração RODOU e falhou — entra aqui. Ocupado, tempo
+ * esgotado e sem disco são "tente de novo", nunca morte.
+ */
+const ultimaReconstrucao = new Map();
+/** Por quanto tempo confiar num veredito de morte antes de tentar de novo. */
+const VEREDITO_MORTO_MS = Number(process.env.VEREDITO_MORTO_MS ?? 3600_000);
 /** Quanto reservar no disco quando não se sabe o tamanho do que vai ser extraído. */
 const RESERVA_RECONSTRUCAO = 24 * 1024 * 1024;
 
@@ -861,37 +1034,60 @@ async function reconstruirBlob(id, meta) {
     const reserva = Math.max(Number(meta.size) || 0, RESERVA_RECONSTRUCAO);
     if (!(await garantirEspaco(reserva))) return 'sem-espaco';
 
-    const args = [
-      '-f',
-      'bestaudio/best',
-      '--no-playlist',
-      '--no-warnings',
-      ...cookieArgs(),
-      ...extractorArgs(),
-      '-o',
-      '-',
-      meta.sourceUrl,
-    ];
-    const ytdlpBinario = await resolveYtdlp();
-    const yt = spawn(ytdlpBinario, args, { windowsHide: true });
+    // A URL DIRETA PRIMEIRO, PELO MESMO MOTIVO DO `/stream`: a extração é que
+    // custa os 7-17s, não o áudio. Se ela já estiver em cache (o aquecimento da
+    // fila costuma ter passado por aqui), a reconstrução começa na hora. Sem
+    // cache, `resolverUrlDireta` extrai — e o resultado fica guardado para o
+    // `/stream` e para as próximas reconstruções desta mesma faixa.
+    const direta = await resolverUrlDireta(meta.sourceUrl);
+    const ytdlpBinario = direta ? null : await resolveYtdlp();
+    const yt = direta
+      ? null
+      : spawn(
+          ytdlpBinario,
+          [
+            '-f',
+            'bestaudio/best',
+            '--no-playlist',
+            '--no-warnings',
+            ...cookieArgs(),
+            ...extractorArgs(),
+            '-o',
+            '-',
+            meta.sourceUrl,
+          ],
+          { windowsHide: true },
+        );
     const ff = spawn(
       FFMPEG_BIN,
-      ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', `${kbpsFor(null)}k`, 'pipe:1'],
+      [
+        '-hide_banner',
+        '-loglevel',
+        'error',
+        ...(direta ? [...RECONEXAO_FFMPEG, '-i', direta] : ['-i', 'pipe:0']),
+        '-f',
+        'mp3',
+        '-b:a',
+        `${kbpsFor(null)}k`,
+        'pipe:1',
+      ],
       { windowsHide: true },
     );
     // Um cano quebrado (ffmpeg que nem chegou a existir) emite erro no stream,
     // e stream sem ouvinte de 'error' derruba o processo inteiro.
     ff.stdin.on('error', () => undefined);
-    yt.stdout.on('error', () => undefined);
-    yt.stdout.pipe(ff.stdin);
-    yt.stderr.resume();
+    if (yt) {
+      yt.stdout.on('error', () => undefined);
+      yt.stdout.pipe(ff.stdin);
+      yt.stderr.resume();
+    }
     ff.stderr.resume();
 
     const saida = createWriteStream(parcial);
     let bytes = 0;
     let estourou = false;
     const matar = () => {
-      yt.kill();
+      yt?.kill();
       ff.kill();
     };
     const relogio = setTimeout(() => {
@@ -913,13 +1109,16 @@ async function reconstruirBlob(id, meta) {
       // Só depois que o ARQUIVO fecha os bytes estão realmente no disco.
       saida.on('close', () => resolve(!estourou && bytes > 0 && bytes <= MAX_BLOB));
       ff.on('error', () => resolve(false));
-      yt.on('error', () => resolve(false));
+      yt?.on('error', () => resolve(false));
     });
     clearTimeout(relogio);
     saida.destroy();
 
     if (!ok) {
       await rm(parcial, { force: true }).catch(() => undefined);
+      // Zero byte pela via rápida = a URL assinada venceu ou foi recusada.
+      // Guardá-la faria a próxima tentativa repetir a mesma falha até o TTL.
+      if (direta && bytes === 0) esquecerUrlDireta(meta.sourceUrl);
       log('reconstrução falhou:', id, estourou ? '(tempo esgotado)' : '');
       return estourou ? 'estourou' : false;
     }
@@ -2125,41 +2324,51 @@ async function main() {
 
         if (!aberto) {
           // OS BYTES SUMIRAM, MAS O TOKEN CONFERE — foi a poda, não um invasor.
-          // Reconstrói da origem em vez de devolver 404. Ver `reconstruirBlob`.
-          const r = meta.sourceUrl ? await reconstruirBlob(id, meta).catch(() => false) : false;
-          if (r === true) {
-            // RELER A META. A reconstrução reencoda a 320k e o tamanho MUDA;
-            // ela grava o novo `size` em disco, mas a cópia que este pedido tem
-            // na mão ainda é a antiga. Sem reler, a conferência de arquivo
-            // cortado logo abaixo compara o blob recém-refeito com o tamanho
-            // velho e o apaga na hora — medido: reconstruía 482 KB, achava que
-            // eram 1 MB cortados, descartava, e o ouvinte tomava 404 depois de
-            // esperar a extração inteira.
-            meta = await readFile(blobMetaPath(id), 'utf8')
-              .then(JSON.parse)
-              .catch(() => meta);
-            aberto = await abrir().catch(() => null);
-          }
-          if (!aberto) {
-            // 503 ≠ 404, DE PROPÓSITO. O app trata 404/403 como MORTE da cópia e
-            // apaga o `remoteUrl` da faixa. Ficar sem vaga de reconstrução, ou
-            // estourar o tempo, ou faltar disco não são morte — devolver 404 ali
-            // faria o app jogar fora um link de capacidade vivo que ninguém
-            // consegue reemitir. Só a extração que RODOU e falhou (origem
-            // removida) vale um 404.
-            if (r === 'ocupado' || r === 'estourou' || r === 'sem-espaco') {
-              res.writeHead(503, {
-                'Content-Type': 'text/plain',
-                'Retry-After': '30',
-                'Cache-Control': 'no-store',
-              });
-              res.end('reconstruindo');
-              return;
-            }
+          //
+          // A RECONSTRUÇÃO SAI DA FRENTE DO OUVINTE. Antes este pedido ficava
+          // esperando a extração INTEIRA — baixar e reencodar a faixa toda, até
+          // 180s — antes de devolver um único byte. Isso era o pior tempo de
+          // espera do app inteiro, e era pago justamente por quem só queria
+          // ouvir uma música que o cofre tinha jogado fora sozinho.
+          //
+          // Agora ela roda em SEGUNDO PLANO e o pedido responde na hora. O 503
+          // manda o app para a próxima fonte, que é o `/stream` — e o `/stream`
+          // entrega o primeiro byte em 0,08s desde que a URL direta esteja
+          // resolvida (ver `resolverUrlDireta`), coisa que esta mesma
+          // reconstrução acabou de fazer. O ouvinte ouve agora; o cofre se
+          // recompõe atrás, e a PRÓXIMA reprodução vem do disco, com Range e
+          // sem tocar em rede externa nenhuma.
+          const veredito = ultimaReconstrucao.get(id);
+          if (veredito?.morta && Date.now() - veredito.em < VEREDITO_MORTO_MS) {
+            // A extração JÁ RODOU e falhou: a origem sumiu de verdade. Este 404
+            // precisa chegar ao app — é ele que faz a faixa parar de anunciar
+            // uma cópia que não existe. Insistir em 503 aqui deixaria um link
+            // morto vivo para sempre.
             res.writeHead(404, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
             res.end('not found');
             return;
           }
+          if (meta.sourceUrl) {
+            void reconstruirBlob(id, meta)
+              .then((r) => {
+                // Só `false` é morte (a extração rodou e falhou). 'ocupado',
+                // 'estourou' e 'sem-espaco' são "tente de novo" — anotá-los
+                // como morte faria o app descartar um link de capacidade vivo,
+                // que ninguém consegue reemitir.
+                if (r === false) ultimaReconstrucao.set(id, { morta: true, em: Date.now() });
+                else if (r === true) ultimaReconstrucao.delete(id);
+              })
+              .catch(() => undefined);
+          }
+          // 503 ≠ 404, DE PROPÓSITO. O app trata 404/403 como MORTE da cópia e
+          // apaga o `remoteUrl` da faixa. "Estou refazendo" não é morte.
+          res.writeHead(503, {
+            'Content-Type': 'text/plain',
+            'Retry-After': '10',
+            'Cache-Control': 'no-store',
+          });
+          res.end('reconstruindo');
+          return;
         }
 
         const { fh, st } = aberto;
@@ -2231,6 +2440,47 @@ async function main() {
         return;
       }
 
+      // ── AQUECIMENTO DA FILA ──────────────────────────────────────────────
+      //
+      // O cache de URLs diretas resolve o SEGUNDO play de cada faixa. Este
+      // endpoint resolve o primeiro: o app conta o que vem a seguir na fila e a
+      // extração acontece enquanto a música atual ainda está tocando — de graça,
+      // em tempo que o ouvinte não está esperando.
+      //
+      // Responde na hora (202) e trabalha depois. Quem aquece não quer resposta:
+      // quer que o trabalho já esteja feito quando apertar o play.
+      if (req.method === 'POST' && pathname === '/aquecer') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        let urls = [];
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          urls = Array.isArray(body.urls) ? body.urls : [];
+        } catch {
+          urls = [];
+        }
+        // Teto: uma playlist inteira mandada de uma vez viraria uma rajada de
+        // extrações — exatamente o que `MAX_RESOLUCOES` existe para evitar.
+        const alvos = urls
+          .filter((u) => typeof u === 'string' && hostSupported(u))
+          .filter((u) => !urlDiretaEmCache(u))
+          .slice(0, 5);
+        res.writeHead(202, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ aquecendo: alvos.length }));
+        // Em SÉRIE, não em paralelo: o teto de simultaneidade recusaria as
+        // excedentes (devolve null sem enfileirar), e aquecer é justamente o
+        // trabalho que pode esperar. Uma de cada vez chega a todas.
+        void (async () => {
+          for (const alvo of alvos) {
+            await resolverUrlDireta(alvo).catch(() => null);
+          }
+        })();
+        return;
+      }
+
       if (req.method === 'GET' && pathname === '/stream') {
         const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
         const url = params.get('url');
@@ -2245,63 +2495,153 @@ async function main() {
           return;
         }
         const streamKbps = kbpsFor(params.get('quality'));
-        log('stream:', url, `${streamKbps}k`);
-        res.writeHead(200, {
-          'Content-Type': 'audio/mpeg',
-          'Cache-Control': 'no-store',
-          'Accept-Ranges': 'none',
-        });
-        // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Playback starts as
-        // soon as the first frames arrive — no full download needed.
-        const yt = spawn(
-          ytdlp,
-          [
-            '-f',
-            'bestaudio/best',
-            '--no-playlist',
-            '--no-warnings',
-            ...cookieArgs(),
-            ...extractorArgs(),
-            '-o',
-            '-',
-            url,
-          ],
-          {
-            windowsHide: true,
-        });
-        const ff = spawn(
-          FFMPEG_BIN,
-          ['-hide_banner', '-loglevel', 'error', '-i', 'pipe:0', '-f', 'mp3', '-b:a', `${streamKbps}k`, 'pipe:1'],
-          { windowsHide: true },
-        );
-        let done = false;
-        const cleanup = () => {
-          if (done) return;
-          done = true;
-          try {
-            yt.kill('SIGKILL');
-          } catch {
-            /* gone */
-          }
-          try {
-            ff.kill('SIGKILL');
-          } catch {
-            /* gone */
-          }
+
+        /**
+         * OS CABEÇALHOS SÓ SAEM COM O PRIMEIRO BYTE DE ÁUDIO NA MÃO.
+         *
+         * Antes o `200` era escrito imediatamente, e isso amarrava o pedido à
+         * primeira tentativa: se ela não desse em nada, não havia mais como
+         * tentar outro caminho — a resposta já tinha prometido áudio. Segurando
+         * o cabeçalho, a via rápida pode falhar em SILÊNCIO e a via lenta assume
+         * sem que o ouvinte perceba nada além do tempo que já esperaria.
+         */
+        let cabecalhoEnviado = false;
+        const enviarCabecalho = () => {
+          if (cabecalhoEnviado || res.writableEnded) return;
+          cabecalhoEnviado = true;
+          res.writeHead(200, {
+            'Content-Type': 'audio/mpeg',
+            'Cache-Control': 'no-store',
+            'Accept-Ranges': 'none',
+          });
         };
-        yt.on('error', cleanup);
-        ff.on('error', cleanup);
-        yt.stderr.on('data', () => {});
-        ff.stderr.on('data', () => {});
-        yt.stdout.on('error', () => {});
-        ff.stdin.on('error', () => {}); // client may disconnect mid-pipe
-        yt.stdout.pipe(ff.stdin);
-        ff.stdout.pipe(res);
-        ff.on('close', () => {
-          if (!res.writableEnded) res.end();
-          cleanup();
+
+        let clienteFoi = false;
+        req.on('close', () => {
+          clienteFoi = true;
         });
-        req.on('close', cleanup);
+
+        /**
+         * Roda um pipeline e despeja o áudio na resposta. Resolve com `true` se
+         * ALGUM byte de áudio chegou a sair — que é a única prova de que o
+         * caminho funcionou.
+         *
+         * O ouvinte do primeiro byte é registrado ANTES do `pipe`, e é por isso
+         * que o cabeçalho sai antes do primeiro `write`: ouvintes de 'data'
+         * correm na ordem em que foram registrados, e o do `pipe` é o segundo.
+         */
+        const servir = (processos) =>
+          new Promise((resolve) => {
+            const ff = processos[processos.length - 1];
+            let saiuAudio = false;
+            let encerrado = false;
+            const matar = () => {
+              if (encerrado) return;
+              encerrado = true;
+              for (const p of processos) {
+                try {
+                  p.kill('SIGKILL');
+                } catch {
+                  /* já morreu */
+                }
+              }
+            };
+            const terminar = () => {
+              matar();
+              resolve(saiuAudio);
+            };
+            for (const p of processos) {
+              p.stderr?.resume();
+              p.stdout?.on('error', () => undefined);
+              p.stdin?.on('error', () => undefined); // o outro lado pode sumir
+              p.on('error', terminar);
+            }
+            ff.stdout.once('data', () => {
+              saiuAudio = true;
+              enviarCabecalho();
+            });
+            ff.stdout.pipe(res, { end: false });
+            ff.on('close', terminar);
+            req.on('close', terminar);
+          });
+
+        // ── VIA RÁPIDA: a URL direta, do cache ou extraída agora ──────────
+        // Medido: o ffmpeg lendo a URL já resolvida entrega o primeiro byte em
+        // 0,3-0,5s, contra 11-17s do `yt-dlp -o -`. Ver `resolverUrlDireta`.
+        let tocou = false;
+        const direta = await resolverUrlDireta(url);
+        if (direta && !clienteFoi) {
+          log('stream (url direta):', url, `${streamKbps}k`);
+          tocou = await servir([
+            spawn(
+              FFMPEG_BIN,
+              [
+                '-hide_banner',
+                '-loglevel',
+                'error',
+                ...RECONEXAO_FFMPEG,
+                '-i',
+                direta,
+                '-f',
+                'mp3',
+                '-b:a',
+                `${streamKbps}k`,
+                'pipe:1',
+              ],
+              { windowsHide: true },
+            ),
+          ]);
+          // Não saiu áudio nenhum: a URL venceu ou foi recusada. Guardá-la seria
+          // repetir a mesma falha até o TTL expirar.
+          if (!tocou) esquecerUrlDireta(url);
+        }
+
+        // ── VIA LENTA: o pipeline de sempre, quando a rápida não serviu ───
+        // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Continua aqui
+        // porque é o que funciona quando a extração falha ou o teto de
+        // simultaneidade está cheio: lento é muito melhor que mudo.
+        if (!tocou && !clienteFoi && !cabecalhoEnviado) {
+          log('stream (extração ao vivo):', url, `${streamKbps}k`);
+          const yt = spawn(
+            ytdlp,
+            [
+              '-f',
+              'bestaudio/best',
+              '--no-playlist',
+              '--no-warnings',
+              ...cookieArgs(),
+              ...extractorArgs(),
+              '-o',
+              '-',
+              url,
+            ],
+            { windowsHide: true },
+          );
+          const ff = spawn(
+            FFMPEG_BIN,
+            [
+              '-hide_banner',
+              '-loglevel',
+              'error',
+              '-i',
+              'pipe:0',
+              '-f',
+              'mp3',
+              '-b:a',
+              `${streamKbps}k`,
+              'pipe:1',
+            ],
+            { windowsHide: true },
+          );
+          yt.stdout.pipe(ff.stdin);
+          tocou = await servir([yt, ff]);
+        }
+
+        if (!cabecalhoEnviado && !clienteFoi) {
+          // Nenhum dos dois caminhos produziu áudio: a origem está morta.
+          res.writeHead(502, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+        }
+        if (!res.writableEnded) res.end();
         return;
       }
 

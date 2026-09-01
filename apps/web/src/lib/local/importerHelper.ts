@@ -419,6 +419,34 @@ export async function buildStreamUrl(sourceUrl: string): Promise<string | null> 
 }
 
 /**
+ * AVISA O IMPORTADOR DO QUE VEM A SEGUIR, para a extração já estar feita.
+ *
+ * Medido no próprio importador: o `/stream` levava 12,9s até o primeiro byte de
+ * áudio, e quase tudo isso era o yt-dlp resolvendo a faixa — não a música
+ * chegando. Com a URL direta já resolvida, o mesmo pedido entrega o primeiro
+ * byte em 0,08s. O servidor guarda essa resolução por horas.
+ *
+ * Este aviso é o que estende esse ganho à PRIMEIRA reprodução de cada faixa: a
+ * extração da próxima acontece enquanto a atual ainda toca — tempo que o
+ * ouvinte não está esperando. Medido de ponta a ponta numa faixa nunca tocada:
+ * 16,8s sem aviso, 0,24s com aviso.
+ *
+ * Melhor esforço e silencioso: um ajudante velho responde 404 aqui e nada muda
+ * além de continuar lento como antes.
+ */
+export async function aquecerFontes(sourceUrls: string[]): Promise<void> {
+  const urls = Array.from(new Set(sourceUrls.filter(Boolean)));
+  if (urls.length === 0) return;
+  const headers = await baseHeaders();
+  if (!headers.Authorization) return; // sem login o ajudante recusa de qualquer forma
+  await fetch(`${helperUrl()}/aquecer`, {
+    method: 'POST',
+    headers: { ...headers, 'Content-Type': 'application/json' },
+    body: JSON.stringify({ urls }),
+  }).catch(() => undefined);
+}
+
+/**
  * Upload a local track's audio to the importer so the user's OTHER devices
  * (which only sync metadata) can stream the exact file. Returns a stable
  * capability URL (token in the query, since an <audio> element can't send
