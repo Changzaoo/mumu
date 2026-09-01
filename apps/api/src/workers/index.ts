@@ -13,6 +13,7 @@ import { startCurationWorker } from './curation.worker.js';
 import { startArmazenamentoWorker } from './armazenamento.worker.js';
 import { startAcervoFielWorker } from './acervoFiel.worker.js';
 import { startVarreduraNoturnaWorker } from './varreduraNoturna.worker.js';
+import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
 
 const connection = createBullConnection();
 
@@ -56,6 +57,12 @@ const stopAcervoFiel = startAcervoFielWorker();
 // com folga no cofre — ver varreduraNoturna.worker.
 const stopVarredura = startVarreduraNoturnaWorker();
 
+// O acervo afirmava `explicit: false` para milhares de faixas que ninguém
+// nunca olhou. Este agente lê a letra e grava um veredito de verdade — com
+// `desconhecido` como resposta legítima quando não há letra exata. Ver
+// conteudoDaFaixa.worker.
+const stopConteudo = startConteudoDaFaixaWorker();
+
 logger.info(
   {
     queues: workers.map((w) => w.name),
@@ -80,6 +87,7 @@ async function shutdown(signal: string): Promise<void> {
   stopArmazenamento();
   stopAcervoFiel();
   stopVarredura();
+  stopConteudo();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

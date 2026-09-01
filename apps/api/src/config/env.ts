@@ -93,6 +93,20 @@ const envSchema = z
       )
       .default('false')
       .transform((v) => v === 'true'),
+    /**
+     * Classificação própria de conteúdo explícito (worker `conteudoDaFaixa`).
+     *
+     * Ligada por padrão: sem ela o app volta a afirmar `explicit: false` para
+     * milhares de faixas que nunca foram olhadas — que é a afirmação que este
+     * sistema veio desfazer. O desligamento existe para desenvolvimento.
+     */
+    CLASSIFICAR_CONTEUDO: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('true')
+      .transform((v) => v === 'true'),
     NVIDIA_API_KEY: optionalString,
     NVIDIA_BASE: z.string().default('https://integrate.api.nvidia.com/v1'),
     NVIDIA_MODEL: z.string().default('nvidia/nemotron-3-ultra-550b-a55b'),

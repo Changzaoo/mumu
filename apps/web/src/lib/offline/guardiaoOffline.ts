@@ -12,11 +12,12 @@
  *
  * ── AS TRÊS COISAS QUE ELE NÃO PODE FAZER ──
  *
- * 1. NÃO PODE ATRAPALHAR A MÚSICA. Baixar é enfeite; ouvir é o serviço. Ele
- *    pausa enquanto uma faixa está tocando e só trabalha uma por vez, com
- *    respiro. Um `repairMissingAudio` automático já foi ligado no boot uma vez e
- *    virou um estrago: o celular, que só deveria transmitir, saiu baixando
- *    centenas de músicas de uma vez.
+ * 1. NÃO PODE ATRAPALHAR A MÚSICA. Baixar é enfeite; ouvir é o serviço. Um
+ *    `repairMissingAudio` automático já foi ligado no boot uma vez e virou um
+ *    estrago: o celular, que só deveria transmitir, saiu baixando centenas de
+ *    músicas de uma vez. A defesa hoje não é baixar devagar sempre — é baixar
+ *    no RITMO DO APARELHO (ver `ritmoDoAparelho`) e nunca passar de alguns
+ *    minutos seguidos de trabalho por rodada.
  *
  * 2. NÃO PODE ENCHER O APARELHO. Ele respeita a cota real do navegador
  *    (`navigator.storage.estimate`) e para bem antes do limite. Encher o
@@ -36,14 +37,38 @@ import {
 } from '@/lib/local/localLibrary';
 import type { LibraryEntry } from '@/lib/local/localLibrary';
 
-/** Espera entre downloads — o aparelho e o túnel de casa agradecem. */
-const RESPIRO_MS = 1_500;
+/**
+ * Teto de downloads simultâneos, em QUALQUER aparelho.
+ *
+ * Os bytes saem de um único servidor doméstico atrás de um túnel: passar disto
+ * não acelera nada e atrapalha quem está ouvindo AGORA pela mesma conexão.
+ */
+const SIMULTANEOS_MAX = 4;
+
+/**
+ * Quanto tempo o guardião pode trabalhar sem parar numa rodada.
+ *
+ * Sem este limite, "baixar o mais rápido possível" vira o rádio e o disco
+ * ligados por uma hora seguida — que é como se torra a bateria de um celular
+ * sem que nada na tela explique por quê. Ele volta na próxima batida.
+ */
+const TEMPO_MAXIMO_POR_RODADA_MS = 10 * 60_000;
+
+/** De quanto em quanto tempo o plantão reavalia sozinho, sem depender de evento. */
+const BATIDA_MS = 5 * 60_000;
+
+/**
+ * Tentativas por faixa dentro da sessão.
+ *
+ * A fila é recalculada a cada lote (o que já baixou sai dela). Sem um teto de
+ * tentativas, uma faixa que falha voltaria ao topo para sempre e seguraria a
+ * fila inteira — o laço giraria sem baixar nada.
+ */
+const TENTATIVAS_POR_FAIXA = 2;
 /** Começa depois do boot: a primeira tela é prioridade absoluta. */
 const ATRASO_INICIAL_MS = 40_000;
 /** Reavalia quando a biblioteca muda, sem correr atrás de cada mudança. */
 const DEBOUNCE_MS = 15_000;
-/** Teto de faixas por rodada — nunca uma rajada. */
-const POR_RODADA = 25;
 /**
  * Fração da cota do navegador que podemos ocupar.
  *
@@ -61,8 +86,8 @@ export interface ContextoDeEscuta {
    * Já foi só "as próximas 7". A intenção era boa — priorizar o que toca em
    * segundos — mas o efeito era que sair do alcance do sinal no meio de uma
    * playlist parava a música na oitava faixa, que é exatamente a situação em
-   * que o offline precisava existir. Mandar a fila toda não cria rajada: o
-   * guardião continua baixando uma por vez, com respiro, e parando na cota. O
+   * que o offline precisava existir. Mandar a fila toda não cria rajada: quem
+   * limita o esforço é `ritmoDoAparelho` e a cota, não o tamanho da lista. O
    * que muda é que ele passa a saber para onde a lista vai.
    */
   aSeguir: string[];
@@ -149,6 +174,85 @@ export async function cabeMaisAudio(): Promise<boolean> {
   }
 }
 
+/**
+ * OS SINAIS QUE O APARELHO DÁ SOBRE O QUANTO AGUENTA.
+ *
+ * Tudo opcional de propósito: cada um destes campos falta em algum navegador
+ * real (`deviceMemory` e `connection` não existem no Safari, por exemplo). A
+ * regra é que a ausência de sinal nunca vire castigo — ver `ritmoDoAparelho`.
+ */
+export interface SinaisDoAparelho {
+  /** O sistema pediu economia de dados. É um pedido explícito da pessoa. */
+  economizarDados?: boolean;
+  /** 'slow-2g' | '2g' | '3g' | '4g' — a qualidade efetiva da conexão. */
+  tipoDeConexao?: string;
+  /** Núcleos de CPU (`navigator.hardwareConcurrency`). */
+  nucleos?: number;
+  /** Memória em GB (`navigator.deviceMemory`), arredondada pelo navegador. */
+  memoriaGb?: number;
+}
+
+export interface Ritmo {
+  /** Quantas faixas baixar ao mesmo tempo. */
+  simultaneos: number;
+  /** Pausa entre um lote e o próximo. */
+  respiroMs: number;
+}
+
+/**
+ * QUANTO ESTE APARELHO AGUENTA BAIXAR AO MESMO TEMPO.
+ *
+ * O guardião baixava uma faixa por vez com 1,5 s de espera entre elas, em todo
+ * aparelho. Isso dá ~13 faixas por minuto no melhor caso — um celular novo em
+ * Wi-Fi passava o tempo todo ocioso esperando um respiro pensado para o pior
+ * caso, e quem estava com pressa não tinha como ir mais rápido.
+ *
+ * Mas simplesmente subir o número esganaria justamente os aparelhos fracos:
+ * cada download carrega o arquivo INTEIRO na memória antes de gravar (ver
+ * `garantirAudioLocal`), então quatro em paralelo são quatro faixas de ~8 MB
+ * vivas ao mesmo tempo. Num aparelho de 2 GB isso é dinheiro que não existe.
+ *
+ * Por isso o ritmo sai dos sinais do próprio aparelho, e o pior sinal manda:
+ * uma conexão 2G num celular de 8 núcleos continua sendo 2G.
+ *
+ * Função pura para poder ser testada sem navegador — é a decisão que separa
+ * "rápido" de "quebrou o celular de alguém".
+ */
+export function ritmoDoAparelho(sinais: SinaisDoAparelho): Ritmo {
+  // Pedido explícito de economia vence qualquer capacidade: a pessoa disse ao
+  // sistema que não quer gastar dados. Não paramos de baixar — a fila é o que
+  // ela vai ouvir, não especulação — mas voltamos ao mínimo.
+  if (sinais.economizarDados) return { simultaneos: 1, respiroMs: 5_000 };
+
+  const conexao = sinais.tipoDeConexao;
+  if (conexao === 'slow-2g' || conexao === '2g') return { simultaneos: 1, respiroMs: 4_000 };
+  if (conexao === '3g') return { simultaneos: 2, respiroMs: 1_500 };
+
+  // Sem sinal de conexão (Safari) tratamos como boa: a ausência de informação
+  // não é evidência de aparelho ruim, e a cota e o tempo máximo já seguram o
+  // exagero. Punir o desconhecido deixaria todo iPhone no ritmo de 2G.
+  const nucleos = sinais.nucleos ?? 4;
+  const memoria = sinais.memoriaGb ?? 4;
+
+  if (memoria <= 2 || nucleos <= 2) return { simultaneos: 2, respiroMs: 900 };
+  if (memoria <= 4 || nucleos <= 4) return { simultaneos: 3, respiroMs: 400 };
+  return { simultaneos: SIMULTANEOS_MAX, respiroMs: 200 };
+}
+
+/** Lê os sinais do navegador. Fora dos testes, é a única fonte deles. */
+function sinaisDoAparelho(): SinaisDoAparelho {
+  const nav = typeof navigator === 'undefined' ? undefined : navigator;
+  const conexao = (
+    nav as unknown as { connection?: { effectiveType?: string; saveData?: boolean } } | undefined
+  )?.connection;
+  return {
+    economizarDados: conexao?.saveData,
+    tipoDeConexao: conexao?.effectiveType,
+    nucleos: nav?.hardwareConcurrency,
+    memoriaGb: (nav as unknown as { deviceMemory?: number } | undefined)?.deviceMemory,
+  };
+}
+
 // ── plantão ─────────────────────────────────────────────────────────────────
 
 let iniciado = false;
@@ -170,19 +274,53 @@ function podeTrabalhar(): boolean {
   return true;
 }
 
+/**
+ * Faixas que falharam nesta sessão, e quantas vezes.
+ *
+ * Vive fora da rodada porque a fila é recalculada a cada lote: sem memória
+ * entre lotes, a faixa que acabou de falhar voltaria ao topo imediatamente e o
+ * guardião giraria nela para sempre, sem chegar nas que dariam certo.
+ */
+const tentativas = new Map<string, number>();
+
+function desistiuDe(id: string): boolean {
+  return (tentativas.get(id) ?? 0) >= TENTATIVAS_POR_FAIXA;
+}
+
+/**
+ * Uma rodada: trabalha até acabar a fila, encher a cota ou estourar o tempo.
+ *
+ * Antes ela baixava 25 faixas e ia embora até alguém mudar a biblioteca. Numa
+ * biblioteca de cinco mil faixas isso nunca chegava perto de "offline": eram 25
+ * por acordar, e o guardião acordava por evento, não por relógio.
+ */
 async function rodada(): Promise<void> {
   if (rodando || !podeTrabalhar()) return;
   rodando = true;
+  const limite = Date.now() + TEMPO_MAXIMO_POR_RODADA_MS;
   try {
-    const alvos = ordemDeDownload(list(), contexto, hasLocalAudio, albunsOffline.lista()).slice(
-      0,
-      POR_RODADA,
-    );
-    for (const entrada of alvos) {
+    const ritmo = ritmoDoAparelho(sinaisDoAparelho());
+    while (Date.now() < limite) {
       if (!podeTrabalhar()) break;
       if (!(await cabeMaisAudio())) break;
-      await garantirAudioLocal(entrada.track.id).catch(() => false);
-      await new Promise((r) => setTimeout(r, RESPIRO_MS));
+
+      // Recalculada a cada lote de propósito: enquanto se baixa, a pessoa pula
+      // faixa, entra numa playlist nova ou marca um álbum. A fila de trinta
+      // segundos atrás não é mais a ordem certa.
+      const alvos = ordemDeDownload(list(), contexto, hasLocalAudio, albunsOffline.lista())
+        .filter((e) => !desistiuDe(e.track.id))
+        .slice(0, ritmo.simultaneos);
+      if (alvos.length === 0) break;
+
+      await Promise.all(
+        alvos.map(async (entrada) => {
+          const id = entrada.track.id;
+          tentativas.set(id, (tentativas.get(id) ?? 0) + 1);
+          const ok = await garantirAudioLocal(id).catch(() => false);
+          if (ok) tentativas.delete(id);
+        }),
+      );
+      await new Promise((r) => setTimeout(r, ritmo.respiroMs));
     }
   } finally {
     rodando = false;
@@ -201,4 +339,8 @@ export function initGuardiaoOffline(): void {
   setTimeout(() => void rodada(), ATRASO_INICIAL_MS);
   subscribe(acordar); // biblioteca mudou: faixa nova entra na fila de download
   window.addEventListener('online', acordar);
+  // Batida própria: sem ela o guardião só acordava por evento, e numa
+  // biblioteca parada (ninguém importando nada) ele simplesmente não voltava
+  // depois da primeira rodada.
+  setInterval(() => void rodada(), BATIDA_MS);
 }

@@ -15,7 +15,7 @@
  * o que vem a seguir), então "escutar música por música" já vai puxando as
  * próximas sem a pessoa pedir.
  */
-import type { TrackDto } from '@aurial/shared';
+import { podemConviver, type VeredictoDeConteudo, type TrackDto } from '@aurial/shared';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { similarTo } from './semanticMixes';
 import { daySeed, seededShuffle } from './recommend';
@@ -30,6 +30,22 @@ function chaveArtista(t: TrackDto): string {
 /** Teto por artista na rádio: parecida não é a discografia de um só. */
 const MAX_POR_ARTISTA = 4;
 
+/**
+ * O veredito de conteúdo que a faixa carrega, gravado pelo agente do servidor
+ * (`conteudoDaFaixa.worker`). Ausente = desconhecido, e desconhecido NÃO é
+ * limpo — ver `conteudoExplicito`.
+ */
+function conteudoDe(t: TrackDto): VeredictoDeConteudo | null {
+  return (t as { conteudo?: { veredicto?: VeredictoDeConteudo } }).conteudo?.veredicto ?? null;
+}
+
+function paraConvivencia(t: TrackDto): {
+  genero?: string | null;
+  conteudo?: VeredictoDeConteudo | null;
+} {
+  return { genero: t.genre ?? null, conteudo: conteudoDe(t) };
+}
+
 export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
   const seedArtista = nomeArtista(seed);
   const seedGenero = seed.genre ?? null;
@@ -40,12 +56,21 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
 
   // Pool único, sem a própria semente, na ordem de afinidade grosseira
   // (artista > gênero > resto).
+  // O TERCEIRO NÍVEL ERA A BIBLIOTECA INTEIRA, SEM OLHAR GÊNERO.
+  //
+  // Era ele que enchia a fila na prática — os dois primeiros acabam rápido — e
+  // era por ele que um louvor podia ser seguido de funk com palavrão, sem a
+  // pessoa ter pedido nada. O filtro abaixo é a única porta: vale para o poço
+  // inteiro, então protege também o caminho semântico logo adiante, que
+  // ranqueia SOBRE este mesmo poço.
+  const semente = paraConvivencia(seed);
   const vistos = new Set<string>([seed.id]);
   const pool: TrackDto[] = [];
   for (const grupo of [doArtista, doGenero, biblioteca]) {
     for (const t of grupo) {
       if (vistos.has(t.id)) continue;
       vistos.add(t.id);
+      if (!podemConviver(semente, paraConvivencia(t))) continue;
       pool.push(t);
     }
   }

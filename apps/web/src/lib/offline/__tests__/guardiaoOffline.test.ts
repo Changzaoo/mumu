@@ -11,7 +11,11 @@
  * estes testes travam.
  */
 import { describe, expect, it } from 'vitest';
-import { ordemDeDownload, type ContextoDeEscuta } from '@/lib/offline/guardiaoOffline';
+import {
+  ordemDeDownload,
+  ritmoDoAparelho,
+  type ContextoDeEscuta,
+} from '@/lib/offline/guardiaoOffline';
 import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { makeTrack } from '@/test/factories';
 
@@ -158,5 +162,61 @@ describe('ordemDeDownload — os álbuns que a pessoa mandou guardar', () => {
       CHAVE,
     );
     expect(fila.map((e) => e.track.id)).toEqual(['g1', 'g2']);
+  });
+});
+
+describe('ritmoDoAparelho — rápido sem esganar o aparelho', () => {
+  it('celular novo em boa rede usa o teto', () => {
+    // O motivo desta mudança: antes era UMA faixa por vez com 1,5 s de espera em
+    // todo aparelho, ou ~13/min no melhor caso. Um celular novo em Wi-Fi passava
+    // o tempo ocioso esperando um respiro calibrado para o pior caso.
+    const r = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 8, memoriaGb: 8 });
+    expect(r.simultaneos).toBe(4);
+    expect(r.respiroMs).toBeLessThanOrEqual(200);
+  });
+
+  it('APARELHO FRACO: cada download carrega o arquivo inteiro na memória', () => {
+    // `garantirAudioLocal` faz `res.blob()` antes de gravar. Quatro em paralelo
+    // são quatro faixas de ~8 MB vivas ao mesmo tempo — num aparelho de 2 GB
+    // isso é dinheiro que não existe.
+    const r = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 2, memoriaGb: 2 });
+    expect(r.simultaneos).toBe(2);
+  });
+
+  it('O PIOR SINAL MANDA: 2G num celular potente continua sendo 2G', () => {
+    const r = ritmoDoAparelho({ tipoDeConexao: '2g', nucleos: 8, memoriaGb: 8 });
+    expect(r.simultaneos).toBe(1);
+    expect(r.respiroMs).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it('economia de dados é pedido da pessoa e vence a capacidade', () => {
+    const r = ritmoDoAparelho({
+      economizarDados: true,
+      tipoDeConexao: '4g',
+      nucleos: 8,
+      memoriaGb: 8,
+    });
+    expect(r.simultaneos).toBe(1);
+    expect(r.respiroMs).toBeGreaterThanOrEqual(5_000);
+  });
+
+  it('mas economia de dados não PARA o download', () => {
+    // A fila é o que a pessoa vai ouvir, não especulação: parar de todo deixaria
+    // justamente quem tem pouca internet sem música offline.
+    expect(ritmoDoAparelho({ economizarDados: true }).simultaneos).toBeGreaterThan(0);
+  });
+
+  it('SEM SINAL NENHUM (Safari) não é castigo', () => {
+    // `deviceMemory` e `connection` não existem no Safari. Tratar ausência como
+    // aparelho ruim deixaria todo iPhone no ritmo de 2G.
+    const r = ritmoDoAparelho({});
+    expect(r.simultaneos).toBeGreaterThanOrEqual(3);
+  });
+
+  it('nunca passa do teto, por mais forte que seja o aparelho', () => {
+    // Os bytes saem de um único servidor doméstico atrás de um túnel: mais
+    // paralelismo não acelera e atrapalha quem está ouvindo agora.
+    const r = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 64, memoriaGb: 64 });
+    expect(r.simultaneos).toBe(4);
   });
 });

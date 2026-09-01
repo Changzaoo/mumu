@@ -152,13 +152,16 @@ export function TopBar() {
           onKeyDown={(event) => {
             if (event.key === 'Escape') setSearch('');
           }}
-          placeholder="O que você quer ouvir?"
+          placeholder="O que vamos ouvir?"
           aria-label="Buscar"
           className={cn(
             // OPACO. Era `bg-bg-elevated/60`: sobre uma capa clara o texto
             // digitado competia com a arte por trás e o campo sumia como
             // superfície. Chapado, ele volta a ser um lugar onde se escreve.
-            'h-9 w-full rounded-full border border-border bg-bg-elevated pl-10 pr-14 text-sm text-fg',
+            // `pr-14` reservava espaço para o atalho ⌘K — que é `hidden` abaixo de
+            // `sm`. No celular a sobra existia sem nada dentro dela e comia o
+            // texto do placeholder, que aparecia cortado no meio da palavra.
+            'h-9 w-full rounded-full border border-border bg-bg-elevated pl-10 pr-3 text-sm text-fg sm:pr-14',
             'placeholder:text-fg-subtle transition-colors duration-200',
             'hover:border-fg/20 focus:border-accent focus:outline-none',
           )}

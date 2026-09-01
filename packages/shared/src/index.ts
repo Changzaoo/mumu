@@ -14,6 +14,8 @@ export * from './utils/format.js';
 export * from './ai/curation.js';
 export * from './ai/generos.js';
 export * from './ai/generoCoerencia.js';
+export * from './ai/conteudoExplicito.js';
+export * from './ai/familiasDeGenero.js';
 export * from './ai/models.js';
 export * from './ai/agents.js';
 export * from './ai/duplicatas.js';

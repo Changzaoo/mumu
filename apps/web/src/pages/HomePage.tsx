@@ -29,6 +29,7 @@ import {
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
 import { generosDoGosto } from '@/lib/reco/generosDoGosto';
 import { prateleiraDaSemente } from '@/lib/reco/semente';
+import { artistasDoUsuario } from '@/lib/reco/artistasDoUsuario';
 import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
 import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
@@ -153,7 +154,7 @@ export default function HomePage() {
   const history = useSyncExternalStore(localHistory.subscribe, localHistory.list, () => []);
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
   const genres = localLibrary.genreGroups();
-  const artists = localLibrary.artists();
+  const artistasDoAcervo = localLibrary.artists();
   const albums = localLibrary.albumGroups();
 
   const playQueue = usePlayerStore((s) => s.playQueue);
@@ -213,6 +214,19 @@ export default function HomePage() {
       ),
 
     [entries, semente.artistas],
+  );
+
+  /**
+   * Os artistas DELA para a grade de atalhos — não os maiores do acervo.
+   *
+   * `localLibrary.artists()` conta a biblioteca inteira, incluindo o acervo
+   * compartilhado: a grade saía idêntica para todo mundo. Ver
+   * `lib/reco/artistasDoUsuario`.
+   */
+  const meusArtistas = useMemo(
+    () => artistasDoUsuario(history, localLikes.list(), semente.artistas, artistasDoAcervo),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+    [history, likedCount, semente.artistas, artistasDoAcervo],
   );
 
   const recos = useMemo(
@@ -313,7 +327,7 @@ export default function HomePage() {
       <div className="relative">
         <QuickAccess
           playlists={playlists}
-          artists={artists}
+          artists={meusArtistas}
           likedCount={likedCount}
           cover={playlistCover}
         />
@@ -493,9 +507,9 @@ export default function HomePage() {
       ))}
 
       {/* Your artists (capped — a página /artistas tem todos). */}
-      {artists.length > 0 && (
+      {artistasDoAcervo.length > 0 && (
         <SectionCarousel title="Seus artistas" href="/artistas">
-          {artists.slice(0, 20).map((artist) => (
+          {artistasDoAcervo.slice(0, 20).map((artist) => (
             <LocalArtistCard
               key={artist.name}
               name={artist.name}

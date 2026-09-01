@@ -1,5 +1,5 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { MonitorSpeaker, Music, Pause, Play, SkipForward } from 'lucide-react';
+import { MonitorSpeaker, Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
 import { useTrackLikes } from '@/features/library/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
@@ -113,6 +113,18 @@ export function MiniPlayer() {
                 className="shrink-0"
               />
             )}
+            {/* Voltar faltava aqui — `prev` já vinha do `useNowPlaying`, só não
+                era desenhado. Sem ele, repetir a música que acabou de tocar
+                exigia abrir a tela cheia, que é caro para o gesto mais comum
+                depois de "pular sem querer". */}
+            <button
+              type="button"
+              aria-label="Anterior"
+              onClick={prev}
+              className="grid size-10 shrink-0 place-items-center rounded-full text-fg-muted active:scale-95"
+            >
+              <SkipBack className="size-5 fill-current" />
+            </button>
             <button
               type="button"
               aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
