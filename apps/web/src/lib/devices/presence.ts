@@ -162,6 +162,18 @@ let lastWriteAt = 0;
 let lastSignature = '';
 let initialized = false;
 
+/**
+ * A ÚLTIMA tentativa de publicar a presença deste aparelho, e como ela terminou.
+ *
+ * Existe porque "o celular não aparece tocando" tinha QUATRO causas que produzem
+ * exatamente o mesmo silêncio — regra do Firestore negando a escrita, ninguém
+ * logado, `db` ausente, ou o sinal envelhecido além dos 180s — e nenhuma delas
+ * deixava rastro. `radinhoAparelhos()` lê isto para separá-las.
+ */
+let ultimaEscrita: { em: number; erro: string | null } | null = null;
+/** O último erro que a assinatura da coleção de aparelhos devolveu. */
+let ultimaLeituraErro: string | null = null;
+
 /** Id do aparelho que detém a posse (null = ninguém reivindicou). */
 let activeDeviceId: string | null = null;
 let wasPlaying = false;
@@ -353,7 +365,15 @@ function publish(force = false): void {
       duration: state.duration,
     };
     await setDoc(doc(db, 'users', uid, 'devices', getDeviceId()), payload);
-  })().catch(() => undefined);
+    ultimaEscrita = { em: Date.now(), erro: null };
+  })().catch((err: unknown) => {
+    // NÃO ENGOLIR MAIS. Este `.catch(() => undefined)` era o motivo de "o
+    // celular não aparece" não ter resposta: regra do Firestore negando a
+    // escrita produzia exatamente o mesmo silêncio que estar deslogado, que
+    // estar sem `db`, e que o sinal ter envelhecido. Quatro causas, um sintoma,
+    // zero evidência. Continua não derrubando nada — só deixa de ser invisível.
+    ultimaEscrita = { em: Date.now(), erro: err instanceof Error ? err.message : String(err) };
+  });
 }
 
 // ── posse da reprodução ─────────────────────────────────────────
@@ -613,7 +633,10 @@ function start(user: User): void {
         emitDevices(devices);
         emitRemote(found);
       },
-      () => {
+      (err: unknown) => {
+        // Mesma razão do catch da escrita: uma leitura negada apagava a lista de
+        // aparelhos e ficava indistinguível de "não há nenhum outro aparelho".
+        ultimaLeituraErro = err instanceof Error ? err.message : String(err);
         emitRemote(null);
         emitDevices([]);
       },
@@ -681,9 +704,68 @@ function stop(): void {
  *  perguntar por ele aqui desligaria a presença para sempre. Quem decide é o
  *  `subscribeAuth` abaixo — ele só dispara com o SDK pronto, e `publish`/`start`
  *  já se protegem sozinhos. */
+/**
+ * `radinhoAparelhos()` no console: por que ESTE aparelho não aparece no outro.
+ *
+ * O sintoma "não mostra que estou ouvindo no celular" tem quatro causas que
+ * produzem o MESMO nada, e nenhuma delas gritava:
+ *
+ *   1. ninguém logado aqui, ou `db` ausente — `publish` retorna na primeira
+ *      linha, calado;
+ *   2. a escrita é NEGADA (regra do Firestore) — o erro era descartado;
+ *   3. a leitura é negada do outro lado — a lista virava vazia, igual a "não há
+ *      outro aparelho";
+ *   4. o sinal ENVELHECEU: quem some por mais de 180s deixa de contar como
+ *      online, e o banner do outro lado cai sozinho.
+ *
+ * Rodar isto NOS DOIS aparelhos separa as quatro em um minuto. É a mesma lição
+ * de `radinhoDiagnostico()` e `radinhoSync()`: um sintoma com muitas causas
+ * silenciosas não se conserta por dedução, e este projeto já pagou por tentar.
+ */
+function instalarDiagnosticoDeAparelhos(): void {
+  if (typeof window === 'undefined') return;
+  (window as unknown as { radinhoAparelhos: () => void }).radinhoAparelhos = (): void => {
+    const linhas: string[] = ['APARELHOS DA CONTA', ''];
+    linhas.push(`este aparelho: ${deviceLabel()}  (id ${getDeviceId()})`);
+    linhas.push(currentUser ? `logado como: ${currentUser.uid}` : '✗ NINGUÉM LOGADO aqui');
+    linhas.push(db ? 'firestore: pronto' : '✗ SEM FIRESTORE (db nulo) — nada é publicado');
+
+    if (!ultimaEscrita) {
+      linhas.push('✗ este aparelho ainda NÃO publicou presença nenhuma');
+    } else if (ultimaEscrita.erro) {
+      linhas.push(
+        `✗ última publicação FALHOU há ${Math.round((Date.now() - ultimaEscrita.em) / 1000)}s: ${ultimaEscrita.erro}`,
+      );
+    } else {
+      linhas.push(`publicou com sucesso há ${Math.round((Date.now() - ultimaEscrita.em) / 1000)}s`);
+    }
+    if (ultimaLeituraErro) linhas.push(`✗ leitura da lista falhou: ${ultimaLeituraErro}`);
+
+    linhas.push('', `aparelhos vistos (${deviceState.length}) — "online" = visto há < 180s:`);
+    if (deviceState.length === 0) {
+      linhas.push('  (nenhum — nem este, o que indica que a publicação não chegou)');
+    }
+    for (const d of deviceState) {
+      const ha = Math.round((Date.now() - d.seenAt) / 1000);
+      linhas.push(
+        `  ${d.isSelf ? '→' : ' '} ${d.name}: ${d.online ? 'online' : 'OFFLINE'}, visto há ${ha}s` +
+          `, ${d.isPlaying ? 'tocando' : 'parado'}${d.track ? ` "${d.track.title}"` : ' (sem faixa)'}`,
+      );
+    }
+    linhas.push(
+      '',
+      'Para o banner aparecer no OUTRO aparelho, a linha dele aqui precisa de três',
+      'coisas ao mesmo tempo: online, tocando, e com faixa. Falta qualquer uma, nada aparece.',
+    );
+    // eslint-disable-next-line no-console -- ferramenta de console, é a saída
+    console.log(linhas.join('\n'));
+  };
+}
+
 export function initPresence(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
+  instalarDiagnosticoDeAparelhos();
   subscribeAuth((user) => {
     stop();
     if (user) start(user);
