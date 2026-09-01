@@ -107,6 +107,36 @@ export async function getAudioBlob(trackId: string): Promise<Blob | null> {
   return blob instanceof Blob ? blob : null;
 }
 
+/**
+ * TODOS os ids que têm áudio aqui — UMA pergunta, não uma por faixa.
+ *
+ * `hasAudio` abre uma transação por chamada. Perguntar por 5.000 faixas custava
+ * 5.000 transações no boot, e isso media 2,7s de tela congelada no desktop e
+ * 1,8s num celular estrangulado a 6× (ver `e2e/desempenho.spec.ts`). É a mesma
+ * lição que o Cache Storage já tinha aprendido do outro lado do `hydrate`:
+ * `keys()` devolve tudo de uma vez e o cruzamento sai em memória.
+ *
+ * `getAllKeys` lê só as CHAVES — os blobs não saem do disco. Uma biblioteca
+ * inteira de chaves são alguns milhares de strings curtas.
+ *
+ * CAPA E ÁUDIO DIVIDEM O MESMO OBJECT STORE, e é por isso que o filtro existe.
+ * A capa embutida mora aqui sob `cover:<id>` (ver `putCover`). Sem descartar
+ * esse prefixo, toda faixa com capa guardada seria contada como faixa com
+ * ÁUDIO local — e passaria a se anunciar tocável offline para depois emudecer,
+ * que é pior que se declarar indisponível.
+ */
+export async function allAudioIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!cacheSupported()) return ids;
+  const keys = await tx<IDBValidKey[]>('readonly', (store) => store.getAllKeys()).catch(() => []);
+  for (const key of keys) {
+    if (typeof key !== 'string') continue;
+    if (key.startsWith('cover:')) continue;
+    ids.add(key);
+  }
+  return ids;
+}
+
 export async function hasAudio(trackId: string): Promise<boolean> {
   if (!cacheSupported()) return false;
   const key = await tx<IDBValidKey | undefined>('readonly', (store) => store.getKey(trackId)).catch(

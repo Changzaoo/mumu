@@ -12,6 +12,7 @@
  */
 import type { SharedTrackMeta, TrackDto } from '@radinho/shared';
 import {
+  allAudioIds,
   cacheStorageSupported,
   deleteAudio,
   deleteCover,
@@ -503,18 +504,26 @@ async function indexarAudioLocal(): Promise<void> {
     }
   }
 
-  // Só pergunta ao IndexedDB por quem o cofre não respondeu — no caso comum
-  // (produção, https) isso é lista vazia e não custa nada.
+  // UMA PERGUNTA AO INDEXEDDB TAMBÉM — a premissa antiga não valia para o acervo.
+  //
+  // Antes: `hasAudio(id)` por faixa, em lotes de 32, e o comentário dizia que
+  // "no caso comum isso é lista vazia e não custa nada". Isso só é verdade se
+  // quase toda faixa tiver áudio BAIXADO. O acervo é o contrário: cinco mil
+  // entradas das quais a maioria nunca foi baixada, então `faltando` era a
+  // biblioteca quase inteira e sobravam 157 lotes de transações no boot.
+  //
+  // Medido em `e2e/desempenho.spec.ts` antes do conserto: 2.730ms de tela
+  // congelada no desktop com 5.000 faixas, 1.845ms num celular a 6×, com uma
+  // tarefa isolada de 1.061ms. Era o maior custo de abertura do app inteiro —
+  // maior que todos os onze plantões de fundo somados.
+  //
+  // `allAudioIds()` faz o mesmo que o `keys()` do Cache Storage logo acima: traz
+  // as chaves de uma vez e cruza em memória. Some junto o `setTimeout(0)` por
+  // lote, que existia só para devolver a vez à tela entre as rajadas.
   const faltando = [...idsDoRegistro].filter((id) => !audioLocal.has(id));
-  const LOTE = 32;
-  for (let i = 0; i < faltando.length; i += LOTE) {
-    await Promise.all(
-      faltando.slice(i, i + LOTE).map(async (id) => {
-        if (await hasAudio(id).catch(() => false)) audioLocal.add(id);
-      }),
-    );
-    await new Promise((r) => setTimeout(r, 0)); // devolve a vez para a tela
-  }
+  if (faltando.length === 0) return;
+  const noIndexedDb = await allAudioIds();
+  for (const id of faltando) if (noIndexedDb.has(id)) audioLocal.add(id);
 }
 
 /** Existe áudio gravado para esta faixa? Não lê os bytes — só confere. */
@@ -1558,12 +1567,37 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
 }
 
 // ── album / artist organization (Spotify-style, all from local metadata) ──
+/**
+ * Identidade normalizada de título/artista — EM QUALQUER ALFABETO.
+ *
+ * Terminava em `.replace(/[^a-z0-9]+/g, ' ')`, e essa linha causava dois
+ * estragos diferentes em toda música que não se escreve em a-z (coreano,
+ * japonês, chinês, russo, grego, árabe, hebraico, tailandês):
+ *
+ * 1. DUPLICATA IMORTAL. `dedupeKey` começa com `if (!title) return null`, e
+ *    título vazio é exatamente o que sai daqui para um nome em hangul. Chave
+ *    nula significa "genérica demais para deduplicar com segurança", então
+ *    NENHUMA cópia dessas faixas era jamais reunida — nem na tela, nem na
+ *    limpeza que apaga de verdade. Elas se multiplicavam sem teto.
+ *
+ * 2. ARTISTA QUE ENGOLE OS OUTROS. `artistTracks` e `findByTitleArtist`
+ *    comparam `normName(a) === normName(b)`. Com dois nomes não-latinos isso
+ *    vira `'' === ''`: TODO artista coreano casava com TODO artista coreano, e
+ *    a página de um deles listava as faixas de todos.
+ *
+ * `\p{L}`/`\p{N}` guardam letra e número de qualquer escrita. O passo dos
+ * acentos vira `\p{M}` entre NFD e NFC — decompor para o acento poder cair,
+ * recompor para o hangul voltar ao silabário em vez de virar jamo solto.
+ * É a mesma correção que `lib/lyrics/lyrics.ts` recebeu; eram duas cópias do
+ * mesmo engano.
+ */
 function normName(value: string): string {
   return value
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\p{M}+/gu, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
 
@@ -1866,12 +1900,60 @@ export async function removeMany(ids: Iterable<string>): Promise<void> {
 // ── de-duplication ──────────────────────────────────────────────
 /** Normalized identity: the same song collapses to one key even under a
  *  slightly different title (title + primary artist + 3s duration bucket). */
-function dedupeKey(track: TrackDto): string | null {
+function dedupeParts(track: TrackDto): { base: string; balde: number } | null {
   const title = normName(track.title);
   if (!title || title === 'faixa') return null; // too generic to dedup safely
   const artist = normName(track.artists[0]?.name ?? '');
-  const durBucket = Math.round((track.durationMs || 0) / 3000);
-  return `${title}|${artist}|${durBucket}`;
+  return { base: `${title}|${artist}`, balde: Math.round((track.durationMs || 0) / 3000) };
+}
+
+function dedupeKey(track: TrackDto): string | null {
+  const p = dedupeParts(track);
+  return p && `${p.base}|${p.balde}`;
+}
+
+/**
+ * ARREDONDAR EM BALDES NÃO É TOLERÂNCIA, É FRONTEIRA — e era por aqui que as
+ * duplicatas escapavam mesmo com título e artista idênticos.
+ *
+ * `Math.round(dur / 3000)` promete "mesma música se a duração for parecida", e
+ * entrega outra coisa: duas cópias com 187,4s e 188,6s caem nos baldes 62 e 63 e
+ * viram faixas diferentes, separadas por um segundo. Quanto mais perto de uma
+ * borda de 3s, maior a chance — e a mesma música ripada de duas fontes quase
+ * sempre difere por uma fração de segundo.
+ *
+ * A correção é olhar os baldes VIZINHOS na hora de procurar. O balde continua
+ * decidindo onde a entrada mora; quem procura aceita o de baixo e o de cima, e
+ * aí a fronteira deixa de cortar o que ela deveria unir. O limite real de
+ * tolerância passa a ser ~3s de diferença em vez de "depende de onde caiu".
+ */
+function chavesCompativeis(p: { base: string; balde: number }): string[] {
+  return [`${p.base}|${p.balde}`, `${p.base}|${p.balde - 1}`, `${p.base}|${p.balde + 1}`];
+}
+
+/**
+ * O EXPLÍCITO SOBREVIVE À FUSÃO — sempre, e nunca ao contrário.
+ *
+ * Duas cópias da mesma música são classificadas em separado, então elas DIVERGEM:
+ * uma sai marcada como explícita e a outra não. Como `preferredEntry` escolhe por
+ * áudio local, cópia remota, capa e idade — critérios que nada têm a ver com
+ * conteúdo —, qual das duas representa o grupo é sorteio do ponto de vista do
+ * aviso. O resultado é o que se via na tela: a mesma música aparecendo explícita
+ * numa hora e limpa em outra.
+ *
+ * Esconder o aviso é o erro caro dos dois: quem filtra conteúdo explícito conta
+ * com ele, e uma faixa que se declara limpa numa listagem e explícita noutra não
+ * é inconsistência de exibição — é a proteção falhando. Então a fusão herda o
+ * pior caso: se QUALQUER cópia é explícita, a sobrevivente é explícita.
+ *
+ * Só mexe na cópia mostrada, nunca no registro: `collapseForDisplay` decide
+ * exibição, e gravar aqui misturaria as duas responsabilidades.
+ */
+function fundirParaExibir(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
+  const vencedora = preferredEntry(a, b);
+  const explicita = Boolean(a.track.explicit) || Boolean(b.track.explicit);
+  if (explicita === Boolean(vencedora.track.explicit)) return vencedora;
+  return { ...vencedora, track: { ...vencedora.track, explicit: explicita } };
 }
 
 export function artistaEhDesconhecido(track: TrackDto): boolean {
@@ -1925,16 +2007,25 @@ function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
   const porChave = new Map<string, LibraryEntry>();
   const ordem: string[] = [];
   for (const e of entries) {
+    const p = dedupeParts(e.track);
     // Faixa sem chave segura (título genérico) nunca colide com nada — cada
     // uma fica com a própria chave e nenhuma corre risco de sumir da tela.
-    const key = dedupeKey(e.track) ?? `id:${e.track.id}`;
-    const prev = porChave.get(key);
-    if (!prev) {
+    if (!p) {
+      const key = `id:${e.track.id}`;
       porChave.set(key, e);
       ordem.push(key);
       continue;
     }
-    porChave.set(key, preferredEntry(prev, e));
+    // Procura nos baldes vizinhos também: a fronteira de 3s separava cópias da
+    // mesma música por uma fração de segundo (ver `chavesCompativeis`).
+    const existente = chavesCompativeis(p).find((k) => porChave.has(k));
+    if (existente) {
+      porChave.set(existente, fundirParaExibir(porChave.get(existente) as LibraryEntry, e));
+      continue;
+    }
+    const key = `${p.base}|${p.balde}`;
+    porChave.set(key, e);
+    ordem.push(key);
   }
 
   // 2ª passada: mesma música, um lado sem artista — ver o comentário irmão em
@@ -1954,7 +2045,7 @@ function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
     const outra = porChave.get(outraChave);
     if (!outra) continue;
     if (artistaEhDesconhecido(outra.track) === artistaEhDesconhecido(e.track)) continue;
-    porChave.set(outraChave, preferredEntry(outra, e));
+    porChave.set(outraChave, fundirParaExibir(outra, e));
     porChave.delete(key);
   }
 
