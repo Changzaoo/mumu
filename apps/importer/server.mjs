@@ -475,13 +475,27 @@ async function resolverUrlDireta(sourceUrl) {
       p.stdout.on('data', (c) => {
         saida += c;
       });
-      p.stderr.resume();
-      p.on('error', () => encerrar(null));
+      // O stderr do yt-dlp é a ÚNICA explicação de por que a via rápida não
+      // engatou. Descartá-lo (era `resume()`) deixava o caminho lento assumir
+      // em silêncio — que é o modo de falha mais caro deste arquivo: o ganho
+      // some em produção e nada no log diz por quê.
+      let erro = '';
+      p.stderr.on('data', (c) => {
+        if (erro.length < 2000) erro += c;
+      });
+      p.on('error', (e) => {
+        log('resolução falhou (spawn):', e.message);
+        encerrar(null);
+      });
       p.on('close', (code) => {
         // `-g` pode imprimir VÁRIAS linhas (vídeo e áudio separados). Com
         // `-f bestaudio` a primeira é a que interessa.
         const primeira = saida.trim().split(/\r?\n/)[0]?.trim() ?? '';
-        encerrar(code === 0 && /^https?:\/\//.test(primeira) ? primeira : null);
+        const resolveu = code === 0 && /^https?:\/\//.test(primeira);
+        if (!resolveu) {
+          log(`resolução falhou (código ${code}):`, erro.trim().split('\n').pop() ?? 'sem detalhe');
+        }
+        encerrar(resolveu ? primeira : null);
       });
     });
     if (direta) guardarUrlDireta(sourceUrl, direta);
@@ -498,22 +512,55 @@ async function resolverUrlDireta(sourceUrl) {
 }
 
 /**
- * Argumentos de reconexão do ffmpeg ao ler uma URL da CDN do YouTube.
+ * ABRE A URL DIRETA E DEVOLVE OS BYTES — e por que NÓS buscamos, não o ffmpeg.
  *
- * Sem eles, uma queda momentânea no meio do arquivo encerra o ffmpeg e a música
- * para no meio sem erro nenhum. PRECISAM vir antes do `-i` — são opções de
- * entrada, e o ffmpeg ignora em silêncio o que vier depois.
+ * A primeira versão disto mandava o ffmpeg abrir a URL (`-i <https://…>`).
+ * Funcionava na máquina de desenvolvimento e SEGFALTA no servidor: o build
+ * estático de ffmpeg 7.0.2 que roda lá morre com "Segmentation fault (core
+ * dumped)" ao ler https, sem escrever uma linha de erro. Medido no próprio
+ * servidor, com a MESMA URL:
+ *
+ *   ffmpeg -i <url>            → segfault, 0 bytes
+ *   curl <url> | ffmpeg -i -   → 81.644 bytes
+ *
+ * O modo de falha era o pior possível: silencioso. A via rápida não produzia
+ * byte nenhum, o caminho lento assumia (a rede de segurança funcionou), e o
+ * ganho de 40× simplesmente não aconteceria em produção — sem nada no log
+ * dizendo por quê.
+ *
+ * Buscar os bytes aqui não é contorno de um bug alheio, é a decisão certa: o
+ * ffmpeg passa a receber um cano, que é o que ele já recebia do yt-dlp, e o
+ * caminho deixa de depender de quais protocolos o binário de ffmpeg da máquina
+ * foi compilado para falar.
+ *
+ * Segue redirecionamento porque a CDN do YouTube usa: a URL resolvida costuma
+ * apontar para `rr*.googlevideo.com`, que pode devolver 302 para outro nó.
  */
-const RECONEXAO_FFMPEG = [
-  '-reconnect',
-  '1',
-  '-reconnect_streamed',
-  '1',
-  '-reconnect_on_network_error',
-  '1',
-  '-reconnect_delay_max',
-  '5',
-];
+const TIMEOUT_URL_DIRETA_MS = Number(process.env.TIMEOUT_URL_DIRETA_MS ?? 20_000);
+
+function abrirUrlDireta(url, restantes = 5) {
+  return new Promise((resolve, reject) => {
+    const req = https.get(url, (res) => {
+      const status = res.statusCode ?? 0;
+      const destino = res.headers.location;
+      if (status >= 300 && status < 400 && destino && restantes > 0) {
+        res.resume(); // descarta o corpo do redirecionamento
+        abrirUrlDireta(new URL(destino, url).toString(), restantes - 1).then(resolve, reject);
+        return;
+      }
+      if (status < 200 || status >= 300) {
+        res.resume();
+        reject(new Error(`origem respondeu ${status}`));
+        return;
+      }
+      resolve(res);
+    });
+    req.on('error', reject);
+    // Sem teto, uma conexão pendurada segura o pedido para sempre — e o cliente
+    // fica no spinner sem nunca cair para o caminho lento.
+    req.setTimeout(TIMEOUT_URL_DIRETA_MS, () => req.destroy(new Error('tempo esgotado')));
+  });
+}
 
 async function importToMp3(ytdlp, url, quality) {
   const dir = await mkdtemp(path.join(tmpdir(), 'aurial-import-'));
@@ -1039,9 +1086,14 @@ async function reconstruirBlob(id, meta) {
     // fila costuma ter passado por aqui), a reconstrução começa na hora. Sem
     // cache, `resolverUrlDireta` extrai — e o resultado fica guardado para o
     // `/stream` e para as próximas reconstruções desta mesma faixa.
+    // A URL direta primeiro; os BYTES dela vêm por `abrirUrlDireta`, não pelo
+    // `-i <url>` do ffmpeg — que segfalta no servidor (ver o comentário lá).
+    // Se a busca falhar, `fonte` fica nula e o caminho antigo assume inteiro.
     const direta = await resolverUrlDireta(meta.sourceUrl);
-    const ytdlpBinario = direta ? null : await resolveYtdlp();
-    const yt = direta
+    const fonte = direta ? await abrirUrlDireta(direta).catch(() => null) : null;
+    if (direta && !fonte) esquecerUrlDireta(meta.sourceUrl);
+    const ytdlpBinario = fonte ? null : await resolveYtdlp();
+    const yt = fonte
       ? null
       : spawn(
           ytdlpBinario,
@@ -1064,7 +1116,8 @@ async function reconstruirBlob(id, meta) {
         '-hide_banner',
         '-loglevel',
         'error',
-        ...(direta ? [...RECONEXAO_FFMPEG, '-i', direta] : ['-i', 'pipe:0']),
+        '-i',
+        'pipe:0',
         '-f',
         'mp3',
         '-b:a',
@@ -1080,6 +1133,9 @@ async function reconstruirBlob(id, meta) {
       yt.stdout.on('error', () => undefined);
       yt.stdout.pipe(ff.stdin);
       yt.stderr.resume();
+    } else if (fonte) {
+      fonte.on('error', () => undefined); // conexão cortada no meio
+      fonte.pipe(ff.stdin);
     }
     ff.stderr.resume();
 
@@ -1087,6 +1143,7 @@ async function reconstruirBlob(id, meta) {
     let bytes = 0;
     let estourou = false;
     const matar = () => {
+      fonte?.destroy(); // a conexão com a CDN morre junto, não fica puxando bytes
       yt?.kill();
       ff.kill();
     };
@@ -1118,7 +1175,7 @@ async function reconstruirBlob(id, meta) {
       await rm(parcial, { force: true }).catch(() => undefined);
       // Zero byte pela via rápida = a URL assinada venceu ou foi recusada.
       // Guardá-la faria a próxima tentativa repetir a mesma falha até o TTL.
-      if (direta && bytes === 0) esquecerUrlDireta(meta.sourceUrl);
+      if (fonte && bytes === 0) esquecerUrlDireta(meta.sourceUrl);
       log('reconstrução falhou:', id, estourou ? '(tempo esgotado)' : '');
       return estourou ? 'estourou' : false;
     }
@@ -2530,7 +2587,7 @@ async function main() {
          * que o cabeçalho sai antes do primeiro `write`: ouvintes de 'data'
          * correm na ordem em que foram registrados, e o do `pipe` é o segundo.
          */
-        const servir = (processos) =>
+        const servir = (processos, entrada = null) =>
           new Promise((resolve) => {
             const ff = processos[processos.length - 1];
             let saiuAudio = false;
@@ -2538,6 +2595,11 @@ async function main() {
             const matar = () => {
               if (encerrado) return;
               encerrado = true;
+              // A CONEXÃO DE ENTRADA MORRE JUNTO. Sem isto, o ouvinte que troca
+              // de música deixa para trás um download da CDN puxando bytes que
+              // ninguém vai ouvir — e num servidor doméstico, que serve a faixa
+              // seguinte pela mesma banda, isso se acumula.
+              entrada?.destroy();
               for (const p of processos) {
                 try {
                   p.kill('SIGKILL');
@@ -2566,22 +2628,28 @@ async function main() {
           });
 
         // ── VIA RÁPIDA: a URL direta, do cache ou extraída agora ──────────
-        // Medido: o ffmpeg lendo a URL já resolvida entrega o primeiro byte em
-        // 0,3-0,5s, contra 11-17s do `yt-dlp -o -`. Ver `resolverUrlDireta`.
+        // O caro é RESOLVER a faixa (yt-dlp lendo a página do YouTube e
+        // decifrando o player), não os bytes chegando. Resolvida uma vez, as
+        // reproduções seguintes começam em fração de segundo — ver
+        // `resolverUrlDireta`. Os bytes vêm por `abrirUrlDireta` e não pelo
+        // `-i <url>` do ffmpeg, que segfalta no servidor.
         let tocou = false;
         const direta = await resolverUrlDireta(url);
         if (direta && !clienteFoi) {
-          log('stream (url direta):', url, `${streamKbps}k`);
-          tocou = await servir([
-            spawn(
+          const bytes = await abrirUrlDireta(direta).catch((e) => {
+            log('url direta recusou os bytes:', e instanceof Error ? e.message : e);
+            return null;
+          });
+          if (bytes) {
+            log('stream (url direta):', url, `${streamKbps}k`);
+            const ff = spawn(
               FFMPEG_BIN,
               [
                 '-hide_banner',
                 '-loglevel',
                 'error',
-                ...RECONEXAO_FFMPEG,
                 '-i',
-                direta,
+                'pipe:0',
                 '-f',
                 'mp3',
                 '-b:a',
@@ -2589,8 +2657,11 @@ async function main() {
                 'pipe:1',
               ],
               { windowsHide: true },
-            ),
-          ]);
+            );
+            bytes.on('error', () => undefined); // conexão cortada no meio
+            bytes.pipe(ff.stdin);
+            tocou = await servir([ff], bytes);
+          }
           // Não saiu áudio nenhum: a URL venceu ou foi recusada. Guardá-la seria
           // repetir a mesma falha até o TTL expirar.
           if (!tocou) esquecerUrlDireta(url);
