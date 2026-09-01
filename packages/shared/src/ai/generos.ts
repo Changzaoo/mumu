@@ -185,6 +185,17 @@ const TRADUCAO: ReadonlyArray<readonly [string, Genre]> = [
   ['latinpop', 'Latina'],
   ['salsa', 'Latina'],
   ['cumbia', 'Latina'],
+  // ── K-pop ─────────────────────────────────────────────────────────────────
+  // `chave()` come hífen e espaço, então 'kpop' cobre "K-Pop", "K Pop" e "k-pop".
+  ['kpop', 'K-Pop'],
+  ['koreanpop', 'K-Pop'],
+  ['popcoreano', 'K-Pop'],
+  ['kpopcoreano', 'K-Pop'],
+  // "Coreana" sozinha é NACIONALIDADE, e cairia no balde sem informação como
+  // "Brasileira" — mas a Apple usa esse rótulo na prateleira de K-pop, e mandar
+  // para o balde deixaria a faixa sem categoria nenhuma. Aqui a nacionalidade
+  // aponta para uma cena só, então traduzir é seguro; em "Brasileira" não é.
+  ['musicacoreana', 'K-Pop'],
 ];
 
 const MAPA = new Map<string, Genre>(TRADUCAO.map(([k, v]) => [chave(k), v]));

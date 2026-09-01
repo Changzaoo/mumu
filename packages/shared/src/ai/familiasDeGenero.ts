@@ -89,6 +89,11 @@ const FAMILIA: Readonly<Record<Genre, FamiliaDeGenero>> = {
   Latina: 'latino',
 
   Pop: 'pop',
+  // Mesma família que Pop: um rádio de K-pop que emenda em Pop não surpreende
+  // ninguém, e o contrário também não. Família é o que PODE conviver, não o que
+  // é igual — separar K-Pop numa família só dele deixaria o rádio dessas faixas
+  // com o comprimento do próprio acervo de K-pop, que é pequeno.
+  'K-Pop': 'pop',
   Clássica: 'classica',
   'Lo-Fi': 'ambiente',
 };

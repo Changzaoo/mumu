@@ -29,6 +29,7 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
 import { Check, Loader2, Music2 } from 'lucide-react';
+import { GENRE_TAXONOMY } from '@aurial/shared';
 import { AurialLogo } from '@/components/brand/AurialMark';
 import { Button } from '@/components/ui/button';
 import * as gostoInicial from '@/lib/local/gostoInicial';
@@ -44,8 +45,18 @@ const VAZIO: localLibrary.LibraryEntry[] = [];
  * do acervo não é mais generosa que uma com 48; é uma tela que ninguém termina
  * de ler, e o resultado prático é a pessoa pular. Os cortes são pelos MAIORES,
  * então o que fica de fora é sempre a cauda longa.
+ *
+ * O RACIOCÍNIO NÃO VALE PARA GÊNERO, e um número fixo aqui apagava categorias.
+ * Artista é lista aberta — o acervo tem centenas, e cortar na cauda é a única
+ * saída. Gênero é lista FECHADA (`GENRE_TAXONOMY`): o vocabulário inteiro cabe
+ * numa tela, e cada corte não tira "mais um card", tira um estilo do mapa. O
+ * número fixo (24) estava um abaixo da taxonomia, então o menor gênero do
+ * acervo sumia do onboarding sem que nada indicasse isso — e o menor é sempre o
+ * recém-chegado, justamente quem mais precisa ser oferecido para crescer.
+ * Amarrar ao tamanho da taxonomia faz o teto acompanhar sozinho o próximo
+ * gênero que entrar.
  */
-const MAX_GENEROS = 24;
+const MAX_GENEROS = GENRE_TAXONOMY.length;
 const MAX_ARTISTAS = 48;
 
 type Passo = 'generos' | 'artistas';

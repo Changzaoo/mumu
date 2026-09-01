@@ -42,6 +42,14 @@ export const GENRE_TAXONOMY = [
   'Indie',
   'Lo-Fi',
   'Latina',
+  // K-Pop não é "Pop cantado em coreano" — é uma cena com produção, formação de
+  // grupo e público próprios, e quem ouve NÃO aceita a troca. Sem o rótulo, a
+  // taxonomia fechada não tinha para onde mandar essas faixas a não ser 'Pop',
+  // e ali elas somem: o rádio de Pop as trata como vizinhas de qualquer coisa,
+  // e o onboarding nunca consegue oferecer o estilo, porque ele não existe como
+  // categoria. Falta de rótulo não deixa a faixa sem categoria — empurra para a
+  // categoria vizinha errada, a mesma lição que trouxe Samba e Axé para cá.
+  'K-Pop',
 ] as const;
 
 export type Genre = (typeof GENRE_TAXONOMY)[number];
@@ -347,6 +355,11 @@ export const GLOSSARIO_DE_GENEROS = [
   'Pagode = pagode e samba de roda moderno; Samba = samba tradicional, escola de samba.',
   'Forró = forró, piseiro, brega nordestino; Axé = axé baiano, carnaval.',
   'MPB = música popular brasileira de compositor (Chico, Caetano, Djavan e herdeiros).',
+  // Sem esta linha o modelo devolve "Pop" para K-pop na maioria das vezes: Pop é
+  // a resposta segura, e a taxonomia sozinha não diz que existe uma escolha
+  // melhor. A regra é de MÃO ÚNICA de propósito — pop ocidental com um verso em
+  // coreano continua Pop; o que manda é a cena, não o idioma.
+  'K-Pop = pop coreano (grupos e solistas da cena da Coreia do Sul: BTS, Stray Kids, BLACKPINK, TWICE, NewJeans e afins), incluindo as subunidades e os lados B. Prefira K-Pop a Pop sempre que o artista for dessa cena, mesmo com a faixa em inglês. Artista ocidental cantando em coreano NÃO é K-Pop.',
 ].join(' ');
 
 export function genreMessages(title: string, artist?: string): AiMessage[] {
