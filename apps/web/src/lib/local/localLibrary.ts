@@ -39,7 +39,7 @@ import {
   verificadorConfirma,
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
-import { marcarBoot } from '@/lib/telemetry/bootPerf';
+import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
 import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
@@ -2099,8 +2099,8 @@ export function hydrate(): Promise<void> {
     // O REGISTRO PRIMEIRO, ANTES DE QUALQUER OUTRA COISA. Ele mora no
     // IndexedDB (não cabe mais no localStorage — ver o comentário lá em cima),
     // e é ele que destrava as gravações. Enquanto não vem, ninguém persiste.
-    await carregarRegistro();
-    emit();
+    await medirEtapa('hydrate:carregarRegistro', () => carregarRegistro());
+    await medirEtapa('hydrate:emit-1', () => emit());
     marcarBoot('biblioteca-local');
 
     // UMA pergunta para o cofre inteiro, não uma por faixa.
@@ -2112,11 +2112,11 @@ export function hydrate(): Promise<void> {
     // separadas num cofre cheio. `keys()` devolve tudo de uma vez, e aí é só
     // cruzar em memória. O object URL passa a ser criado na hora de tocar
     // (ver ensureLocalAudioUrl) — o usuário ouve uma faixa, não trezentas.
-    await indexarAudioLocal();
+    await medirEtapa('hydrate:indexarAudioLocal', () => indexarAudioLocal());
 
-    await restoreEmbeddedCovers();
-    normalizeArtistCasing();
-    emit();
+    await medirEtapa('hydrate:restoreEmbeddedCovers', () => restoreEmbeddedCovers());
+    await medirEtapa('hydrate:normalizeArtistCasing', () => normalizeArtistCasing());
+    await medirEtapa('hydrate:emit-2', () => emit());
     scheduleBackgroundCuration();
   })());
 }

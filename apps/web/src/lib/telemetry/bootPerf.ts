@@ -160,6 +160,13 @@ export function relatorioBoot(): RelatorioBoot {
 export function instalarBootPerf(): void {
   if (typeof window === 'undefined') return;
   observarTarefasLongas();
+  // O MESMO RELATÓRIO, LEGÍVEL POR MÁQUINA.
+  //
+  // `radinhoPerf()` imprime para gente ler. Isso não serve para o arnês de
+  // desempenho (`e2e/desempenho.spec.ts`), que precisa dos números como dado
+  // para comparar aparelho rápido com aparelho lento e falhar quando piorar.
+  // Sem esta linha, medir regressão de boot dependeria de raspar `console.table`.
+  (window as unknown as { radinhoPerfDados: () => RelatorioBoot }).radinhoPerfDados = relatorioBoot;
   (window as unknown as { radinhoPerf: () => void }).radinhoPerf = (): void => {
     const r = relatorioBoot();
     // eslint-disable-next-line no-console -- ferramenta de console, é a saída
