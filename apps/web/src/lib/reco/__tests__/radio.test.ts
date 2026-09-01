@@ -13,12 +13,19 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrackDto } from '@aurial/shared';
 
 const biblioteca: TrackDto[] = [];
+const vereditos = new Map<string, 'limpo' | 'explicito'>();
 
 vi.mock('@/lib/local/localLibrary', () => ({
   artistTracks: (nome: string) =>
     biblioteca.filter((t) => t.artists?.[0]?.name?.toLowerCase() === nome.toLowerCase()),
   genreTracks: (g: string) => biblioteca.filter((t) => t.genre === g),
-  list: () => biblioteca.map((track) => ({ track })),
+  // O veredito desce na ENTRADA, não na faixa: a listagem manda
+  // `conteudoVeredicto` e remove `track.explicit`. Ver radio.ts.
+  list: () =>
+    biblioteca.map((track) => ({
+      track,
+      ...(vereditos.get(track.id) ? { conteudoVeredicto: vereditos.get(track.id) } : {}),
+    })),
 }));
 
 // Sem vetores de embedding o caminho semântico devolve pouco e o heurístico
@@ -33,18 +40,19 @@ function faixa(
   genre: string | null,
   conteudo?: 'limpo' | 'explicito',
 ): TrackDto {
+  if (conteudo) vereditos.set(id, conteudo);
   return {
     id,
     title: id,
     artists: [{ id: artista, name: artista }],
     genre,
-    ...(conteudo ? { conteudo: { veredicto: conteudo } } : {}),
   } as unknown as TrackDto;
 }
 
 describe('construirRadio — a fronteira que não pode vazar', () => {
   beforeEach(() => {
     biblioteca.length = 0;
+    vereditos.clear();
   });
 
   it('UM LOUVOR NUNCA É SEGUIDO DE FUNK', () => {

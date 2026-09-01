@@ -223,3 +223,55 @@ describe('enxugar a faixa para a listagem', () => {
     expect('id' in em(gravar, 'track', 'artists', 0)).toBe(false);
   });
 });
+
+describe('veredito de conteúdo na listagem', () => {
+  const analisada = {
+    track: { id: 'local:9', title: 'Faixa' },
+    remoteUrl: 'https://cofre/9',
+    conteudo: {
+      veredicto: 'explicito',
+      categorias: ['palavrao'],
+      achados: ['caralho', 'porra'],
+      em: '2026-08-31T00:00:00.000Z',
+      versao: 1,
+    },
+  };
+
+  it('manda o VEREDITO e deixa a análise inteira para o clique', () => {
+    // A análise completa são ~95 bytes × 5.057 — quase meio MB, um terço de
+    // tudo o que a listagem magra tirou da memória do celular. O que ela
+    // precisa é da decisão, não da prova.
+    const saida = semCamposDoServidor(analisada);
+    expect(saida.conteudoVeredicto).toBe('explicito');
+    expect(saida).not.toHaveProperty('conteudo');
+  });
+
+  it('DESCONHECIDO não desce: ausência do campo é o padrão', () => {
+    // Só faixa já classificada custa bytes.
+    const semAnalise = semCamposDoServidor({ track: { id: 'local:8' }, remoteUrl: 'x' });
+    expect(semAnalise).not.toHaveProperty('conteudoVeredicto');
+
+    const indefinida = semCamposDoServidor({
+      track: { id: 'local:7' },
+      remoteUrl: 'x',
+      conteudo: { veredicto: 'desconhecido' },
+    });
+    expect(indefinida).not.toHaveProperty('conteudoVeredicto');
+  });
+
+  it('NÃO é gravado de volta — é calculado, não é dado', () => {
+    // Gravá-lo criaria uma cópia que envelhece sozinha e passa a mentir quando
+    // o léxico mudar e a faixa for reclassificada.
+    const devolvida = semCamposDoServidor(analisada);
+    const paraGravar = comCamposDoServidor(devolvida, analisada);
+    expect(paraGravar).not.toHaveProperty('conteudoVeredicto');
+  });
+
+  it('a análise sobrevive à republicação do cliente', () => {
+    // O cliente republica a faixa sem `conteudo` (a listagem não mandou). Sem a
+    // devolução, a primeira republicação apagaria o trabalho do classificador.
+    const devolvida = semCamposDoServidor(analisada);
+    const paraGravar = comCamposDoServidor(devolvida, analisada);
+    expect(em(paraGravar, 'conteudo', 'veredicto')).toBe('explicito');
+  });
+});

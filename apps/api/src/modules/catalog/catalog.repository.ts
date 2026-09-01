@@ -128,6 +128,12 @@ const CAMPOS_SOB_DEMANDA_DA_ENTRADA = [
   'contentHash',
   'mimeType',
   'sizeBytes',
+  // A análise de conteúdo INTEIRA (categorias, termos achados, data, versão do
+  // léxico) só interessa a quem for auditar uma faixa específica. São ~95 bytes
+  // × 5.057 = quase meio MB na listagem — um terço de tudo o que acabamos de
+  // tirar do celular. O que a listagem precisa é do VEREDITO, e ele desce
+  // abaixo em um campo curto.
+  'conteudo',
 ] as const;
 const CAMPOS_SOB_DEMANDA_DA_FAIXA = ['streamUrl'] as const;
 
@@ -189,8 +195,28 @@ function enxugarFaixa(track: Obj): Obj {
  * A entrada como a LISTAGEM a entrega: sem o que é só nosso, sem peso morto e
  * sem o que só faz sentido no clique — mais o bit que diz se ela toca.
  */
+/**
+ * O VEREDITO DE CONTEÚDO, EM UM CAMPO CURTO.
+ *
+ * Mesma ideia do `tocavel`: a listagem não pode carregar o objeto inteiro, mas
+ * precisa saber o suficiente para DECIDIR — aqui, se a faixa pode entrar numa
+ * fila automática de família sensível (ver `shared/ai/familiasDeGenero`). Essa
+ * decisão é tomada sobre a biblioteca toda, então não dá para adiar ao clique.
+ *
+ * `desconhecido` não desce: é a ausência do campo, que é o padrão do cliente.
+ * Assim só as faixas já classificadas custam bytes.
+ *
+ * Não usamos `track.explicit` para isso porque ele está em
+ * `CAMPOS_MORTOS_DA_FAIXA` — a listagem o remove, e o veredito nunca chegaria.
+ */
+function veredictoParaListagem(entry: Obj): 'explicito' | 'limpo' | undefined {
+  const v = (entry.conteudo as { veredicto?: string } | undefined)?.veredicto;
+  return v === 'explicito' || v === 'limpo' ? v : undefined;
+}
+
 export function semCamposDoServidor(entry: CatalogEntry): CatalogEntry {
   const tocavel = ehTocavel(entry as Obj);
+  const conteudoVeredicto = veredictoParaListagem(entry as Obj);
   let saida = sem(entry as Obj, [...CAMPOS_DO_SERVIDOR, ...CAMPOS_SOB_DEMANDA_DA_ENTRADA]);
   const track = saida.track;
   if (track && typeof track === 'object') {
@@ -199,7 +225,11 @@ export function semCamposDoServidor(entry: CatalogEntry): CatalogEntry {
   }
   // Sempre uma cópia a partir daqui: `saida` pode ainda ser o objeto original
   // quando não havia nada a tirar, e escrever nele contaminaria o cache.
-  return { ...saida, tocavel } as CatalogEntry;
+  return {
+    ...saida,
+    tocavel,
+    ...(conteudoVeredicto ? { conteudoVeredicto } : {}),
+  } as CatalogEntry;
 }
 
 /**
@@ -222,9 +252,11 @@ export function comCamposDoServidor(
   recebida: CatalogEntry,
   anterior: CatalogEntry | null,
 ): CatalogEntry {
-  // `tocavel` é calculado na listagem, não é dado: gravá-lo criaria uma cópia
-  // do estado que envelhece sozinha e passa a mentir quando o cofre podar.
-  const limpa = sem(recebida as Obj, ['tocavel']) as CatalogEntry;
+  // `tocavel` e `conteudoVeredicto` são calculados na listagem, não são dado:
+  // gravá-los criaria uma cópia do estado que envelhece sozinha e passa a
+  // mentir — o primeiro quando o cofre podar, o segundo quando o léxico mudar e
+  // a faixa for reclassificada.
+  const limpa = sem(recebida as Obj, ['tocavel', 'conteudoVeredicto']) as CatalogEntry;
   if (!anterior) return limpa;
   let saida = limpa;
   for (const campo of [...CAMPOS_DO_SERVIDOR, ...CAMPOS_SOB_DEMANDA_DA_ENTRADA]) {

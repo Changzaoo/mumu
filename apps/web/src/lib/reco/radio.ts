@@ -31,19 +31,25 @@ function chaveArtista(t: TrackDto): string {
 const MAX_POR_ARTISTA = 4;
 
 /**
- * O veredito de conteúdo que a faixa carrega, gravado pelo agente do servidor
- * (`conteudoDaFaixa.worker`). Ausente = desconhecido, e desconhecido NÃO é
- * limpo — ver `conteudoExplicito`.
+ * O veredito de conteúdo vive na ENTRADA da biblioteca, não na faixa.
+ *
+ * A listagem do acervo não pode carregar a análise inteira (categorias, termos
+ * achados, versão do léxico): são ~95 bytes × 5.057, quase meio MB — um terço
+ * de tudo o que foi tirado do celular quando a listagem emagreceu. Ela manda só
+ * o veredito, em `conteudoVeredicto`, e só quando ele é conhecido. Ausente =
+ * desconhecido, e desconhecido NÃO é limpo — ver `conteudoExplicito`.
+ *
+ * `track.explicit` não serve para isto: ele está em `CAMPOS_MORTOS_DA_FAIXA` e
+ * a listagem o remove, então chegaria sempre `false` — que é exatamente a
+ * mentira que este sistema veio desfazer.
  */
-function conteudoDe(t: TrackDto): VeredictoDeConteudo | null {
-  return (t as { conteudo?: { veredicto?: VeredictoDeConteudo } }).conteudo?.veredicto ?? null;
-}
-
-function paraConvivencia(t: TrackDto): {
-  genero?: string | null;
-  conteudo?: VeredictoDeConteudo | null;
-} {
-  return { genero: t.genre ?? null, conteudo: conteudoDe(t) };
+function vereditosPorFaixa(): Map<string, VeredictoDeConteudo> {
+  const mapa = new Map<string, VeredictoDeConteudo>();
+  for (const e of localLibrary.list()) {
+    const v = (e as { conteudoVeredicto?: VeredictoDeConteudo }).conteudoVeredicto;
+    if (v) mapa.set(e.track.id, v);
+  }
+  return mapa;
 }
 
 export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
@@ -63,6 +69,11 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
   // pessoa ter pedido nada. O filtro abaixo é a única porta: vale para o poço
   // inteiro, então protege também o caminho semântico logo adiante, que
   // ranqueia SOBRE este mesmo poço.
+  const veredictos = vereditosPorFaixa();
+  const paraConvivencia = (t: TrackDto) => ({
+    genero: t.genre ?? null,
+    conteudo: veredictos.get(t.id) ?? null,
+  });
   const semente = paraConvivencia(seed);
   const vistos = new Set<string>([seed.id]);
   const pool: TrackDto[] = [];
