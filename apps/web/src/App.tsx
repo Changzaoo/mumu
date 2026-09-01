@@ -10,6 +10,7 @@ import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
 import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
 import { router } from '@/app/router';
+import { ligarCacheDePaginas } from '@/lib/perf/cacheDePaginas';
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -27,6 +28,11 @@ const queryClient = new QueryClient({
     },
   },
 });
+
+// O cache acima passa a sobreviver ao fechar do app (IndexedDB): a página
+// pinta com o que se sabia da última vez e revalida por trás. Era a fatia da
+// "página demora a carregar" que não estava no cliente — ver cacheDePaginas.ts.
+ligarCacheDePaginas(queryClient);
 
 const MOTION_MAP: Record<ReducedMotionSetting, 'user' | 'always' | 'never'> = {
   system: 'user',
