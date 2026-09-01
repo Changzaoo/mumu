@@ -152,15 +152,31 @@ export function rowMatches(
   return artistaBate || duracaoBate;
 }
 
+/**
+ * `source` NÃO NOMEIA O PROVEDOR — é a mesma regra que o resto do app já segue.
+ *
+ * O app não anuncia de onde vem (nem de onde não vem) o conteúdo: a mensagem de
+ * erro da importação já omite a plataforma de propósito, e a caixa de adicionar
+ * música fala em "link", não no site. A letra era o último lugar que destoava,
+ * carimbando o nome do serviço no rodapé do painel.
+ *
+ * `null` some da tela: `LyricsView` só desenha o rodapé quando há algo a dizer.
+ *
+ * O QUE CONTINUA APARECENDO, e por quê: a transcrição automática. Aquilo não é
+ * crédito de terceiro, é AVISO DE CONFIANÇA — letra que a máquina ouviu erra, e
+ * quem lê precisa saber que está diante de um palpite, não de um texto
+ * publicado. Tirar aquele rótulo não removeria uma fonte, removeria uma
+ * ressalva.
+ */
 function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
   if (!row) return null;
   if (typeof row.syncedLyrics === 'string' && row.syncedLyrics.trim()) {
     const lines = parseLrc(row.syncedLyrics);
-    if (lines.length > 0) return { synced: true, lines, source: 'LRCLIB' };
+    if (lines.length > 0) return { synced: true, lines, source: null };
   }
   if (typeof row.plainLyrics === 'string' && row.plainLyrics.trim()) {
     const lines = row.plainLyrics.split(/\r?\n/).map((text) => ({ timeMs: 0, text: text.trim() }));
-    return { synced: false, lines, source: 'LRCLIB' };
+    return { synced: false, lines, source: null };
   }
   return null;
 }

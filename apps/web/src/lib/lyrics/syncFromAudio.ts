@@ -244,7 +244,10 @@ export async function syncLyricsFromAudio(track: TrackDto): Promise<Lyrics | nul
     const synced: Lyrics = {
       synced: true,
       lines: aligned,
-      // Fonte composta: o texto continua sendo do LRCLIB, o tempo é nosso.
+      // Fonte composta: o TEXTO é a letra publicada, o TEMPO é nosso. Como a
+      // letra publicada não carimba mais provedor nenhum (`source: null`, ver
+      // `toLyrics`), isto vira "Letra + sincronia do áudio" — descreve o que
+      // foi feito com ela, sem nomear de onde veio.
       source: `${current.source ?? 'Letra'} + sincronia do áudio`,
     };
     writeLyrics(track.id, synced);
