@@ -74,13 +74,38 @@ export interface LrclibRow {
   duration?: number | null;
 }
 
-/** Loose normalization for fuzzy title/artist comparison. */
+/**
+ * Normalização frouxa para comparar título/artista — EM QUALQUER ALFABETO.
+ *
+ * A versão anterior terminava em `.replace(/[^a-z0-9]+/g, ' ')`, e essa linha
+ * deixava fora do app toda música que não se escreve com o alfabeto latino.
+ * Para o português ela só tirava a pontuação; para um título inteiro em
+ * coreano, japonês, chinês, russo, grego, árabe, hebraico ou tailandês ela
+ * apagava TUDO e devolvia string vazia — e `rowMatches` recusa vazio na
+ * primeira linha.
+ *
+ * O modo de falha era invisível, que é o que o tornava difícil: o LRCLIB
+ * ENCONTRAVA a letra certa e devolvia a linha correta; era o nosso próprio
+ * guarda que a jogava fora. Sem erro, sem log — a faixa simplesmente nunca
+ * ganhava letra, para sempre.
+ *
+ * `\p{L}` e `\p{N}` guardam letra e número de qualquer escrita, que é o que
+ * "letra e número" sempre quis dizer aqui. O passo dos acentos vira `\p{M}`
+ * (toda marca combinante, não só o bloco latino) entre NFD e NFC: decompor
+ * separa o acento para ele poder cair, e recompor devolve o hangul ao seu
+ * silabário — sem o NFC final, 한 voltaria como três jamo soltos.
+ *
+ * EFEITO COLATERAL ACEITO: isto muda o `trackFingerprint` de faixas com título
+ * não-latino, então a letra que estiver em cache para elas será rebuscada uma
+ * vez. Ela estava errada ou ausente de qualquer forma.
+ */
 function normLoose(s: string): string {
   return s
     .toLowerCase()
     .normalize('NFD')
-    .replace(/[̀-ͯ]/g, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .replace(/\p{M}+/gu, '')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
 }
 

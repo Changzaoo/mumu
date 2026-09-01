@@ -69,3 +69,71 @@ describe('a linha do LRCLIB é mesmo desta faixa?', () => {
     );
   });
 });
+
+/**
+ * TODA MÚSICA QUE NÃO SE ESCREVE EM a-z FICAVA SEM LETRA.
+ *
+ * A normalização de comparação apagava tudo que não fosse `[a-z0-9]`. Para
+ * português isso é só tirar acento — mas para um título inteiro em coreano,
+ * japonês, chinês, russo, grego, árabe, hebraico ou tailandês o resultado é a
+ * STRING VAZIA, e a primeira linha de `rowMatches` recusa vazio.
+ *
+ * O efeito é cruel porque é invisível: o LRCLIB ENCONTRAVA a letra certa e
+ * devolvia a linha correta — era o nosso próprio guarda que a jogava fora.
+ * Nenhum erro, nenhum log: a faixa só ficava para sempre sem letra.
+ *
+ * Estes testes cobrem os DOIS lados, e o segundo grupo importa tanto quanto o
+ * primeiro: a saída fácil (deixar passar quando a normalização esvazia) traria
+ * de volta exatamente o defeito que este arquivo existe para impedir — letra de
+ * outra música entrando por falta de prova.
+ */
+describe('letra em qualquer idioma, não só o que cabe em a-z', () => {
+  it('coreano: título e artista em hangul, duração batendo', () => {
+    const row = { trackName: '소리꾼', artistName: '스트레이 키즈', duration: 187 };
+    expect(rowMatches(row, '소리꾼', ['스트레이 키즈'], 187)).toBe(true);
+  });
+
+  it('japonês: título em kana/kanji', () => {
+    const row = { trackName: '打上花火', artistName: 'DAOKO', duration: 275 };
+    expect(rowMatches(row, '打上花火', ['DAOKO'], 275)).toBe(true);
+  });
+
+  it('russo: cirílico', () => {
+    const row = { trackName: 'Кукушка', artistName: 'Кино', duration: 226 };
+    expect(rowMatches(row, 'Кукушка', ['Кино'], 226)).toBe(true);
+  });
+
+  it('misto: título coreano com artista em latim (o caso do K-pop no acervo)', () => {
+    const row = { trackName: '소리꾼', artistName: 'Stray Kids', duration: 187 };
+    expect(rowMatches(row, '소리꾼', ['Stray Kids'], 187)).toBe(true);
+  });
+
+  it('grego, árabe e tailandês também são idiomas', () => {
+    expect(rowMatches({ trackName: 'Ελλάδα', duration: 200 }, 'Ελλάδα', [], 200)).toBe(true);
+    expect(rowMatches({ trackName: 'قلبي', duration: 200 }, 'قلبي', [], 200)).toBe(true);
+    expect(rowMatches({ trackName: 'ลาก่อน', duration: 200 }, 'ลาก่อน', [], 200)).toBe(true);
+  });
+
+  // ── O CONSERTO NÃO PODE VIRAR UM "ACEITA TUDO" ──────────────────────────
+  it('dois títulos coreanos DIFERENTES continuam sendo recusados', () => {
+    // Se a correção apenas deixasse passar quando a normalização esvazia, esta
+    // linha entraria — e seria a letra de outra música, em cache, para sempre.
+    const row = { trackName: '소리꾼', artistName: '스트레이 키즈', duration: 187 };
+    expect(rowMatches(row, '별거 아니야', ['스트레이 키즈'], 187)).toBe(false);
+  });
+
+  it('coreano com artista conhecido e diferente: recusa', () => {
+    const row = { trackName: '소리꾼', artistName: '방탄소년단', duration: 187 };
+    expect(rowMatches(row, '소리꾼', ['스트레이 키즈'], 187)).toBe(false);
+  });
+
+  it('coreano sem artista E sem duração: recusa, como em qualquer idioma', () => {
+    const row = { trackName: '소리꾼', artistName: null, duration: null };
+    expect(rowMatches(row, '소리꾼', [], 0)).toBe(false);
+  });
+
+  it('título vazio de verdade continua recusado', () => {
+    // A pontuação sozinha não é nome de faixa; isto tem de continuar caindo.
+    expect(rowMatches({ trackName: '---', duration: 200 }, '...', [], 200)).toBe(false);
+  });
+});
