@@ -10,19 +10,24 @@
  * próprias conclusões. Uma vez aqui, o veredito desce junto com a faixa na
  * sincronia que já existe, de graça, igual para todo mundo.
  *
- * ── SÓ CASAMENTO EXATO, E ISSO É A PARTE IMPORTANTE ──
+ * ── IDENTIFICAÇÃO, NUNCA SEMELHANÇA ──
  *
- * A busca de letra tem um modo difuso (`/api/search`) que devolve "a música
- * mais parecida". Ele é ótimo para karaokê e é PROIBIDO aqui.
+ * Classificar uma faixa com a letra de OUTRA música é precisamente o erro que
+ * este sistema existe para impedir. Uma letra de funk atribuída a um louvor
+ * marcaria o louvor como explícito; pior, o inverso marcaria o funk como limpo
+ * e o liberaria para a fila de quem não quer isso.
  *
- * O motivo: classificar uma faixa usando a letra de OUTRA música é precisamente
- * o erro que este sistema existe para impedir. Uma letra de funk pegajoso
- * atribuída a um louvor marcaria o louvor como explícito; pior, o inverso
- * marcaria o funk como limpo e o liberaria para a fila de quem não quer isso.
+ * A primeira tentativa é `/api/get`, que exige artista, título e duração e
+ * responde 404 quando não tem certeza. Só que ele exige casamento LITERAL, e na
+ * primeira rodada real 93 de 120 faixas ficaram sem veredito por causa disso —
+ * grafia de artista, sufixo no título, um segundo de diferença. Um sistema que
+ * não sabe de 77% do acervo não protege ninguém.
  *
- * Então usamos `/api/get`, que exige artista, título e duração e responde 404
- * quando não tem certeza. Sem casamento exato, a faixa fica `desconhecido` — e
- * `desconhecido` é uma resposta legítima do sistema, não uma falha dele.
+ * Então há uma segunda tentativa pela busca — e ela NÃO aceita "o mais
+ * parecido". O resultado passa por `mesmaGravacao`: mesmo artista, mesmo título
+ * (sem os sufixos de versão) e duração dentro de três segundos. As três juntas
+ * identificam a gravação; qualquer uma faltando, a faixa continua
+ * `desconhecido` — que é uma resposta legítima do sistema, não uma falha dele.
  */
 import { classificarFaixa, type AnaliseDeConteudo } from '@aurial/shared';
 import { env } from '../config/index.js';
@@ -30,7 +35,17 @@ import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
 
-const LRCLIB = 'https://lrclib.net/api/get';
+const LRCLIB_EXATO = 'https://lrclib.net/api/get';
+const LRCLIB_BUSCA = 'https://lrclib.net/api/search';
+
+/**
+ * Quanto a duração pode divergir e ainda ser a MESMA gravação.
+ *
+ * Três segundos cobrem diferença de corte e de arredondamento entre fontes, e
+ * são apertados o bastante para separar uma faixa de outra do mesmo artista com
+ * o mesmo nome (ao vivo, remix) — que teria letra diferente.
+ */
+const TOLERANCIA_DE_DURACAO_S = 3;
 
 /** De quanto em quanto tempo o agente procura faixas sem veredito. */
 const BATIDA_MS = 15 * 60_000;
@@ -59,12 +74,17 @@ export interface ConteudoDaFaixa extends AnaliseDeConteudo {
 }
 
 /**
- * Sobe quando o léxico muda de forma que valha reclassificar o acervo.
+ * Sobe quando o léxico OU a forma de achar a letra muda a ponto de valer
+ * reclassificar o acervo.
  *
  * Sem este número, corrigir um falso positivo consertaria só as faixas novas e
- * deixaria a música injustamente marcada marcada para sempre.
+ * deixaria a música injustamente marcada assim para sempre.
+ *
+ * 2: entrou a busca verificada. A primeira rodada real deixou 93 de 120 faixas
+ *    sem veredito porque só o casamento literal era aceito — essas precisam ser
+ *    reexaminadas, senão o trabalho novo só valeria para faixa nova.
  */
-export const VERSAO_DO_LEXICO = 1;
+export const VERSAO_DO_LEXICO = 2;
 
 function textoDaLetra(corpo: {
   plainLyrics?: string | null;
@@ -76,13 +96,62 @@ function textoDaLetra(corpo: {
   return (corpo.syncedLyrics ?? '').replace(/\[\d+:\d+[.:]\d+\]/g, ' ');
 }
 
+/** Compara nomes ignorando acento, caixa e pontuação. */
+function chave(valor: string): string {
+  return valor
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[̀-ͯ]/g, '')
+    .replace(/[^a-z0-9]+/g, '')
+    .trim();
+}
+
 /**
- * Busca a letra EXATA desta faixa. `null` quando não há certeza.
+ * Tira os sufixos de versão do título.
+ *
+ * "Nome (Ao Vivo)", "Nome - Remaster 2011", "Nome [Clipe Oficial]" são a mesma
+ * canção e têm a mesma letra. Sem isto, cada uma dessas grafias vira uma faixa
+ * que o sistema não consegue identificar — e não saber é o que trava o filtro.
+ */
+function tituloBase(titulo: string): string {
+  return chave(titulo.replace(/[([{][^)\]}]*[)\]}]/g, ' ').replace(/\s-\s.*$/, ' '));
+}
+
+export interface IdentidadeDaFaixa {
+  titulo: string;
+  artista: string;
+  duracaoS: number;
+}
+
+/**
+ * É A MESMA GRAVAÇÃO? — a porta que separa identificação de palpite.
+ *
+ * Exige as três: artista, título-base e duração. Duas não bastam — o mesmo
+ * artista com o mesmo nome de música existe (estúdio e ao vivo), e essas
+ * versões podem ter letra diferente. Pura para poder ser testada, porque é aqui
+ * que um erro vira "letra de funk atribuída a um louvor".
+ */
+export function mesmaGravacao(alvo: IdentidadeDaFaixa, candidata: IdentidadeDaFaixa): boolean {
+  if (chave(alvo.artista) !== chave(candidata.artista)) return false;
+  if (tituloBase(alvo.titulo) !== tituloBase(candidata.titulo)) return false;
+  return Math.abs(alvo.duracaoS - candidata.duracaoS) <= TOLERANCIA_DE_DURACAO_S;
+}
+
+interface LinhaDaLrclib {
+  trackName?: string;
+  artistName?: string;
+  duration?: number;
+  plainLyrics?: string;
+  syncedLyrics?: string;
+}
+
+/**
+ * Busca a letra desta faixa. `null` quando não há CERTEZA de que é ela.
  *
  * Ver o cabeçalho: a ausência de letra é um resultado aceitável; a letra errada
  * não é.
  */
-async function letraExata(track: {
+async function letraDaFaixa(track: {
   title?: string;
   artists?: Array<{ name?: string }>;
   durationMs?: number;
@@ -90,20 +159,42 @@ async function letraExata(track: {
   const titulo = (track.title ?? '').trim();
   const artista = (track.artists?.[0]?.name ?? '').trim();
   if (!titulo || !artista || !track.durationMs) return null;
+  const duracaoS = Math.round(track.durationMs / 1000);
+  const alvo: IdentidadeDaFaixa = { titulo, artista, duracaoS };
 
-  const url = new URL(LRCLIB);
-  url.searchParams.set('track_name', titulo);
-  url.searchParams.set('artist_name', artista);
-  url.searchParams.set('duration', String(Math.round(track.durationMs / 1000)));
+  const cabecalhos = { 'User-Agent': 'Aurial (classificacao de conteudo)' };
 
-  const res = await fetch(url, {
-    headers: { 'User-Agent': 'Aurial (classificacao de conteudo)' },
-    signal: AbortSignal.timeout(15_000),
-  });
-  if (!res.ok) return null; // 404 = a LRCLIB não tem certeza. Nós também não.
-  const corpo = (await res.json()) as { plainLyrics?: string; syncedLyrics?: string };
-  const texto = textoDaLetra(corpo).trim();
-  return texto.length > 0 ? texto : null;
+  // 1) Casamento literal. Quando responde, é ele mesmo — sem verificação.
+  const exata = new URL(LRCLIB_EXATO);
+  exata.searchParams.set('track_name', titulo);
+  exata.searchParams.set('artist_name', artista);
+  exata.searchParams.set('duration', String(duracaoS));
+  const res = await fetch(exata, { headers: cabecalhos, signal: AbortSignal.timeout(15_000) });
+  if (res.ok) {
+    const texto = textoDaLetra((await res.json()) as LinhaDaLrclib).trim();
+    if (texto) return texto;
+  }
+
+  // 2) Busca — e aqui NADA é aceito sem passar por `mesmaGravacao`.
+  const busca = new URL(LRCLIB_BUSCA);
+  busca.searchParams.set('track_name', titulo);
+  busca.searchParams.set('artist_name', artista);
+  const resBusca = await fetch(busca, { headers: cabecalhos, signal: AbortSignal.timeout(15_000) });
+  if (!resBusca.ok) return null;
+  const linhas = (await resBusca.json()) as LinhaDaLrclib[];
+  if (!Array.isArray(linhas)) return null;
+
+  for (const linha of linhas) {
+    const identidade: IdentidadeDaFaixa = {
+      titulo: linha.trackName ?? '',
+      artista: linha.artistName ?? '',
+      duracaoS: Math.round(linha.duration ?? -1),
+    };
+    if (!mesmaGravacao(alvo, identidade)) continue;
+    const texto = textoDaLetra(linha).trim();
+    if (texto) return texto;
+  }
+  return null;
 }
 
 /**
@@ -139,7 +230,7 @@ export async function classificarUmaRodada(): Promise<{
     const track = (faixa.data as { track?: Record<string, unknown> }).track ?? {};
     let letra: string | null = null;
     try {
-      letra = await letraExata(track as Parameters<typeof letraExata>[0]);
+      letra = await letraDaFaixa(track as Parameters<typeof letraDaFaixa>[0]);
     } catch {
       // Rede instável não é veredito: deixa para a próxima rodada em vez de
       // gravar `desconhecido` e nunca mais olhar.
