@@ -136,7 +136,7 @@ function norm(value: string): string {
  *   5. "Desconhecido" — a única resposta honesta sem evidência.
  */
 export function juizDecideCredito(ev: Evidencia, atual?: { artist?: string | null }): Credito {
-  const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle) : { title: '' };
+  const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle, ev.uploader) : { title: '' };
   const title = ev.sourceTrack || parsed.title || ev.rawTitle;
   if (ev.sourceArtist) {
     return { title, artist: ev.sourceArtist, album: ev.sourceAlbum, procedencia: 'fonte' };
@@ -167,7 +167,7 @@ export function juizCreditoConflita(
 ): boolean {
   const atual = atualArtist?.trim();
   if (!atual || atual === 'Desconhecido') return false;
-  const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle) : { title: '' };
+  const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle, ev.uploader) : { title: '' };
   const temEvidencia = Boolean(ev.sourceArtist || parsed.artist || ev.uploader);
   if (!temEvidencia) return false;
   const alvo = norm(atual);
@@ -256,7 +256,8 @@ export async function verificadorAlbum(ev: Evidencia): Promise<VeredictoAlbum | 
   const info = await fetchAlbumInfo(ev.sourceAlbum, hint);
   if (!info || info.tracks.length === 0) return null;
   if (!albumBate(info.title, ev.sourceAlbum)) return null; // não é o álbum citado
-  const wantedTitle = ev.sourceTrack || (ev.rawTitle ? cleanQuery(ev.rawTitle).title : '');
+  const wantedTitle =
+    ev.sourceTrack || (ev.rawTitle ? cleanQuery(ev.rawTitle, ev.uploader).title : '');
   if (!wantedTitle) return null;
   const pertence = info.tracks.some((t) => tituloBate(t, wantedTitle));
   if (!pertence) return null; // a faixa não está nesse álbum — não adota nada

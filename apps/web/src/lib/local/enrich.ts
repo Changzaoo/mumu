@@ -69,14 +69,34 @@ const NOISE = [
 const hiRes = (url: string): string => appleArtwork(url, 'grid');
 
 /** Loose normalization for comparison: lowercase, strip accents + punctuation. */
-const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
+const DIACRITICS = new RegExp('\\p{M}+', 'gu');
 function norm(value: string): string {
+  // `[^a-z0-9]` apagava toda escrita não-latina, e esta é a TERCEIRA cópia do
+  // mesmo engano no app (as outras duas estavam em `lyrics.ts` e no `normName`
+  // da biblioteca). Aqui o estrago era comparar título/artista coreano contra o
+  // catálogo: os dois lados viravam string vazia e casavam com qualquer coisa.
   return value
     .toLowerCase()
     .normalize('NFD')
     .replace(DIACRITICS, '')
-    .replace(/[^a-z0-9]+/g, ' ')
+    .normalize('NFC')
+    .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+}
+
+/**
+ * Dois nomes se referem à mesma coisa? Comparação frouxa, mas com piso.
+ *
+ * O piso existe porque `includes` em pedaço curto aceita qualquer coisa: sem
+ * ele, um canal chamado "AL" casaria com metade dos títulos do acervo e a
+ * decisão de ordem abaixo viraria moeda.
+ */
+const MIN_PISTA = 3;
+function mesmoNome(a: string, b: string): boolean {
+  if (!a || !b) return false;
+  if (a === b) return true;
+  if (a.length < MIN_PISTA || b.length < MIN_PISTA) return false;
+  return a.includes(b) || b.includes(a);
 }
 
 /**
@@ -85,7 +105,7 @@ function norm(value: string): string {
  * spaces, removes "(Official Video)/(Audio)/(Lyrics)/[Official]" noise, and —
  * when the name looks like "Artist - Title" — splits artist + title.
  */
-export function cleanQuery(filename: string): CleanQuery {
+export function cleanQuery(filename: string, pista?: string | null): CleanQuery {
   let base = filename.replace(/\.[a-z0-9]{1,5}$/i, '');
   base = base.replace(/_/g, ' ');
   // Leading track number: "01 - ", "01.", "1) ", "07_"
@@ -95,7 +115,27 @@ export function cleanQuery(filename: string): CleanQuery {
 
   const split = /^(.+?)\s+[-–—]\s+(.+)$/.exec(base);
   if (split?.[1] && split[2]) {
-    return { artist: split[1].trim(), title: split[2].trim() };
+    const esquerda = split[1].trim();
+    const direita = split[2].trim();
+
+    // DE QUE LADO DO HÍFEN ESTÁ O ARTISTA — a `pista` é quem sabe.
+    //
+    // Este código assumia SEMPRE "Artista - Título", e metade das postagens do
+    // acervo é o contrário: "ÚLTIMA VEZ - Alee" saía com o artista no campo do
+    // título e o nome da música no campo do artista. Era o defeito de "aparece
+    // o nome do artista onde deveria ser o da música", e ele nasce aqui.
+    //
+    // Inverter a suposição não conserta — só troca quem é a vítima. O que
+    // desempata é EVIDÊNCIA externa ao texto: o canal que publicou. Se o lado
+    // DIREITO é o canal e o esquerdo não é, então o direito é o artista e a
+    // ordem está invertida. Sem pista, ou com os dois lados casando (o canal
+    // que leva o nome da música), fica a convenção antiga — que é a mais comum
+    // e continua sendo o palpite certo na dúvida.
+    const p = pista ? norm(pista) : '';
+    if (p && mesmoNome(norm(direita), p) && !mesmoNome(norm(esquerda), p)) {
+      return { artist: direita, title: esquerda };
+    }
+    return { artist: esquerda, title: direita };
   }
   return { title: base || filename };
 }
