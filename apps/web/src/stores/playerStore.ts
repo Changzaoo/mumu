@@ -317,6 +317,29 @@ let handoffTimer: ReturnType<typeof setTimeout> | null = null;
 let handoffDoneTrackId: string | null = null;
 /** Antecedência da troca: começa a próxima ~0,9s antes do fim da atual. */
 const BG_HANDOFF_LEAD_MS = 900;
+
+/**
+ * Antecedência efetiva, respeitando o crossfade que a pessoa configurou.
+ *
+ * ── POR QUE O CROSSFADE PRECISOU ENTRAR AQUI ──
+ *
+ * Esta troca antecipada era PULADA quando havia crossfade configurado, com a
+ * justificativa de que o bloco no 'timeupdate' já começava a próxima cedo. A
+ * justificativa vale com a tela acesa e cai com a tela apagada: aquele bloco
+ * roda dentro do 'timeupdate', que vem do rAF (congelado em segundo plano) ou do
+ * heartbeat de 1s (estrangulado a um por minuto, ou nenhum). Ou seja, quem usava
+ * crossfade continuava com o avanço pendurado exatamente no relógio que o
+ * sistema desliga — o problema que esta perna existe para contornar.
+ *
+ * Agora ela cobre os dois casos, e usa o crossfade da pessoa como antecedência
+ * para não encurtar a mistura que ela pediu.
+ */
+function bgHandoffLeadMs(): number {
+  const { crossfadeSeconds } = useSettingsStore.getState();
+  return crossfadeSeconds > 0
+    ? Math.max(crossfadeSeconds * 1000, BG_HANDOFF_LEAD_MS)
+    : BG_HANDOFF_LEAD_MS;
+}
 /** Blend curtíssimo no Android (via grafo Web Audio); no iOS a troca é seca. */
 const BG_HANDOFF_XF = 0.4;
 
@@ -1576,9 +1599,6 @@ export function initPlayerEngine(): void {
     if (typeof document !== 'undefined' && !document.hidden) return;
     if (handoffDoneTrackId === track.id) return;
     if (s.repeat === 'one') return; // repetir-uma: o 'ended' re-busca a posição 0
-    // Crossfade configurado já começa a próxima cedo sozinho (bloco no
-    // 'timeupdate') — não duplicar a troca.
-    if (useSettingsStore.getState().crossfadeSeconds > 0) return;
 
     const nextIndex =
       s.queueIndex + 1 < s.queue.length
@@ -1596,7 +1616,7 @@ export function initPlayerEngine(): void {
     // A duração pode ter sido subestimada (stream em chunks revela o tamanho
     // real tarde): se ainda falta bastante, não corta — só remarca.
     const restante = audioEngine.getDuration() - audioEngine.getPosition();
-    if (restante > BG_HANDOFF_LEAD_MS / 1000 + 2) {
+    if (restante > bgHandoffLeadMs() / 1000 + 2) {
       armHandoffTimer();
       return;
     }
@@ -1605,12 +1625,17 @@ export function initPlayerEngine(): void {
     playRecorded = false;
     preloadRequested = false;
     lastProgressCommit = 0;
-    // Blend curto: no Android o grafo Web Audio cruza as duas por BG_HANDOFF_XF;
-    // no iOS (sem grafo) o engine faz corte seco — mas emitido enquanto a atual
-    // ainda tocava, então o play() da próxima é continuação de sessão ATIVA, que
-    // o sistema permite. É essa a diferença para o caminho antigo, que só
-    // chamava play() DEPOIS do fim, com a sessão já derrubada.
-    audioEngine.load(next, { autoplay: true, crossfadeSeconds: BG_HANDOFF_XF });
+    // O blend sai por `rampFade`: com grafo (computador) é cruzamento de ganho,
+    // sem grafo (celular) é o fade do próprio Howler. O que importa aqui não é o
+    // blend e sim o INSTANTE: o play() da próxima acontece enquanto a atual
+    // ainda está saindo, então é continuação de uma sessão ATIVA, que o sistema
+    // permite. É essa a diferença para o caminho antigo, que só chamava play()
+    // DEPOIS do fim, com a sessão já derrubada.
+    const { crossfadeSeconds } = useSettingsStore.getState();
+    audioEngine.load(next, {
+      autoplay: true,
+      crossfadeSeconds: crossfadeSeconds > 0 ? crossfadeSeconds : BG_HANDOFF_XF,
+    });
     store.setState({
       currentTrack: next,
       queueIndex: nextIndex,
@@ -1638,8 +1663,12 @@ export function initPlayerEngine(): void {
     const duration = audioEngine.getDuration();
     if (!Number.isFinite(duration) || duration <= 0) return;
     if (duration < 2) return; // faixa curta demais para antecipar: fica no 'ended'
+    const lead = bgHandoffLeadMs();
+    // Faixa curta demais para o crossfade pedido: o mesmo cuidado que o bloco do
+    // 'timeupdate' toma. Antecipar 12s numa faixa de 15s cortaria a música.
+    if (duration <= (lead / 1000) * 2) return;
     const restante = duration - audioEngine.getPosition();
-    handoffTimer = setTimeout(doHandoff, Math.max(0, restante * 1000 - BG_HANDOFF_LEAD_MS));
+    handoffTimer = setTimeout(doHandoff, Math.max(0, restante * 1000 - lead));
   };
 
   const rearmTimers = (): void => {

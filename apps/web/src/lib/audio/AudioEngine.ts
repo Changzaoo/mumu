@@ -109,16 +109,68 @@ interface HowlerInternals {
 const mediaSourceCache = new WeakMap<HTMLMediaElement, MediaElementAudioSourceNode>();
 
 /**
- * iOS suspends the AudioContext when the screen locks or the PWA leaves the
- * foreground — ANY audio routed through Web Audio goes silent. On iPhone/iPad
- * we skip the graph entirely (no EQ/visualizer there) so playback stays on the
- * bare <audio> element, which iOS keeps playing in the background with
- * Media Session lock-screen controls.
+ * NO CELULAR O SOM SAI DIRETO DO ELEMENTO — sem passar pelo Web Audio.
+ *
+ * Esta é a regra que decide se a música continua tocando com a TELA APAGADA, e
+ * ela custa caro: sem grafo não há equalizador, nem normalização de volume, nem
+ * visualizador de espectro no celular. Vale mesmo assim, e o porquê é este:
+ *
+ * Um `<audio>` comum é tratado pelo sistema como MÍDIA: com a tela apagada ele
+ * segue tocando, aparece no bloqueio e mantém a sessão viva. No instante em que
+ * o elemento passa por `createMediaElementSource`, o som deixa de sair dele e
+ * passa a sair do AudioContext — e o AudioContext é suspenso quando a página vai
+ * para segundo plano. O resultado é exatamente o sintoma relatado: a faixa
+ * seguinte começa, toca cerca de um segundo e emudece.
+ *
+ * ── POR QUE A MITIGAÇÃO ANTERIOR NÃO PODIA FUNCIONAR ──
+ *
+ * O caminho de antes mantinha o grafo no Android e tentava contornar com um
+ * `setInterval` de 1s que chamava `ctx.resume()` (ver `syncTicker`). Mas o
+ * próprio `playerStore` já documenta, no bloco do `handoffTimer`, que com a tela
+ * apagada "o Android estrangula temporizador repetido — o heartbeat de 1s vira
+ * um a cada minuto ou some". As duas afirmações não cabem juntas: o conserto
+ * dependia justamente do relógio que o sistema desliga. Enquanto a tela está
+ * acesa ele funciona, e foi por isso que a mitigação passou nos testes de quem a
+ * escreveu — o problema só existe onde o instrumento não olhava.
+ *
+ * NÃO DÁ para religar o grafo só quando a tela acende: depois que um elemento
+ * passa por `createMediaElementSource`, desconectar o nó não devolve o som ao
+ * elemento — deixa MUDO. A escolha é por elemento e para sempre, e por isso ela
+ * é feita por plataforma, aqui.
+ *
+ * O iPhone já seguia esta regra pelo mesmo motivo. O Android ficou de fora e o
+ * sintoma sobreviveu — a mesma forma do vazamento de alças, que também tinha
+ * duas cópias e só uma consertada.
  */
 const IS_IOS =
   typeof navigator !== 'undefined' &&
   (/iP(hone|od|ad)/.test(navigator.userAgent) ||
     (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1));
+
+/**
+ * Celular de qualquer marca. `userAgentData.mobile` é a resposta do próprio
+ * navegador e vem primeiro; a regex cobre quem ainda não a implementa (todo o
+ * Safari, e o Firefox até pouco tempo atrás).
+ */
+const IS_MOBILE =
+  typeof navigator !== 'undefined' &&
+  ((navigator as Navigator & { userAgentData?: { mobile?: boolean } }).userAgentData?.mobile ===
+    true ||
+    IS_IOS ||
+    /Android|Mobile|iP(hone|od|ad)|Silk|Kindle|Opera Mini|IEMobile/i.test(navigator.userAgent));
+
+/** No celular a reprodução em segundo plano ganha do equalizador. Ver acima. */
+const SEM_GRAFO_WEB_AUDIO = IS_MOBILE;
+
+/**
+ * O equalizador (e a normalização, e o visualizador) só existe onde há grafo.
+ *
+ * Exportado para a interface poder DIZER isso. Um controle que não faz nada é
+ * pior que um controle ausente: a pessoa mexe, não ouve diferença e conclui que
+ * o app está quebrado. No iPhone isso já acontecia calado desde que o grafo foi
+ * desligado lá; agora que o Android entrou na mesma regra, a tela avisa.
+ */
+export const equalizadorDisponivel = !SEM_GRAFO_WEB_AUDIO;
 
 const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 
@@ -177,7 +229,7 @@ export class AudioEngine {
   unlock = (): void => {
     if (this.audioUnlocked) return;
     this.audioUnlocked = true;
-    if (!IS_IOS) {
+    if (!SEM_GRAFO_WEB_AUDIO) {
       this.ensureGraph();
       void this.ctx?.resume().catch(() => undefined);
     }
@@ -504,8 +556,10 @@ export class AudioEngine {
 
   private ensureGraph(): void {
     if (this.ctx || this.webAudioFailed || typeof window === 'undefined') return;
-    if (IS_IOS) {
-      // Bare <audio> path — background/lock-screen playback beats EQ on iOS.
+    if (SEM_GRAFO_WEB_AUDIO) {
+      // Caminho do `<audio>` puro: tocar com a tela apagada ganha do EQ. Ver o
+      // bloco no topo do arquivo para o porquê de a decisão ser por plataforma
+      // e não por visibilidade.
       this.webAudioFailed = true;
       return;
     }

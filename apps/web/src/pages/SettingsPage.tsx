@@ -56,6 +56,7 @@ import { cn } from '@/lib/utils';
 import { useSettingsStore, type ThemeSetting } from '@/stores/settingsStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
+import { equalizadorDisponivel } from '@/lib/audio/AudioEngine';
 
 const APP_VERSION = '0.1.0';
 
@@ -389,13 +390,34 @@ export default function SettingsPage() {
       <SettingsCard
         icon={SlidersHorizontal}
         title="Equalizador"
-        description="10 bandas com predefinições"
+        description={
+          equalizadorDisponivel
+            ? '10 bandas com predefinições'
+            : 'Indisponível no celular — o som sai direto para não parar com a tela apagada'
+        }
       >
         <Row
-          label={settings.eq.enabled ? 'Ativado' : 'Desativado'}
-          hint={settings.eq.preset ? `Predefinição: ${settings.eq.preset}` : 'Personalizado'}
+          label={
+            equalizadorDisponivel
+              ? settings.eq.enabled
+                ? 'Ativado'
+                : 'Desativado'
+              : 'No computador'
+          }
+          hint={
+            equalizadorDisponivel
+              ? settings.eq.preset
+                ? `Predefinição: ${settings.eq.preset}`
+                : 'Personalizado'
+              : 'Equalizar exige processar o áudio, e áudio processado é interrompido pelo sistema quando a tela apaga. Tocar de fundo ganha.'
+          }
         >
-          <Button variant="outline" size="sm" onClick={() => setActiveModal('equalizer')}>
+          <Button
+            variant="outline"
+            size="sm"
+            disabled={!equalizadorDisponivel}
+            onClick={() => setActiveModal('equalizer')}
+          >
             <AudioWaveform /> Abrir equalizador
           </Button>
         </Row>
