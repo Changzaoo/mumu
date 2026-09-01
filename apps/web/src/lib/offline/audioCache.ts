@@ -137,6 +137,27 @@ export async function allAudioIds(): Promise<Set<string>> {
   return ids;
 }
 
+/**
+ * TODOS os ids que têm CAPA guardada aqui — uma pergunta, não uma por faixa.
+ *
+ * O irmão de `allAudioIds`, e existe pelo mesmo motivo: a restauração de capas
+ * precisa saber QUEM tem arte antes de decidir o que abrir, e descobrir isso
+ * com um `getCoverBlob` por faixa custaria 5.000 transações — cada uma
+ * arrastando a imagem inteira do disco — só para responder "existe?".
+ *
+ * `getAllKeys` lê só as CHAVES: nenhum byte de imagem sai do disco.
+ */
+export async function allCoverIds(): Promise<Set<string>> {
+  const ids = new Set<string>();
+  if (!cacheSupported()) return ids;
+  const keys = await tx<IDBValidKey[]>('readonly', (store) => store.getAllKeys()).catch(() => []);
+  for (const key of keys) {
+    if (typeof key !== 'string' || !key.startsWith('cover:')) continue;
+    ids.add(key.slice('cover:'.length));
+  }
+  return ids;
+}
+
 export async function hasAudio(trackId: string): Promise<boolean> {
   if (!cacheSupported()) return false;
   const key = await tx<IDBValidKey | undefined>('readonly', (store) => store.getKey(trackId)).catch(

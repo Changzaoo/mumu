@@ -44,6 +44,12 @@ vi.mock('@/lib/local/localLibrary', () => ({
   list: () => fixtures.none,
   artistTracks: () => fixtures.tracks,
   artistAlbums: () => fixtures.none,
+  // A linha de faixa pergunta pela capa guardada (`useLocalCover`) antes de
+  // desenhar: a alça dela pode ter sido despejada pelo orçamento de memória.
+  // Sem capa local nestas fixtures, a resposta é "não tenho".
+  hasLocalCover: () => false,
+  ensureLocalCoverUrl: async () => null,
+  versaoDaBiblioteca: () => 0,
 }));
 
 describe('ArtistLocalPage smoke', () => {

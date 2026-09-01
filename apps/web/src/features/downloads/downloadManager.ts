@@ -21,6 +21,7 @@ import {
   requestPersistentStorage,
 } from '@/lib/offline/audioCache';
 import { addDownload, isDownloaded, removeDownload } from '@/features/downloads/registry';
+import { abrir, consultar, soltar } from '@/lib/perf/alcasDeBlob';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'error';
 
@@ -32,55 +33,27 @@ export interface DownloadState {
 
 const inFlight = new Map<string, number>(); // trackId → progress 0..1
 const failed = new Set<string>();
-const blobUrls = new Map<string, string>();
+
+/**
+ * AS ALÇAS DE ÁUDIO NÃO MORAM MAIS AQUI — e o motivo não é arrumação.
+ *
+ * Este módulo tinha um mapa de object URLs com teto de 60 ALÇAS, cópia literal
+ * do que o `localLibrary` tinha do outro lado. Dois problemas nasceram daí:
+ *
+ *  1. Contar alças é contar a coisa errada. Sessenta alças são 60 MB numa
+ *     biblioteca de MP3 e 2,4 GB numa de FLAC — mesmo número, mesmo "teto
+ *     respeitado", quarenta vezes a memória. O limite tem de ser em BYTES.
+ *  2. Por serem DOIS mapas, cada um respeitava o próprio teto sem saber do
+ *     outro: os dois cheios eram 120 alças, e ninguém no app conseguia
+ *     responder "quanto a aba está segurando" — a resposta não existia.
+ *
+ * O comentário antigo daqui já registrava que este módulo era "a SEGUNDA cópia
+ * do mapa" e que por isso o sintoma sobreviveu ao primeiro conserto. A cópia
+ * acabou: `alcasDeBlob` é o dono único, com conta consultável por
+ * `radinhoMemoria()`.
+ */
+
 const listeners = new Set<() => void>();
-
-/**
- * QUANTAS ALÇAS DE ÁUDIO FICAM ABERTAS AO MESMO TEMPO — e por que existe teto.
- *
- * `URL.createObjectURL` não é um endereço: é uma ALÇA que segura o arquivo
- * inteiro vivo enquanto ninguém a solta. Este mapa nunca soltava nada, e
- * `hydrateDownloads` abria uma alça POR FAIXA BAIXADA logo no boot. Cem faixas
- * offline de 8 MB são ~800 MB presos antes de a primeira tela pintar — o
- * aparelho fraco morre aí, e é isso que aparece como "estoura a RAM e mata a
- * página".
- *
- * `localLibrary` já tinha aprendido esta lição e ganhou o mesmo teto (lá também
- * são 60). Este módulo é a SEGUNDA cópia do mapa e ficou de fora do conserto —
- * por isso o sintoma continuou depois de a biblioteca ser corrigida. Os dois
- * mapas existem porque guardam coisas diferentes (biblioteca do usuário × o que
- * foi baixado do acervo), mas a armadilha é idêntica.
- *
- * O teto é generoso de propósito: 60 cobrem uma fila inteira e uma página de
- * álbum, e reabrir uma alça descartada é barato — os bytes continuam no
- * IndexedDB, só a alça foi solta (ver `ensureDownloadedAudioUrl`).
- */
-const MAX_URLS_ABERTAS = 60;
-
-/**
- * Registra a alça e solta as mais antigas quando passar do teto.
- *
- * A ordem do `Map` é a de inserção e esta função re-insere a cada uso, então as
- * primeiras chaves são sempre as MENOS usadas recentemente. Por construção a
- * faixa que toca agora e a pré-carregada — as duas últimas a entrar — nunca
- * estão na ponta descartada: soltar a alça do áudio em reprodução emudeceria a
- * música na hora.
- */
-function lembrarUrl(trackId: string, url: string): void {
-  blobUrls.delete(trackId); // reposiciona no fim da fila (mais recente)
-  blobUrls.set(trackId, url);
-  while (blobUrls.size > MAX_URLS_ABERTAS) {
-    const maisAntiga = blobUrls.keys().next();
-    if (maisAntiga.done) break;
-    const velha = blobUrls.get(maisAntiga.value);
-    blobUrls.delete(maisAntiga.value);
-    if (velha) URL.revokeObjectURL(velha);
-    // O registro NÃO é mexido: a faixa continua baixada e os bytes continuam no
-    // IndexedDB. Só a alça saiu, e `ensureDownloadedAudioUrl` reabre no próximo
-    // play. É por isso que `downloadStateOf` pergunta ao registro, e não a este
-    // mapa — senão a faixa despejada daqui apareceria como "não baixada".
-  }
-}
 
 function emit(): void {
   for (const listener of listeners) listener();
@@ -115,13 +88,13 @@ export function downloadStateOf(trackId: string): DownloadState {
  * Alça já aberta NESTA sessão, ou null.
  *
  * Cuidado ao usar isto como "a faixa está baixada?": não é. Desde que o mapa
- * ganhou teto, `null` aqui significa apenas "a alça não está aberta agora" —
+ * ganhou orçamento, `null` aqui significa apenas "a alça não está aberta agora" —
  * pode ser uma faixa perfeitamente baixada cuja alça foi descartada, ou uma que
  * nunca foi aberta neste boot. Quem quer saber se os bytes existem pergunta a
  * `hasDownloadedAudio`; quem quer TOCAR chama `ensureDownloadedAudioUrl`.
  */
 export function localAudioUrl(trackId: string): string | null {
-  return blobUrls.get(trackId) ?? null;
+  return consultar('audio', trackId);
 }
 
 /**
@@ -138,7 +111,7 @@ export function hasDownloadedAudio(trackId: string): boolean {
 /**
  * Abre a alça desta faixa AGORA, se os bytes existirem aqui.
  *
- * É o par do teto de `lembrarUrl`: com o mapa limitado, a alça de uma faixa
+ * É o par do orçamento de `alcasDeBlob`: com teto em bytes, a alça de uma faixa
  * baixada pode não estar aberta, e o caminho do play precisa de um jeito de
  * reabrir antes de cogitar a rede. Uma faixa baixada indo buscar bytes no
  * servidor é o pior erro deste módulo — offline ela simplesmente emudece.
@@ -149,11 +122,8 @@ export function hasDownloadedAudio(trackId: string): boolean {
  * agora acontece na faixa que foi pedida, quando a verdade importa.
  */
 export async function ensureDownloadedAudioUrl(trackId: string): Promise<string | null> {
-  const aberta = blobUrls.get(trackId);
-  if (aberta) {
-    lembrarUrl(trackId, aberta); // marca como recém-usada, não deixa ser podada
-    return aberta;
-  }
+  const aberta = consultar('audio', trackId); // consultar conta como uso
+  if (aberta) return aberta;
   if (!isDownloaded(trackId) || !cacheSupported()) return null;
 
   const blob = await getAudioBlob(trackId).catch(() => null);
@@ -162,9 +132,7 @@ export async function ensureDownloadedAudioUrl(trackId: string): Promise<string 
     emit();
     return null;
   }
-  const url = URL.createObjectURL(blob);
-  lembrarUrl(trackId, url);
-  return url;
+  return abrir('audio', trackId, blob);
 }
 
 const MAX_DOWNLOAD_TRIES = 3;
@@ -336,7 +304,7 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
       // abort de quota rejeita aqui e nunca registramos uma faixa fantasma.
       await putAudio(track.id, blob);
       addDownload(track, blob.size);
-      lembrarUrl(track.id, URL.createObjectURL(blob));
+      abrir('audio', track.id, blob);
       // O áudio acabou de chegar ao aparelho: além de cachear a letra, é AQUI
       // que ela pode ganhar sincronia (a transcrição precisa do arquivo local).
       // Vai para uma fila serial — baixar uma playlist não pode virar uma
@@ -403,11 +371,7 @@ function scheduleAutoRetry(track: TrackDto): void {
 
 export async function removeDownloadedTrack(trackId: string): Promise<void> {
   await deleteAudio(trackId).catch(() => undefined);
-  const url = blobUrls.get(trackId);
-  if (url) {
-    URL.revokeObjectURL(url);
-    blobUrls.delete(trackId);
-  }
+  soltar('audio', trackId);
   removeDownload(trackId);
   inFlight.delete(trackId);
   failed.delete(trackId);

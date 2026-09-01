@@ -25,6 +25,7 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { formatDuration, cn, trackArtistNames } from '@/lib/utils';
+import { useLocalCover } from '@/hooks/useLocalCover';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /**
@@ -105,6 +106,10 @@ export function TrackRow({
   ...props
 }: TrackRowProps) {
   const navigate = useNavigate();
+  // A capa vem daqui, e não de `track.coverUrl` direto: numa biblioteca grande
+  // a alça da capa pode ter sido despejada pelo orçamento de memória, e este
+  // gancho a reabre quando a linha volta à tela. Ver `useLocalCover`.
+  const coverUrl = useLocalCover(track);
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const playNextInQueue = usePlayerStore((s) => s.playNext);
   const toggle = usePlayerStore((s) => s.toggle);
@@ -187,9 +192,9 @@ export function TrackRow({
       <div className="flex min-w-0 items-center gap-3">
         {showArt && (
           <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
-            {track.coverUrl ? (
+            {coverUrl ? (
               <img
-                src={track.coverUrl}
+                src={coverUrl}
                 alt=""
                 loading="lazy"
                 decoding="async"

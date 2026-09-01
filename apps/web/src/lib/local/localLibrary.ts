@@ -13,6 +13,7 @@
 import type { SharedTrackMeta, TrackDto } from '@radinho/shared';
 import {
   allAudioIds,
+  allCoverIds,
   cacheStorageSupported,
   deleteAudio,
   deleteCover,
@@ -41,6 +42,8 @@ import {
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
 import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
+import { abrir, aoDespejar, consultar, orcamentoCheio, soltar } from '@/lib/perf/alcasDeBlob';
+import { BYTES_QUE_JA_ESTAO_BONS, miniaturaDeCapa } from '@/lib/local/miniaturaDeCapa';
 import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
@@ -134,47 +137,21 @@ export interface LibraryEntry {
   remoteMorta?: string;
 }
 
-// ── in-memory state ─────────────────────────────────────────────
-const blobUrls = new Map<string, string>();
+// ── in-memory state ─────────────────────────────────
 
 /**
- * QUANTOS ÁUDIOS ABERTOS AO MESMO TEMPO — e por que existe um teto.
+ * AS ALÇAS DE ÁUDIO NÃO MORAM MAIS AQUI — e o motivo não é arrumação.
  *
- * `URL.createObjectURL` não é um endereço: é uma ALÇA que segura o arquivo
- * inteiro vivo até alguém soltar. O mapa acima nunca soltava nada. Numa sessão
- * longa — ouvir a biblioteca, deixar tocando a tarde toda — ele acumulava uma
- * alça por faixa já tocada, e nenhuma delas volta a ser usada. Uma biblioteca
- * de quatro mil faixas de 8 MB terminava o dia segurando o que já tinha
- * passado, e é isso que aparece como "buga a memória RAM".
+ * Este módulo tinha o próprio mapa de object URLs com teto de 60 ALÇAS, e o
+ * `downloadManager` tinha uma cópia do mesmo código com o mesmo teto. Contar
+ * alças é contar a coisa errada: 60 alças são 60 MB numa biblioteca de MP3 e
+ * 2,4 GB numa de FLAC, com o mesmo número e o mesmo "limite respeitado". E,
+ * por serem dois mapas, os dois cheios eram 120 alças sem que nenhum dos lados
+ * soubesse do outro.
  *
- * O teto é generoso de propósito. Sessenta cabem folgado numa fila inteira e
- * numa página de álbum, e reabrir uma alça descartada é barato — o arquivo
- * continua no cofre, só a alça foi solta.
+ * `alcasDeBlob` é o dono único, com orçamento em BYTES e uma conta consultável
+ * (`radinhoMemoria()` no console). Ver o cabeçalho de lá.
  */
-const MAX_URLS_ABERTAS = 60;
-
-/**
- * Registra a alça e solta as mais antigas quando passar do teto.
- *
- * A ordem do `Map` é a de inserção, e `lembrarUrl` re-insere a cada uso: as
- * primeiras chaves são sempre as MENOS usadas recentemente. Por construção,
- * então, a faixa que está tocando e a que está pré-carregada — as duas últimas
- * a serem tocadas — nunca estão na ponta que é descartada. Isso importa: soltar
- * a alça do áudio que está tocando emudeceria a música na hora.
- */
-function lembrarUrl(id: string, url: string): void {
-  blobUrls.delete(id); // reposiciona no fim da fila (mais recente)
-  blobUrls.set(id, url);
-  while (blobUrls.size > MAX_URLS_ABERTAS) {
-    const maisAntiga = blobUrls.keys().next();
-    if (maisAntiga.done) break;
-    const velha = blobUrls.get(maisAntiga.value);
-    blobUrls.delete(maisAntiga.value);
-    if (velha) URL.revokeObjectURL(velha);
-    // `audioLocal` NÃO é mexido: os bytes continuam no cofre. Só a alça saiu, e
-    // `ensureLocalAudioUrl` reabre sozinho no próximo play.
-  }
-}
 const listeners = new Set<() => void>();
 let cache: LibraryEntry[] | null = null;
 /** Derivados caros (álbuns/artistas/gêneros) memoizados até a próxima write() —
@@ -187,7 +164,25 @@ let groupsCache: {
   labels: LocalLabel[];
 } | null = null;
 
+/**
+ * Conta quantas vezes a biblioteca mudou.
+ *
+ * Existe para quem precisa REAGIR a uma mudança sem depender do conteúdo dela.
+ * O caso que a criou: `useLocalCover` pergunta "esta faixa tem capa guardada?"
+ * e a resposta muda no meio do boot — as linhas já estão na tela quando
+ * `restoreEmbeddedCovers` termina de montar o índice. Sem um número que mude,
+ * o efeito do gancho tinha as mesmas dependências de antes e nunca tornava a
+ * perguntar: a capa existia no disco e a faixa ficava com o ícone padrão até a
+ * próxima abertura do app.
+ */
+let versao = 0;
+
+export function versaoDaBiblioteca(): number {
+  return versao;
+}
+
 function emit(): void {
+  versao += 1;
   for (const listener of listeners) listener();
 }
 
@@ -473,7 +468,7 @@ async function getBlob(id: string): Promise<Blob | null> {
 /**
  * Ids cujo áudio está gravado NESTE aparelho.
  *
- * Substitui o papel que `blobUrls` fazia de "quem tem áudio": aquele mapa só
+ * Substitui o papel que o mapa de alças fazia de "quem tem áudio": ele só
  * ficava preenchido depois de abrir cada arquivo, o que custava o boot inteiro.
  * Este conjunto é montado com uma pergunta barata (existe?) e é a resposta
  * certa para "dá para tocar sem rede?".
@@ -542,26 +537,21 @@ async function blobExists(id: string): Promise<boolean> {
  * usuário mandou tocar, em vez de para as centenas que ele não pediu.
  */
 export async function ensureLocalAudioUrl(id: string): Promise<string | null> {
-  const pronto = blobUrls.get(id);
-  if (pronto) {
-    lembrarUrl(id, pronto); // consultar conta como uso — ver `lembrarUrl`
-    return pronto;
-  }
+  const pronto = consultar('audio', id); // consultar conta como uso
+  if (pronto) return pronto;
   if (!audioLocal.has(id) && !(await blobExists(id).catch(() => false))) return null;
   const blob = await getBlob(id).catch(() => null);
   if (!blob) {
     audioLocal.delete(id); // sumiu do cofre — não insistir
     return null;
   }
-  const url = URL.createObjectURL(blob);
-  lembrarUrl(id, url);
   audioLocal.add(id);
-  return url;
+  return abrir('audio', id, blob);
 }
 
 /** A faixa tem áudio neste aparelho (sem precisar abrir o arquivo)? */
 export function hasLocalAudio(id: string): boolean {
-  return blobUrls.has(id) || audioLocal.has(id);
+  return audioLocal.has(id) || consultar('audio', id) !== null;
 }
 
 async function deleteBlob(id: string): Promise<void> {
@@ -573,25 +563,116 @@ async function deleteBlob(id: string): Promise<void> {
 }
 
 // ── capas embutidas ─────────────────────────────────────────────
-/** Object URLs das capas guardadas no IndexedDB (reconstruídos a cada boot). */
-const coverUrls = new Map<string, string>();
+/**
+ * Ids que têm capa guardada NESTE aparelho.
+ *
+ * É o irmão de `audioLocal`, e existe pela mesma razão: saber QUEM tem capa é
+ * uma pergunta barata (uma listagem de chaves), enquanto ter a capa ABERTA é
+ * caro (uma alça de blob por faixa, e o arquivo inteiro vivo atrás dela).
+ * Enquanto o mapa de alças era eterno as duas coisas coincidiam — e era
+ * exatamente esse o vazamento.
+ */
+const comCapa = new Set<string>();
 
 /**
  * Guarda a capa embutida como BLOB e devolve um object URL para usar agora.
  * Devolve null se algo falhar — capa é enfeite, jamais pode impedir o import.
+ *
+ * A arte é ENCOLHIDA antes de ser gravada. O arquivo original vem do tamanho
+ * que a gravadora gravou (1400×1400, às vezes 2 MB), e guardar isso significa
+ * segurar o arquivo inteiro vivo por faixa e decodificar ~6 MB de bitmap para
+ * exibir um selo de 40px numa linha de lista. Ver `miniaturaDeCapa`.
  */
 async function storeEmbeddedCover(id: string, dataUrl: string): Promise<string | null> {
   try {
-    const blob = await (await fetch(dataUrl)).blob();
-    if (blob.size === 0) return null;
+    const original = await (await fetch(dataUrl)).blob();
+    if (original.size === 0) return null;
+    const blob = await miniaturaDeCapa(original);
     await putCover(id, blob);
-    const url = URL.createObjectURL(blob);
-    coverUrls.set(id, url);
-    return url;
+    comCapa.add(id);
+    return abrir('capa', id, blob);
   } catch {
     return null;
   }
 }
+
+/**
+ * Garante a alça da capa desta faixa, reabrindo do cofre se preciso.
+ *
+ * É o par do orçamento de `alcasDeBlob`: com teto em bytes, a alça de uma capa
+ * que saiu de vista pode ter sido despejada, e ausência no cofre de alças
+ * significa "não está aberta agora", nunca "não existe". Quem desenha a capa
+ * pergunta aqui e a recebe de volta sem que a imagem tenha sumido do disco.
+ */
+export async function ensureLocalCoverUrl(id: string): Promise<string | null> {
+  const pronta = consultar('capa', id); // consultar conta como uso
+  if (pronta) return pronta;
+  if (!comCapa.has(id)) return null;
+  const blob = await getCoverBlob(id).catch(() => null);
+  if (!blob) {
+    comCapa.delete(id); // sumiu do cofre — não insistir
+    return null;
+  }
+  return abrir('capa', id, blob);
+}
+
+/** A faixa tem capa guardada aqui (mesmo que a alça não esteja aberta)? */
+export function hasLocalCover(id: string): boolean {
+  return comCapa.has(id);
+}
+
+/**
+ * Quando o orçamento despeja a alça de uma capa, a faixa PRECISA saber.
+ *
+ * O `coverUrl` da entrada guarda a string da alça. Despejar sem limpar essa
+ * referência deixaria a tela apontando para um `blob:` revogado — imagem
+ * quebrada, que é pior que o ícone padrão. Zerando o campo, a próxima
+ * renderização pede a capa de volta por `ensureLocalCoverUrl`.
+ *
+ * ── POR QUE ISTO É EM LOTE, E NÃO UM POR DESPEJO ──
+ *
+ * Despejo não vem sozinho: ele vem em rajada, quando a restauração de capas
+ * enche o orçamento. Reagir a cada um custaria uma varredura da biblioteca
+ * INTEIRA mais um `emit()` por capa despejada — numa biblioteca de 5.000 faixas
+ * isso é centenas de varreduras O(n) e centenas de re-renderizações, no boot,
+ * dentro do laço que está justamente tentando ALIVIAR o aparelho. Seria trocar
+ * um problema de memória por um de travamento, que é o erro que o arnês de
+ * desempenho existe para reprovar.
+ *
+ * Então os ids se acumulam e a limpeza acontece uma vez, no fim da rajada.
+ */
+const capasDespejadas = new Set<string>();
+let limpezaDeCapasAgendada = false;
+
+/** Tira do registro (em memória) as capas cujas alças morreram. */
+function limparCapasDespejadas(ids: Set<string>): boolean {
+  if (ids.size === 0) return false;
+  let mexeu = false;
+  const proximas = read().map((e) => {
+    if (!ids.has(e.track.id) || !e.track.coverUrl?.startsWith('blob:')) return e;
+    mexeu = true;
+    return { ...e, track: { ...e.track, coverUrl: null } };
+  });
+  if (!mexeu) return false;
+  // SÓ MEMÓRIA, sem `write()`: o registro nunca persistiu `blob:` (ver
+  // `storableEntry`), então não há o que regravar — e escrever em disco a cada
+  // rajada de despejo seria pagar caro por nada.
+  cache = proximas;
+  groupsCache = null;
+  return true;
+}
+
+aoDespejar('capa', (id) => {
+  capasDespejadas.add(id);
+  if (limpezaDeCapasAgendada) return;
+  limpezaDeCapasAgendada = true;
+  queueMicrotask(() => {
+    limpezaDeCapasAgendada = false;
+    const ids = new Set(capasDespejadas);
+    capasDespejadas.clear();
+    if (limparCapasDespejadas(ids)) emit();
+  });
+});
 
 /** SHA-256 of the audio bytes (hex) — identifies identical files. */
 async function hashBlob(blob: Blob): Promise<string | null> {
@@ -686,7 +767,7 @@ function localTrackDto(
 }
 
 function addEntry(entry: LibraryEntry, blob: Blob): void {
-  lembrarUrl(entry.track.id, URL.createObjectURL(blob));
+  abrir('audio', entry.track.id, blob);
   write([entry, ...read().filter((e) => e.track.id !== entry.track.id)]);
   // NUNCA sincronizar object URL: ele só vale nesta aba, e no outro aparelho
   // viraria uma capa morta que ainda por cima BLOQUEIA a reidratação (a
@@ -803,7 +884,7 @@ export const setUser = cloud.setUser;
  * aparece no boot e some sozinha depois".
  */
 function comCapaLocal(id: string, entry: LibraryEntry): LibraryEntry {
-  const localCover = coverUrls.get(id);
+  const localCover = consultar('capa', id);
   return localCover && !entry.track.coverUrl
     ? { ...entry, track: { ...entry.track, coverUrl: localCover } }
     : entry;
@@ -834,13 +915,7 @@ function applyRemoteBatch(upserts: Array<[string, LibraryEntry]>, deletes: strin
   const porId = new Map(upserts.map(([id, entry]) => [id, comCapaLocal(id, entry)]));
   const removidos = new Set(deletes);
 
-  for (const id of removidos) {
-    const url = blobUrls.get(id);
-    if (url) {
-      URL.revokeObjectURL(url);
-      blobUrls.delete(id);
-    }
-  }
+  for (const id of removidos) soltar('audio', id);
 
   const atualizados: LibraryEntry[] = [];
   for (const entry of read()) {
@@ -946,11 +1021,7 @@ export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
 }
 
 function applyRemoteDelete(id: string): void {
-  const url = blobUrls.get(id);
-  if (url) {
-    URL.revokeObjectURL(url);
-    blobUrls.delete(id);
-  }
+  soltar('audio', id);
   write(read().filter((e) => e.track.id !== id));
 }
 
@@ -1483,8 +1554,8 @@ export function entryFor(id: string): LibraryEntry | null {
  * Faixas do registro cujo áudio NÃO está neste aparelho.
  *
  * Pergunta pelos BYTES (`audioLocal`), não pela alça aberta. Enquanto o mapa de
- * alças era eterno as duas coisas coincidiam; com o teto de `lembrarUrl` uma
- * alça descartada passaria a se parecer com faixa sem áudio, e esta lista
+ * alças era eterno as duas coisas coincidiam; com o orçamento de `alcasDeBlob`
+ * uma alça despejada passaria a se parecer com faixa sem áudio, e esta lista
  * mandaria rebaixar coisa que está inteirinha no cofre.
  */
 export function tracksMissingAudio(): LibraryEntry[] {
@@ -1539,7 +1610,7 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
   // não há o que baixar.
   const local = await getBlob(id).catch(() => null);
   if (local) {
-    lembrarUrl(id, blobUrls.get(id) ?? URL.createObjectURL(local));
+    if (!consultar('audio', id)) abrir('audio', id, local);
     audioLocal.add(id);
     return true;
   }
@@ -1556,7 +1627,7 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
       const blob = await res.blob();
       if (!blob.size) continue;
       await putBlob(id, blob); // já confere que ficou gravado
-      lembrarUrl(id, URL.createObjectURL(blob));
+      abrir('audio', id, blob);
       audioLocal.add(id);
       return true;
     } catch {
@@ -1830,21 +1901,18 @@ export function labelTracks(label: string): TrackDto[] {
 /**
  * Object URL for a local track, or null when its audio is not available.
  *
- * Consultar TAMBÉM conta como uso. É por aqui que o player pega a faixa que vai
- * tocar agora, e sem essa marca ela envelheceria parada no fim da fila enquanto
- * toca — até ser descartada por outras sessenta consultas e emudecer no meio.
- * Ver `lembrarUrl`.
+ * Consultar TAMBÉM conta como uso, e é `consultar` de `alcasDeBlob` que garante
+ * isso. É por aqui que o player pega a faixa que vai tocar agora: sem essa
+ * marca ela envelheceria parada no fim da fila enquanto toca, até ser despejada
+ * por consultas de outras faixas e emudecer no meio.
  */
 export function localAudioUrl(id: string): string | null {
-  const url = blobUrls.get(id);
-  if (!url) return null;
-  lembrarUrl(id, url);
-  return url;
+  return consultar('audio', id);
 }
 
 /** Raw bytes for a local track (for sending over P2P). */
 export async function blobFor(id: string): Promise<Blob | null> {
-  const url = blobUrls.get(id);
+  const url = consultar('audio', id);
   if (url) {
     try {
       return await (await fetch(url)).blob();
@@ -1865,28 +1933,17 @@ export async function remove(id: string): Promise<void> {
   // some do cofre daqui, e nada além disso.
   if (alvo?.origem === 'catalogo') {
     await deleteBlob(id).catch(() => undefined);
-    const objectUrl = blobUrls.get(id);
-    if (objectUrl) {
-      URL.revokeObjectURL(objectUrl);
-      blobUrls.delete(id);
-    }
+    soltar('audio', id);
     write(read().filter((e) => e.track.id !== id));
     return;
   }
   await deleteBlob(id).catch(() => undefined);
   void deleteTrackBlob(id); // best-effort remove the uploaded cross-device copy
-  const url = blobUrls.get(id);
-  if (url) {
-    URL.revokeObjectURL(url);
-    blobUrls.delete(id);
-  }
+  soltar('audio', id);
   // A capa mora fora do registro: sem apagar aqui viraria lixo permanente.
   void deleteCover(id);
-  const coverUrl = coverUrls.get(id);
-  if (coverUrl) {
-    URL.revokeObjectURL(coverUrl);
-    coverUrls.delete(id);
-  }
+  soltar('capa', id);
+  comCapa.delete(id);
   write(read().filter((e) => e.track.id !== id));
   cloud.remove(id);
   removerDoCatalogo(id); // admin apagou: sai do acervo de todo mundo
@@ -2105,14 +2162,12 @@ export async function dedupeLibrary(): Promise<number> {
   const drop = new Set(losers);
   write(read().filter((e) => !drop.has(e.track.id)));
   for (const id of losers) {
-    const url = blobUrls.get(id);
-    if (url) {
-      URL.revokeObjectURL(url);
-      blobUrls.delete(id);
-    }
+    soltar('audio', id);
+    soltar('capa', id);
+    comCapa.delete(id);
     // SÓ o armazenamento DESTE aparelho. A cópia no importador e a entrada na
     // nuvem são compartilhadas com todos os outros, e apagá-las daqui foi um
-    // estrago real: no celular o mapa `blobUrls` está vazio para tudo (lá as
+    // estrago real: no celular não há alça de áudio aberta para nada (lá as
     // faixas são sincronizadas, não baixadas), então duas cópias empatam em
     // `preferredEntry`, a perdedora é escolhida por idade e o telefone apagava
     // no importador o upload que o computador tinha acabado de fazer — e o
@@ -2213,49 +2268,145 @@ export function hydrate(): Promise<void> {
 }
 
 /**
+ * QUANTAS CAPAS ANTIGAS SE ENCOLHE POR BOOT.
+ *
+ * A conversao para miniatura acontece no import das faixas novas, mas a
+ * biblioteca que ja existe esta cheia de arte em tamanho de gravadora — e e
+ * dela que veio o relato de 1,4 GB. Encolher todas de uma vez no boot trocaria
+ * um problema de memoria por um de travamento: sao 5.000 decodificacoes mais
+ * 5.000 recodificacoes, e o arnes de desempenho existe justamente para reprovar
+ * esse tipo de conserto.
+ *
+ * Entao converte-se um punhado por abertura. A biblioteca converge em algumas
+ * sessoes, o teto de bytes de `alcasDeBlob` segura a memoria enquanto isso, e
+ * nenhum boot paga a conta inteira.
+ */
+const CAPAS_ENCOLHIDAS_POR_BOOT = 150;
+
+/** Tamanho do lote da restauracao. Entre lotes a tela recebe a vez de volta. */
+const LOTE_DE_CAPAS = 24;
+
+function descansarUmQuadro(): Promise<void> {
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+/**
  * Reconstrói as capas embutidas a partir do IndexedDB.
  *
  * O registro guarda `coverUrl: null` para elas (a imagem não cabe no
  * localStorage), então sem este passo a faixa apareceria sem capa depois de
  * cada recarga, mesmo com a imagem salva. Só toca em quem está sem capa —
  * capa vinda do iTunes é uma URL http normal e continua valendo.
+ *
+ * ── TRES COISAS MUDARAM AQUI, E TODAS PELA MESMA MEDICAO ──
+ *
+ * `e2e/memoria.spec.ts` mediu 1.000 faixas segurando 161 MB de alcas com a aba
+ * PARADA, e esta funcao era a fonte: ela abria uma alca por faixa, para a
+ * biblioteca inteira, no boot, e nunca soltava nenhuma.
+ *
+ *  1. As alcas passam por `alcasDeBlob`, que tem orcamento em bytes. A memoria
+ *     agora tem teto mesmo numa biblioteca de qualquer tamanho.
+ *  2. A capa gorda e ENCOLHIDA e regravada antes de virar alca (ate um teto por
+ *     boot). O ganho e permanente: vale para o disco, para a alca e para o
+ *     bitmap decodificado, que era a segunda maior fatia.
+ *  3. Deixou de ser `Promise.all` sobre a biblioteca inteira. Cinco mil leituras
+ *     simultaneas de IndexedDB, cada uma arrastando a imagem inteira do disco,
+ *     e a tela sem receber a vez ate a ultima terminar.
  */
 async function restoreEmbeddedCovers(): Promise<void> {
+  // Uma pergunta para o cofre inteiro: quem TEM capa guardada. E o que torna
+  // `ensureLocalCoverUrl` capaz de reabrir uma capa despejada sem adivinhar.
+  for (const id of await allCoverIds().catch(() => new Set<string>())) comCapa.add(id);
+
   const entries = read();
-  let changed = false;
-  const next = await Promise.all(
-    entries.map(async (entry) => {
-      // Um `blob:` aqui é lixo de OUTRA sessão (ou sincronizado de outro
-      // aparelho): a URL não aponta para nada. Tratar como ausente — se
-      // fosse considerado "já tem capa", a faixa nunca mais recuperaria a
-      // dela, mesmo com a imagem salva no IndexedDB.
-      const dead = entry.track.coverUrl?.startsWith('blob:') ?? false;
-      if (entry.track.coverUrl && !dead) return entry;
-      const id = entry.track.id;
-      const known = coverUrls.get(id);
-      if (known) {
-        changed = true;
-        return { ...entry, track: { ...entry.track, coverUrl: known } };
-      }
-      const blob = await getCoverBlob(id).catch(() => null);
-      if (!blob) {
-        // Sem imagem guardada: limpa a URL morta para a UI mostrar o ícone
-        // padrão em vez de uma imagem quebrada.
-        if (!dead) return entry;
-        changed = true;
-        return { ...entry, track: { ...entry.track, coverUrl: null } };
-      }
-      const url = URL.createObjectURL(blob);
-      coverUrls.set(id, url);
-      changed = true;
-      return { ...entry, track: { ...entry.track, coverUrl: url } };
-    }),
-  );
-  // Só memória: o object URL é filtrado por storableEntry antes de persistir.
-  if (changed) {
-    cache = next;
-    groupsCache = null;
+  const proximas = [...entries];
+  let mexeu = false;
+  let encolhidas = 0;
+
+  // OS DESPEJOS DESTA RESTAURAÇÃO PRECISAM SOBREVIVER A ELA.
+  //
+  // Abrir mil capas contra um orçamento de 64 MB despeja centenas delas pelo
+  // caminho, e o ouvinte global limpa o `coverUrl` correspondente no registro.
+  // Só que este laço está montando a própria versão do registro em `proximas`,
+  // e atribuí-la no fim apagaria essa limpeza — sobrariam entradas apontando
+  // para `blob:` já revogado, que é imagem quebrada na tela. Anotando aqui os
+  // ids despejados, a limpeza é reaplicada sobre `proximas` antes de valer.
+  const despejadasNoCaminho = new Set<string>();
+  const pararDeOuvir = aoDespejar('capa', (id) => despejadasNoCaminho.add(id));
+
+  for (let inicio = 0; inicio < proximas.length; inicio += LOTE_DE_CAPAS) {
+    const lote = proximas.slice(inicio, inicio + LOTE_DE_CAPAS);
+    await Promise.all(
+      lote.map(async (entry, deslocamento) => {
+        // Um `blob:` aqui é lixo de OUTRA sessão (ou sincronizado de outro
+        // aparelho): a URL não aponta para nada. Tratar como ausente — se
+        // fosse considerado "já tem capa", a faixa nunca mais recuperaria a
+        // dela, mesmo com a imagem salva no IndexedDB.
+        const dead = entry.track.coverUrl?.startsWith('blob:') ?? false;
+        if (entry.track.coverUrl && !dead) return;
+
+        const id = entry.track.id;
+        const posicao = inicio + deslocamento;
+        const trocar = (coverUrl: string | null): void => {
+          mexeu = true;
+          proximas[posicao] = { ...entry, track: { ...entry.track, coverUrl } };
+        };
+
+        const aberta = consultar('capa', id);
+        if (aberta) {
+          trocar(aberta);
+          return;
+        }
+        if (!comCapa.has(id)) {
+          // Sem imagem guardada: limpa a URL morta para a UI mostrar o ícone
+          // padrão em vez de uma imagem quebrada.
+          if (dead) trocar(null);
+          return;
+        }
+
+        const guardada = await getCoverBlob(id).catch(() => null);
+        if (!guardada) {
+          comCapa.delete(id);
+          if (dead) trocar(null);
+          return;
+        }
+
+        let blob = guardada;
+        if (guardada.size > BYTES_QUE_JA_ESTAO_BONS && encolhidas < CAPAS_ENCOLHIDAS_POR_BOOT) {
+          encolhidas += 1;
+          const menor = await miniaturaDeCapa(guardada);
+          if (menor !== guardada) {
+            blob = menor;
+            // Regravar é o que torna o ganho permanente: sem isto a próxima
+            // abertura pagaria a mesma conversão de novo, para sempre.
+            await putCover(id, menor).catch(() => undefined);
+          }
+        }
+
+        // NO TETO, NÃO ABRE. Abrir aqui despejaria uma capa mais antiga para
+        // segurar esta, e a lista rolaria trocando uma pela outra sem fim. A
+        // faixa fica sem capa no registro e `useLocalCover` a busca quando (e
+        // se) a linha aparecer na tela — uma leitura, para quem está vendo.
+        if (orcamentoCheio('capa')) return;
+        trocar(abrir('capa', id, blob));
+      }),
+    );
+    // Nada mais a fazer nesta abertura: o orçamento está cheio e a cota de
+    // conversão do boot acabou. Continuar seria varrer a biblioteca inteira
+    // lendo capas do disco para descartá-las em seguida.
+    if (orcamentoCheio('capa') && encolhidas >= CAPAS_ENCOLHIDAS_POR_BOOT) break;
+
+    // A vez de volta para a tela entre lotes.
+    await descansarUmQuadro();
   }
+  pararDeOuvir();
+
+  if (!mexeu) return;
+  // Só memória: o object URL é filtrado por storableEntry antes de persistir.
+  cache = proximas;
+  groupsCache = null;
+  // E agora as que caíram no caminho — ver o comentário lá em cima.
+  limparCapasDespejadas(despejadasNoCaminho);
 }
 
 /**
