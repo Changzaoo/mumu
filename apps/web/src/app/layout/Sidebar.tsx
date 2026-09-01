@@ -1,5 +1,5 @@
 /**
- * Desktop sidebar — Spotify-style: main nav on top, then "Sua Biblioteca" with
+ * Desktop sidebar — Spotify-style: main nav on top, then "Biblioteca" with
  * filter pills (Playlists / Artistas / Álbuns) and a rich item list showing the
  * REAL artwork of each entry (round thumbs for artists), all from local data.
  * Collapsible to a 72px icon rail (persisted).
@@ -235,13 +235,13 @@ export function Sidebar() {
           ))}
         </div>
 
-        {/* ── Sua Biblioteca (Spotify-style) ── */}
+        {/* ── Biblioteca (Spotify-style) ── */}
         {collapsed ? (
           <>
             <SectionLabel collapsed>Biblioteca</SectionLabel>
             <div className="flex flex-col items-center gap-0.5">
               {[
-                { to: '/library', label: 'Sua Biblioteca', icon: IoLibraryOutline },
+                { to: '/library', label: 'Biblioteca', icon: IoLibraryOutline },
                 { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
                 { to: '/history', label: 'Histórico', icon: IoTimeOutline },
               ].map((entry) => (
@@ -257,7 +257,7 @@ export function Sidebar() {
                 className="flex items-center gap-2 text-sm font-bold text-fg-muted transition-colors hover:text-fg"
               >
                 <IoLibraryOutline className="size-5" />
-                Sua Biblioteca
+                Biblioteca
               </NavLink>
               <NavLink
                 to="/history"

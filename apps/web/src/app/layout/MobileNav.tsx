@@ -35,7 +35,7 @@ interface Tab {
 const TABS: Tab[] = [
   { to: '/', label: 'Início', icon: IoHomeOutline, iconActive: IoHome },
   { to: '/search', label: 'Buscar', icon: IoSearchOutline, iconActive: IoSearch },
-  { to: '/library', label: 'Sua Biblioteca', icon: IoLibraryOutline, iconActive: IoLibrary },
+  { to: '/library', label: 'Biblioteca', icon: IoLibraryOutline, iconActive: IoLibrary },
 ];
 
 interface MenuGroup {
