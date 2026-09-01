@@ -15,6 +15,7 @@
  */
 import { aiClassifyGenre } from '@/lib/ai/ai';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { modoLeve } from '@/lib/perf/dispositivo';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import {
   aceitarSugestao,
@@ -33,6 +34,38 @@ const SESSION_BUDGET = 20;
 const PACE_MS = 1_800;
 const BOOT_DELAY_MS = 25_000;
 const WAKE_DEBOUNCE_MS = 10_000;
+
+/**
+ * O MESMO PLANTÃO NUM APARELHO QUE JÁ PROVOU QUE TRAVA.
+ *
+ * Classificar gênero é trabalho ADIÁVEL: a faixa sem rótulo continua tocando,
+ * continua na busca e continua na biblioteca — ela só não aparece numa
+ * prateleira de gênero. Num celular de entrada esse trabalho compete com a
+ * rolagem e com a própria reprodução pela mesma thread, e o que a pessoa sente
+ * não é "faltou um rótulo": é o app inteiro pesado.
+ *
+ * Então em modo leve ele não desliga — desacelera. Começa muito depois da
+ * primeira tela, faz um punhado por sessão em vez de vinte, e anda devagar. A
+ * biblioteca ainda converge; leva mais sessões, e sessões são de graça.
+ */
+const SESSION_BUDGET_LEVE = 5;
+const PACE_LEVE_MS = 6_000;
+const BOOT_DELAY_LEVE_MS = 90_000;
+
+/**
+ * Lido a cada uso, nunca no import: o rebaixamento por travamento MEDIDO chega
+ * depois do carregamento do módulo (ver `lib/perf/dispositivo`), e congelar o
+ * valor aqui descartaria justamente o sinal mais confiável.
+ */
+function ritmo(): { orcamento: number; passoMs: number; atrasoBootMs: number } {
+  return modoLeve()
+    ? {
+        orcamento: SESSION_BUDGET_LEVE,
+        passoMs: PACE_LEVE_MS,
+        atrasoBootMs: BOOT_DELAY_LEVE_MS,
+      }
+    : { orcamento: SESSION_BUDGET, passoMs: PACE_MS, atrasoBootMs: BOOT_DELAY_MS };
+}
 
 let initialized = false;
 let running = false;
@@ -124,7 +157,7 @@ async function run(): Promise<void> {
     await revisarGravados();
     const attempts = readAttempts();
     for (const entry of localLibrary.list()) {
-      if (classifiedThisSession >= SESSION_BUDGET) break;
+      if (classifiedThisSession >= ritmo().orcamento) break;
       const t = entry.track;
       if (t.genre?.trim()) continue;
       if ((attempts[t.id] ?? 0) >= MAX_ATTEMPTS) continue;
@@ -169,7 +202,7 @@ async function run(): Promise<void> {
       }
       writeAttempts(attempts);
       emit();
-      await new Promise((resolve) => setTimeout(resolve, PACE_MS));
+      await new Promise((resolve) => setTimeout(resolve, ritmo().passoMs));
     }
   } finally {
     running = false;
@@ -187,7 +220,7 @@ function wake(): void {
 export function initGenreAgent(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
-  setTimeout(() => void run(), BOOT_DELAY_MS);
+  setTimeout(() => void run(), ritmo().atrasoBootMs);
   localLibrary.subscribe(wake);
   window.addEventListener('online', () => void run());
 }

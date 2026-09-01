@@ -31,6 +31,7 @@
  * garante que "sob demanda" continue sendo sob demanda.
  */
 import { API_BASE_URL } from '@/lib/apiBase';
+import { modoLeve } from '@/lib/perf/dispositivo';
 import { hidratarEntrada, list, type LibraryEntry } from '@/lib/local/localLibrary';
 
 /**
@@ -41,10 +42,39 @@ import { hidratarEntrada, list, type LibraryEntry } from '@/lib/local/localLibra
  * este número é reintroduzir o problema em câmera lenta.
  */
 const ADIANTE = 30;
+/**
+ * O mesmo adiantamento num aparelho que já provou que trava.
+ *
+ * Assimilar é ENFEITE: adianta a busca do conteúdo para o play não esperar a
+ * rede. Num celular de entrada esse enfeite compete com a rolagem pela mesma
+ * thread, e o que a pessoa sente não é "o play demorou menos" — é a lista
+ * engasgando. Oito faixas ainda cobrem a próxima meia dúzia de músicas, que é
+ * onde o adiantamento realmente paga.
+ */
+const ADIANTE_LEVE = 8;
 /** Respiro entre buscas: assimilar é enfeite, ouvir é o serviço. */
 const RESPIRO_MS = 400;
+/** Em modo leve o respiro é o triplo — o enfeite cede a vez ao dedo. */
+const RESPIRO_LEVE_MS = 1_200;
 /** De quanto em quanto tempo o plantão reavalia a fila. */
 const BATIDA_MS = 20_000;
+/** Batida no modo leve: três vezes mais espaçada. */
+const BATIDA_LEVE_MS = 60_000;
+
+/**
+ * As três medidas do plantão, decididas A CADA RODADA.
+ *
+ * Lidas na hora, e não no carregamento do módulo, porque o rebaixamento pode
+ * chegar DEPOIS: o monitor de quadros (ver `lib/perf/dispositivo`) rebaixa no
+ * meio da sessão quando vê o travamento acontecer de verdade — e essa é a
+ * evidência mais confiável que existe, melhor que a heurística de núcleos. Um
+ * valor congelado no import ignoraria justamente ela.
+ */
+function ritmo(): { adiante: number; respiroMs: number; batidaMs: number } {
+  return modoLeve()
+    ? { adiante: ADIANTE_LEVE, respiroMs: RESPIRO_LEVE_MS, batidaMs: BATIDA_LEVE_MS }
+    : { adiante: ADIANTE, respiroMs: RESPIRO_MS, batidaMs: BATIDA_MS };
+}
 
 /** Ids já hidratados nesta sessão — não se pede duas vezes a mesma coisa. */
 const prontos = new Set<string>();
@@ -106,14 +136,15 @@ export function temDetalhe(id: string): boolean {
  *
  * Pura o bastante para ser testada: recebe os ids, não lê o player.
  */
-export async function assimilar(ids: readonly string[], teto = ADIANTE): Promise<number> {
+export async function assimilar(ids: readonly string[], teto = ritmo().adiante): Promise<number> {
   if (typeof navigator !== 'undefined' && !navigator.onLine) return 0;
+  const { respiroMs } = ritmo();
   let feitas = 0;
   for (const id of ids.slice(0, teto)) {
     if (temDetalhe(id)) continue;
     const ok = await garantirDetalhe(id);
     if (ok) feitas++;
-    await new Promise((r) => setTimeout(r, RESPIRO_MS));
+    await new Promise((r) => setTimeout(r, respiroMs));
   }
   return feitas;
 }
@@ -148,9 +179,21 @@ export function iniciarAssimilador(): () => void {
     }
   };
 
-  const timer = setInterval(() => void bater(), BATIDA_MS);
+  // AGENDA A PRÓPRIA PRÓXIMA BATIDA em vez de `setInterval`. Um intervalo fixo
+  // congela a cadência do primeiro instante, e é exatamente aí que ela ainda
+  // não se sabe: o rebaixamento por travamento medido chega segundos depois.
+  // Reagendando, a primeira batida após o rebaixamento já vem no ritmo leve.
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const agendar = (): void => {
+    if (parado) return;
+    timer = setTimeout(() => {
+      void bater().finally(agendar);
+    }, ritmo().batidaMs);
+  };
+  agendar();
+
   return () => {
     parado = true;
-    clearInterval(timer);
+    if (timer) clearTimeout(timer);
   };
 }

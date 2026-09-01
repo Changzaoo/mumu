@@ -8,7 +8,7 @@ import { Toaster } from '@/components/ui/toaster';
 import { TooltipProvider } from '@/components/ui/tooltip';
 import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
-import { marcarBoot } from '@/lib/telemetry/bootPerf';
+import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
 import { router } from '@/app/router';
 
 const queryClient = new QueryClient({
@@ -95,18 +95,26 @@ export default function App() {
       // não cabem nos ~5 MB do localStorage) e, enquanto não carrega, NADA
       // persiste — é a trava que impede uma biblioteca pela metade de ser
       // gravada por cima da inteira. Ver lib/local/localLibrary.ts.
-      await biblioteca.hydrate();
+      await medirEtapa('biblioteca.hydrate', () => biblioteca.hydrate());
       if (cancelado) return;
-      sync.initCloudSync();
-      catalogo.initCatalogo(); // acervo do app: o que o admin adiciona chega em todos
-      fila.init(); // resume any downloads queued before a reload
-      telemetria.initTelemetry(); // usage metrics for the admin /telemetria page
-      presenca.initPresence(); // "tocando em {aparelho}" entre dispositivos da conta
-      genero.initGenreAgent(); // plantão que categoriza a biblioteca por gênero (IA)
+      // CADA UM MEDIDO SEPARADAMENTE. Onze subsistemas sobem aqui, e até agora o
+      // relatório de boot mostrava um bloco só: "está pesado na abertura" não
+      // apontava para nenhum deles. `radinhoPerf()` agora imprime o custo de
+      // cada linha desta lista — a próxima vez que a abertura pesar, a evidência
+      // já está no aparelho de quem reclamou, em vez de num palpite daqui.
+      await medirEtapa('sync.initCloudSync', () => sync.initCloudSync());
+      // acervo do app: o que o admin adiciona chega em todos
+      await medirEtapa('catalogo.initCatalogo', () => catalogo.initCatalogo());
+      await medirEtapa('fila.init', () => fila.init()); // retoma downloads da sessão anterior
+      await medirEtapa('telemetria.initTelemetry', () => telemetria.initTelemetry());
+      // "tocando em {aparelho}" entre dispositivos da conta
+      await medirEtapa('presenca.initPresence', () => presenca.initPresence());
+      // plantão que categoriza a biblioteca por gênero (IA)
+      await medirEtapa('genero.initGenreAgent', () => genero.initGenreAgent());
       // "Se você viu a música, ela toca": traz os bytes para o aparelho ANTES de
       // precisar deles, para o servidor fora do ar deixar de virar faixa que
       // aparece e não toca. Ver lib/offline/guardiaoOffline.ts.
-      guardiao.initGuardiaoOffline();
+      await medirEtapa('guardiao.initGuardiaoOffline', () => guardiao.initGuardiaoOffline());
       // Agente pesquisador: DESLIGADO por padrão. Ele confere o interruptor a
       // cada rodada, então desligar nas configurações para o agente na hora.
       pararPesquisador = pesquisador.iniciarPesquisador(

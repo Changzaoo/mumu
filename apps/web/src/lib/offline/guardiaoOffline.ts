@@ -36,6 +36,7 @@ import {
   subscribe,
 } from '@/lib/local/localLibrary';
 import type { LibraryEntry } from '@/lib/local/localLibrary';
+import { modoLeve } from '@/lib/perf/dispositivo';
 
 /**
  * Teto de downloads simultâneos, em QUALQUER aparelho.
@@ -190,6 +191,20 @@ export interface SinaisDoAparelho {
   nucleos?: number;
   /** Memória em GB (`navigator.deviceMemory`), arredondada pelo navegador. */
   memoriaGb?: number;
+  /**
+   * ESTE APARELHO JÁ TRAVOU DE VERDADE — medido, não estimado.
+   *
+   * Núcleos e memória são um palpite: um celular com 4 núcleos e 4 GB passa
+   * folgado nos dois testes acima e mesmo assim engasga, porque o custo real
+   * mora na GPU/compositor e em quanta coisa está rodando junto. O monitor de
+   * quadros (ver `lib/perf/dispositivo`) observa o travamento ACONTECER e
+   * rebaixa; este campo é essa observação chegando aqui.
+   *
+   * Entra como sinal, e não como chamada dentro da função de ritmo, porque essa
+   * função é pura de propósito — é a decisão que separa "rápido" de "quebrou o
+   * celular de alguém", e ela precisa ser testável sem navegador.
+   */
+  travouAntes?: boolean;
 }
 
 export interface Ritmo {
@@ -219,24 +234,50 @@ export interface Ritmo {
  * "rápido" de "quebrou o celular de alguém".
  */
 export function ritmoDoAparelho(sinais: SinaisDoAparelho): Ritmo {
-  // Pedido explícito de economia vence qualquer capacidade: a pessoa disse ao
-  // sistema que não quer gastar dados. Não paramos de baixar — a fila é o que
-  // ela vai ouvir, não especulação — mas voltamos ao mínimo.
-  if (sinais.economizarDados) return { simultaneos: 1, respiroMs: 5_000 };
+  // CADA SINAL PROPÕE UM RITMO; O PIOR DE CADA EIXO VENCE.
+  //
+  // Antes isto era uma escada de `return`, e a escada mentia sobre a própria
+  // regra: o primeiro sinal a casar decidia TUDO e os seguintes nem eram lidos.
+  // Enquanto havia só conexão e hardware o resultado batia por sorte de ordem,
+  // mas ao entrar um terceiro sinal a falha apareceu — um aparelho em 2G E
+  // travando ficava com o respiro de 3s do travamento em vez dos 4s do 2G, ou
+  // seja, MENOS conservador que o mesmo aparelho só em 2G. Somar sinal ruim não
+  // pode afrouxar nada.
+  //
+  // Reduzir pelo pior de cada eixo (menos simultâneos, mais respiro) é a regra
+  // que o módulo sempre quis dizer, e agora ela não depende da ordem em que os
+  // casos foram escritos.
+  const candidatos: Ritmo[] = [];
+
+  // Pedido explícito de economia: a pessoa disse ao sistema que não quer gastar
+  // dados. Não paramos de baixar — a fila é o que ela vai ouvir, não
+  // especulação — mas voltamos ao mínimo.
+  if (sinais.economizarDados) candidatos.push({ simultaneos: 1, respiroMs: 5_000 });
+
+  // Travamento MEDIDO, da mesma natureza do pedido acima: evidência sobre este
+  // aparelho, não suposição a partir de uma ficha técnica.
+  if (sinais.travouAntes) candidatos.push({ simultaneos: 1, respiroMs: 3_000 });
 
   const conexao = sinais.tipoDeConexao;
-  if (conexao === 'slow-2g' || conexao === '2g') return { simultaneos: 1, respiroMs: 4_000 };
-  if (conexao === '3g') return { simultaneos: 2, respiroMs: 1_500 };
+  if (conexao === 'slow-2g' || conexao === '2g') {
+    candidatos.push({ simultaneos: 1, respiroMs: 4_000 });
+  } else if (conexao === '3g') {
+    candidatos.push({ simultaneos: 2, respiroMs: 1_500 });
+  }
 
   // Sem sinal de conexão (Safari) tratamos como boa: a ausência de informação
   // não é evidência de aparelho ruim, e a cota e o tempo máximo já seguram o
   // exagero. Punir o desconhecido deixaria todo iPhone no ritmo de 2G.
   const nucleos = sinais.nucleos ?? 4;
   const memoria = sinais.memoriaGb ?? 4;
+  if (memoria <= 2 || nucleos <= 2) candidatos.push({ simultaneos: 2, respiroMs: 900 });
+  else if (memoria <= 4 || nucleos <= 4) candidatos.push({ simultaneos: 3, respiroMs: 400 });
+  else candidatos.push({ simultaneos: SIMULTANEOS_MAX, respiroMs: 200 });
 
-  if (memoria <= 2 || nucleos <= 2) return { simultaneos: 2, respiroMs: 900 };
-  if (memoria <= 4 || nucleos <= 4) return { simultaneos: 3, respiroMs: 400 };
-  return { simultaneos: SIMULTANEOS_MAX, respiroMs: 200 };
+  return candidatos.reduce((pior, atual) => ({
+    simultaneos: Math.min(pior.simultaneos, atual.simultaneos),
+    respiroMs: Math.max(pior.respiroMs, atual.respiroMs),
+  }));
 }
 
 /** Lê os sinais do navegador. Fora dos testes, é a única fonte deles. */
@@ -250,6 +291,7 @@ function sinaisDoAparelho(): SinaisDoAparelho {
     tipoDeConexao: conexao?.effectiveType,
     nucleos: nav?.hardwareConcurrency,
     memoriaGb: (nav as unknown as { deviceMemory?: number } | undefined)?.deviceMemory,
+    travouAntes: modoLeve(),
   };
 }
 

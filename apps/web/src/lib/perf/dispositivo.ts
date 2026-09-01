@@ -57,6 +57,32 @@ export function dispositivoFraco(): boolean {
   return false;
 }
 
+/**
+ * ESTE APARELHO ESTÁ NO MODO LEVE?
+ *
+ * O rebaixamento existia só para o CSS: `data-perf="baixo"` desligava vidro,
+ * desfoque e aurora, e o assunto terminava aí. Mas o que estrangula um celular
+ * de entrada não é só o compositor — é o TRABALHO DE FUNDO. Na abertura sobem
+ * onze subsistemas (sincronia, catálogo, fila, telemetria, presença, agente de
+ * gênero, guardião offline, reparador, assimilador…), e todos rodavam na mesma
+ * intensidade num aparelho de 2 GB e num desktop: quatro downloads simultâneos,
+ * assimilação a cada 20s, classificação por IA. O app detectava a fraqueza e
+ * respondia tirando a beleza, enquanto mantinha o peso.
+ *
+ * Esta função é a mesma decisão, legível por quem faz trabalho e não só por
+ * folha de estilo. Lê o atributo em vez de recalcular de propósito: assim ela
+ * concorda com o CSS por construção, e acompanha o monitor de quadros, que pode
+ * rebaixar no meio da sessão depois de ver o travamento acontecer de verdade.
+ *
+ * É consultada A CADA RODADA, nunca no carregamento do módulo — senão o
+ * rebaixamento tardio (o caso mais confiável, porque é medido) não teria efeito
+ * nenhum sobre quem já tinha lido o valor.
+ */
+export function modoLeve(): boolean {
+  if (typeof document === 'undefined') return false;
+  return document.documentElement.getAttribute('data-perf') === 'baixo';
+}
+
 /** Chave onde guardamos "este aparelho já provou que trava". */
 const CHAVE_REBAIXADO = 'aurial:perf-baixo';
 

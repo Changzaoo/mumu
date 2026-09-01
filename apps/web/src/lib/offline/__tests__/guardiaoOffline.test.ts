@@ -213,6 +213,60 @@ describe('ritmoDoAparelho — rápido sem esganar o aparelho', () => {
     expect(r.simultaneos).toBeGreaterThanOrEqual(3);
   });
 
+  it('TRAVAMENTO MEDIDO vence a ficha técnica boa', () => {
+    // Este é o caso que a heurística de hardware NÃO pega: 4 núcleos e 4 GB
+    // passam nos dois testes de capacidade, e mesmo assim o aparelho engasga —
+    // o custo real está na GPU/compositor e em quanta coisa roda junto, e disso
+    // o navegador não conta nada. Quem viu o travamento acontecer foi o monitor
+    // de quadros; sem esta linha, a observação morria no CSS e o guardião
+    // continuava baixando de três em três no aparelho que já estava no chão.
+    const semMedicao = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 4, memoriaGb: 4 });
+    const comMedicao = ritmoDoAparelho({
+      tipoDeConexao: '4g',
+      nucleos: 4,
+      memoriaGb: 4,
+      travouAntes: true,
+    });
+    expect(semMedicao.simultaneos).toBe(3);
+    expect(comMedicao.simultaneos).toBe(1);
+    expect(comMedicao.respiroMs).toBeGreaterThan(semMedicao.respiroMs);
+  });
+
+  it('mas o travamento medido também não PARA o download', () => {
+    // Mesma regra da economia de dados: o guardião baixa o que a pessoa vai
+    // ouvir. Zerar deixaria justamente o aparelho fraco — o que mais depende do
+    // offline, porque é o que mais sofre com rede ruim — sem música nenhuma.
+    expect(ritmoDoAparelho({ travouAntes: true }).simultaneos).toBeGreaterThan(0);
+  });
+
+  it('SOMAR SINAL RUIM NUNCA AFROUXA — o pior de cada eixo vence', () => {
+    // Este teste existe por causa de um defeito real: com a escada de `return`,
+    // o primeiro sinal a casar decidia tudo. Um aparelho em 2G E travando pegava
+    // o respiro de 3s do travamento em vez dos 4s do 2G — ficava MENOS
+    // conservador que o mesmo aparelho só em 2G. Acrescentar uma má notícia não
+    // pode melhorar o ritmo.
+    const so2g = ritmoDoAparelho({ tipoDeConexao: '2g' });
+    const ambos = ritmoDoAparelho({ tipoDeConexao: '2g', travouAntes: true });
+    expect(ambos.simultaneos).toBeLessThanOrEqual(so2g.simultaneos);
+    expect(ambos.respiroMs).toBeGreaterThanOrEqual(so2g.respiroMs);
+    expect(ambos.respiroMs).toBeGreaterThanOrEqual(4_000);
+  });
+
+  it('nenhuma combinação de sinais ruins zera o download', () => {
+    // Vale para o conjunto, não só para um sinal por vez: o aparelho fraco é
+    // justamente quem MAIS depende do offline, porque é quem mais sofre com
+    // rede ruim. Ritmo mínimo é um, nunca zero.
+    const tudoRuim = ritmoDoAparelho({
+      economizarDados: true,
+      travouAntes: true,
+      tipoDeConexao: 'slow-2g',
+      nucleos: 1,
+      memoriaGb: 1,
+    });
+    expect(tudoRuim.simultaneos).toBeGreaterThan(0);
+    expect(tudoRuim.respiroMs).toBeGreaterThanOrEqual(5_000);
+  });
+
   it('nunca passa do teto, por mais forte que seja o aparelho', () => {
     // Os bytes saem de um único servidor doméstico atrás de um túnel: mais
     // paralelismo não acelera e atrapalha quem está ouvindo agora.
