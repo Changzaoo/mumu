@@ -1990,6 +1990,19 @@ async function main() {
           await rejectUpload(req, res, 400, { error: 'id inválido.' });
           return;
         }
+        // RECUSA PELO TAMANHO ANUNCIADO, ANTES DE LER O CORPO.
+        //
+        // `readBinaryBody` destrói a requisição ao estourar o teto, e quem
+        // estava enviando vê ECONNRESET — não um status. A varredura lia isso
+        // como falha transiente e reenviava a mesma coletânea de 76 minutos
+        // (~184 MB em MP3) a cada rodada, para sempre, derrubando a trava de
+        // apagão junto. Um 413 honesto encerra o assunto na primeira vez.
+        const anunciado = Number(req.headers['content-length'] ?? 0);
+        if (anunciado > MAX_BLOB) {
+          anotarRecusaDeUpload(`413 arquivo grande demais (${Math.round(anunciado / 1e6)} MB)`);
+          await rejectUpload(req, res, 413, { error: 'Arquivo grande demais.' });
+          return;
+        }
         let buf;
         try {
           buf = await readBinaryBody(req, MAX_BLOB);

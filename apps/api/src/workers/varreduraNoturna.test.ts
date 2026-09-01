@@ -258,3 +258,59 @@ describe('apagão x cauda ruim da fila', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('arquivo grande demais para o cofre', () => {
+  const agora = new Date();
+
+  beforeEach(() => {
+    vi.restoreAllMocks();
+    env.IMPORTER_URL = 'http://importer:8790';
+    env.IMPORT_SERVICE_TOKEN = 'x'.repeat(48);
+    env.VARREDURA_HORA_INICIO = 0;
+    env.VARREDURA_HORA_FIM = 0;
+  });
+
+  it('413 é DEFINITIVO — não vira tentativa eterna', async () => {
+    // Medido em produção: "Músicas Nacionais Românticas Anos 80-90-2000", 76
+    // minutos, ~184 MB em MP3 contra o teto de 140 MB do cofre. O importador
+    // destruía a conexão, a varredura lia ECONNRESET como falha transiente e
+    // rebaixava os mesmos 184 MB toda rodada — derrubando a trava de apagão
+    // junto e travando a fila inteira atrás de uma coletânea.
+    vi.stubGlobal('setTimeout', ((fn: () => void) => {
+      fn();
+      return 0;
+    }) as unknown as typeof setTimeout);
+    const { prisma } = await import('../infra/db/prisma.js');
+    vi.mocked(prisma.$queryRaw).mockResolvedValueOnce([
+      { id: 'coletanea', data: { sourceUrl: 'https://www.youtube.com/watch?v=x' } },
+    ]);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (url: string) => {
+        const u = String(url);
+        if (u.includes('/cofre/estado')) {
+          return { ok: true, json: async () => ({ pronto: true, livreBytes: 50_000_000_000 }) };
+        }
+        if (u.includes('/import/start')) return { ok: true, json: async () => ({ id: 'j1' }) };
+        if (u.includes('/import/job/')) {
+          return { ok: true, json: async () => ({ status: 'done' }) };
+        }
+        if (u.includes('/import/file/')) {
+          return {
+            ok: true,
+            headers: { get: () => 'audio/mpeg' },
+            arrayBuffer: async () => new ArrayBuffer(1024),
+          };
+        }
+        // O cofre recusa pelo tamanho anunciado.
+        return { ok: false, status: 413, json: async () => ({}) };
+      }),
+    );
+
+    const r = await varrerUmaVez(agora);
+
+    expect(r.impossiveis).toBe(1);
+    expect(r.falhas).toBe(0);
+    vi.unstubAllGlobals();
+  });
+});

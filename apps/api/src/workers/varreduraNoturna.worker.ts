@@ -240,7 +240,7 @@ async function guardarNoCofre(
   blobId: string,
   arquivo: ResultadoDoDownload,
   sourceUrl: string,
-): Promise<string | null> {
+): Promise<{ remoteUrl: string | null; grandeDemais: boolean }> {
   const res = await fetch(`${baseInterna()}/blob`, {
     method: 'POST',
     headers: {
@@ -254,10 +254,18 @@ async function guardarNoCofre(
     },
     body: new Uint8Array(arquivo.bytes),
   });
-  if (!res.ok) return null;
+  // 413 = não cabe no cofre, e nunca vai caber. Medido: uma "coletânea de
+  // românticas anos 80/90" de 76 minutos vira ~184 MB em MP3, contra o teto de
+  // 140 MB. Tratar isso como falha transiente fazia a varredura rebaixá-la
+  // toda rodada — baixando os 184 MB de novo a cada vez.
+  if (res.status === 413) return { remoteUrl: null, grandeDemais: true };
+  if (!res.ok) return { remoteUrl: null, grandeDemais: false };
   const dados = (await res.json()) as { token?: string };
-  if (!dados.token) return null;
-  return `${basePublica()}/blob/${encodeURIComponent(blobId)}?k=${encodeURIComponent(dados.token)}`;
+  if (!dados.token) return { remoteUrl: null, grandeDemais: false };
+  return {
+    remoteUrl: `${basePublica()}/blob/${encodeURIComponent(blobId)}?k=${encodeURIComponent(dados.token)}`,
+    grandeDemais: false,
+  };
 }
 
 /** Conserta UMA faixa. Devolve o que aconteceu, para o log e para a contagem. */
@@ -268,7 +276,11 @@ async function repararUma(c: Candidata): Promise<'reparada' | 'falhou' | 'imposs
   const { ok, permanente } = await baixar(sourceUrl);
   if (!ok) return permanente ? 'impossivel' : 'falhou';
 
-  const remoteUrl = await guardarNoCofre(c.id, ok, sourceUrl);
+  const guardada = await guardarNoCofre(c.id, ok, sourceUrl);
+  // Grande demais não é "tente amanhã": é uma faixa que não é faixa. Marcar
+  // como impossível tira do caminho das que ainda dá para salvar.
+  if (guardada.grandeDemais) return 'impossivel';
+  const remoteUrl = guardada.remoteUrl;
   if (!remoteUrl) return 'falhou';
 
   const track = { ...((c.data as { track?: Record<string, unknown> }).track ?? {}) };
