@@ -27,7 +27,7 @@ import type { Timestamp } from 'firebase/firestore';
 // para o chunk de entrada — ver lib/sync/firestoreLazy.ts.
 import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { resumeAt, usePlayerStore } from '@/stores/playerStore';
 
@@ -531,8 +531,7 @@ function start(user: User): void {
       doc(db, 'users', user.uid, 'state', 'activeDevice'),
       (snap) => {
         const data = snap.data() as
-          | { deviceId?: string; name?: string; at?: Timestamp }
-          | undefined;
+          { deviceId?: string; name?: string; at?: Timestamp } | undefined;
         activeDeviceId = data?.deviceId ?? null;
 
         // UM APARELHO SÓ TOCA POR VEZ — mas silenciar o usuário à toa é o pior

@@ -5,8 +5,8 @@ import type {
   ImportConfigDto,
   ImportJobDto,
   UploadDto,
-} from '@aurial/shared';
-import { LINK_IMPORT_HOSTS } from '@aurial/shared';
+} from '@radinho/shared';
+import { LINK_IMPORT_HOSTS } from '@radinho/shared';
 import { env } from '../../config/index.js';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { enqueueImportSync, enqueueLinkImport } from '../../infra/queue/queues.js';

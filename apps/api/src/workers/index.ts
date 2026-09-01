@@ -70,7 +70,7 @@ logger.info(
     armazenamento: true,
     acervoFiel: true,
   },
-  'Aurial workers started',
+  'radinho.online workers started',
 );
 
 let shuttingDown = false;

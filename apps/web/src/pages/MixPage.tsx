@@ -6,7 +6,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { Play, Share2, Shuffle, Sparkles } from 'lucide-react';
 import { useParams } from 'react-router';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';

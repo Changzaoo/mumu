@@ -17,7 +17,7 @@ import {
   Users,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { USER_ROLES, type UploadStatus, type UserRole } from '@aurial/shared';
+import { USER_ROLES, type UploadStatus, type UserRole } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { Badge, type BadgeProps } from '@/components/ui/badge';

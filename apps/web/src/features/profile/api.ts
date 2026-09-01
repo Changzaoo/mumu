@@ -16,7 +16,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { MeDto, PlaylistDto, UpdateMeInput, UserDto, UserStatsDto } from '@aurial/shared';
+import type { MeDto, PlaylistDto, UpdateMeInput, UserDto, UserStatsDto } from '@radinho/shared';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { api } from '@/lib/api';
 

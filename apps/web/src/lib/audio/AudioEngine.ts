@@ -21,7 +21,7 @@
  * Typed events (`on`) are consumed exclusively by `stores/playerStore.ts`.
  */
 import { Howl, Howler } from 'howler';
-import { EQ_BANDS_HZ, dbToLinear, replayGainDb, type TrackDto } from '@aurial/shared';
+import { EQ_BANDS_HZ, dbToLinear, replayGainDb, type TrackDto } from '@radinho/shared';
 import { resolveMediaUrl } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import type HlsType from 'hls.js';
@@ -732,7 +732,7 @@ export class AudioEngine {
    * outra coisa assumiu o áudio do aparelho — outro app tocando, uma ligação,
    * o fone desconectado. Sem escutar isto, `this.playing` continuava `true`
    * para sempre, o watchdog do player via o playhead parado e chamava `play()`
-   * de volta a cada 10s: o Aurial ficava brigando com o outro app pelo alto-
+   * de volta a cada 10s: o radinho.online ficava brigando com o outro app pelo alto-
    * falante, e ganhava. Isso nunca pode acontecer.
    *
    * Como distinguir: `pause()` nosso já zerou `this.playing` antes de o evento

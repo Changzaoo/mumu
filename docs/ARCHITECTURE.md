@@ -1,18 +1,18 @@
-# Aurial — Architecture
+# radinho.online — Architecture
 
-> **Aurial** is a professional music streaming platform: minimal, glass, elegant, fast.
+> **radinho.online** is a professional music streaming platform: minimal, glass, elegant, fast.
 > This document is the single source of truth for architecture decisions and conventions.
 > Every contributor (human or agent) must follow it.
 
 ## 1. Monorepo layout
 
 ```
-aurial/
+radinho/
 ├── apps/
 │   ├── web/          # React 19 + Vite + TS — deployed to Vercel
 │   └── api/          # Node 22 + Express 5 + Prisma — deployed to Linux VPS (Docker + PM2)
 ├── packages/
-│   └── shared/       # @aurial/shared — Zod schemas, DTO types, constants (used by web + api)
+│   └── shared/       # @radinho/shared — Zod schemas, DTO types, constants (used by web + api)
 ├── infra/            # docker-compose, nginx, pm2, deploy scripts
 ├── docs/             # architecture, design, api docs
 └── .github/          # CI/CD workflows
@@ -21,7 +21,7 @@ aurial/
 - Package manager: **pnpm workspaces**. Node >= 20.
 - All packages are **ESM** (`"type": "module"`).
 - TypeScript **strict** everywhere; every package extends `tsconfig.base.json`.
-- Workspace deps use `"@aurial/shared": "workspace:*"`.
+- Workspace deps use `"@radinho/shared": "workspace:*"`.
 
 ## 2. Why these choices (decision log)
 
@@ -71,7 +71,7 @@ apps/api/src/
 **Rules**
 
 - Controllers never touch Prisma. Services never touch `req`/`res`. Repositories never contain business rules.
-- All input validated with Zod schemas from `@aurial/shared` via `validate({ body?, query?, params? })` middleware.
+- All input validated with Zod schemas from `@radinho/shared` via `validate({ body?, query?, params? })` middleware.
 - All responses use the envelope: `{ data, meta? }` for success; errors: `{ error: { code, message, details? } }`.
 - Pagination: cursor-based (`?cursor=&limit=`) → `meta: { nextCursor, hasMore }`. Offset mode (`?page=&perPage=`) only on admin tables.
 - IDs: `cuid()` strings from Prisma.
@@ -171,7 +171,7 @@ apps/web/src/
 **Rules**
 
 - Server state = TanStack Query only (`queryKey` conventions: `['artist', id]`, `['home']`...). Client state = Zustand. Never duplicate server data in stores.
-- Forms = react-hook-form + zodResolver with schemas from `@aurial/shared`.
+- Forms = react-hook-form + zodResolver with schemas from `@radinho/shared`.
 - Routes lazy-loaded; lists > 50 items virtualized (`@tanstack/react-virtual`).
 - Player is global and never unmounts; routing changes must not interrupt audio.
 - Media Session API for OS-level controls; keyboard shortcuts (space, ←/→ seek, ↑/↓ volume, etc.).

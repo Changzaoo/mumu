@@ -8,7 +8,7 @@ import {
   removePlaylistTracksSchema,
   reorderPlaylistSchema,
   updatePlaylistSchema,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { playlistsController } from './playlists.controller.js';

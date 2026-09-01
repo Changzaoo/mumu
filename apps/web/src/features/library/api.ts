@@ -28,7 +28,7 @@ import type {
   PlaylistDto,
   TrackDto,
   UploadDto,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { api } from '@/lib/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';

@@ -46,7 +46,7 @@ async function processLinkImport(job: Job<LinkImportJobData>): Promise<void> {
     return;
   }
 
-  const tmpDir = path.join(os.tmpdir(), 'aurial-linkimport', uploadId);
+  const tmpDir = path.join(os.tmpdir(), 'radinho-linkimport', uploadId);
   await mkdir(tmpDir, { recursive: true });
 
   try {

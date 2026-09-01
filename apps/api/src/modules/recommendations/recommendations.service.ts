@@ -1,4 +1,4 @@
-import type { DailyMixDto, Mood, TrackDto } from '@aurial/shared';
+import type { DailyMixDto, Mood, TrackDto } from '@radinho/shared';
 import { cache, cacheKeys, cacheTtl } from '../../infra/redis/cache.js';
 import { applyLikedFlags } from '../shared/mappers.js';
 import { libraryRepository } from '../library/library.repository.js';

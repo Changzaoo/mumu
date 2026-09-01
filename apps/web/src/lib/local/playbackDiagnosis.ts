@@ -168,7 +168,7 @@ export async function relatorioDeReproducao(limite = 5): Promise<string> {
  */
 export function instalarDiagnostico(): void {
   if (typeof window === 'undefined') return;
-  (window as unknown as Record<string, unknown>).aurialDiagnostico = async (): Promise<string> => {
+  (window as unknown as Record<string, unknown>).radinhoDiagnostico = async (): Promise<string> => {
     const texto = await relatorioDeReproducao();
     // eslint-disable-next-line no-console
     console.log(texto);

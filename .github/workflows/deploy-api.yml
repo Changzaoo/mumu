@@ -1,4 +1,4 @@
-# Aurial — deploy the API stack to the LAN server over SSH.
+# radinho.online — deploy the API stack to the LAN server over SSH.
 #
 # Required repository secrets:
 #   SSH_HOST  → server address (e.g. 192.168.0.100, or its Tailscale/VPN name)
@@ -11,10 +11,10 @@
 # GitHub-hosted runners CANNOT reach. Pick one:
 #   a) Self-hosted runner on the LAN (recommended for this setup):
 #      repo Settings > Actions > Runners > New self-hosted runner, then
-#      change `runs-on: ubuntu-latest` to `runs-on: [self-hosted, aurial]`.
+#      change `runs-on: ubuntu-latest` to `runs-on: [self-hosted, radinho]`.
 #   b) Tailscale/WireGuard: join the server to a tailnet, add the
 #      tailscale/github-action step before the SSH step, and set SSH_HOST
-#      to the tailnet address (e.g. aurial-server.tailnet-xyz.ts.net).
+#      to the tailnet address (e.g. radinho-server.tailnet-xyz.ts.net).
 #   c) Skip CI for deploys and run infra/scripts/deploy-from-windows.ps1
 #      from the dev machine — this workflow also supports manual runs
 #      (workflow_dispatch) for when connectivity exists.
@@ -38,7 +38,7 @@ jobs:
   deploy:
     name: SSH deploy to the server
     # LAN setup? Use your self-hosted runner instead:
-    # runs-on: [self-hosted, aurial]
+    # runs-on: [self-hosted, radinho]
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:

@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { idSchema } from '@aurial/shared';
+import { idSchema } from '@radinho/shared';
 import { validate } from '../../middlewares/validate.js';
 import { streamController } from './stream.controller.js';
 

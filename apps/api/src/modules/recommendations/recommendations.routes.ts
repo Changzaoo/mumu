@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { idSchema, moodSchema } from '@aurial/shared';
+import { idSchema, moodSchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { recommendationsController } from './recommendations.controller.js';

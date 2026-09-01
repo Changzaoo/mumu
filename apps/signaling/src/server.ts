@@ -1,5 +1,5 @@
 /**
- * Aurial signaling server — WebRTC matchmaking only.
+ * radinho.online signaling server — WebRTC matchmaking only.
  *
  * Relays room membership and SDP/ICE handshakes between peers so they can open
  * a direct WebRTC connection. It never receives, relays or stores audio, and
@@ -8,7 +8,7 @@
 import { createServer } from 'node:http';
 import { randomUUID } from 'node:crypto';
 import { WebSocketServer, type WebSocket } from 'ws';
-import { clientMessageSchema, type PeerInfo, type ServerMessage } from '@aurial/shared';
+import { clientMessageSchema, type PeerInfo, type ServerMessage } from '@radinho/shared';
 
 const PORT = Number(process.env.PORT ?? 4100);
 const MAX_CONNECTIONS = Number(process.env.MAX_CONNECTIONS ?? 500);

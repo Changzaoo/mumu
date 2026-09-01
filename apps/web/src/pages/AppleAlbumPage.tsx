@@ -6,7 +6,7 @@
 import { useMemo, useSyncExternalStore } from 'react';
 import { Link, useParams } from 'react-router';
 import { Disc3, Music, Pause, Play } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { PageSkeleton } from '@/components/media/PageSkeleton';

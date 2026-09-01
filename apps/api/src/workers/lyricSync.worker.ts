@@ -44,7 +44,7 @@ async function syncLyrics(job: Job<LyricSyncJobData>): Promise<void> {
     return;
   }
 
-  const tmpDir = path.join(os.tmpdir(), 'aurial-lyrics', trackId);
+  const tmpDir = path.join(os.tmpdir(), 'radinho-lyrics', trackId);
   await mkdir(tmpDir, { recursive: true });
   const audioPath = path.join(tmpDir, `source${path.extname(sourceKey) || '.mp3'}`);
 

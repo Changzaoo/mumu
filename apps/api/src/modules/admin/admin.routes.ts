@@ -6,7 +6,7 @@ import {
   idParamSchema,
   pageQuerySchema,
   uploadStatusSchema,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { requireAuth, requireRole } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { adminController } from './admin.controller.js';

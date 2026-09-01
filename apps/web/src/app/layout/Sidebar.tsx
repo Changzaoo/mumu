@@ -24,7 +24,7 @@ import {
   IoTimeOutline,
 } from 'react-icons/io5';
 import { PanelLeft } from 'lucide-react';
-import { AurialLogo, AurialMark } from '@/components/brand/AurialMark';
+import { RadinhoLogo, RadinhoMark } from '@/components/brand/RadinhoMark';
 import { IconButton } from '@/components/ui/icon-button';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { useIsAuthorized } from '@/lib/auth/roles';
@@ -205,7 +205,7 @@ export function Sidebar() {
         // caem no mesmo eixo — o centro dos 72px do trilho.
         <div className="flex flex-col items-center gap-0.5 py-3">
           <div className="grid size-10 place-items-center">
-            <AurialMark className="size-6" />
+            <RadinhoMark className="size-6" />
           </div>
           <button
             type="button"
@@ -218,7 +218,7 @@ export function Sidebar() {
         </div>
       ) : (
         <div className="flex h-16 items-center justify-between px-4">
-          <AurialLogo />
+          <RadinhoLogo />
           <IconButton aria-label="Recolher menu" size="sm" onClick={toggleSidebar}>
             <PanelLeft />
           </IconButton>

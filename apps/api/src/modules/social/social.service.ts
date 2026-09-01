@@ -1,4 +1,4 @@
-import type { CommentDto, FeedEventDto, ListenSessionDto } from '@aurial/shared';
+import type { CommentDto, FeedEventDto, ListenSessionDto } from '@radinho/shared';
 import { ForbiddenError, NotFoundError } from '../../core/errors/index.js';
 import { takePage, type CursorPage } from '../../core/http/pagination.js';
 import { toCommentDto, toListenSessionDto, toTrackDto } from '../shared/mappers.js';

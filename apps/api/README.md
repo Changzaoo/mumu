@@ -1,6 +1,6 @@
-# @aurial/api
+# @radinho/api
 
-Aurial backend — Express 5 + Prisma (PostgreSQL) + Redis/BullMQ + FFmpeg audio pipeline.
+radinho.online backend — Express 5 + Prisma (PostgreSQL) + Redis/BullMQ + FFmpeg audio pipeline.
 
 ## Prerequisites
 
@@ -14,17 +14,17 @@ Aurial backend — Express 5 + Prisma (PostgreSQL) + Redis/BullMQ + FFmpeg audio
 # from the repo root
 cp .env.example apps/api/.env    # then edit values
 pnpm install
-pnpm --filter @aurial/shared build
-pnpm --filter @aurial/api db:generate
-pnpm --filter @aurial/api db:migrate   # creates/updates the schema
-pnpm --filter @aurial/api db:seed      # rich demo data (idempotent)
+pnpm --filter @radinho/shared build
+pnpm --filter @radinho/api db:generate
+pnpm --filter @radinho/api db:migrate   # creates/updates the schema
+pnpm --filter @radinho/api db:seed      # rich demo data (idempotent)
 ```
 
 ## Run
 
 ```bash
-pnpm --filter @aurial/api dev          # API on http://localhost:4000
-pnpm --filter @aurial/api dev:worker   # BullMQ workers (audio pipeline)
+pnpm --filter @radinho/api dev          # API on http://localhost:4000
+pnpm --filter @radinho/api dev:worker   # BullMQ workers (audio pipeline)
 ```
 
 - Health: `GET /healthz`
@@ -43,8 +43,8 @@ is logged at startup). Seeded demo users have firebase uids `seed-user-1..3`, so
 ## Tests
 
 ```bash
-pnpm --filter @aurial/api test        # vitest unit tests (no DB/Redis needed)
-pnpm --filter @aurial/api typecheck
+pnpm --filter @radinho/api test        # vitest unit tests (no DB/Redis needed)
+pnpm --filter @radinho/api typecheck
 ```
 
 ## Production

@@ -20,7 +20,7 @@
  *      um download que não toca.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /** Cofre de bytes de mentira (o IndexedDB real). */
 const cofre = new Map<string, Blob>();

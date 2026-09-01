@@ -20,7 +20,7 @@ import {
   Volume2,
   VolumeX,
 } from 'lucide-react';
-import type { WaveformDto } from '@aurial/shared';
+import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';

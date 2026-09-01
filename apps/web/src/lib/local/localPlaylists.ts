@@ -12,7 +12,7 @@
  * no audio library. When the user later imports the matching file, the local
  * track can be added and it upgrades to full offline playback.
  */
-import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@aurial/shared';
+import type { PlaylistDto, PlaylistWithTracksDto, TrackDto } from '@radinho/shared';
 import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';

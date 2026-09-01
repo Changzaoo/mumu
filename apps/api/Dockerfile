@@ -17,12 +17,12 @@ COPY apps/api/package.json apps/api/package.json
 RUN apt-get update \
   && apt-get install -y --no-install-recommends openssl ca-certificates \
   && rm -rf /var/lib/apt/lists/*
-RUN pnpm install --frozen-lockfile --filter "@aurial/api..."
+RUN pnpm install --frozen-lockfile --filter "@radinho/api..."
 COPY packages/shared packages/shared
 COPY apps/api apps/api
-RUN pnpm --filter @aurial/shared build \
-  && pnpm --filter @aurial/api db:generate \
-  && pnpm --filter @aurial/api build
+RUN pnpm --filter @radinho/shared build \
+  && pnpm --filter @radinho/api db:generate \
+  && pnpm --filter @radinho/api build
 
 # ── runtime: node + ffmpeg + yt-dlp ─────────────────────────────────────
 # Dev deps are kept on purpose: the compose `migrate` one-shot runs

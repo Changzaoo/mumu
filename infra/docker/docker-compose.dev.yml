@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-# Aurial — local development dependencies (Postgres + Redis only).
+# radinho.online — local development dependencies (Postgres + Redis only).
 # The api/web apps run on the host via `pnpm dev`.
 #
 #   docker compose -f infra/docker/docker-compose.dev.yml up -d

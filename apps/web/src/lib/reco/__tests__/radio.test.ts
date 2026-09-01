@@ -10,7 +10,7 @@
  * quem enchia a fila era o terceiro, que não olhava gênero nenhum.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 const biblioteca: TrackDto[] = [];
 const vereditos = new Map<string, 'limpo' | 'explicito'>();

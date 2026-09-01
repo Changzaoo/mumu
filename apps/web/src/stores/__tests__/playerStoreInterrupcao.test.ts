@@ -12,7 +12,7 @@
  *    falante do outro app em loop.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 type Handler = (payload: unknown) => void;
 const engineHandlers = new Map<string, Handler[]>();

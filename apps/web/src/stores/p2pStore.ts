@@ -10,7 +10,7 @@
  * only plain, render-friendly data lives in the zustand store.
  */
 import { create } from 'zustand';
-import type { PeerControlMessage, SharedTrackMeta } from '@aurial/shared';
+import type { PeerControlMessage, SharedTrackMeta } from '@radinho/shared';
 import { PeerConnection } from '@/lib/p2p/peerConnection';
 import { emDadosMoveis, podeServir, registrarEnvioMovel } from '@/lib/p2p/politica';
 import { Transfer, type TransferProgress } from '@/lib/p2p/transfer';

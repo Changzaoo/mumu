@@ -10,7 +10,7 @@
  * concentram a informação, então cortar em 512 e renormalizar preserva quase
  * toda a qualidade com 1/4 do espaço (5 mil faixas ≈ 10 MB em vez de 40 MB).
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { aiEmbed } from '@/lib/local/importerHelper';
 import { normalize, trackEmbeddingText } from '@/lib/reco/semantic';
 

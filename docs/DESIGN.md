@@ -1,10 +1,10 @@
-# Aurial — Design System
+# radinho.online — Design System
 
 > Identity: **deep black, glass, one exclusive green**. Minimal like Nothing/Linear, warm like Apple Music, fast like Raycast. Original — inspired by, never copied from, Spotify/Apple/Arc.
 
 ## 1. Brand
 
-- Name: **Aurial** (aura + aural).
+- Name: **radinho.online** (aura + aural).
 - Logo concept: a rounded waveform arc forming an "A" (SVG, single path, uses `--accent`).
 - Voice: quiet confidence. No exclamation marks in UI copy.
 
@@ -12,20 +12,20 @@
 
 Defined in `styles/globals.css` under `:root` (light) and `.dark`. **All components use tokens — never raw hex.**
 
-| Token           | Dark                                   | Light         | Use                                  |
-| --------------- | -------------------------------------- | ------------- | ------------------------------------ |
-| `--bg`          | `240 6% 4%` (#0A0A0C deep black)       | `0 0% 99%`    | app background                       |
-| `--bg-elevated` | `240 5% 7%`                            | `0 0% 100%`   | cards, sidebar                       |
-| `--bg-overlay`  | `240 5% 10%`                           | `240 5% 96%`  | popovers, sheets                     |
-| `--fg`          | `0 0% 98%`                             | `240 6% 7%`   | primary text                         |
-| `--fg-muted`    | `240 4% 64%`                           | `240 4% 42%`  | secondary text                       |
-| `--fg-subtle`   | `240 4% 40%`                           | `240 4% 62%`  | tertiary/placeholders                |
-| `--accent`      | `158 84% 52%` (#17E68C — Aurial Green) | `160 84% 36%` | primary actions, active states, play |
-| `--accent-fg`   | `160 90% 8%`                           | `0 0% 100%`   | text on accent                       |
-| `--info`        | `217 92% 65%` (discreet neon blue)     | `221 83% 53%` | links, focus alt, badges             |
-| `--danger`      | `0 72% 58%`                            | `0 72% 46%`   | destructive                          |
-| `--border`      | `240 5% 14%`                           | `240 5% 90%`  | hairlines (always 1px)               |
-| `--ring`        | = accent                               | = accent      | focus rings                          |
+| Token           | Dark                                           | Light         | Use                                  |
+| --------------- | ---------------------------------------------- | ------------- | ------------------------------------ |
+| `--bg`          | `240 6% 4%` (#0A0A0C deep black)               | `0 0% 99%`    | app background                       |
+| `--bg-elevated` | `240 5% 7%`                                    | `0 0% 100%`   | cards, sidebar                       |
+| `--bg-overlay`  | `240 5% 10%`                                   | `240 5% 96%`  | popovers, sheets                     |
+| `--fg`          | `0 0% 98%`                                     | `240 6% 7%`   | primary text                         |
+| `--fg-muted`    | `240 4% 64%`                                   | `240 4% 42%`  | secondary text                       |
+| `--fg-subtle`   | `240 4% 40%`                                   | `240 4% 62%`  | tertiary/placeholders                |
+| `--accent`      | `158 84% 52%` (#17E68C — radinho.online Green) | `160 84% 36%` | primary actions, active states, play |
+| `--accent-fg`   | `160 90% 8%`                                   | `0 0% 100%`   | text on accent                       |
+| `--info`        | `217 92% 65%` (discreet neon blue)             | `221 83% 53%` | links, focus alt, badges             |
+| `--danger`      | `0 72% 58%`                                    | `0 72% 46%`   | destructive                          |
+| `--border`      | `240 5% 14%`                                   | `240 5% 90%`  | hairlines (always 1px)               |
+| `--ring`        | = accent                                       | = accent      | focus rings                          |
 
 Gradients: only ambient — dominant-color glow extracted from artwork (`color-thief` style util), blurred 120px at 25% opacity behind hero sections. No decorative rainbow gradients.
 

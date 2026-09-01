@@ -5,7 +5,7 @@
  * alimenta ao baixar/enriquecer faixas; um indexador em segundo plano
  * (indexLyricsInBackground) vai completando o cache da biblioteca aos poucos.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { cachedLyrics, fetchLyrics, lyricsCacheEntries, type Lyrics } from '@/lib/lyrics/lyrics';
 
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');

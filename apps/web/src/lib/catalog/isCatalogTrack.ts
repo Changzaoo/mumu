@@ -8,7 +8,7 @@
  * a fonte sai do ar. Este é o único lugar que decide essa fronteira, para que
  * biblioteca, listas locais, curtidas e histórico concordem entre si.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /** Prefixos de id que identificam faixas vindas do catálogo grátis. */
 const CATALOG_ID_PREFIXES = ['audius:', 'apple:'] as const;

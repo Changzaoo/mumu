@@ -25,7 +25,7 @@
  * A biblioteca entra apenas como ÚLTIMO recurso, e só quando as três acima não
  * produziram nada. Grade vazia numa conta nova seria pior que genérica.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import type { LocalArtist } from '@/lib/local/localLibrary';
 
 /** Meia-vida do play: o de um mês atrás vale metade do de hoje. */

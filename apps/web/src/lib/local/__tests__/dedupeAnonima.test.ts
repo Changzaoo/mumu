@@ -10,7 +10,7 @@
  * juntar quanto, principalmente, o que ela NÃO pode encostar.
  */
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { artistaEhDesconhecido, tituloDuracaoKey } from '@/lib/local/localLibrary';
 
 function t(title: string, artist: string | null, durationMs: number): TrackDto {

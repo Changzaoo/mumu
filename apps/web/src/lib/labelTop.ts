@@ -1,5 +1,5 @@
 import { useSyncExternalStore } from 'react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { fetchArtistTop } from '@/lib/local/importerHelper';
 import { normTitle } from '@/lib/artistTop';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';

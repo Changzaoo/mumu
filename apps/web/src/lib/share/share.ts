@@ -6,7 +6,7 @@
  */
 import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { remoteUrlFor, sourceUrlFor } from '@/lib/local/localLibrary';
 import { trackArtistNames } from '@/lib/utils';

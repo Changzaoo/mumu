@@ -1,9 +1,9 @@
 {
-  "name": "@aurial/signaling",
+  "name": "@radinho/signaling",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aurial P2P signaling server — WebRTC matchmaking only, no audio, no database.",
+  "description": "radinho.online P2P signaling server — WebRTC matchmaking only, no audio, no database.",
   "main": "dist/server.js",
   "scripts": {
     "dev": "tsx watch src/server.ts",
@@ -12,7 +12,7 @@
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
-    "@aurial/shared": "workspace:*",
+    "@radinho/shared": "workspace:*",
     "ws": "^8.18.0"
   },
   "devDependencies": {

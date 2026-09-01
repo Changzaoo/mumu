@@ -1,6 +1,6 @@
 /**
  * Audius catalog client — the client-side data source for real, legal, freely
- * playable music (Audius public API, no key). The central Aurial backend is not
+ * playable music (Audius public API, no key). The central radinho.online backend is not
  * deployed in the P2P topology, so Home / Search / Discover read from here.
  *
  * Host discovery: `GET https://api.audius.co` → `{ data: string[] }`. We pick a
@@ -17,7 +17,7 @@ import {
   type AudiusUser,
   type CatalogPlaylist,
 } from '@/lib/catalog/map';
-import type { ArtistDto, TrackDto } from '@aurial/shared';
+import type { ArtistDto, TrackDto } from '@radinho/shared';
 
 const APP_NAME = 'Aurial';
 const HOST_KEY = 'aurial:audius-host';

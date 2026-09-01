@@ -1,4 +1,4 @@
-import type { CursorQuery } from '@aurial/shared';
+import type { CursorQuery } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { created, noContent, ok } from '../../core/http/respond.js';
 import { currentUser } from '../../middlewares/auth.js';

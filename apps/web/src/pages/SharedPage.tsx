@@ -16,7 +16,7 @@ import { useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { toast } from 'sonner';
 import { ListPlus, Music, Play, Share2, UserRoundPlus } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Skeleton } from '@/components/ui/skeleton';

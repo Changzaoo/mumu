@@ -30,6 +30,6 @@ Você cuida de UMA frente: **a próxima música fazer sentido para ESTA pessoa.*
 ## Regras
 
 - `buildRecommendations(inputs)` com argumento é função **pura** — é assim que os testes a exercitam. Não introduza leitura de módulo dentro do caminho puro.
-- Rode `pnpm --filter @aurial/web test` (`lib/reco/__tests__/recommend.test.ts`).
+- Rode `pnpm --filter @radinho/web test` (`lib/reco/__tests__/recommend.test.ts`).
 - Não mexa em player, catálogo, downloads ou letras: têm dono. Relate se a causa estiver lá.
 - Comentário explica **por que**, em pt-BR.

@@ -30,7 +30,7 @@
  * (referência da biblioteca + dia + tamanho do histórico) — a Home pode chamar
  * a cada render sem custo.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localLikes from '@/lib/local/localLikes';

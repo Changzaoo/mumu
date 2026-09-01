@@ -2,7 +2,7 @@
 
 <!-- logo: substitua por docs/assets/logo.svg quando disponível -->
 
-# 🎧 Aurial
+# 🎧 radinho.online
 
 **Streaming de música profissional — minimal, glass, elegante, rápido.**
 
@@ -15,15 +15,15 @@
 <!-- badges: troque OWNER/REPO pela org/repo reais no GitHub -->
 
 <!-- screenshot: substitua por docs/assets/screenshot-home.png -->
-<img src="https://placehold.co/1200x680/0A0A0C/17E68C?text=Aurial+%E2%80%94+screenshot+em+breve" alt="Aurial — screenshot" width="800" />
+<img src="https://placehold.co/1200x680/0A0A0C/17E68C?text=radinho.online+%E2%80%94+screenshot+em+breve" alt="radinho.online — screenshot" width="800" />
 
 </div>
 
 ---
 
-## O que é o Aurial
+## O que é o radinho.online
 
-O **Aurial** (aura + aural) é uma plataforma de streaming de música completa e auto-hospedável: você envia seus arquivos de áudio, um pipeline FFmpeg transcodifica tudo para **HLS adaptativo**, e um player de nível profissional entrega a experiência — crossfade, gapless, equalizador e ReplayGain — em uma interface _deep black + glass_ com um único verde exclusivo.
+O **radinho.online** (aura + aural) é uma plataforma de streaming de música completa e auto-hospedável: você envia seus arquivos de áudio, um pipeline FFmpeg transcodifica tudo para **HLS adaptativo**, e um player de nível profissional entrega a experiência — crossfade, gapless, equalizador e ReplayGain — em uma interface _deep black + glass_ com um único verde exclusivo.
 
 Web na edge (Vercel) + API em servidor próprio (Docker) = custo mínimo, controle total do áudio.
 
@@ -50,7 +50,7 @@ Web na edge (Vercel) + API em servidor próprio (Docker) = custo mínimo, contro
 | Auth     | Firebase Auth (web SDK + firebase-admin)                                                                                |
 | Storage  | Cloudflare R2 (S3) · Supabase Storage · disco local (dev) — via interface `StorageProvider`                             |
 | Infra    | Docker Compose · nginx · PM2 (alternativa bare-metal) · GitHub Actions · Vercel                                         |
-| Contrato | `@aurial/shared` — schemas Zod + DTOs compartilhados entre web e api                                                    |
+| Contrato | `@radinho/shared` — schemas Zod + DTOs compartilhados entre web e api                                                   |
 
 ## Arquitetura
 
@@ -86,12 +86,12 @@ Decisões e regras completas em [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) �
 ## Estrutura de pastas
 
 ```
-aurial/
+radinho/
 ├── apps/
 │   ├── web/          # SPA React 19 + Vite (Vercel)
 │   └── api/          # Node 22 + Express 5 + Prisma (Docker/PM2 no servidor)
 ├── packages/
-│   └── shared/       # @aurial/shared — schemas Zod, DTOs, constantes
+│   └── shared/       # @radinho/shared — schemas Zod, DTOs, constantes
 ├── infra/
 │   ├── docker/       # docker-compose.dev.yml (deps locais) · docker-compose.prod.yml (stack completa)
 │   ├── nginx/        # reverse proxy de produção (rate limit, WS, cache HLS, TLS)
@@ -116,7 +116,7 @@ aurial/
 # 1. Dependências
 pnpm install
 
-# 2. Postgres + Redis locais (projeto docker: aurial-dev)
+# 2. Postgres + Redis locais (projeto docker: radinho-dev)
 docker compose -f infra/docker/docker-compose.dev.yml up -d
 
 # 3. Variáveis de ambiente (edite com suas credenciais Firebase)
@@ -154,7 +154,7 @@ pnpm dev
 | `pnpm typecheck`                              | `tsc --noEmit` em todos os pacotes     |
 | `pnpm test` / `pnpm test:coverage`            | Vitest em todos os pacotes             |
 | `pnpm e2e`                                    | Playwright (web)                       |
-| `pnpm --filter @aurial/web android:apk`       | build web + sync Capacitor + APK debug |
+| `pnpm --filter @radinho/web android:apk`      | build web + sync Capacitor + APK debug |
 | `pnpm db:generate` / `db:migrate` / `db:seed` | Prisma                                 |
 
 ### APK Android (app nativo)
@@ -165,7 +165,7 @@ Pré-requisitos locais:
 - Android SDK (`ANDROID_HOME` ou `local.properties` em `apps/web/android`)
 
 ```bash
-pnpm --filter @aurial/web android:apk
+pnpm --filter @radinho/web android:apk
 ```
 
 APK gerado em `apps/web/android/app/build/outputs/apk/debug/app-debug.apk`.

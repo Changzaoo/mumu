@@ -1,4 +1,4 @@
-import type { UserRole } from '@aurial/shared';
+import type { UserRole } from '@radinho/shared';
 
 declare global {
   namespace Express {

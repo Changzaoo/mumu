@@ -1,4 +1,4 @@
-import type { HomeDto, HomeSectionDto, HomeSectionItem, TrackDto } from '@aurial/shared';
+import type { HomeDto, HomeSectionDto, HomeSectionItem, TrackDto } from '@radinho/shared';
 import { cache, cacheKeys, cacheTtl } from '../../infra/redis/cache.js';
 import {
   toAlbumDto,

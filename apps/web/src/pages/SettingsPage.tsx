@@ -26,8 +26,8 @@ import {
   UserRound,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
-import { AUDIO_QUALITIES, type AudioQuality } from '@aurial/shared';
-import { AurialMark } from '@/components/brand/AurialMark';
+import { AUDIO_QUALITIES, type AudioQuality } from '@radinho/shared';
+import { RadinhoMark } from '@/components/brand/RadinhoMark';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -533,7 +533,7 @@ export default function SettingsPage() {
       {/* Sobre */}
       <SettingsCard icon={Info} title="Sobre">
         <div className="flex items-center gap-3">
-          <AurialMark className="size-8" />
+          <RadinhoMark className="size-8" />
           <div>
             <p className="text-sm font-medium text-fg">radinho.online</p>
             <p className="font-mono text-xs tabular-nums text-fg-muted">versão {APP_VERSION}</p>

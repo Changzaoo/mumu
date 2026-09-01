@@ -1,4 +1,4 @@
-# Aurial — Guia de Deploy
+# radinho.online — Guia de Deploy
 
 > Passo a passo completo: servidor LAN (API via Docker Compose) + Vercel (web).
 > Topologia, arquivos e serviços referenciados aqui vivem em `infra/` e `.github/workflows/`.
@@ -137,14 +137,14 @@ Deploys seguintes: rode o mesmo script — ou, da máquina Windows, `.\infra\scr
 1. **Import** do repositório em [vercel.com/new](https://vercel.com/new).
 2. Configurações do projeto (o `apps/web/vercel.json` já encode os comandos; confirme no dashboard):
 
-| Configuração     | Valor                                                                   |
-| ---------------- | ----------------------------------------------------------------------- |
-| Root Directory   | `apps/web`                                                              |
-| Framework Preset | Vite                                                                    |
-| Install Command  | `corepack enable && pnpm install --frozen-lockfile`                     |
-| Build Command    | `pnpm --filter @aurial/shared build && pnpm --filter @aurial/web build` |
-| Output Directory | `dist`                                                                  |
-| Node.js Version  | 22.x                                                                    |
+| Configuração     | Valor                                                                     |
+| ---------------- | ------------------------------------------------------------------------- |
+| Root Directory   | `apps/web`                                                                |
+| Framework Preset | Vite                                                                      |
+| Install Command  | `corepack enable && pnpm install --frozen-lockfile`                       |
+| Build Command    | `pnpm --filter @radinho/shared build && pnpm --filter @radinho/web build` |
+| Output Directory | `dist`                                                                    |
+| Node.js Version  | 22.x                                                                      |
 
 3. Environment Variables (Production) — nomes exatamente como no `.env.example`:
 
@@ -241,7 +241,7 @@ Sem Docker para o app (Postgres/Redis ainda precisam existir — nativos ou via 
 ```bash
 cd /opt/radinho
 pnpm install --frozen-lockfile
-pnpm --filter @aurial/shared build && pnpm --filter @aurial/api build
+pnpm --filter @radinho/shared build && pnpm --filter @radinho/api build
 cp .env.example apps/api/.env   # valores de produção (hosts localhost neste modo)
 pm2 start infra/pm2/ecosystem.config.cjs
 pm2 save && pm2 startup

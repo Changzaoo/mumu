@@ -19,7 +19,7 @@
  *
  * Puro e testável: recebe os dados, não lê store nem relógio por fora do `now`.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { daySeed, seededShuffle } from './recommend';
 
 export interface GrupoDeGenero {

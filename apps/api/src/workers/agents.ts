@@ -32,7 +32,7 @@ import {
   verifyGenreMessages,
   verifyMessages,
   type TrackIdentity,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { logger } from '../core/logger.js';
 import { nvidiaChat, nvidiaEmbed } from '../infra/ai/nvidia.js';
 
@@ -227,7 +227,7 @@ export async function dna(tracks: TrackFacts[]): Promise<(number[] | null)[]> {
 /**
  * Acha grupos de duplicatas na biblioteca de um usuário.
  *
- * A lógica de decisão vive em `@aurial/shared` (`duplicatas.ts`) e é pura —
+ * A lógica de decisão vive em `@radinho/shared` (`duplicatas.ts`) e é pura —
  * aqui só entra a colheita dos dados. Isso importa: fundir é destrutivo e
  * acontece sem o usuário ver, então a regra tem que ser testável sem Firestore.
  *

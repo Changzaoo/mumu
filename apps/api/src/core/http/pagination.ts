@@ -1,4 +1,4 @@
-import type { CursorMeta } from '@aurial/shared';
+import type { CursorMeta } from '@radinho/shared';
 import { ValidationError } from '../errors/index.js';
 
 export interface CursorPoint {

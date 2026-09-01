@@ -30,7 +30,7 @@
  * que dá para varrer e reparar — inclusive de outro aparelho, e inclusive
  * depois que a pessoa fechou o app.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { serverCollection } from '@/lib/sync/serverCollection';
 
 const CHAVE = 'aurial:faixas-que-falharam';

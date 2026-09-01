@@ -15,14 +15,14 @@
  *  3. Nada reexaminava o que já estava gravado errado.
  */
 import { describe, expect, it } from 'vitest';
-import { normalizarGenero, ehBaldeSemInformacao } from '@aurial/shared';
+import { normalizarGenero, ehBaldeSemInformacao } from '@radinho/shared';
 import {
   aceitarSugestao,
   generoDoArtista,
   herdarDoArtista,
   revisarGeneros,
   type FaixaMinima,
-} from '@aurial/shared';
+} from '@radinho/shared';
 
 const faixa = (id: string, genre: string | null, ...artistas: string[]): FaixaMinima => ({
   id,

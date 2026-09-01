@@ -1,9 +1,9 @@
 {
-  "name": "@aurial/web",
+  "name": "@radinho/web",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aurial web app — React 19 + Vite + Tailwind v4. Deep black, glass, one green.",
+  "description": "radinho.online web app — React 19 + Vite + Tailwind v4. Deep black, glass, one green.",
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
@@ -17,7 +17,7 @@
     "android:apk": "pnpm android:build && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
-    "@aurial/shared": "workspace:*",
+    "@radinho/shared": "workspace:*",
     "@capacitor/android": "^8.4.2",
     "@capacitor/core": "^8.4.2",
     "@fontsource-variable/inter": "^5.1.1",

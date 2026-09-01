@@ -1,9 +1,9 @@
 {
-  "name": "@aurial/api",
+  "name": "@radinho/api",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aurial API — Express 5 + Prisma + BullMQ backend",
+  "description": "radinho.online API — Express 5 + Prisma + BullMQ backend",
   "scripts": {
     "dev": "tsx watch src/main.ts",
     "dev:worker": "tsx watch src/workers/index.ts",
@@ -23,7 +23,7 @@
   },
   "dependencies": {
     "@asteasolutions/zod-to-openapi": "^7.3.0",
-    "@aurial/shared": "workspace:*",
+    "@radinho/shared": "workspace:*",
     "@aws-sdk/client-s3": "^3.716.0",
     "@aws-sdk/lib-storage": "^3.716.0",
     "@prisma/client": "^6.2.1",

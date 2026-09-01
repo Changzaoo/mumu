@@ -6,7 +6,7 @@
  * parte destes testes cobre quem ele NÃO pode escolher.
  */
 import { describe, expect, it, vi } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 vi.mock('@/lib/local/importerHelper', () => ({ aiSearchYouTube: vi.fn() }));
 vi.mock('@/lib/local/importQueue', () => ({ enqueue: vi.fn() }));

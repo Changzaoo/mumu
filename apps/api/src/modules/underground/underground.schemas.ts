@@ -1,5 +1,5 @@
 import { z } from 'zod';
-import { cursorQuerySchema } from '@aurial/shared';
+import { cursorQuerySchema } from '@radinho/shared';
 import { limitQuerySchema } from '../shared/querySchemas.js';
 
 /** Curation tag, e.g. "underground". Bounded so it cannot bloat a cache key. */

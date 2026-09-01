@@ -1,4 +1,4 @@
-import type { CursorQuery, RecordPlayInput } from '@aurial/shared';
+import type { CursorQuery, RecordPlayInput } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { created, ok } from '../../core/http/respond.js';
 import { currentUser } from '../../middlewares/auth.js';

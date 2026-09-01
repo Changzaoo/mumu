@@ -1,4 +1,4 @@
-// Aurial — data model
+// radinho.online — data model
 // PostgreSQL + Prisma. IDs are cuid strings. All timestamps UTC.
 
 generator client {

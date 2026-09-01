@@ -3,19 +3,19 @@ import { Radio } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
 /** The radinho mark — a little radio (single accent color). */
-export function AurialMark({ className, ...props }: ComponentProps<'svg'>) {
+export function RadinhoMark({ className, ...props }: ComponentProps<'svg'>) {
   return <Radio aria-hidden className={cn('size-7 text-accent', className)} {...props} />;
 }
 
-export interface AurialLogoProps extends ComponentProps<'span'> {
+export interface RadinhoLogoProps extends ComponentProps<'span'> {
   /** Hide the wordmark (collapsed sidebar). */
   markOnly?: boolean;
 }
 
-export function AurialLogo({ markOnly = false, className, ...props }: AurialLogoProps) {
+export function RadinhoLogo({ markOnly = false, className, ...props }: RadinhoLogoProps) {
   return (
     <span className={cn('inline-flex items-center gap-2.5', className)} {...props}>
-      <AurialMark />
+      <RadinhoMark />
       {!markOnly && (
         <span className="select-none text-lg font-semibold tracking-tight text-fg">
           radinho

@@ -3,7 +3,7 @@
  */
 import { useParams } from 'react-router';
 import { Play, Podcast } from 'lucide-react';
-import type { EpisodeDto } from '@aurial/shared';
+import type { EpisodeDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { HeroHeader } from '@/components/media/HeroHeader';

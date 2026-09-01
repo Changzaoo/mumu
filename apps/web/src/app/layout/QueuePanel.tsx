@@ -1,7 +1,7 @@
 import { useMemo } from 'react';
 import { Reorder, useDragControls } from 'framer-motion';
 import { GripVertical, ListMusic, Music, X } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Button } from '@/components/ui/button';
 import { IconButton } from '@/components/ui/icon-button';

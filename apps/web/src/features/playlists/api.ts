@@ -16,7 +16,7 @@ import type {
   PlaylistWithTracksDto,
   ReorderPlaylistInput,
   UpdatePlaylistInput,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { api } from '@/lib/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 

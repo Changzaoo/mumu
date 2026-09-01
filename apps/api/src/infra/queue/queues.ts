@@ -1,5 +1,5 @@
 import { Queue } from 'bullmq';
-import type { ImportProvider, UploadMetadataInput } from '@aurial/shared';
+import type { ImportProvider, UploadMetadataInput } from '@radinho/shared';
 import { createBullConnection } from '../redis/redis.js';
 
 export const QUEUE_NAMES = {

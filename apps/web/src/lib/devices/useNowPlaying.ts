@@ -21,7 +21,7 @@ import {
   type DeviceInfo,
 } from '@/lib/devices/presence';
 import { usePlayerStore } from '@/stores/playerStore';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 type ArtistRef = TrackDto['artists'][number];
 

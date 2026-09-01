@@ -6,7 +6,7 @@
  * MusicBrainz coverage of writer credits is uneven, so results can be sparse;
  * that's fine — we prefer "accurate but incomplete" over "full but wrong".
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 export interface Credits {

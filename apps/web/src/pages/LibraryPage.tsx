@@ -18,7 +18,7 @@ import {
   Search,
   Tag,
 } from 'lucide-react';
-import { createPlaylistSchema, type CreatePlaylistInput } from '@aurial/shared';
+import { createPlaylistSchema, type CreatePlaylistInput } from '@radinho/shared';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';

@@ -1,4 +1,4 @@
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /** Minimal valid TrackDto for unit tests. */
 export function makeTrack(id: string, overrides: Partial<TrackDto> = {}): TrackDto {
@@ -16,7 +16,7 @@ export function makeTrack(id: string, overrides: Partial<TrackDto> = {}): TrackD
     isLiked: false,
     album: { id: `album-${id}`, title: `Album ${id}`, slug: `album-${id}`, coverUrl: null },
     artists: [{ id: `artist-${id}`, name: `Artist ${id}`, slug: `artist-${id}`, imageUrl: null }],
-    streamUrl: `https://cdn.aurial.test/audio/${id}/master.m3u8`,
+    streamUrl: `https://cdn.radinho.test/audio/${id}/master.m3u8`,
     uploadedByUserId: null,
     ...overrides,
   };

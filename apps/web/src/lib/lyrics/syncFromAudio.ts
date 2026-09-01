@@ -16,7 +16,7 @@
  * - O resultado entra no MESMO cache das letras, então vale offline e para
  *   sempre — a transcrição acontece uma vez por faixa na vida.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { alignLinesToSegments, alignLyrics, spreadLinesOverSpan } from '@/lib/lyrics/align';
 import {
   cachedLyrics,

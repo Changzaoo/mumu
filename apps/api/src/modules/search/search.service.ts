@@ -1,4 +1,4 @@
-import type { SearchQuery, SearchResultsDto, SearchType, SuggestionDto } from '@aurial/shared';
+import type { SearchQuery, SearchResultsDto, SearchType, SuggestionDto } from '@radinho/shared';
 import { cache, cacheKeys, cacheTtl } from '../../infra/redis/cache.js';
 import {
   applyLikedFlags,

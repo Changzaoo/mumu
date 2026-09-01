@@ -18,7 +18,7 @@
  * Estas funções ATRIBUEM AUTORIA — errar aqui não deixa a faixa como estava,
  * deixa ela mentindo. Na dúvida, devolvem null.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { appleArtwork, artistSongs, searchArtistIds } from '@/lib/catalog/itunes';
 import { normalizeForMatch, titleSearchCandidates } from '@/lib/local/coverBackfill';
 

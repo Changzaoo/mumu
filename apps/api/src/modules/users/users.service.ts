@@ -1,4 +1,4 @@
-import type { MeDto, PlaylistDto, UpdateMeInput, UserDto, UserStatsDto } from '@aurial/shared';
+import type { MeDto, PlaylistDto, UpdateMeInput, UserDto, UserStatsDto } from '@radinho/shared';
 import type { Prisma } from '@prisma/client';
 import { ConflictError, NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { eventBus } from '../../core/events/eventBus.js';

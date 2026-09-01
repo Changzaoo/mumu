@@ -12,7 +12,7 @@ import {
   type ApiErrorBody,
   type UploadDto,
   type UploadStatus,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { Badge, type BadgeProps } from '@/components/ui/badge';

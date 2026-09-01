@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Aurial — set up SSH key auth from this Windows machine to the LAN server.
+  radinho.online — set up SSH key auth from this Windows machine to the LAN server.
 
 .DESCRIPTION
   1. Generates an ed25519 key pair if one does not exist yet.

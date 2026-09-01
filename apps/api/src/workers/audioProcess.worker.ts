@@ -7,9 +7,9 @@ import { Worker, type Job } from 'bullmq';
 import { customAlphabet } from 'nanoid';
 import { parseFile } from 'music-metadata';
 import sharp from 'sharp';
-import { slugify, WAVEFORM_PEAKS } from '@aurial/shared';
+import { slugify, WAVEFORM_PEAKS } from '@radinho/shared';
 import type { Prisma, UploadStatus } from '@prisma/client';
-import type { UploadMetadataInput } from '@aurial/shared';
+import type { UploadMetadataInput } from '@radinho/shared';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import type { Redis } from 'ioredis';
@@ -194,7 +194,7 @@ async function processUpload(job: Job<AudioProcessJobData>): Promise<void> {
     return;
   }
 
-  const tmpDir = path.join(os.tmpdir(), 'aurial-pipeline', uploadId);
+  const tmpDir = path.join(os.tmpdir(), 'radinho-pipeline', uploadId);
   await mkdir(tmpDir, { recursive: true });
   const sourcePath = path.join(tmpDir, `source${path.extname(fileName) || '.bin'}`);
 

@@ -5,7 +5,7 @@
  * local que rejeita não pode travar TODA a reprodução para sempre.
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 type Handler = (payload: unknown) => void;
 const engineHandlers = new Map<string, Handler[]>();

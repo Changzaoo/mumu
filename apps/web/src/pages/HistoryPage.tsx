@@ -4,7 +4,7 @@
  */
 import { useEffect, useMemo, useRef } from 'react';
 import { History } from 'lucide-react';
-import type { HistoryEntryDto } from '@aurial/shared';
+import type { HistoryEntryDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { PageSkeleton } from '@/components/media/PageSkeleton';

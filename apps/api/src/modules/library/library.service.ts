@@ -1,4 +1,4 @@
-import type { LibraryDto, TrackDto } from '@aurial/shared';
+import type { LibraryDto, TrackDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { eventBus } from '../../core/events/eventBus.js';
 import { encodeCursor, type CursorPage } from '../../core/http/pagination.js';

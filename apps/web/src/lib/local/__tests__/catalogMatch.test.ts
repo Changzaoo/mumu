@@ -8,7 +8,7 @@
  * ela mente com confiança e o usuário não tem como perceber.
  */
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import {
   candidateArtists,
   indexCatalog,

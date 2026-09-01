@@ -1,9 +1,9 @@
 {
-  "name": "@aurial/shared",
+  "name": "@radinho/shared",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Shared Zod schemas, DTO types and constants for Aurial web + api",
+  "description": "Shared Zod schemas, DTO types and constants for radinho.online web + api",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",

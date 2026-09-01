@@ -10,7 +10,7 @@ import { useParams } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { ExternalLink, ListMusic, Loader2, Pencil, UserMinus, UserPlus } from 'lucide-react';
-import { updateMeSchema, type MeDto, type UpdateMeInput } from '@aurial/shared';
+import { updateMeSchema, type MeDto, type UpdateMeInput } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { PageSkeleton } from '@/components/media/PageSkeleton';

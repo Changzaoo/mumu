@@ -1,4 +1,4 @@
-import { REPLAY_GAIN_TARGET_LUFS } from '@aurial/shared';
+import { REPLAY_GAIN_TARGET_LUFS } from '@radinho/shared';
 import { ffmpeg, NULL_SINK } from './ffmpeg.js';
 
 export interface LoudnessAnalysis {

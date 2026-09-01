@@ -9,7 +9,7 @@
  *   trending/{trackId}                     { track, genre, genreKey, likeCount }
  *   trending/{trackId}/voters/{uid}        { at }   (one per user who liked it)
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { auth, db } from '@/lib/firebase';
 // Firestore por import DINÂMICO: `recordLike` é alcançado pela API de
 // biblioteca, que está no caminho crítico — ver lib/sync/firestoreLazy.ts.

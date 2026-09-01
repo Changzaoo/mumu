@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { searchQuerySchema, suggestQuerySchema } from '@aurial/shared';
+import { searchQuerySchema, suggestQuerySchema } from '@radinho/shared';
 import { validate } from '../../middlewares/validate.js';
 import { searchController } from './search.controller.js';
 

@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# Aurial — PostgreSQL backup (pg_dump from the postgres container).
+# radinho.online — PostgreSQL backup (pg_dump from the postgres container).
 #
 # Run ON the server:
 #   /opt/radinho/infra/scripts/backup-db.sh

@@ -1,4 +1,4 @@
-import { EQ_BANDS_HZ, EQ_PRESETS } from '@aurial/shared';
+import { EQ_BANDS_HZ, EQ_PRESETS } from '@radinho/shared';
 import {
   Sheet,
   SheetContent,

@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { cursorQuerySchema, recordPlaySchema } from '@aurial/shared';
+import { cursorQuerySchema, recordPlaySchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { limitQuerySchema } from '../shared/querySchemas.js';

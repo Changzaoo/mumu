@@ -22,7 +22,7 @@ import {
   herdarDoArtista,
   revisarGeneros,
   type FaixaMinima,
-} from '@aurial/shared';
+} from '@radinho/shared';
 
 const ATTEMPTS_KEY = 'aurial:genreAgentAttempts';
 const REVISAO_KEY = 'aurial:genreRevisao';

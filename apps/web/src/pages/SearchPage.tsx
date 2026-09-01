@@ -24,7 +24,7 @@ import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSear
 import { useSyncExternalStore } from 'react';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 type Tab = 'all' | 'track' | 'artist' | 'album';
 

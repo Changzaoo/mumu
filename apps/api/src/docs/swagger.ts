@@ -10,6 +10,10 @@ export function createDocsRouter(): Router {
   router.get('/openapi.json', (_req, res) => {
     res.json(document);
   });
-  router.use('/', swaggerUi.serve, swaggerUi.setup(document, { customSiteTitle: 'Aurial API' }));
+  router.use(
+    '/',
+    swaggerUi.serve,
+    swaggerUi.setup(document, { customSiteTitle: 'radinho.online API' }),
+  );
   return router;
 }

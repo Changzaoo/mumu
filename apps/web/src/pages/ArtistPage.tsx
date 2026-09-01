@@ -6,7 +6,7 @@ import { useMemo, useState } from 'react';
 import { useParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { BadgeCheck, MicVocal, Shuffle, UserMinus, UserPlus } from 'lucide-react';
-import type { AlbumDto } from '@aurial/shared';
+import type { AlbumDto } from '@radinho/shared';
 import { ArtistCard } from '@/components/media/ArtistCard';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';

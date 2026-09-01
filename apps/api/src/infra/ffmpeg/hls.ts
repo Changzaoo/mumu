@@ -1,6 +1,6 @@
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
-import { AUDIO_BITRATES } from '@aurial/shared';
+import { AUDIO_BITRATES } from '@radinho/shared';
 import { ffmpeg } from './ffmpeg.js';
 
 export interface HlsRung {

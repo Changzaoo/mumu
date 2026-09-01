@@ -1,4 +1,4 @@
-# Contribuindo com o Aurial
+# Contribuindo com o radinho.online
 
 > Projeto proprietário — contribuições apenas por convite. Este guia vale para todo o time (humanos e agentes).
 > Leia antes: [`ARCHITECTURE.md`](ARCHITECTURE.md) (regras de código, é a fonte da verdade) e [`DESIGN.md`](DESIGN.md) (UI).
@@ -55,11 +55,11 @@ pnpm -r build
 pnpm e2e            # Playwright — para mudanças na web
 ```
 
-Testes acompanham a mudança: service novo → teste com repositório mockado; componente novo → Testing Library; schema novo em `@aurial/shared` → teste de parse.
+Testes acompanham a mudança: service novo → teste com repositório mockado; componente novo → Testing Library; schema novo em `@radinho/shared` → teste de parse.
 
 ## Padrões de código (resumo — detalhes no ARCHITECTURE.md)
 
-- **API**: controller → service → repository, sem atalhos. Controllers não tocam Prisma; services não tocam `req`/`res`; repositories não têm regra de negócio. Toda entrada validada com Zod de `@aurial/shared`; toda resposta no envelope `{ data, meta? }` / `{ error: { code, message } }`; erros via hierarquia `AppError`.
+- **API**: controller → service → repository, sem atalhos. Controllers não tocam Prisma; services não tocam `req`/`res`; repositories não têm regra de negócio. Toda entrada validada com Zod de `@radinho/shared`; toda resposta no envelope `{ data, meta? }` / `{ error: { code, message } }`; erros via hierarquia `AppError`.
 - **Web**: estado de servidor só em TanStack Query, estado de cliente só em Zustand — nunca duplicar. Formulários com react-hook-form + zodResolver. O player é global e nunca desmonta.
 - **UI**: só tokens do design system (nunca hex cru), radius/espaçamentos do `DESIGN.md`, toda tela verificada em **dark e light**, `prefers-reduced-motion` respeitado.
 - **Shared primeiro**: DTOs/schemas usados por web **e** api nascem em `packages/shared` — nunca duplique contratos.

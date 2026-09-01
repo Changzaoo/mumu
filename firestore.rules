@@ -1,6 +1,6 @@
 rules_version = '2';
 
-// Aurial — Firestore security rules (cross-device sync + community trending).
+// radinho.online — Firestore security rules (cross-device sync + community trending).
 // Paste these into Firebase console → Firestore Database → Rules → Publish.
 service cloud.firestore {
   match /databases/{database}/documents {

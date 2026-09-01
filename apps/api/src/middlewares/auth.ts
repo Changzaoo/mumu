@@ -1,6 +1,6 @@
 import type { Request, RequestHandler } from 'express';
 import type { User } from '@prisma/client';
-import { ehEmailAdmin, slugify, type UserRole } from '@aurial/shared';
+import { ehEmailAdmin, slugify, type UserRole } from '@radinho/shared';
 import { customAlphabet } from 'nanoid';
 import { asyncHandler } from '../core/http/asyncHandler.js';
 import { ForbiddenError, UnauthorizedError } from '../core/errors/index.js';

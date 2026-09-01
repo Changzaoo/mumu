@@ -11,7 +11,7 @@
  * em todo boot — daí o teto de 3 tentativas, com reset manual pelo "tentar de
  * novo".
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 
 /** Depois de 3 tentativas sem achar, a faixa sai da varredura automática. */

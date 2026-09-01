@@ -1,5 +1,5 @@
-// Aurial demo seed — deterministic and idempotent (fixed ids + upserts).
-// Run: pnpm --filter @aurial/api db:seed
+// radinho.online demo seed — deterministic and idempotent (fixed ids + upserts).
+// Run: pnpm --filter @radinho/api db:seed
 import 'dotenv/config';
 import { PrismaClient } from '@prisma/client';
 
@@ -21,7 +21,7 @@ const pick = <T>(arr: readonly T[]): T => arr[Math.floor(rand() * arr.length)] a
 const between = (min: number, max: number): number => Math.floor(min + rand() * (max - min));
 
 const cover = (seedKey: string, size = 600): string =>
-  `https://picsum.photos/seed/aurial-${seedKey}/${size}/${size}`;
+  `https://picsum.photos/seed/radinho-${seedKey}/${size}/${size}`;
 
 const slugify = (s: string): string =>
   s
@@ -240,7 +240,7 @@ async function seedArtists(genreIds: Map<string, string>): Promise<string[]> {
         slug,
         imageUrl: cover(slug, 500),
         bannerUrl: cover(`${slug}-banner`, 1200),
-        bio: `${a.name} — one of Aurial's demo catalog artists.`,
+        bio: `${a.name} — one of radinho.online's demo catalog artists.`,
         verified: a.verified ?? false,
         monthlyListeners: between(2_000, 900_000),
       },
@@ -391,7 +391,7 @@ async function seedUsers(): Promise<string[]> {
       create: {
         id: u.id,
         firebaseUid: u.firebaseUid,
-        email: `${u.handle.replace(/[^a-z0-9]/g, '')}@demo.aurial.app`,
+        email: `${u.handle.replace(/[^a-z0-9]/g, '')}@demo.radinho.online`,
         handle: u.handle,
         displayName: u.displayName,
         avatarUrl: cover(`avatar-${u.handle}`, 300),
@@ -593,16 +593,16 @@ async function seedPodcasts(): Promise<void> {
     {
       id: 'seed-podcast-01',
       title: 'Waveform Stories',
-      publisher: 'Aurial Originals',
+      publisher: 'radinho.online Originals',
       description: 'Conversations about the songs that changed lives.',
-      feedUrl: 'https://feeds.aurial.app/waveform-stories.xml',
+      feedUrl: 'https://feeds.radinho.online/waveform-stories.xml',
     },
     {
       id: 'seed-podcast-02',
       title: 'Backstage Brasil',
       publisher: 'Estúdio Oito',
       description: 'Bastidores da música brasileira independente.',
-      feedUrl: 'https://feeds.aurial.app/backstage-brasil.xml',
+      feedUrl: 'https://feeds.radinho.online/backstage-brasil.xml',
     },
   ];
   for (const [pi, p] of podcasts.entries()) {
@@ -622,7 +622,7 @@ async function seedPodcasts(): Promise<void> {
           title: `Episode ${e + 1}: ${pick(ALBUM_WORDS_A)} ${pick(ALBUM_WORDS_B)}`,
           description: 'Demo episode seeded for development.',
           durationMs: between(20 * 60_000, 75 * 60_000),
-          audioUrl: `https://cdn.aurial.app/podcasts/${p.id}/ep-${e + 1}.mp3`,
+          audioUrl: `https://cdn.radinho.online/podcasts/${p.id}/ep-${e + 1}.mp3`,
           coverUrl: cover(`${p.id}-ep-${e + 1}`, 400),
           publishedAt: new Date(Date.UTC(2025, pi * 3 + (e % 12), ((e * 9) % 27) + 1)),
         },
@@ -659,7 +659,7 @@ async function seedRadiosAndBadges(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  console.log('🌱 Seeding Aurial demo data (idempotent)...');
+  console.log('🌱 Seeding radinho.online demo data (idempotent)...');
   const genreIds = await seedGenres();
   const artistIds = await seedArtists(genreIds);
   const albums = await seedAlbums(artistIds, genreIds);

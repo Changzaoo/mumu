@@ -1,4 +1,4 @@
-import type { RadioStationDto } from '@aurial/shared';
+import type { RadioStationDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { toRadioDto } from '../shared/mappers.js';
 import { radiosRepository } from './radios.repository.js';

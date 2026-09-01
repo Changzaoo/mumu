@@ -1,4 +1,4 @@
-import type { ArtistDto, TrackDto } from '@aurial/shared';
+import type { ArtistDto, TrackDto } from '@radinho/shared';
 import {
   encodeNumericCursor,
   takePage,

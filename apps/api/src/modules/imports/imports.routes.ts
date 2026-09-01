@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { createImportSchema, createLinkImportSchema, idParamSchema } from '@aurial/shared';
+import { createImportSchema, createLinkImportSchema, idParamSchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { uploadRateLimit } from '../../middlewares/rateLimit.js';
 import { validate } from '../../middlewares/validate.js';

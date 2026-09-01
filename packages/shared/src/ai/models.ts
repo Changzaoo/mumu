@@ -1,5 +1,5 @@
 /**
- * Catálogo dos modelos NVIDIA que o Aurial usa, e a política de qual vai em
+ * Catálogo dos modelos NVIDIA que o radinho.online usa, e a política de qual vai em
  * cada tarefa.
  *
  * POR QUE ISSO EXISTE: até aqui TODA chamada ia no `nemotron-3-ultra-550b`,

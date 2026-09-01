@@ -1,4 +1,4 @@
-import type { MeDto } from '@aurial/shared';
+import type { MeDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { toMeDto } from '../shared/mappers.js';
 import { authRepository } from './auth.repository.js';

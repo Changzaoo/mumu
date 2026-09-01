@@ -1,5 +1,5 @@
 /**
- * Apple/iTunes → Aurial domain mapper.
+ * Apple/iTunes → radinho.online domain mapper.
  *
  * Maps an iTunes song row to a `TrackDto`. Ids are namespaced (`itunes:<id>`)
  * so they never collide with local (`local:<uuid>`), Audius (`audius:<id>`) or
@@ -10,7 +10,7 @@
  * clip, not the full song). `downloadUrl` is always null and `previewOnly` is
  * true — these tracks are never downloaded, offline-cached or P2P-shared.
  */
-import { normalizarGenero, type TrackDto } from '@aurial/shared';
+import { normalizarGenero, type TrackDto } from '@radinho/shared';
 import { appleArtwork, type AppleSong } from '@/lib/catalog/itunes';
 
 /** Apple preview clip length in ms (fixed — matches the seek bar). */

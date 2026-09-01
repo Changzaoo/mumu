@@ -9,7 +9,7 @@ import {
   type UseQueryResult,
 } from '@tanstack/react-query';
 import { toast } from 'sonner';
-import type { AlbumDto, ArtistDto, TrackDto } from '@aurial/shared';
+import type { AlbumDto, ArtistDto, TrackDto } from '@radinho/shared';
 import { api } from '@/lib/api';
 
 /** ArtistDto + optional server-side "am I following" flag. */

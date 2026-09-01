@@ -4,7 +4,7 @@
  * artist tracks) flows through here. Query keys are namespaced `['catalog', …]`.
  */
 import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
-import type { ArtistDto, TrackDto } from '@aurial/shared';
+import type { ArtistDto, TrackDto } from '@radinho/shared';
 import * as audius from '@/lib/catalog/audius';
 import * as itunes from '@/lib/catalog/itunes';
 import { appleSongToDto } from '@/lib/catalog/mapApple';

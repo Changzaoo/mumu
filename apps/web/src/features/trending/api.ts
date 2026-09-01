@@ -2,7 +2,7 @@
  * Community trending feed — reads the global likes-fed "em alta" from Firestore.
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { APPLE_GENRES } from '@/lib/catalog/itunes';
 import { topByGenre, topTrending } from '@/lib/trending/trending';
 

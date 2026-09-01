@@ -1,12 +1,12 @@
 /**
- * Typed fetch client for the Aurial API.
+ * Typed fetch client for the radinho.online API.
  *
  * - Envelope-aware: success `{ data, meta? }`, error `{ error: { code, message, details? } }`.
  * - Auto `Authorization: Bearer <Firebase ID token>` (Firebase SDK caches tokens).
  * - Throws `ApiError { code, message, status, details }` on any failure,
  *   including network errors (status 0).
  */
-import type { ApiErrorBody } from '@aurial/shared';
+import type { ApiErrorBody } from '@radinho/shared';
 import { getIdToken } from '@/lib/firebase';
 import { API_BASE_URL } from '@/lib/apiBase';
 
@@ -126,7 +126,7 @@ export const api = {
     request<T, M>('DELETE', path, options),
 };
 
-/** The origin the Aurial API is served from. */
+/** The origin the radinho.online API is served from. */
 export function apiOrigin(): string {
   try {
     return new URL(BASE_URL, window.location.origin).origin;

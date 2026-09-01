@@ -1,5 +1,5 @@
 /**
- * Audius → Aurial domain mappers.
+ * Audius → radinho.online domain mappers.
  *
  * The Audius public API returns rich track/user/playlist objects; the rest of
  * the app speaks `TrackDto` / `ArtistDto`. These pure functions bridge the two.
@@ -8,7 +8,7 @@
  * `downloadUrl` point at the Audius stream endpoint — making every catalog
  * track directly playable, downloadable (→ offline) and therefore shareable.
  */
-import type { ArtistDto, TrackDto } from '@aurial/shared';
+import type { ArtistDto, TrackDto } from '@radinho/shared';
 import { audiusHost } from '@/lib/catalog/audius';
 
 /** Audius artwork/profile picture bag (sizes are optional per node). */

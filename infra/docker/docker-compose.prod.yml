@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-# Aurial — production stack (runs on the LAN server, e.g. 192.168.0.100).
+# radinho.online — production stack (runs on the LAN server, e.g. 192.168.0.100).
 #
 # Expected layout on the server:
 #   /opt/radinho              → git checkout of this repo (DEPLOY_PATH)
@@ -152,7 +152,7 @@ services:
 
   # NÃO SOBE SOZINHO — o Caddy do host é quem atende a porta 80.
   #
-  # Esta máquina hospeda mais coisa além do Aurial, e quem responde na 80 é um
+  # Esta máquina hospeda mais coisa além do radinho.online, e quem responde na 80 é um
   # Caddy instalado no host. O nginx daqui então nunca conseguia subir ("address
   # already in use") e ficava `unhealthy` havia dois meses. O efeito colateral
   # era pior que ele não subir: o `deploy-api.sh` terminava com erro por causa

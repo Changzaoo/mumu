@@ -1,6 +1,6 @@
 /**
  * transfer — the peer application protocol over the data channel
- * (ARCHITECTURE-P2P §4, `PeerControlMessage` from @aurial/shared).
+ * (ARCHITECTURE-P2P §4, `PeerControlMessage` from @radinho/shared).
  *
  *   open        → send {hello} + {manifest}
  *   request     → {track-begin} · binary chunks (backpressured) · {track-end}
@@ -9,7 +9,7 @@
  * One outbound transfer at a time per peer (requests are queued). Progress is
  * emitted for both directions.
  */
-import type { PeerControlMessage, SharedTrackMeta } from '@aurial/shared';
+import type { PeerControlMessage, SharedTrackMeta } from '@radinho/shared';
 
 /** Minimal channel surface a Transfer needs (satisfied by PeerConnection). */
 export interface TransferChannel {

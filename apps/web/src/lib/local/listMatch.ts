@@ -7,7 +7,7 @@
  * que entram na biblioteca dele. Aqui só o acervo próprio conta; o que não
  * casar é devolvido como "faltando" para a tela dizer a verdade.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /** Mesma normalização da biblioteca (caixa/acento/pontuação não decidem nada). */
 export function normalizeName(value: string): string {

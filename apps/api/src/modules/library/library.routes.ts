@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { cursorQuerySchema, idParamSchema } from '@aurial/shared';
+import { cursorQuerySchema, idParamSchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { libraryController } from './library.controller.js';

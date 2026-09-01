@@ -13,7 +13,7 @@
  */
 import { env } from '../../config/index.js';
 import { logger } from '../../core/logger.js';
-import { EMBED_MODEL, type AiMessage } from '@aurial/shared';
+import { EMBED_MODEL, type AiMessage } from '@radinho/shared';
 
 const log = logger.child({ infra: 'nvidia' });
 

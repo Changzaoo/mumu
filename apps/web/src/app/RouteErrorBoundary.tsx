@@ -75,7 +75,7 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
     // Surface in dev tooling; production logging hooks in later.
-    console.error('[Aurial] page crashed:', error, info.componentStack);
+    console.error('[radinho.online] page crashed:', error, info.componentStack);
   }
 
   override render(): ReactNode {

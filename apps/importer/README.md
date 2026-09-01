@@ -1,9 +1,9 @@
-# @aurial/importer — local importer helper
+# @radinho/importer — local importer helper
 
 A tiny service you run on **your own machine** (only dependency: the gRPC
 client used for word-level transcription). It does the
 one thing a browser can't: fetch audio from a media link (via `yt-dlp`) and hand
-the resulting **MP3** back to the Aurial web app, which stores it in your local
+the resulting **MP3** back to the radinho.online web app, which stores it in your local
 library like any imported file — with cover art and metadata.
 
 Why a helper at all? A browser can't download from YouTube & friends: their CDNs
@@ -33,7 +33,7 @@ node apps/importer/server.mjs
 # → listening on http://127.0.0.1:8787
 ```
 
-Then open Aurial (local `pnpm dev:web`, or the hosted app) → **No dispositivo**
+Then open radinho.online (local `pnpm dev:web`, or the hosted app) → **No dispositivo**
 (`/dispositivo`) → _Adicionar por link_. When the helper is running the card
 shows a green “Importador local” badge and accepts YouTube / SoundCloud / Vimeo
 / Bandcamp links in addition to direct audio-file URLs.

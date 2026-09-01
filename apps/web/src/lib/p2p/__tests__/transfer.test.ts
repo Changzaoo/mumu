@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from 'vitest';
-import type { SharedTrackMeta } from '@aurial/shared';
+import type { SharedTrackMeta } from '@radinho/shared';
 import { Transfer, type TransferChannel, type TransferProgress } from '@/lib/p2p/transfer';
 
 /** A loopback channel: whatever is "sent" is delivered to the paired Transfer. */

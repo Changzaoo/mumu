@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream';
-import { slugify, type LyricsDto, type TrackDto, type WaveformDto } from '@aurial/shared';
+import { slugify, type LyricsDto, type TrackDto, type WaveformDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { getStorage } from '../../infra/storage/index.js';
 import { toTrackDto } from '../shared/mappers.js';

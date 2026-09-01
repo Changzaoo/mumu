@@ -25,6 +25,6 @@ Você cuida de UMA frente: **a música sair pelo alto-falante, do começo ao fim
 ## Regras
 
 - Toda correção precisa de um caminho de recuperação, não só de um `catch`. Engolir erro em silêncio é o bug, não a proteção.
-- Rode `pnpm --filter @aurial/web test` — há testes de fallback do player (`playerStoreFallback.test.ts`) que descrevem o comportamento esperado. Se você mudar a semântica, atualize o teste conscientemente e diga por quê.
+- Rode `pnpm --filter @radinho/web test` — há testes de fallback do player (`playerStoreFallback.test.ts`) que descrevem o comportamento esperado. Se você mudar a semântica, atualize o teste conscientemente e diga por quê.
 - Não mexa em letras, downloads ou recomendação: têm dono. Se a causa estiver lá, relate em vez de corrigir.
 - Comentário explica **por que**, não o quê — e em pt-BR, como o resto do arquivo.

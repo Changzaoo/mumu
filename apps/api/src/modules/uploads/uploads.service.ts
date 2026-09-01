@@ -7,7 +7,7 @@ import {
   ACCEPTED_AUDIO_MIME,
   type UploadDto,
   type UploadMetadataInput,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { takePage, type CursorPage } from '../../core/http/pagination.js';
 import { enqueueAudioProcess } from '../../infra/queue/queues.js';

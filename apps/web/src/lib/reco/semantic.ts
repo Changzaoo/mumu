@@ -10,7 +10,7 @@
  * Aqui fica só o que é puro e testável: montar o texto que representa a faixa,
  * cosseno, e o "vetor de gosto" do usuário. Rede e cache ficam em embeddings.ts.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /**
  * Texto que representa a faixa para o modelo. Título e artista carregam quase

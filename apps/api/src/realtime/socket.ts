@@ -1,6 +1,6 @@
 import type { Server as HttpServer } from 'node:http';
 import { Server, type Socket } from 'socket.io';
-import { sessionSyncSchema, type SessionSyncPayload, type UserRole } from '@aurial/shared';
+import { sessionSyncSchema, type SessionSyncPayload, type UserRole } from '@radinho/shared';
 import { webOrigins } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';

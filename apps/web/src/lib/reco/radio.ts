@@ -15,7 +15,7 @@
  * o que vem a seguir), então "escutar música por música" já vai puxando as
  * próximas sem a pessoa pedir.
  */
-import { podemConviver, type VeredictoDeConteudo, type TrackDto } from '@aurial/shared';
+import { podemConviver, type VeredictoDeConteudo, type TrackDto } from '@radinho/shared';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { similarTo } from './semanticMixes';
 import { daySeed, seededShuffle } from './recommend';

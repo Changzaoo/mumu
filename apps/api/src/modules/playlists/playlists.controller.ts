@@ -4,7 +4,7 @@ import type {
   CursorQuery,
   ReorderPlaylistInput,
   UpdatePlaylistInput,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { created, noContent, ok } from '../../core/http/respond.js';
 import { currentUser } from '../../middlewares/auth.js';

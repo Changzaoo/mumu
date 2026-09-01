@@ -20,7 +20,7 @@ import {
   LINK_IMPORT_HOSTS,
   LINK_IMPORT_MAX_DURATION_SECONDS,
   MAX_UPLOAD_SIZE_BYTES,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { env } from '../../config/index.js';
 import { logger } from '../../core/logger.js';
 

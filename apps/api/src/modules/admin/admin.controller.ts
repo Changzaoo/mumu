@@ -1,4 +1,4 @@
-import type { BanUserInput, PageQuery, UserRole } from '@aurial/shared';
+import type { BanUserInput, PageQuery, UserRole } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { ok } from '../../core/http/respond.js';
 import { currentUser } from '../../middlewares/auth.js';

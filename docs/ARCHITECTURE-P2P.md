@@ -1,6 +1,6 @@
-# Aurial — P2P / local-first architecture
+# radinho.online — P2P / local-first architecture
 
-> **Pivot.** Aurial is a **local-first, peer-to-peer** music app. Songs live on the
+> **Pivot.** radinho.online is a **local-first, peer-to-peer** music app. Songs live on the
 > user's device; users send tracks **directly to each other** over WebRTC. No
 > central server ever stores or streams audio. This document supersedes the
 > central-streaming design in `ARCHITECTURE.md` (which is kept as an optional

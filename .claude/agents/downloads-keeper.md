@@ -34,6 +34,6 @@ Você cuida de UMA frente: **o áudio estar no aparelho e continuar lá.**
 
 - Todo caminho de gravação: verifique que existe leitura correspondente no boot (`hydrate`) e que a chave é a mesma (`track.id`).
 - Nunca envie token nosso para CDN de terceiros.
-- Rode `pnpm --filter @aurial/web test`.
+- Rode `pnpm --filter @radinho/web test`.
 - Não mexa em player, catálogo, letras ou recomendação: têm dono. Relate se a causa estiver lá.
 - Comentário explica **por que**, em pt-BR.

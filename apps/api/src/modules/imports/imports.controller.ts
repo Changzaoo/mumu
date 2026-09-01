@@ -1,4 +1,4 @@
-import type { CreateImportInput, CreateLinkImportInput } from '@aurial/shared';
+import type { CreateImportInput, CreateLinkImportInput } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { accepted, ok } from '../../core/http/respond.js';
 import { currentUser } from '../../middlewares/auth.js';

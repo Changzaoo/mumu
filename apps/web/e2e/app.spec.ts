@@ -1,6 +1,6 @@
 import { expect, test } from '@playwright/test';
 
-test.describe('Aurial shell smoke', () => {
+test.describe('radinho.online shell smoke', () => {
   test('loads home, shows sidebar and navigates to /search', async ({ page }) => {
     await page.goto('/');
 

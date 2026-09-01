@@ -1,4 +1,4 @@
-import type { CursorQuery, UploadMetadataInput } from '@aurial/shared';
+import type { CursorQuery, UploadMetadataInput } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { accepted, noContent, ok } from '../../core/http/respond.js';
 import { ValidationError } from '../../core/errors/index.js';

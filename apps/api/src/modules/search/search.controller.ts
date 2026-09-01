@@ -1,4 +1,4 @@
-import type { SearchQuery } from '@aurial/shared';
+import type { SearchQuery } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { ok } from '../../core/http/respond.js';
 import { searchService } from './search.service.js';

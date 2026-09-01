@@ -6,7 +6,7 @@
  *
  * Emits: open, close, control (parsed JSON), binary (ArrayBuffer).
  */
-import type { PeerControlMessage } from '@aurial/shared';
+import type { PeerControlMessage } from '@radinho/shared';
 
 /**
  * O IP DE QUEM EMPRESTA NÃO PODE APARECER PARA QUEM RECEBE.

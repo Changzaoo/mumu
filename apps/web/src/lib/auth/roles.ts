@@ -4,11 +4,11 @@
  * owner controls here. Everyone else is a "common user": they can still add
  * music through the hardened Add-music dialog, but not the management tabs.
  */
-import { ADMIN_EMAILS, ehEmailAdmin } from '@aurial/shared';
+import { ADMIN_EMAILS, ehEmailAdmin } from '@radinho/shared';
 import { useAuthUser } from '@/hooks/useAuthUser';
 
 /**
- * Emails allowed into the admin/management surfaces. A lista mora em `@aurial/shared`
+ * Emails allowed into the admin/management surfaces. A lista mora em `@radinho/shared`
  * (`ADMIN_EMAILS`), uma cópia só — a API promove os mesmos e-mails a ADMIN no
  * login, então cliente e servidor não podem mais discordar sobre quem é dono.
  */

@@ -8,7 +8,7 @@
  * local source resolver). Playback prefers the local copy whenever present,
  * so downloaded tracks work fully offline.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';

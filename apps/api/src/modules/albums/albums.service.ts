@@ -1,4 +1,4 @@
-import type { AlbumDto, AlbumWithTracksDto } from '@aurial/shared';
+import type { AlbumDto, AlbumWithTracksDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { takePage, type CursorPage } from '../../core/http/pagination.js';
 import { cache, cacheKeys, cacheTtl } from '../../infra/redis/cache.js';

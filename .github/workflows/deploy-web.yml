@@ -1,4 +1,4 @@
-# Aurial — deploy the web SPA to Vercel (prebuilt flow: build in CI, upload artifacts).
+# radinho.online — deploy the web SPA to Vercel (prebuilt flow: build in CI, upload artifacts).
 #
 # Required repository secrets (Settings > Secrets and variables > Actions):
 #   VERCEL_TOKEN       → https://vercel.com/account/tokens
@@ -54,7 +54,7 @@ jobs:
         run: vercel pull --yes --environment=production --token=${{ secrets.VERCEL_TOKEN }}
 
       # Runs the project's installCommand + buildCommand (apps/web/vercel.json):
-      # pnpm install at the workspace root, build @aurial/shared, build the SPA.
+      # pnpm install at the workspace root, build @radinho/shared, build the SPA.
       - name: Build (vercel build)
         run: vercel build --prod --token=${{ secrets.VERCEL_TOKEN }}
 

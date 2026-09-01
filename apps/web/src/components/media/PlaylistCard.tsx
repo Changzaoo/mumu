@@ -1,4 +1,4 @@
-import type { PlaylistDto } from '@aurial/shared';
+import type { PlaylistDto } from '@radinho/shared';
 import { MediaCard } from '@/components/media/MediaCard';
 
 export interface PlaylistCardProps {

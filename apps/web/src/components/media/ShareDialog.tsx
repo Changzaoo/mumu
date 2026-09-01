@@ -7,7 +7,7 @@
 import { useEffect, useState } from 'react';
 import { Check, Copy, Link2, Loader2, Music, Share2 } from 'lucide-react';
 import { toast } from 'sonner';
-import { AurialMark } from '@/components/brand/AurialMark';
+import { RadinhoMark } from '@/components/brand/RadinhoMark';
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from '@/components/ui/dialog';
 import { createShare, type SharePayload } from '@/lib/share/share';
 
@@ -88,7 +88,7 @@ export function ShareDialogHost() {
                 {payload.subtitle}
               </p>
               <div className="mt-5 flex items-center justify-center gap-1.5 text-[12px] font-semibold text-white/80">
-                <AurialMark /> radinho.online
+                <RadinhoMark /> radinho.online
               </div>
             </div>
 

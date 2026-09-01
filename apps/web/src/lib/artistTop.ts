@@ -11,7 +11,7 @@
  * intacta — a seção degrada, não quebra.
  */
 import { useSyncExternalStore } from 'react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { fetchArtistTop } from '@/lib/local/importerHelper';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 

@@ -6,7 +6,7 @@
  * por quantidade. Todo usuário abria o app e via os mesmos três nomes.
  */
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { artistasDoUsuario } from '../artistasDoUsuario';
 
 const t = (id: string, artista: string): TrackDto =>

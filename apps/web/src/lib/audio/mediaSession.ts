@@ -9,7 +9,7 @@
  *
  * No-ops on browsers without the API. Called once from initPlayerEngine.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore, type PlayerState } from '@/stores/playerStore';
 

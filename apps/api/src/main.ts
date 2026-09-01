@@ -14,7 +14,7 @@ const io = setupRealtime(server);
 server.listen(env.PORT, () => {
   logger.info(
     { port: env.PORT, env: env.NODE_ENV, storage: env.STORAGE_DRIVER },
-    `Aurial API listening on :${env.PORT} (docs at /api/docs, ws at /ws)`,
+    `radinho.online API listening on :${env.PORT} (docs at /api/docs, ws at /ws)`,
   );
 });
 

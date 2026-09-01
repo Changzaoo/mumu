@@ -7,7 +7,7 @@
  */
 import { keepPreviousData, useQuery, type UseQueryResult } from '@tanstack/react-query';
 import { useCallback, useSyncExternalStore } from 'react';
-import type { SearchResultsDto, SearchType, SuggestionDto } from '@aurial/shared';
+import type { SearchResultsDto, SearchType, SuggestionDto } from '@radinho/shared';
 import { api } from '@/lib/api';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 

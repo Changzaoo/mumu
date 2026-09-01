@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { createCommentSchema, cursorQuerySchema, idParamSchema, idSchema } from '@aurial/shared';
+import { createCommentSchema, cursorQuerySchema, idParamSchema, idSchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { socialController } from './social.controller.js';

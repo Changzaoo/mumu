@@ -2,7 +2,7 @@
  * AI helpers (NVIDIA, via the importer's server-side proxy — the key never
  * reaches the browser). Reuse `aiChat` for any future AI feature.
  *
- * Os prompts e os parsers vivem em `@aurial/shared` porque o worker de
+ * Os prompts e os parsers vivem em `@radinho/shared` porque o worker de
  * curadoria do servidor roda os MESMOS agentes 24/7. Duas cópias divergiriam, e
  * a mesma faixa passaria a receber respostas diferentes conforme quem a
  * processou.
@@ -17,7 +17,7 @@ import {
   parseVerify,
   verifyMessages,
   type TrackIdentity,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { aiChat, type AiMessage } from '@/lib/local/importerHelper';
 
 export { aiChat, GENRE_TAXONOMY };

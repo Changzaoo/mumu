@@ -1,4 +1,4 @@
-import type { CursorQuery } from '@aurial/shared';
+import type { CursorQuery } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { ok } from '../../core/http/respond.js';
 import type { LimitQuery } from '../shared/querySchemas.js';

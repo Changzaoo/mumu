@@ -15,7 +15,7 @@ import type {
   PodcastDto,
   RadioStationDto,
   TrackDto,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { api } from '@/lib/api';
 
 export function useNewReleases(): UseQueryResult<AlbumDto[]> {

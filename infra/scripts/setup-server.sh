@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# Aurial — Ubuntu server bootstrap (idempotent — safe to re-run).
+# radinho.online — Ubuntu server bootstrap (idempotent — safe to re-run).
 #
 # Installs Docker Engine + compose plugin, git, ffmpeg and ufw;
 # opens the firewall; creates /opt/radinho.

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { generosDoGosto } from '../generosDoGosto';
 
 function faixa(id: string, genre: string, artista: string): TrackDto {

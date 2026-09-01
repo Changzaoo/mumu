@@ -7,7 +7,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@aurial/shared';
+import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@radinho/shared';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { initMediaSession } from '@/lib/audio/mediaSession';
 import { api } from '@/lib/api';

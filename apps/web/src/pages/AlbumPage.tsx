@@ -4,7 +4,7 @@
 import { Fragment, useEffect, useMemo, useState } from 'react';
 import { Link, useParams } from 'react-router';
 import { Disc3 } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { ErrorState } from '@/components/media/ErrorState';
 import { HeroHeader } from '@/components/media/HeroHeader';
 import { LikeButton } from '@/components/media/LikeButton';

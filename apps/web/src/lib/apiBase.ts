@@ -1,5 +1,5 @@
 /**
- * De onde o app fala com a API do Aurial — UM lugar só.
+ * De onde o app fala com a API do radinho.online — UM lugar só.
  *
  * POR QUE NÃO É MAIS `/api/v1`. O caminho relativo saía pelo rewrite da Vercel
  * (`/api/:path*` → `aurial-api.nexusholding.xyz`, ver `vercel.json`). Isso faz

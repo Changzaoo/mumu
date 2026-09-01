@@ -16,7 +16,7 @@
  * O trabalho pesado de decidir "isto já está na biblioteca" fica na fila de
  * import, que já sabe reconhecer origem repetida e áudio idêntico.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { aiSearchYouTube } from '@/lib/local/importerHelper';
 import * as importQueue from '@/lib/local/importQueue';
 import * as localLibrary from '@/lib/local/localLibrary';

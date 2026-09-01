@@ -5,7 +5,7 @@
  * a pessoa acabou de ouvir.
  */
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import {
   agenteDasLetras,
   agenteDeSingles,

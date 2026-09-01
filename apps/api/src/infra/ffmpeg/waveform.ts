@@ -1,4 +1,4 @@
-import { WAVEFORM_PEAKS } from '@aurial/shared';
+import { WAVEFORM_PEAKS } from '@radinho/shared';
 import { ffmpeg } from './ffmpeg.js';
 
 const DECODE_SAMPLE_RATE = 8000;

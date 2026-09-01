@@ -5,7 +5,7 @@ import type {
   PageMeta,
   UploadDto,
   UserDto,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { auditLogger } from '../../core/logger.js';
 import { getQueues } from '../../infra/queue/queues.js';

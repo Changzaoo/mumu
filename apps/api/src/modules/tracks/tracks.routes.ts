@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { idParamSchema } from '@aurial/shared';
+import { idParamSchema } from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { validate } from '../../middlewares/validate.js';
 import { tracksController } from './tracks.controller.js';

@@ -1,10 +1,10 @@
 #!/usr/bin/env node
 /**
- * Aurial — local importer helper.
+ * radinho.online — local importer helper.
  *
  * A tiny, zero-dependency HTTP service you run on YOUR OWN machine. It is the
  * one piece a browser cannot do itself: fetch audio from a media link (via
- * yt-dlp) and hand the resulting MP3 back to the Aurial web app, which stores
+ * yt-dlp) and hand the resulting MP3 back to the radinho.online web app, which stores
  * it in your local library like any imported file.
  *
  * ⚠️  Personal / self-host use only. Import ONLY content you are authorized to
@@ -602,7 +602,7 @@ const MAX_BLOB = 140 * 1024 * 1024; // 140 MB per file (matches the client cap)
 // se o USB cair, o mountpoint vira um diretório vazio no disco RAIZ — sem o
 // marcador, gravações são recusadas (503) em vez de encher a raiz de novo.
 const BLOB_DIR_EXTERNAL = Boolean(process.env.BLOB_DIR);
-// DOIS nomes aceitos: o app se chamava Aurial e virou radinho, e o marcador
+// DOIS nomes aceitos: o app se chamava radinho.online e virou radinho, e o marcador
 // mora DENTRO do cofre, no disco externo. Aceitar só o nome novo transformaria
 // a renomeação num apagão: o cofre existente ficaria "não pronto", todo upload
 // viraria 503 e toda reprodução cairia para streaming ao vivo. Aceitar só o
@@ -1255,7 +1255,7 @@ function readBodyBuffer(req, maxBytes) {
   });
 }
 
-const log = (...a) => console.log('[aurial-importer]', ...a);
+const log = (...a) => console.log('[radinho-importer]', ...a);
 
 /**
  * Authorize a request. Firebase-gated when IMPORT_ALLOWED_EMAILS or
@@ -1297,7 +1297,7 @@ async function authorize(req) {
 // no máximo 1 requisição por segundo — um teto que só dá para respeitar num
 // ponto único, com fila. O token do Firebase nunca sai daqui para esses hosts.
 const MB_ROOT = 'https://musicbrainz.org/ws/2';
-const MB_USER_AGENT = 'Aurial/1.0 ( perdibitcoin@gmail.com )';
+const MB_USER_AGENT = 'radinho.online/1.0 ( perdibitcoin@gmail.com )';
 const MB_MIN_INTERVAL_MS = 1100; // 1 req/s + folga; abusar rende bloqueio de IP
 const COVER_FETCH_TIMEOUT_MS = 8000;
 
@@ -1561,7 +1561,7 @@ async function main() {
         res.end(
           JSON.stringify({
             ok: true,
-            service: 'aurial-importer',
+            service: 'radinho-importer',
             hosts: HOSTS,
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
@@ -2727,6 +2727,6 @@ async function main() {
 }
 
 main().catch((err) => {
-  console.error('[aurial-importer] fatal:', err);
+  console.error('[radinho-importer] fatal:', err);
   process.exit(1);
 });

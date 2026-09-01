@@ -10,13 +10,13 @@ import {
   idParamSchema,
   MAX_UPLOAD_SIZE_BYTES,
   uploadMetadataSchema,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { requireAuth } from '../../middlewares/auth.js';
 import { uploadRateLimit } from '../../middlewares/rateLimit.js';
 import { validate } from '../../middlewares/validate.js';
 import { uploadsController } from './uploads.controller.js';
 
-const TMP_DIR = path.join(os.tmpdir(), 'aurial-uploads');
+const TMP_DIR = path.join(os.tmpdir(), 'radinho-uploads');
 mkdirSync(TMP_DIR, { recursive: true });
 
 const upload = multer({

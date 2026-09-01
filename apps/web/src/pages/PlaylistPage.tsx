@@ -32,7 +32,7 @@ import {
   type PlaylistWithTracksDto,
   type TrackDto,
   type UpdatePlaylistInput,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { HeroHeader } from '@/components/media/HeroHeader';

@@ -1,4 +1,4 @@
-import type { ArtistDto } from '@aurial/shared';
+import type { ArtistDto } from '@radinho/shared';
 import { MediaCard } from '@/components/media/MediaCard';
 
 export interface ArtistCardProps {

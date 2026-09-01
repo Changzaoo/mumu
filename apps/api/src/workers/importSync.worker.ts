@@ -1,6 +1,6 @@
 import { Worker, type Job } from 'bullmq';
 import type { Redis } from 'ioredis';
-import type { ImportProvider } from '@aurial/shared';
+import type { ImportProvider } from '@radinho/shared';
 import type { ImportStatus } from '@prisma/client';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';

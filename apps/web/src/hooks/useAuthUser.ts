@@ -1,18 +1,18 @@
 /**
- * useAuthUser — reactive Firebase auth state + Aurial profile.
+ * useAuthUser — reactive Firebase auth state + radinho.online profile.
  *
  * On first login it POSTs /auth/session once per uid (verifies the token and
  * upserts the user server-side) and caches the returned MeDto profile.
  * Demo mode (authDisabled): resolves immediately to signed-out.
  */
 import { useSyncExternalStore } from 'react';
-import type { MeDto } from '@aurial/shared';
+import type { MeDto } from '@radinho/shared';
 import { api } from '@/lib/api';
 import { authDisabled, subscribeAuth, type User } from '@/lib/firebase';
 
 export interface AuthSnapshot {
   user: User | null;
-  /** Aurial profile from POST /auth/session (role, handle…). */
+  /** radinho.online profile from POST /auth/session (role, handle…). */
   profile: MeDto | null;
   loading: boolean;
 }

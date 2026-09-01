@@ -28,7 +28,7 @@ arrumarCofre();
 // Register the service worker + auto-updater as early as possible.
 initPwaUpdater();
 
-// `aurialDiagnostico()` no console diz, elo a elo, por que uma faixa não toca.
+// `radinhoDiagnostico()` no console diz, elo a elo, por que uma faixa não toca.
 // "Indisponível" é o mesmo sintoma para quatro falhas diferentes; sem isto, a
 // correção vira palpite — e já virou três vezes.
 instalarDiagnostico();

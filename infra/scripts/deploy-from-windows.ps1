@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Aurial — trigger a server deploy from the Windows dev machine.
+  radinho.online — trigger a server deploy from the Windows dev machine.
 
 .DESCRIPTION
   SSHes into the LAN server and runs infra/scripts/deploy-api.sh there.
@@ -57,7 +57,7 @@ if (-not (Get-Command ssh -ErrorAction SilentlyContinue)) {
     exit 1
 }
 
-Write-Host "==> Deploying Aurial API on $DeployUser@$DeployHost ($DeployPath)" -ForegroundColor Green
+Write-Host "==> Deploying radinho.online API on $DeployUser@$DeployHost ($DeployPath)" -ForegroundColor Green
 Write-Host '    (the server deploys the latest pushed commit - did you git push?)'
 Write-Host ''
 

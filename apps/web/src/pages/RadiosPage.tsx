@@ -3,7 +3,7 @@
  * (RadioStationDto mapped to a TrackDto-shaped object via radioToTrack).
  */
 import { RadioTower } from 'lucide-react';
-import type { RadioStationDto } from '@aurial/shared';
+import type { RadioStationDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { ErrorState } from '@/components/media/ErrorState';
 import { PlayButton } from '@/components/media/PlayButton';

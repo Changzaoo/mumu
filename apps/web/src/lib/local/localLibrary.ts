@@ -10,7 +10,7 @@
  * local-source resolver returns their object URL (see stores/playerStore.ts).
  * Works fully offline and, on secure origins, survives reloads via Cache Storage.
  */
-import type { SharedTrackMeta, TrackDto } from '@aurial/shared';
+import type { SharedTrackMeta, TrackDto } from '@radinho/shared';
 import {
   cacheStorageSupported,
   deleteAudio,

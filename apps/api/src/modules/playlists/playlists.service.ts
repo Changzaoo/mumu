@@ -5,7 +5,7 @@ import type {
   PlaylistWithTracksDto,
   ReorderPlaylistInput,
   UpdatePlaylistInput,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { ForbiddenError, NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { eventBus } from '../../core/events/eventBus.js';
 import { takePage, type CursorPage } from '../../core/http/pagination.js';

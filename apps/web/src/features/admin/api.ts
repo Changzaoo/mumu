@@ -18,7 +18,7 @@ import type {
   UploadDto,
   UserDto,
   UserRole,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { api } from '@/lib/api';
 
 /** Admin listing includes private fields the public UserDto omits. */

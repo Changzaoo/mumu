@@ -13,7 +13,7 @@
  * offline, biblioteca recém-criada) ele devolve [] e a Home segue exatamente
  * como antes. Nada aqui pode piorar o caminho que já funciona.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import type { Recommendation, RecoEntry, RecoPlay } from '@/lib/reco/recommend';
 import { vectorOf } from '@/lib/reco/embeddings';
 import {

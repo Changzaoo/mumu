@@ -29,7 +29,7 @@
  * identificam a gravação; qualquer uma faltando, a faixa continua
  * `desconhecido` — que é uma resposta legítima do sistema, não uma falha dele.
  */
-import { classificarFaixa, type AnaliseDeConteudo } from '@aurial/shared';
+import { classificarFaixa, type AnaliseDeConteudo } from '@radinho/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
@@ -202,7 +202,7 @@ async function letraDaFaixa(track: {
   const duracaoS = track.durationMs ? Math.round(track.durationMs / 1000) : null;
   const alvo: IdentidadeDaFaixa = { titulo, artista, duracaoS: duracaoS ?? 0 };
 
-  const cabecalhos = { 'User-Agent': 'Aurial (classificacao de conteudo)' };
+  const cabecalhos = { 'User-Agent': 'radinho.online (classificacao de conteudo)' };
 
   // 1) Casamento literal. Quando responde, é ele mesmo — sem verificação.
   if (duracaoS !== null) {

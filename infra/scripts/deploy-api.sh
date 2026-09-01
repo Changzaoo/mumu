@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ──────────────────────────────────────────────────────────────
-# Aurial — build & deploy the API stack (docker compose) on the server.
+# radinho.online — build & deploy the API stack (docker compose) on the server.
 #
 # Run ON the server:
 #   cd /opt/radinho && ./infra/scripts/deploy-api.sh

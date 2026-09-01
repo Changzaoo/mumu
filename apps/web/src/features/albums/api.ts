@@ -2,7 +2,7 @@
  * Albums feature — detail hook (GET /albums/:id includes tracks).
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import type { AlbumWithTracksDto } from '@aurial/shared';
+import type { AlbumWithTracksDto } from '@radinho/shared';
 import { api } from '@/lib/api';
 
 /** AlbumWithTracksDto + optional server-side "is in my library" flag. */

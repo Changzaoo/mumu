@@ -1,4 +1,4 @@
-# Aurial — CI: install → build shared → prisma generate → lint → typecheck → test → build
+# radinho.online — CI: install → build shared → prisma generate → lint → typecheck → test → build
 name: CI
 
 on:
@@ -33,13 +33,13 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
-      # @aurial/shared must be built first — web and api import its dist.
-      - name: Build @aurial/shared
-        run: pnpm --filter @aurial/shared build
+      # @radinho/shared must be built first — web and api import its dist.
+      - name: Build @radinho/shared
+        run: pnpm --filter @radinho/shared build
 
       # Prisma client is required for the api typecheck/build (no DB needed).
       - name: Generate Prisma client
-        run: pnpm --filter @aurial/api exec prisma generate
+        run: pnpm --filter @radinho/api exec prisma generate
 
       - name: Lint
         run: pnpm lint

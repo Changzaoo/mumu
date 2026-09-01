@@ -18,7 +18,7 @@
  * escondido (a hora é sempre parâmetro), sem estado — é o que permite testar
  * recomendação de verdade, em vez de olhar a tela e torcer.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import type { RecoEntry, RecoPlay } from '@/lib/reco/recommend';
 
 export interface AgenteInputs {

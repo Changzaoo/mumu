@@ -13,7 +13,7 @@ import {
   Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { LikeButton } from '@/components/media/LikeButton';
 import { openShare } from '@/components/media/ShareDialog';
 import { albumKeyForTrack, sourceUrlFor } from '@/lib/local/localLibrary';

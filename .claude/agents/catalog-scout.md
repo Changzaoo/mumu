@@ -26,6 +26,6 @@ Você cuida de UMA frente: **existir faixa tocável para pedir.**
 
 - Nunca envie header de autenticação nosso para CDN de terceiros — vaza token e derruba o CORS.
 - Toda chamada externa precisa de timeout. Sem isso a UI pendura para sempre esperando bytes que não vêm.
-- Rode `pnpm --filter @aurial/web test` (há `lib/catalog/__tests__/map.test.ts`).
+- Rode `pnpm --filter @radinho/web test` (há `lib/catalog/__tests__/map.test.ts`).
 - Não mexa em player, downloads, letras ou recomendação: têm dono. Relate se a causa estiver lá.
 - Comentário explica **por que**, em pt-BR.

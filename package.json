@@ -1,17 +1,17 @@
 {
-  "name": "aurial",
+  "name": "radinho",
   "version": "0.1.0",
   "private": true,
   "type": "module",
-  "description": "Aurial — professional music streaming platform. Minimal, glass, fast.",
+  "description": "radinho.online — professional music streaming platform. Minimal, glass, fast.",
   "packageManager": "pnpm@10.4.1",
   "engines": {
     "node": ">=20.0.0"
   },
   "scripts": {
     "dev": "pnpm --parallel --filter \"./apps/*\" dev",
-    "dev:web": "pnpm --filter @aurial/web dev",
-    "dev:api": "pnpm --filter @aurial/api dev",
+    "dev:web": "pnpm --filter @radinho/web dev",
+    "dev:api": "pnpm --filter @radinho/api dev",
     "build": "pnpm -r build",
     "typecheck": "pnpm -r typecheck",
     "lint": "eslint .",
@@ -20,10 +20,10 @@
     "format:check": "prettier --check .",
     "test": "pnpm -r test",
     "test:coverage": "pnpm -r test:coverage",
-    "e2e": "pnpm --filter @aurial/web e2e",
-    "db:generate": "pnpm --filter @aurial/api db:generate",
-    "db:migrate": "pnpm --filter @aurial/api db:migrate",
-    "db:seed": "pnpm --filter @aurial/api db:seed",
+    "e2e": "pnpm --filter @radinho/web e2e",
+    "db:generate": "pnpm --filter @radinho/api db:generate",
+    "db:migrate": "pnpm --filter @radinho/api db:migrate",
+    "db:seed": "pnpm --filter @radinho/api db:seed",
     "prepare": "husky || true"
   },
   "devDependencies": {

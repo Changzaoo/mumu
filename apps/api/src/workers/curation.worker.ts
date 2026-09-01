@@ -47,7 +47,7 @@ import {
   type FaixaMinima,
   type Genre,
   type RevisaoDeGenero,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
@@ -652,7 +652,10 @@ async function curarAcervo(): Promise<number> {
   const amostras = amostrasDeTitulos(
     linhas.map((linha) => {
       const track = (linha.data as { track?: LibraryTrack }).track ?? {};
-      return { artista: artistNames(track)[0], titulo: typeof track.title === 'string' ? track.title : '' };
+      return {
+        artista: artistNames(track)[0],
+        titulo: typeof track.title === 'string' ? track.title : '',
+      };
     }),
   );
   for (const mudanca of await revisoesDeGeneroReal(faixas, amostras)) {

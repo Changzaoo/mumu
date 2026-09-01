@@ -1,5 +1,5 @@
 import { createHmac, timingSafeEqual } from 'node:crypto';
-import { STREAM_TOKEN_TTL_SECONDS } from '@aurial/shared';
+import { STREAM_TOKEN_TTL_SECONDS } from '@radinho/shared';
 import { env } from '../../config/index.js';
 
 export interface StreamTokenOptions {

@@ -6,7 +6,7 @@
  * lyrics offline. `previewOnly` (30s Apple) tracks search by name only, since
  * their duration won't match the full song.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 

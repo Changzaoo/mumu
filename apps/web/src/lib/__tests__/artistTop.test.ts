@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { normTitle, rankTracks } from '@/lib/artistTop';
 
 const track = (title: string): TrackDto => ({ id: `local:${title}`, title }) as unknown as TrackDto;

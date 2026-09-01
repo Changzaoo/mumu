@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────────────────────
-// Aurial — PM2 ecosystem (bare-metal alternative to docker compose).
+// radinho.online — PM2 ecosystem (bare-metal alternative to docker compose).
 //
 // Use this when running the API directly on the server (Node 22 + ffmpeg
 // installed on the host, Postgres/Redis running natively or via the dev
@@ -8,7 +8,7 @@
 //
 // Prereqs on the server:
 //   pnpm install --frozen-lockfile
-//   pnpm --filter @aurial/shared build && pnpm --filter @aurial/api build
+//   pnpm --filter @radinho/shared build && pnpm --filter @radinho/api build
 //   cp .env.example apps/api/.env   # then fill in production values
 //
 // Start / persist:
@@ -49,7 +49,7 @@ module.exports = {
     {
       ...base,
       name: 'aurial-api',
-      script: 'dist/main.js', // = pnpm --filter @aurial/api start
+      script: 'dist/main.js', // = pnpm --filter @radinho/api start
       // Keep a single instance: socket.io (/ws) needs sticky sessions —
       // do NOT switch to cluster mode without adding @socket.io/sticky.
       instances: 1,
@@ -58,7 +58,7 @@ module.exports = {
     {
       ...base,
       name: 'aurial-worker',
-      script: 'dist/workers/index.js', // = pnpm --filter @aurial/api start:worker
+      script: 'dist/workers/index.js', // = pnpm --filter @radinho/api start:worker
       instances: 1,
       exec_mode: 'fork',
       // FFmpeg jobs are heavier than HTTP traffic.

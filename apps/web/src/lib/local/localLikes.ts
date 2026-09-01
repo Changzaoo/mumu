@@ -3,7 +3,7 @@
  * Mirrors localPlaylists: an ordered id list (newest-first) plus a companion
  * Record<id, TrackDto> so the Curtidas page renders and plays without a backend.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';
 

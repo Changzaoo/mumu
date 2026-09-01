@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { cursorQuerySchema, idParamSchema } from '@aurial/shared';
+import { cursorQuerySchema, idParamSchema } from '@radinho/shared';
 import { validate } from '../../middlewares/validate.js';
 import { limitQuerySchema } from '../shared/querySchemas.js';
 import { albumsController } from './albums.controller.js';

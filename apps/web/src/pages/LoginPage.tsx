@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { Navigate, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import { Loader2 } from 'lucide-react';
-import { AurialLogo } from '@/components/brand/AurialMark';
+import { RadinhoLogo } from '@/components/brand/RadinhoMark';
 import { Button } from '@/components/ui/button';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { authDisabled, signInGoogle } from '@/lib/firebase';
@@ -96,7 +96,7 @@ export default function LoginPage() {
 
       <main className="glass relative w-full max-w-sm rounded-2xl p-8">
         <div className="mb-8 flex flex-col items-center gap-3 text-center">
-          <AurialLogo />
+          <RadinhoLogo />
           <p className="text-sm text-fg-muted">Entre para ouvir as músicas completas</p>
         </div>
 

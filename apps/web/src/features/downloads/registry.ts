@@ -6,7 +6,7 @@
  * by features/downloads/downloadManager.ts. Track DTOs are stored here so the
  * library stays browsable while offline.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { gravarLocal } from '@/lib/local/cofreLocal';
 
 const STORAGE_KEY = 'aurial:downloads';

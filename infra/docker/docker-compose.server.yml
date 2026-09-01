@@ -1,5 +1,5 @@
 # ──────────────────────────────────────────────────────────────
-# Aurial — server stack tailored for the LAN box 192.168.0.100.
+# radinho.online — server stack tailored for the LAN box 192.168.0.100.
 #
 # Differences from docker-compose.prod.yml:
 #   • No nginx container — the host's system nginx is the reverse proxy

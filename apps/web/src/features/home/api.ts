@@ -2,7 +2,7 @@
  * Home feature — API hooks (GET /home).
  */
 import { useQuery, type UseQueryResult } from '@tanstack/react-query';
-import type { HomeDto } from '@aurial/shared';
+import type { HomeDto } from '@radinho/shared';
 import { api } from '@/lib/api';
 
 export function useHome(): UseQueryResult<HomeDto> {

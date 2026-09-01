@@ -29,8 +29,8 @@
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
 import { Check, Loader2, Music2 } from 'lucide-react';
-import { GENRE_TAXONOMY } from '@aurial/shared';
-import { AurialLogo } from '@/components/brand/AurialMark';
+import { GENRE_TAXONOMY } from '@radinho/shared';
+import { RadinhoLogo } from '@/components/brand/RadinhoMark';
 import { Button } from '@/components/ui/button';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -195,7 +195,7 @@ export default function OnboardingPage() {
           que passou batido. */}
       <div className="relative z-10 min-h-0 flex-1 overflow-y-auto overscroll-y-none">
         <header className="mx-auto w-full max-w-4xl px-5 pb-4 pt-8">
-          <AurialLogo />
+          <RadinhoLogo />
           <p className="mt-6 text-[13px] font-medium uppercase tracking-wide text-fg-muted">
             Passo {noPasso1 ? 1 : 2} de 2
           </p>

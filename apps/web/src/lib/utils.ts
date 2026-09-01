@@ -1,6 +1,6 @@
 import { clsx, type ClassValue } from 'clsx';
 import { twMerge } from 'tailwind-merge';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 
 /** Merge Tailwind classes with conflict resolution. */
 export function cn(...inputs: ClassValue[]): string {
@@ -13,7 +13,7 @@ export {
   formatCompactNumber,
   formatDuration,
   formatDurationLong,
-} from '@aurial/shared';
+} from '@radinho/shared';
 
 /** Seconds → "m:ss" (player timestamps; formatDuration takes ms). */
 export function formatTime(seconds: number): string {

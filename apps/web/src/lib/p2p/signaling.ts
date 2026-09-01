@@ -5,7 +5,7 @@
  *
  * URL: `import.meta.env.VITE_SIGNALING_URL`, else same-origin ws at `/rtc`.
  */
-import type { ClientMessage, PeerInfo, ServerMessage } from '@aurial/shared';
+import type { ClientMessage, PeerInfo, ServerMessage } from '@radinho/shared';
 
 export type SignalingStatus = 'idle' | 'connecting' | 'connected' | 'reconnecting';
 

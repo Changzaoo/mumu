@@ -1,4 +1,4 @@
-import type { EpisodeDto, PodcastDto } from '@aurial/shared';
+import type { EpisodeDto, PodcastDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { takePage, type CursorPage } from '../../core/http/pagination.js';
 import { toEpisodeDto, toPodcastDto } from '../shared/mappers.js';

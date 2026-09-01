@@ -8,7 +8,7 @@
  */
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
-import { EQ_BANDS_HZ, EQ_PRESETS, type AudioQuality } from '@aurial/shared';
+import { EQ_BANDS_HZ, EQ_PRESETS, type AudioQuality } from '@radinho/shared';
 import { clamp } from '@/lib/utils';
 
 export type ThemeSetting = 'dark' | 'light' | 'system';

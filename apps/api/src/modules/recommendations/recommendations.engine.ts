@@ -1,4 +1,4 @@
-import type { Mood, TrackDto } from '@aurial/shared';
+import type { Mood, TrackDto } from '@radinho/shared';
 import { NotFoundError } from '../../core/errors/index.js';
 import { toTrackDto, type TrackRow } from '../shared/mappers.js';
 import { recommendationsRepository } from './recommendations.repository.js';

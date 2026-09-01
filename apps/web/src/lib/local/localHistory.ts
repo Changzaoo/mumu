@@ -2,7 +2,7 @@
  * Local play history — kept entirely on-device in localStorage. Entries are
  * HistoryEntryDto-compatible so HistoryPage renders them unchanged.
  */
-import type { HistoryEntryDto, PlaySource, TrackDto } from '@aurial/shared';
+import type { HistoryEntryDto, PlaySource, TrackDto } from '@radinho/shared';
 import { isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { subscribeAuth } from '@/lib/firebase';
 import { gravarLocal } from '@/lib/local/cofreLocal';

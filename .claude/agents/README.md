@@ -1,4 +1,4 @@
-# Time de agentes do Aurial
+# Time de agentes do radinho.online
 
 Cinco frentes, uma dona cada. As fronteiras existem para que dois agentes não
 "consertem" o mesmo sintoma em camadas diferentes e criem correção dupla.
@@ -37,5 +37,5 @@ fora de casa é como um bug volta pela porta dos fundos.
 4. **Fonte de terceiros omite campo sem avisar.** Todo número que vem de fora
    precisa de guarda antes de virar `NaN` na tela.
 5. **Comentário explica o porquê**, em pt-BR, como o resto do código.
-6. **Rode os testes** (`pnpm --filter @aurial/web test`) e o typecheck
+6. **Rode os testes** (`pnpm --filter @radinho/web test`) e o typecheck
    (`pnpm typecheck`) antes de dar qualquer coisa por pronta.

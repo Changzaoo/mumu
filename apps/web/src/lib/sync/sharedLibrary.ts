@@ -7,7 +7,7 @@
  * with the stored `sourceUrl`. Deduped by a key derived from that URL, so the
  * same video shared by many people is a single entry.
  */
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { auth, db, firebaseReady } from '@/lib/firebase';
 
 // Import dinâmico: a biblioteca local alcança este módulo, e ela está no

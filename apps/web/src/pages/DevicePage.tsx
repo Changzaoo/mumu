@@ -22,7 +22,7 @@ import {
   Trash2,
   Upload,
 } from 'lucide-react';
-import type { TrackDto } from '@aurial/shared';
+import type { TrackDto } from '@radinho/shared';
 import { CommunityTracksRow } from '@/components/media/CommunityTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Button } from '@/components/ui/button';

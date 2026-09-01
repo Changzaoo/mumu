@@ -1,6 +1,6 @@
 import { Router } from 'express';
 import { z } from 'zod';
-import { idParamSchema } from '@aurial/shared';
+import { idParamSchema } from '@radinho/shared';
 import { validate } from '../../middlewares/validate.js';
 import { radiosController } from './radios.controller.js';
 

@@ -1,6 +1,6 @@
-# @aurial/signaling
+# @radinho/signaling
 
-Tiny WebRTC **signaling** server for Aurial's peer-to-peer sharing. It matches
+Tiny WebRTC **signaling** server for radinho.online's peer-to-peer sharing. It matches
 peers in rooms and relays their SDP/ICE handshakes so they can open a **direct**
 WebRTC connection. It never sees, relays or stores audio, and keeps all state in
 memory — no database, no disk, no Docker.
@@ -8,7 +8,7 @@ memory — no database, no disk, no Docker.
 ## Run
 
 ```bash
-pnpm --filter @aurial/signaling build
+pnpm --filter @radinho/signaling build
 node apps/signaling/dist/server.js
 ```
 

@@ -14,7 +14,7 @@ import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
 // O catálogo devolve PRATELEIRA, não gênero: "Brasileira" cobre sertanejo, trap,
 // gospel e funk ao mesmo tempo. Gravar isso cru criava a prateleira inútil E
 // trancava a faixa fora do agente de categorias. Ver shared/ai/generos.ts.
-import { normalizarGenero } from '@aurial/shared';
+import { normalizarGenero } from '@radinho/shared';
 
 export interface CleanQuery {
   title: string;

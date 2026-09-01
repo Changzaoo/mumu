@@ -16,7 +16,7 @@ import {
   Users,
   Wifi,
 } from 'lucide-react';
-import { MAX_NAME_LEN, MAX_ROOM_LEN, type SharedTrackMeta } from '@aurial/shared';
+import { MAX_NAME_LEN, MAX_ROOM_LEN, type SharedTrackMeta } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Button } from '@/components/ui/button';
 import * as localLibrary from '@/lib/local/localLibrary';

@@ -20,7 +20,7 @@ import type {
   UploadStatus,
   UserDto,
   UserRole,
-} from '@aurial/shared';
+} from '@radinho/shared';
 import { env } from '../../config/index.js';
 import { signStreamToken } from '../stream/streamToken.js';
 

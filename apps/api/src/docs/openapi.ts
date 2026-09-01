@@ -52,7 +52,7 @@ import {
   userSchema,
   userStatsSchema,
   waveformSchema,
-} from '@aurial/shared';
+} from '@radinho/shared';
 
 extendZodWithOpenApi(z);
 
@@ -910,10 +910,10 @@ export function buildOpenApiDocument(): ReturnType<OpenApiGeneratorV31['generate
   return generator.generateDocument({
     openapi: '3.1.0',
     info: {
-      title: 'Aurial API',
+      title: 'radinho.online API',
       version: '1.0.0',
       description:
-        'Aurial music streaming API. Success envelope: `{ data, meta? }` — errors: `{ error: { code, message, details? } }`. Cursor pagination via `?cursor=&limit=`.',
+        'radinho.online music streaming API. Success envelope: `{ data, meta? }` — errors: `{ error: { code, message, details? } }`. Cursor pagination via `?cursor=&limit=`.',
     },
     servers: [{ url: '/api/v1' }],
   });
