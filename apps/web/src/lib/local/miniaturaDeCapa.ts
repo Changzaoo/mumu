@@ -6,10 +6,11 @@
  * arquivo como veio e abria uma alça de blob por faixa. Numa biblioteca de
  * 5.000 faixas importadas isso é a conta inteira do problema:
  *
- *   5.000 capas × ~160 KB = ~800 MB de alças abertas com a aba PARADA
+ *   5.000 capas × ~215 KB = ~1,1 GB de alças abertas com a aba PARADA
  *
  * Medido, não deduzido: `e2e/memoria.spec.ts` mostrou 1.000 faixas segurando
- * 161 MB de alças sem ninguém tocar em nada.
+ * 219 MB de alças sem ninguém tocar em nada, e 1.500 capas segurando 328 MB —
+ * linear no tamanho da biblioteca, que é o que faz a conta chegar no giga.
  *
  * E o disco é a menor parte. Onde a capa cheia dói mesmo é na DECODIFICAÇÃO:
  * um JPEG de 1200×1200 vira 5,8 MB de bitmap na memória do navegador quando
