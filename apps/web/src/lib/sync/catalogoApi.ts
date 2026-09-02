@@ -75,7 +75,36 @@ async function lerCache(): Promise<CachePersistido | null> {
   }
 }
 
+/**
+ * A LEITURA DO COFRE É UMA SÓ POR SESSÃO — e agora tem DOIS clientes.
+ *
+ * Quem lê o acervo do disco no boot deixou de ser só a assinatura: a
+ * hidratação da biblioteca lê antes, para a primeira lista já nascer com o
+ * acervo dentro (ver `hydrate` em lib/local/localLibrary.ts). Sem compartilhar
+ * a promessa, os dois abririam o mesmo IndexedDB e desserializariam o mesmo
+ * snapshot de milhares de faixas duas vezes, no trecho mais apertado do boot.
+ */
+let leituraDoDisco: Promise<CachePersistido | null> | null = null;
+
+function cacheDoDisco(): Promise<CachePersistido | null> {
+  return (leituraDoDisco ??= lerCache());
+}
+
+/**
+ * O acervo que este aparelho já conhecia, direto do disco.
+ *
+ * Chamado pela hidratação da biblioteca ANTES da primeira pintura. É o que
+ * evita a lista aparecer em ondas — as faixas do aparelho primeiro, o acervo
+ * depois. Ver `e2e`/`lib/sync/__tests__/acervoNaAbertura.test.ts`.
+ */
+export async function acervoDoDisco(): Promise<LibraryEntry[]> {
+  return (await cacheDoDisco())?.entradas ?? [];
+}
+
 async function gravarCache(valor: CachePersistido): Promise<void> {
+  // O que acabou de ser gravado é o que uma leitura seguinte encontraria: sem
+  // esta linha o memo devolveria para sempre o snapshot com que a sessão abriu.
+  leituraDoDisco = Promise.resolve(valor);
   if (typeof indexedDB === 'undefined') return;
   try {
     const db = await abrirDb();
@@ -155,7 +184,7 @@ export function subscribeCatalogo(callback: (entradas: LibraryEntry[]) => void):
   void (async () => {
     // 1. O DISCO PRIMEIRO. É o que faz o acervo aparecer no boot e continuar
     //    aparecendo sem sinal — o papel que o cache do Firestore fazia.
-    const cache = await lerCache();
+    const cache = await cacheDoDisco();
     if (cancelado) return;
     if (cache?.entradas.length) {
       etag = cache.etag;

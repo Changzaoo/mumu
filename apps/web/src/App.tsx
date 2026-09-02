@@ -97,6 +97,14 @@ export default function App() {
         import('@/lib/local/localLibrary'),
       ]);
       if (cancelado) return;
+      // O ACERVO SAI NA FRENTE, EM PARALELO COM A HIDRATAÇÃO.
+      //
+      // Ele não espera mais a biblioteca terminar de hidratar — espera só a
+      // trava do registro cair (ver `registroPronto`). Ligado aqui, a leitura
+      // do acervo em disco e a revalidação com o servidor correm ao lado da
+      // hidratação em vez de na fila atrás dela; quem abre o app vê UMA lista,
+      // completa, em vez de vê-la crescer em ondas.
+      await medirEtapa('catalogo.initCatalogo', () => catalogo.initCatalogo());
       // O REGISTRO DA BIBLIOTECA PRIMEIRO. Ele mora no IndexedDB (4 mil faixas
       // não cabem nos ~5 MB do localStorage) e, enquanto não carrega, NADA
       // persiste — é a trava que impede uma biblioteca pela metade de ser
@@ -109,8 +117,6 @@ export default function App() {
       // cada linha desta lista — a próxima vez que a abertura pesar, a evidência
       // já está no aparelho de quem reclamou, em vez de num palpite daqui.
       await medirEtapa('sync.initCloudSync', () => sync.initCloudSync());
-      // acervo do app: o que o admin adiciona chega em todos
-      await medirEtapa('catalogo.initCatalogo', () => catalogo.initCatalogo());
       await medirEtapa('fila.init', () => fila.init()); // retoma downloads da sessão anterior
       await medirEtapa('telemetria.initTelemetry', () => telemetria.initTelemetry());
       // "tocando em {aparelho}" entre dispositivos da conta

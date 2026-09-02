@@ -25,6 +25,7 @@ import {
 } from '@/lib/offline/audioCache';
 import { serverCollection } from '@/lib/sync/serverCollection';
 import { publicarNoCatalogo, removerDoCatalogo } from '@/lib/sync/catalogo';
+import { acervoDoDisco } from '@/lib/sync/catalogoApi';
 import { publishSharedTrack } from '@/lib/sync/sharedLibrary';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
@@ -224,6 +225,25 @@ const CHAVE_REGISTRO = 'entradas';
  */
 let registroCarregado = false;
 
+/**
+ * QUEM PRECISA ESPERAR O REGISTRO — sem esperar a hidratação INTEIRA.
+ *
+ * O acervo do app (lib/sync/catalogoBoot.ts) precisa de UMA garantia antes de
+ * aplicar: que a trava acima já caiu, senão ele grava por cima de uma
+ * biblioteca pela metade. Ele esperava `hydrate()` completo, que é muito mais
+ * que isso — inclui restaurar até 150 capas em lotes, com folga de quadro entre
+ * eles. O acervo, que para a maioria das pessoas É a biblioteca, ficava na fila
+ * atrás de trabalho de imagem. Agora espera só o que de fato o protege.
+ */
+let liberarRegistro: () => void = () => undefined;
+const registroDisponivel = new Promise<void>((resolve) => {
+  liberarRegistro = resolve;
+});
+
+export function registroPronto(): Promise<void> {
+  return registroDisponivel;
+}
+
 let dbRegistro: Promise<IDBDatabase> | null = null;
 
 function abrirRegistro(): Promise<IDBDatabase> {
@@ -294,20 +314,31 @@ async function carregarRegistro(): Promise<void> {
 
   groupsCache = null;
   registroCarregado = true;
+  liberarRegistro();
 
-  // Grava já (e só então libera o localStorage): perder os ~5 MB que a
-  // biblioteca ocupava lá devolve espaço para todo o resto do app.
-  try {
-    await gravarRegistroNoDisco(
-      (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry),
-    );
-    window.localStorage.removeItem(STORAGE_KEY);
-  } catch (erro) {
-    // Sem IndexedDB (aba anônima antiga, storage desligado) seguimos com o
-    // localStorage como antes — pior, mas não pior do que já era.
-    registrarFalhaDePersistencia(erro);
-  }
-  emit();
+  // A REGRAVAÇÃO NÃO SEGURA A PRIMEIRA LISTA.
+  //
+  // Ela existe para largar os ~5 MB que a biblioteca ocupava no localStorage e
+  // devolver esse espaço ao resto do app — vale, mas é arrumação, não é o que a
+  // pessoa está esperando ver. Numa biblioteca de quatro mil faixas é um
+  // `JSON.stringify` inteiro mais uma transação de IndexedDB, e enquanto isso
+  // acontecia a tela ficava sem nenhuma música. Agora corre atrás da pintura.
+  //
+  // Uma escrita posterior (a curadoria, o acervo) pode alcançar esta: as
+  // transações do IndexedDB são sequenciais na mesma store, então a última a
+  // entrar vence — e a última é sempre a que tem os dados mais novos.
+  void (async () => {
+    try {
+      await gravarRegistroNoDisco(
+        (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry),
+      );
+      window.localStorage.removeItem(STORAGE_KEY);
+    } catch (erro) {
+      // Sem IndexedDB (aba anônima antiga, storage desligado) seguimos com o
+      // localStorage como antes — pior, mas não pior do que já era.
+      registrarFalhaDePersistencia(erro);
+    }
+  })();
 }
 
 function read(): LibraryEntry[] {
@@ -2245,7 +2276,22 @@ export function hydrate(): Promise<void> {
     // O REGISTRO PRIMEIRO, ANTES DE QUALQUER OUTRA COISA. Ele mora no
     // IndexedDB (não cabe mais no localStorage — ver o comentário lá em cima),
     // e é ele que destrava as gravações. Enquanto não vem, ninguém persiste.
-    await medirEtapa('hydrate:carregarRegistro', () => carregarRegistro());
+    // O REGISTRO E O ACERVO JUNTOS — porque a pessoa não os vê como duas coisas.
+    //
+    // A biblioteca do aparelho e o acervo do app moram em cofres separados de
+    // propósito (`flushWrite` filtra `origem: 'catalogo'` fora do registro: são
+    // milhares de faixas que o servidor reenvia inteiras, e duplicá-las aqui já
+    // custou uma cota estourada). Mas separados no disco não pode virar
+    // separados NA TELA. Lidos em série, a lista nascia com as poucas faixas do
+    // próprio aparelho e só depois pulava para o acervo inteiro — duas
+    // contagens diferentes em segundos, que é o "carregando de novo" relatado.
+    //
+    // São duas leituras de IndexedDB independentes: em paralelo custam o tempo
+    // da mais lenta, não a soma. Uma emissão só, com tudo dentro.
+    const [, doAcervo] = await medirEtapa('hydrate:carregarRegistro', () =>
+      Promise.all([carregarRegistro(), acervoDoDisco().catch(() => [] as LibraryEntry[])]),
+    );
+    if (doAcervo.length > 0) aplicarCatalogo(doAcervo);
     await medirEtapa('hydrate:emit-1', () => emit());
     marcarBoot('biblioteca-local');
 
