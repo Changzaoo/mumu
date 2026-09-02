@@ -52,7 +52,6 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/uploads', 'UploadsPage'],
   ['/discover', 'DiscoverPage'],
   ['/settings', 'SettingsPage'],
-  ['/recentes', 'RecentPage'],
   ['/history', 'HistoryPage'],
   ['/library', 'LibraryPage'],
   ['/search', 'SearchPage'],
@@ -222,7 +221,6 @@ export const router = createBrowserRouter([
           { path: '/gravadora/:name', element: page('LabelLocalPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
           { path: '/mix/:key', element: page('MixPage', 'detail') },
-          { path: '/recentes', element: page('RecentPage', 'list') },
           // Public share landing (link sent by a user) — works signed-out.
           { path: '/s/:id', element: page('SharedPage', 'detail') },
           { path: '/disco/:key', element: page('AlbumLocalPage', 'detail') },

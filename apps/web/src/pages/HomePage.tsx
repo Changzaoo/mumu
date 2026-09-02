@@ -28,6 +28,8 @@ import {
 } from '@/lib/reco/recommend';
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
 import { generosDoGosto } from '@/lib/reco/generosDoGosto';
+import { perfilDeGosto } from '@/lib/reco/perfilDeGosto';
+import { ramificacoesDoGenero } from '@/lib/reco/ramificacoes';
 import { prateleiraDaSemente } from '@/lib/reco/semente';
 import { artistasDoUsuario } from '@/lib/reco/artistasDoUsuario';
 import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
@@ -151,7 +153,19 @@ function cnTile(gradient?: boolean): string {
 export default function HomePage() {
   const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
   const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
-  const history = useSyncExternalStore(localHistory.subscribe, localHistory.list, () => []);
+  // O HISTÓRICO É DA CONTA, NÃO DO APARELHO.
+  //
+  // A Home lia `localHistory.list()`, que devolve o histórico do APARELHO. Num
+  // celular compartilhado — que é o caso comum aqui — isso significa a Home de
+  // uma pessoa montada com o que a outra ouviu: o gosto de quem entrou por
+  // último decidindo a tela de quem entrou agora. A Biblioteca já lia certo
+  // (`listForCurrentUser`); a Home não, e as duas telas discordavam sobre quem
+  // era o dono do gosto.
+  const history = useSyncExternalStore(
+    localHistory.subscribe,
+    localHistory.listForCurrentUser,
+    () => [],
+  );
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
   const genres = localLibrary.genreGroups();
   const artistasDoAcervo = localLibrary.artists();
@@ -160,16 +174,6 @@ export default function HomePage() {
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
-
-  // Adicionadas recentemente (pela data real de adição, mais novas primeiro).
-  const recentlyAdded = useMemo(
-    () =>
-      [...entries]
-        .sort((a, b) => (b.addedAt ?? '').localeCompare(a.addedAt ?? ''))
-        .slice(0, 12)
-        .map((e) => e.track),
-    [entries],
-  );
 
   // Recently played, deduped by track (latest first).
   const recentTracks = useMemo(() => {
@@ -248,6 +252,47 @@ export default function HomePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
     [entries, history, likedCount, semente.generos],
   );
+
+  /**
+   * O TRONCO E OS RAMOS — o que abre a Home.
+   *
+   * `generosGosto` já vem ordenado pelo gosto, então o primeiro da lista é o
+   * gênero que esta pessoa mais ouve. Ele sobe para o topo da página e as
+   * ramificações dele vêm logo abaixo, ANTES de qualquer outro assunto: quem
+   * ouve gospel abre o app em gospel, e o que segue continua sendo gospel por
+   * mais algumas fileiras — o que ela mais ouve dele, os cantores dela, o que
+   * ainda não tocou, o que sumiu do rodízio.
+   *
+   * Os demais gêneros continuam na página, mais abaixo, na mesma ordem de
+   * afinidade de antes. "Só o que ela mais ouve" no topo não é "só isso na
+   * tela": um app que se fecha no gosto de ontem para de apresentar qualquer
+   * coisa nova, e aí o gosto congela junto.
+   */
+  const [generoTronco, ...outrosGeneros] = generosGosto;
+
+  const perfil = useMemo(() => {
+    const generoDaFaixa = new Map<string, string>();
+    for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
+    return perfilDeGosto({
+      historico: history,
+      curtidas: localLikes.list(),
+      generoDaFaixa,
+      sementesDeGenero: semente.generos,
+      sementesDeArtista: semente.artistas,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+  }, [entries, history, likedCount, semente.generos, semente.artistas]);
+
+  const ramos = useMemo(() => {
+    if (!generoTronco) return [];
+    return ramificacoesDoGenero({
+      genero: generoTronco.genre,
+      biblioteca: entries.map((e) => e.track),
+      historico: history,
+      perfil,
+    });
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
+  }, [entries, history, perfil, generoTronco?.genre]);
 
   // Time de agentes (lib/reco/agents): relógio (hora × tipo de dia),
   // calendário (semana vs. fim de semana), singles e letras. Cada um responde
@@ -333,10 +378,19 @@ export default function HomePage() {
         />
       </div>
 
-      {/* Adicionadas recentemente — "Mostrar tudo" leva à página completa. */}
-      {recentlyAdded.length > 0 && (
-        <SectionCarousel title="Adicionadas recentemente" href="/recentes">
-          {recentlyAdded.map((track, index) => (
+      {/* ── O GÊNERO QUE ELA MAIS OUVE, E OS RAMOS DELE ──────────────────
+          Primeiro bloco da página de propósito: é a resposta à pergunta que a
+          pessoa tem ao abrir o app ("o que eu ouço?"), e não à que o app tem
+          ("o que eu acabei de receber?"). O que vinha aqui antes era
+          "Adicionadas recentemente" — a ordem de chegada dos arquivos, que é o
+          dado mais fácil de mostrar e o menos interessante de olhar. */}
+      {generoTronco && (
+        <SectionCarousel
+          title={generoTronco.genre}
+          subtitle={generoTronco.motivo ?? 'O que mais toca por aqui'}
+          href={`/genero/${encodeURIComponent(generoTronco.genre)}`}
+        >
+          {generoTronco.tracks.map((track, index) => (
             <MediaCard
               key={track.id}
               title={track.title}
@@ -344,12 +398,34 @@ export default function HomePage() {
               imageUrl={track.coverUrl}
               playing={currentTrack?.id === track.id && isPlaying}
               onPlay={() =>
-                playQueue(recentlyAdded, index, { source: 'library', sourceId: 'recentes' })
+                playQueue(generoTronco.tracks, index, {
+                  source: 'library',
+                  sourceId: `genre:${generoTronco.genre}`,
+                })
               }
             />
           ))}
         </SectionCarousel>
       )}
+
+      {/* As ramificações do tronco. Cada uma diz por que está ali — é o
+          "Explain" do Explore-Exploit-Explain (ver lib/reco/ramificacoes). */}
+      {ramos.map((ramo) => (
+        <SectionCarousel key={ramo.key} title={ramo.titulo} subtitle={ramo.explicacao}>
+          {ramo.tracks.map((track, index) => (
+            <MediaCard
+              key={track.id}
+              title={track.title}
+              subtitle={trackArtistNames(track)}
+              imageUrl={track.coverUrl}
+              playing={currentTrack?.id === track.id && isPlaying}
+              onPlay={() =>
+                playQueue(ramo.tracks, index, { source: 'library', sourceId: ramo.key })
+              }
+            />
+          ))}
+        </SectionCarousel>
+      ))}
 
       {/* Recently played on THIS profile. */}
       {recentTracks.length > 0 && (
@@ -483,8 +559,9 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {/* Gêneros ordenados pelo gosto, variados por dia (lib/reco/generosDoGosto). */}
-      {generosGosto.map((g) => (
+      {/* Os demais gêneros, na ordem do gosto (lib/reco/generosDoGosto). O
+          tronco não se repete aqui: ele já abriu a página. */}
+      {outrosGeneros.map((g) => (
         <SectionCarousel
           key={g.genre}
           title={g.genre}

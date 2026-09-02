@@ -17,10 +17,20 @@
  *    cada dia, igual entre recarregamentos do mesmo dia) e teto por artista, pra
  *    não ser o mesmo artista repetido nem a mesma vitrine de ontem.
  *
+ * ── A CONTA DE AFINIDADE NÃO MORA MAIS AQUI ──
+ *
+ * Ela tinha uma cópia própria (meia-vida de 30 dias, curtida ×2) enquanto
+ * `recommend.ts` usava outra (14 dias, ×3) e `faixasFavoritas.ts` uma terceira.
+ * A Home ordenava as prateleiras por uma dessas e escrevia "porque você ouve"
+ * por outra — duas respostas para a mesma pergunta na mesma tela. Agora todas
+ * bebem de `lib/reco/perfilDeGosto`, e o que sobrou aqui é só o que é DAQUI: a
+ * seleção das faixas de cada prateleira e a variedade delas.
+ *
  * Puro e testável: recebe os dados, não lê store nem relógio por fora do `now`.
  */
 import type { TrackDto } from '@radinho/shared';
 import { daySeed, seededShuffle } from './recommend';
+import { perfilDeGosto } from './perfilDeGosto';
 
 export interface GrupoDeGenero {
   genre: string;
@@ -32,38 +42,6 @@ export interface PrateleiraDeGenero {
   tracks: TrackDto[];
   /** Legenda curta quando o gênero é claramente do gosto da pessoa. */
   motivo?: string;
-}
-
-/** Meia-vida do play: um play de 30 dias atrás vale metade de um de hoje. */
-const MEIA_VIDA_MS = 30 * 24 * 60 * 60 * 1000;
-/** Curtir é sinal forte de gosto — vale vários plays. */
-const BONUS_CURTIDA = 2;
-
-/**
- * O QUE VALE A ESCOLHA DO ONBOARDING, E COMO ELA É ESQUECIDA.
- *
- * `PESO_SEMENTE` é o peso do gênero escolhido quando não existe comportamento
- * nenhum. 6 fica acima de três curtidas (BONUS_CURTIDA = 2) e muito acima da
- * base logarítmica de tamanho — o suficiente para o que a pessoa escolheu
- * passar na frente do maior gênero do acervo, que é exatamente o problema do
- * primeiro dia.
- *
- * `MEIA_FORCA_SEMENTE` é a massa de comportamento real que corta esse peso pela
- * metade: ~10 equivale a uma dezena de plays recentes ou cinco curtidas. O
- * decaimento é suave e nunca chega a zero de vez, então a escolha continua
- * desempatando gêneros parecidos muito depois de ter deixado de mandar.
- *
- * Isto é o que separa um PALPITE de uma CONFIGURAÇÃO: quem escolheu "rock" ao
- * entrar e passa um mês ouvindo samba vê samba, sem precisar achar uma tela de
- * ajuste para se corrigir.
- */
-const PESO_SEMENTE = 6;
-const MEIA_FORCA_SEMENTE = 10;
-
-/** Gêneros vêm da mesma biblioteca, mas comparar sem caixa evita que uma
- *  diferença de maiúscula faça a escolha da pessoa não casar com nada. */
-function chaveGenero(g: string): string {
-  return g.toLowerCase().trim();
 }
 
 /** FNV-1a: hash estável de string → semente por gênero (varia o embaralho). */
@@ -96,38 +74,25 @@ export function generosDoGosto(
   const maxGeneros = opts.maxGeneros ?? 8;
   const porGenero = opts.porGenero ?? 14;
   const maxPorArtista = opts.maxPorArtista ?? 3;
-  const now = (opts.now ?? new Date()).getTime();
 
   // Fallback de gênero: faixa do histórico/curtida sem `genre` próprio herda o
   // do agrupamento da biblioteca (a mesma faixa, do mesmo id).
   const generoDaFaixa = new Map<string, string>();
   for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
 
-  const afinidade = new Map<string, number>();
-  for (const h of history) {
-    const g = h.track.genre ?? generoDaFaixa.get(h.track.id);
-    if (!g) continue;
-    const idade = h.playedAt ? now - new Date(h.playedAt).getTime() : MEIA_VIDA_MS;
-    const peso = Math.pow(0.5, Math.max(0, idade) / MEIA_VIDA_MS);
-    afinidade.set(g, (afinidade.get(g) ?? 0) + peso);
-  }
-  for (const t of liked) {
-    const g = t.genre ?? generoDaFaixa.get(t.id);
-    if (!g) continue;
-    afinidade.set(g, (afinidade.get(g) ?? 0) + BONUS_CURTIDA);
-  }
-
-  const totalAfin = [...afinidade.values()].reduce((a, b) => a + b, 0);
-
-  // A semente entra DEPOIS da soma do comportamento real, e o seu peso é função
-  // dessa soma — é assim que ela manda no dia zero e some sozinha depois.
-  const escolhidos = new Set((opts.sementes ?? []).map(chaveGenero));
-  const forcaDaSemente =
-    escolhidos.size === 0 ? 0 : PESO_SEMENTE / (1 + totalAfin / MEIA_FORCA_SEMENTE);
+  const perfil = perfilDeGosto({
+    historico: history,
+    curtidas: liked,
+    generoDaFaixa,
+    sementesDeGenero: opts.sementes,
+    now: opts.now,
+  });
 
   const pontuados = genres.map((g) => {
-    const af = afinidade.get(g.genre) ?? 0;
-    const sem = escolhidos.has(chaveGenero(g.genre)) ? forcaDaSemente : 0;
+    // Medida = comportamento; a diferença para a afinidade cheia é exatamente o
+    // que a semente do onboarding está emprestando a este gênero hoje.
+    const af = perfil.afinidadeMedida(g.genre);
+    const sem = perfil.afinidadeDoGenero(g.genre) - af;
     // Base logarítmica pelo tamanho: garante ordem sensata no cold start sem
     // deixar um gênero gigante atropelar o gosto de quem já ouve.
     const base = Math.log2(g.tracks.length + 1) * 0.15;
@@ -170,7 +135,7 @@ export function generosDoGosto(
     // O que a pessoa FAZ explica melhor que o que ela DISSE — por isso o motivo
     // de comportamento vem primeiro, e o da escolha só aparece enquanto a
     // semente ainda pesa mais que a afinidade medida daquele gênero.
-    const forte = totalAfin > 0 && af / totalAfin >= 0.15;
+    const forte = perfil.fatiaMedida(g.genre) >= 0.15;
     const motivo = forte
       ? 'Porque você ouve bastante'
       : sem > af

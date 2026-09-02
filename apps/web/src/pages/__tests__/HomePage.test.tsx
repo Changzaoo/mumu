@@ -91,11 +91,83 @@ describe('HomePage (personal library)', () => {
     await renderHome();
 
     expect(screen.getByText('Rock')).toBeInTheDocument();
-    // A faixa aparece em mais de uma prateleira (gênero + adicionadas
-    // recentemente) — o que importa é existir pelo menos uma.
+    // A faixa pode aparecer em mais de uma prateleira — o que importa é existir
+    // pelo menos uma.
     expect(screen.getAllByText('Como Tudo Deve Ser').length).toBeGreaterThan(0);
     expect(screen.getByText('Seus artistas')).toBeInTheDocument();
     expect(screen.getAllByText('Charlie Brown Jr.').length).toBeGreaterThan(0);
     expect(screen.queryByText('Sua biblioteca está vazia')).not.toBeInTheDocument();
+  });
+
+  /**
+   * A HOME ABRE NO QUE A PESSOA OUVE — não no que chegou por último.
+   *
+   * Este é o pedido, em teste: quem ouve gospel abre o app em gospel, mesmo com
+   * uma biblioteca em que o rock é MAIOR. Sem isto, a ordem volta a ser a do
+   * acervo (tamanho) ou a do relógio (data de importação), que é de onde veio a
+   * reclamação.
+   */
+  it(
+    'abre no gênero que a pessoa mais ouve, e não no maior da biblioteca',
+    { timeout: 60_000 },
+    async () => {
+      const faixa = (id: string, genero: string, titulo: string) => ({
+        track: {
+          ...makeTrack(id, { title: titulo }),
+          genre: genero,
+          artists: [{ id: `a:${genero}`, name: `Cantor de ${genero}`, slug: '', imageUrl: null }],
+        },
+        addedAt: new Date().toISOString(),
+        sizeBytes: 1,
+        mimeType: 'audio/mpeg',
+      });
+
+      // Rock é o gênero MAIOR do acervo; gospel é o que ela ouve. Metade do
+      // gospel fica sem play, para o ramo "para descobrir" ter material.
+      const biblioteca = [
+        ...Array.from({ length: 16 }, (_, i) => faixa(`r${i}`, 'Rock', `Rock ${i}`)),
+        ...Array.from({ length: 12 }, (_, i) => faixa(`g${i}`, 'Gospel', `Gospel ${i}`)),
+      ];
+      window.localStorage.setItem('aurial:library', JSON.stringify(biblioteca));
+      window.localStorage.setItem(
+        'aurial:local-history',
+        JSON.stringify(
+          Array.from({ length: 6 }, (_, i) => ({
+            id: `h${i}`,
+            playedAt: new Date(Date.now() - i * 3_600_000).toISOString(),
+            playedMs: 200_000,
+            source: 'queue',
+            track: biblioteca[16 + i]!.track,
+          })),
+        ),
+      );
+
+      await renderHome();
+
+      const gospel = await screen.findByText('Gospel');
+      const rock = screen.getByText('Rock');
+      // `compareDocumentPosition` responde a única pergunta que importa aqui:
+      // quem vem ANTES na página. Contar prateleiras não responderia.
+      expect(gospel.compareDocumentPosition(rock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+
+      // E as ramificações do gospel ficam entre um e outro.
+      const ramo = screen.getByText('Gospel para descobrir');
+      expect(gospel.compareDocumentPosition(ramo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+      expect(ramo.compareDocumentPosition(rock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    },
+  );
+
+  it('não mostra mais "Adicionadas recentemente"', { timeout: 60_000 }, async () => {
+    const entry = {
+      track: makeTrack('local:1', { title: 'Recém-chegada' }),
+      addedAt: new Date().toISOString(),
+      sizeBytes: 1,
+      mimeType: 'audio/mpeg',
+    };
+    window.localStorage.setItem('aurial:library', JSON.stringify([entry]));
+
+    await renderHome();
+
+    expect(screen.queryByText('Adicionadas recentemente')).not.toBeInTheDocument();
   });
 });

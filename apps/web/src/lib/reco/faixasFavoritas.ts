@@ -21,18 +21,22 @@
  * música no repeat conta uma vez. É subestimação, nunca invenção: a ordem
  * continua sendo a de quem realmente volta na faixa em sessões diferentes.
  *
+ * A RÉGUA DO PLAY NÃO É DAQUI. Ela mora em `lib/reco/perfilDeGosto` e é a
+ * mesma que ordena os gêneros e as ramificações da Home — inclusive a parte que
+ * este arquivo não tinha: quanto da faixa foi de fato ouvido. Uma régua para a
+ * prateleira e outra para o gênero acima dela dariam duas ordens para a mesma
+ * pergunta na mesma tela.
+ *
  * Pura e testável: recebe os dados, não lê store nem relógio fora do `now`.
  */
 import type { TrackDto } from '@radinho/shared';
-
-/** Meia-vida do play: o de um mês atrás vale metade do de hoje. */
-const MEIA_VIDA_MS = 30 * 24 * 60 * 60 * 1000;
-/** Uma curtida vale por vários plays — ela foi deliberada. */
-const PESO_CURTIDA = 3;
+import { PESO_CURTIDA, pesoDoPlay } from './perfilDeGosto';
 
 export interface PlayDaFaixa {
   track: TrackDto;
   playedAt?: string;
+  /** Quanto da faixa foi ouvido — grava o player, pesa o `pesoDoPlay`. */
+  playedMs?: number;
 }
 
 /**
@@ -53,10 +57,7 @@ export function faixasFavoritas(
     const id = entrada.track?.id;
     if (!id) continue;
     const quando = entrada.playedAt ? Date.parse(entrada.playedAt) : Number.NaN;
-    // Data ilegível (ou do futuro, relógio torto) não descarta o play: ele
-    // aconteceu. Só não ganha o bônus de recência.
-    const idade = Number.isFinite(quando) ? Math.max(0, agora - quando) : MEIA_VIDA_MS;
-    peso.set(id, (peso.get(id) ?? 0) + Math.pow(0.5, idade / MEIA_VIDA_MS));
+    peso.set(id, (peso.get(id) ?? 0) + pesoDoPlay(entrada, agora));
     if (!faixa.has(id)) faixa.set(id, entrada.track);
     if (Number.isFinite(quando)) {
       ultimoPlay.set(id, Math.max(ultimoPlay.get(id) ?? 0, quando));
