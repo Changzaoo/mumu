@@ -124,6 +124,42 @@ não há humano na sessão nem aparelho para apagar a tela. O comportamento com 
 coberto por `webAudioOpcional.test.ts` e `avancoComTelaApagada.test.ts`, que é o que dá para provar
 daqui; **não é a mesma coisa que um celular na mão**, e fica registrado como tal.
 
+## H5 — Deploy conferido no ar (saída real, 2026-09-05)
+
+```
+home:                200   https://aurial.vercel.app/
+sw.js contém a regra nova de /api/v1/stream/:   1 ocorrência
+catálogo DIRETO:     200   https://aurial-api.nexusholding.xyz/api/v1/catalogo
+```
+
+Cadeia completa de uma faixa de verdade ("TUDO BEM", Brandão85), do acervo até os bytes:
+
+```
+GET /catalogo/local:2c8c83a3-…  → 200, streamUrl = https://importer.nexusholding.xyz/blob/…?k=98561505…
+GET esse blob, Range: bytes=0-0 → HTTP/1.1 206 Partial Content
+                                  Content-Type: audio/mpeg
+                                  content-range: bytes 0-0/6286607
+                                  Accept-Ranges: bytes
+                                  access-control-allow-origin: *
+```
+
+- **Toca:** o cofre entrega áudio (206, 6,3 MB, `audio/mpeg`).
+- **Duração correta:** o catálogo traz `durationMs: 143264.938` (2:23) — a fonte primária de RF2
+  tem dado de verdade para essa faixa.
+- **Direto ao servidor, sem o rewrite da Vercel:** `apiBase.ts` resolve a base absoluta
+  `aurial-api.nexusholding.xyz` em produção, e o áudio sai de `importer.nexusholding.xyz`.
+  Nenhum dos dois passa pelo salto que toma 403 do Cloudflare (memória `rewrite-vercel-toma-403`).
+
+**Não verificado daqui:** o som saindo do alto-falante. Isto é uma conferência de rede e de
+artefato publicado, feita por `curl` — prova que os bytes existem e chegam, não que a pessoa ouviu.
+
+## Interface
+
+Esta entrega **não tocou em nenhum componente, página ou CSS** — o diff é motor de áudio, store,
+service worker e testes. Nada renderizado mudou, então a diretriz de "Apple glass / liquid glass"
+não teve onde ser aplicada; o vidro existente do app segue como estava. Dizer que foi aplicada
+seria inventar trabalho que não houve.
+
 ## Não entregue e por quê
 
 1. **10 vulnerabilidades de dependência** (6 high, 4 moderate — `music-metadata`, `sharp`,

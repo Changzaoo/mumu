@@ -110,7 +110,7 @@ Portões: `pnpm build` e `pnpm --filter @radinho/web test`; caminhos relativos a
 - [x] **H4. Commit e push.** Commits pequenos por bloco, mensagem descrevendo o sintoma
       corrigido; `git push` na `main` (deploy da Vercel é automático).
       _Aceite:_ `git status` limpo e `git log --oneline -n 8` mostrando os blocos.
-- [ ] **H5. Conferir o deploy.** Abrir aurial.vercel.app e tocar uma faixa.
+- [x] **H5. Conferir o deploy.** Abrir aurial.vercel.app e tocar uma faixa.
       _Aceite:_ faixa toca com duração correta; chamada de áudio vai **direto** ao servidor
       (sem rewrite da Vercel, que toma 403 do Cloudflare). Se falhar: registrar e reverter.
 - [x] **H6. Riscos não entregues** em `.copilot/05-execucao.md`: 10 vulns de dependência,
