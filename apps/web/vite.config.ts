@@ -66,8 +66,32 @@ export default defineConfig({
               cacheableResponse: { statuses: [0, 200] },
             },
           },
+          /**
+           * O SERVICE WORKER NÃO ENCOSTA EM ÁUDIO — e `/api/v1/stream/` É áudio.
+           *
+           * A regra abaixo pega toda a API, e o manifesto HLS e os segmentos
+           * moram em `/api/v1/stream/:trackId/...` (ver `mappers.ts:96` e
+           * `modules/stream`). Deixá-los cair aqui produzia dois estragos, os
+           * dois em cima da reprodução:
+           *
+           *  1. `networkTimeoutSeconds: 4` — passados 4 segundos o worker
+           *     DESISTE da rede e responde do cache. Para JSON isso é bom; para
+           *     áudio é o contrário do que este player precisa. O cofre se
+           *     refaz: quando a poda levou os bytes, o importador reextrai a
+           *     faixa e isso leva 20 a 25 segundos medidos — é por isso que o
+           *     watchdog espera 60s. O worker cortava em 4, e como não há
+           *     segmento nenhum no cache, a resposta era o nada;
+           *  2. resposta **206** (que é como qualquer servidor de mídia atende
+           *     um `Range`) não pode ser guardada: `cache.put` lança com
+           *     resposta parcial. Enquanto não houver suporte a Range no
+           *     worker, áudio fica de fora — restrição da fase 2.
+           *
+           * Streams de outras origens (cofre do importador, Audius) nem chegam
+           * a casar com este padrão; o buraco era só o do próprio acervo.
+           */
           {
-            urlPattern: /\/api\/v1\//,
+            urlPattern: ({ url }: { url: URL }) =>
+              url.pathname.includes('/api/v1/') && !url.pathname.includes('/api/v1/stream/'),
             handler: 'NetworkFirst',
             options: {
               cacheName: 'aurial-api',

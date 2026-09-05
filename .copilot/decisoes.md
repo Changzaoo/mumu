@@ -65,3 +65,12 @@
   por PLATAFORMA (`SEM_GRAFO_WEB_AUDIO = IS_MOBILE`), que é estritamente mais forte para RF5.
   E2 vira: provar que no celular nenhum `AudioContext` nasce e que o elemento segue tocando
   depois de `visibilitychange → hidden`.
+- **A porta do e2e virou configurável (`E2E_PORT`)**: nesta máquina a 5173 serve outro projeto, e
+  `reuseExistingServer` reusava aquele servidor — a suíte inteira media outro site.
+- **`desempenho`/`memoria`/`navegacao` saem do `playwright.config.ts` padrão**: elas medem sobre
+  `vite preview` (4173) e cortam a rede com `isolarDaRede`; no config de dev os 15 morriam em
+  `ERR_FAILED`. Um portão que não pode ficar verde não é portão.
+- **`/api/v1/stream/` excluído do `runtimeCaching`**: era áudio HLS caindo num `NetworkFirst` com
+  `networkTimeoutSeconds: 4`, justamente onde o cofre leva 20-25s se refazendo.
+- **D2/D3, F2, G1 e G3 não precisaram de código**: já estavam implementados. Os testes novos
+  entram como rede de segurança, e isso está dito em `05-execucao.md` — não como conserto.

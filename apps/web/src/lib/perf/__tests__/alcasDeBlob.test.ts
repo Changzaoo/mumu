@@ -184,4 +184,34 @@ describe('orçamento de alças de blob', () => {
     expect(consultar('audio', 'nunca-existiu')).toBeNull();
     expect(alcas.criadas).toBe(0);
   });
+
+  /**
+   * RNF3 — dez trocas de faixa não deixam dez arquivos abertos.
+   *
+   * É a forma que o vazamento tinha no ar: cada faixa que tocava abria a sua
+   * alça e ninguém soltava, então "ouvir um álbum" era o mesmo que abrir o
+   * álbum inteiro na memória. Nenhuma API do navegador contava isso — o heap
+   * marcava 12 MB enquanto a aba passava de 1 GB —, e é por isso que a prova
+   * tem que ser esta conta, e não a do `performance.memory`.
+   */
+  it('dez trocas de faixa: as alças ficam no orçamento e zeram ao desmontar', async () => {
+    const { abrir, consultar, relatorio, esquecerTudo } = await import('@/lib/perf/alcasDeBlob');
+
+    for (let i = 0; i < 10; i++) {
+      const chave = `faixa-${i}`;
+      abrir('audio', chave, blobDe(8_000_000)); // 8 MB por faixa, 80 MB no total
+      consultar('audio', chave); // é o que o player faz ao tocar
+    }
+
+    // O despejo é por USO, e a última a entrar é a que está tocando: ela nunca
+    // pode ser a despejada, porque soltar a alça emudece a música na hora.
+    expect(consultar('audio', 'faixa-9')).not.toBeNull();
+    expect(alcas.abertas.size).toBe(relatorio().audio.alcas);
+
+    // Desmontar (fechar a aba, trocar de usuário) devolve tudo.
+    esquecerTudo();
+    expect(relatorio().audio.alcas).toBe(0);
+    expect(relatorio().audio.bytes).toBe(0);
+    expect(alcas.abertas.size).toBe(0);
+  });
 });

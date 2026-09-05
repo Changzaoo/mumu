@@ -17,7 +17,10 @@ import { defineConfig, devices } from '@playwright/test';
  */
 export default defineConfig({
   testDir: './e2e',
-  testMatch: /desempenho\.spec\.ts/,
+  // `navegacao` mede a mesma coisa por outro caminho (o custo de trocar de
+  // página) e usa o mesmo `isolarDaRede`, que só conhece o servidor de preview.
+  // É aqui que ela sempre pertenceu.
+  testMatch: /(desempenho|navegacao)\.spec\.ts/,
   // Uma rodada estrangulada a 6× leva minutos; o teto do e2e (30s) reprovaria
   // por relógio o que estamos justamente tentando medir.
   timeout: 15 * 60_000,
