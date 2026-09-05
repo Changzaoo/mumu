@@ -24,10 +24,31 @@ export interface DownloadPayload {
   sizeBytes: number | null;
 }
 
+/**
+ * FAIXA ESCONDIDA É COMO FAIXA QUE NÃO EXISTE — para quem não é dono dela.
+ *
+ * Toda listagem da API filtra `isPublic: true` (busca, home, artista, rádio,
+ * recomendação), e `stream.repository` chega a SELECIONAR `isPublic`. Só a
+ * busca por id não olhava o campo: `GET /tracks/:id` devolvia a faixa marcada
+ * como não-pública para qualquer um, inclusive visitante — e o DTO carrega
+ * `streamUrl` com token de stream ASSINADO, ou seja, entregava junto a chave de
+ * ouvir. Esconder uma faixa não escondia nada.
+ *
+ * A recusa é 404 e não 403 de propósito: 403 confirmaria que a faixa existe,
+ * que é metade do que quem sonda ids quer descobrir.
+ */
+function visivelPara(
+  row: { isPublic: boolean; uploadedByUserId: string | null },
+  userId?: string,
+): boolean {
+  return row.isPublic || (userId !== undefined && row.uploadedByUserId === userId);
+}
+
 export const tracksService = {
   async getById(id: string, userId?: string): Promise<TrackDto> {
     const row = await tracksRepository.findById(id);
     if (!row) throw new NotFoundError('Track');
+    if (!visivelPara(row, userId)) throw new NotFoundError('Track');
     const likedSet = userId ? await libraryRepository.likedTrackIdSet(userId, [id]) : undefined;
     return toTrackDto(row, { likedSet });
   },
@@ -55,6 +76,7 @@ export const tracksService = {
   async getDownload(userId: string, trackId: string): Promise<DownloadPayload> {
     const track = await tracksRepository.downloadSource(trackId);
     if (!track) throw new NotFoundError('Track');
+    if (!visivelPara(track, userId)) throw new NotFoundError('Track');
     if (!track.originalKey) throw new NotFoundError('Download');
 
     const storage = getStorage();

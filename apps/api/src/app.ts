@@ -3,6 +3,7 @@ import express, { type Express } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { env, webOrigins } from './config/index.js';
+import { ForbiddenError } from './core/errors/index.js';
 import { requestId } from './middlewares/requestId.js';
 import { httpLogger } from './middlewares/httpLogger.js';
 import { authenticate } from './middlewares/auth.js';
@@ -50,7 +51,11 @@ export function createApp(): Express {
       origin: (origin, cb) => {
         // Allow non-browser clients (no Origin) and the configured allowlist.
         if (!origin || webOrigins.includes(origin)) cb(null, true);
-        else cb(new Error('Not allowed by CORS'));
+        // Origem de fora da lista é recusa esperada, não defeito do servidor.
+        // Um `Error` cru caía no ramo final do errorHandler: 500 `INTERNAL` e
+        // uma linha de log em nível de erro COM PILHA por requisição — qualquer
+        // varredura automática enchia o log e escondia erro de verdade.
+        else cb(new ForbiddenError('Origin not allowed'));
       },
       credentials: true,
     }),
