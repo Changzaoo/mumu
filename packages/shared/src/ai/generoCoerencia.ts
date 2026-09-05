@@ -38,6 +38,12 @@
 import { GENRE_TAXONOMY, type Genre } from './curation.js';
 import { normalizarGenero } from './generos.js';
 
+/* Quem consome este módulo já fala em `Genre` (é o tipo de tudo que ele devolve),
+   então repassamos o tipo daqui em vez de obrigar cada chamador a saber que ele
+   mora na taxonomia. Sem isto, `tsc --noEmit` quebra o pacote inteiro: o vitest
+   apaga os tipos e não percebe, o build percebe. */
+export type { Genre };
+
 /** O mínimo que precisamos saber de uma faixa para decidir gênero. */
 export interface FaixaMinima {
   id: string;

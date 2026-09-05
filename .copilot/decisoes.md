@@ -74,3 +74,17 @@
   `networkTimeoutSeconds: 4`, justamente onde o cofre leva 20-25s se refazendo.
 - **D2/D3, F2, G1 e G3 não precisaram de código**: já estavam implementados. Os testes novos
   entram como rede de segurança, e isso está dito em `05-execucao.md` — não como conserto.
+
+## Fase 6 — verificação
+
+- **`export type { Genre }` em `generoCoerencia.ts`** em vez de mudar o import do teste:
+  o módulo já devolve `Genre` em quase toda função pública, então repassar o tipo é o
+  caminho mais curto e serve a qualquer chamador. Falha de base (2026-08-16), não regressão.
+- **Capturas por Playwright/CDP** e não só por Edge headless: `prefers-reduced-transparency`
+  não tem flag de linha de comando, e era justamente a regra que a fase precisava ver.
+- **Tema claro semeado por `localStorage`**: o app nasce escuro por decisão de produto;
+  sem semear a preferência a captura "clara" sairia escura e provaria nada.
+- **Script de captura descartado** após uso (`apps/web/tirar-capturas.mjs`): instrumento de
+  uma fase, não código de produto. A cópia fica em `.copilot/screens/tirar.mjs`.
+- **Desvios do briefing de vidro mantidos** (opacidade .72/.8, borda .08): trocar é
+  redesenho do app, fora do pedido. Registrado como desvio consciente, não como falha.

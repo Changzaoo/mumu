@@ -200,8 +200,13 @@
      e SATURATE alto (a "vibrancy" — as cores atrás vazam e o vidro ganha vida),
      mais um brilho de 1px no topo (inset) que é o que o olho lê como "vidro". */
   background: hsl(var(--bg-elevated) / 0.72);
+  /* SEM `-webkit-` escrito à mão. O Lightning CSS (Tailwind v4) trata o par
+     prefixado/padrão como UMA propriedade e guarda só a última declaração: com
+     `-webkit-` escrito depois, o `backdrop-filter` padrão sumia do bundle e
+     sobrava só a versão prefixada, que o Chrome/Edge atual não reconhece —
+     todo o vidro do app saía CHAPADO em produção. Declarando só o padrão, a
+     ferramenta emite os dois (verificado no `dist`). */
   backdrop-filter: blur(30px) saturate(180%);
-  -webkit-backdrop-filter: blur(30px) saturate(180%);
   border: 1px solid hsl(var(--fg) / 0.08);
   box-shadow:
     inset 0 1px 0 0 hsl(0 0% 100% / 0.06),
@@ -220,8 +225,8 @@
      AURORA — não sobre conteúdo rolando — então podem revelar o fundo vivo sem
      custo de legibilidade. */
   background: hsl(var(--bg-elevated) / 0.8);
+  /* Só o padrão — ver a nota em `.glass`. */
   backdrop-filter: blur(34px) saturate(185%);
-  -webkit-backdrop-filter: blur(34px) saturate(185%);
   border: 1px solid hsl(var(--fg) / 0.08);
   box-shadow:
     inset 0 1px 0 0 hsl(0 0% 100% / 0.06),
@@ -229,6 +234,22 @@
 
   @supports not (backdrop-filter: blur(1px)) {
     background: hsl(var(--bg-elevated) / 0.98);
+  }
+}
+
+/* TRANSPARÊNCIA REDUZIDA (acessibilidade do sistema — "Reduce transparency" no
+   iOS/macOS, "Transparency effects: off" no Windows). Quem liga isso está
+   pedindo superfícies OPACAS, normalmente por dificuldade de ler texto sobre
+   fundo que se mexe. Mesmo caminho do aparelho fraco, motivo diferente: aqui
+   não é custo de GPU, é legibilidade. O vidro vira parede. */
+@media (prefers-reduced-transparency: reduce) {
+  .glass,
+  .glass-strong {
+    background: hsl(var(--bg-elevated));
+    backdrop-filter: none;
+  }
+  [class*='backdrop-blur'] {
+    backdrop-filter: none !important;
   }
 }
 
@@ -378,8 +399,10 @@
 :root[data-perf='baixo'] .glass,
 :root[data-perf='baixo'] .glass-strong {
   background: hsl(var(--bg-elevated));
+  /* Só o padrão — ver a nota em `.glass`. Aqui o corte importa duas vezes: se
+     sobra só a versão prefixada, este desligamento não chega ao Chrome e o
+     aparelho fraco continua re-borrando a cada quadro. */
   backdrop-filter: none;
-  -webkit-backdrop-filter: none;
   box-shadow: none;
 }
 
@@ -388,8 +411,8 @@
    qualquer variante (`md:backdrop-blur-*` incluso); o fundo escurecido
    (bg-black/60) fica — só o borrão sai. */
 :root[data-perf='baixo'] [class*='backdrop-blur'] {
+  /* Só o padrão — ver a nota em `.glass`. */
   backdrop-filter: none !important;
-  -webkit-backdrop-filter: none !important;
 }
 
 /* Desfoques enormes de decoração (o brilho de fundo do NowPlaying usa 120px
