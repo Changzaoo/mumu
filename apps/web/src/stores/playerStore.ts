@@ -307,6 +307,63 @@ function localSourcesReady(trackId: string): Promise<unknown> {
     : downloadsReady();
 }
 
+/**
+ * A INTENÇÃO DA PESSOA, separada do que o motor conseguiu fazer até agora (RF1).
+ *
+ * Carregar uma faixa `local:` sem áudio no aparelho leva de meio segundo a
+ * vários — hidratar os cofres locais, e às vezes buscar o endereço vivo no
+ * acervo. Durante essa espera a pessoa continua com o dedo na tela, e o defeito
+ * era decidir no COMEÇO da transição o que só se pode saber no FIM: `loadIndex`
+ * capturava `autoplay` e, ao terminar, mandava o motor tocar com o valor de
+ * antes. Quem apertasse pause no meio ficava com o pior estado possível — a
+ * música TOCANDO e a tela dizendo "pausado", com o botão de pause aparentemente
+ * quebrado, porque a interface já estava no estado que ele produz.
+ *
+ * `querTocar` é a única fonte de verdade sobre o que a pessoa quer. Toda
+ * transição termina em `reconciliarIntencao`, que aproxima a realidade dela.
+ */
+let querTocar = false;
+
+/**
+ * TOKEN DE GERAÇÃO DA CARGA — o mesmo remédio do `seq` dos slots do motor.
+ *
+ * As continuações assíncronas de `loadIndex` se guardavam comparando
+ * `queueIndex`/`currentTrack.id`, o que não distingue "ainda é esta carga" de
+ * "é a MESMA faixa, mas pedida de novo depois". Tocar A, pular para B e voltar
+ * para A deixava a primeira continuação passar pela guarda e carregar por cima
+ * da segunda — com o DTO resolvido lá atrás, que pode ter um endereço já podre.
+ * Um contador resolve os dois casos de uma vez.
+ */
+let geracaoDeCarga = 0;
+
+/**
+ * Anota a intenção e devolve o token da carga em curso — para quem começa uma
+ * transição fora de `loadIndex` (troca antecipada, crossfade, fonte alternativa).
+ */
+function novaGeracao(intencao: boolean): number {
+  querTocar = intencao;
+  return ++geracaoDeCarga;
+}
+
+/**
+ * FIM DA TRANSIÇÃO: aproxima a realidade da INTENÇÃO da pessoa.
+ *
+ * Chamado depois de todo `audioEngine.load` que veio de um caminho assíncrono.
+ * É aqui que um pause dado no meio do carregamento tem efeito — e é aqui que um
+ * play dado no meio também tem, sem depender de o motor adivinhar nada.
+ *
+ * A guarda de geração é o que impede uma carga já substituída de reabrir o som
+ * depois que a pessoa pediu outra coisa.
+ */
+function reconciliarIntencao(geracao: number): void {
+  if (geracao !== geracaoDeCarga) return;
+  if (querTocar && !audioEngine.isPlaying) audioEngine.play();
+  else if (!querTocar && audioEngine.isPlaying) audioEngine.pause();
+  if (usePlayerStore.getState().isPlaying !== querTocar) {
+    usePlayerStore.setState({ isPlaying: querTocar });
+  }
+}
+
 // Per-loaded-track flags (reset on every load).
 let playRecorded = false;
 let preloadRequested = false;
@@ -611,6 +668,7 @@ function failCurrentTrack(message: string): void {
 }
 
 function pararComErro(message: string): void {
+  querTocar = false; // fim da linha: uma carga atrasada não pode ressuscitar o som
   usePlayerStore.setState({ isPlaying: false, isBuffering: false });
   void import('sonner').then(({ toast }) => toast.error(message));
 }
@@ -727,6 +785,7 @@ subscribeAuth((user) => {
 function firePreviewGate(): void {
   if (previewGateFired) return;
   previewGateFired = true;
+  querTocar = false;
   audioEngine.pause();
   usePlayerStore.setState({ isPlaying: false });
   void import('sonner').then(({ toast }) =>
@@ -769,7 +828,11 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
     currentTrack: resolved,
     isBuffering: true,
   }));
-  audioEngine.load(resolved, { autoplay: s.isPlaying });
+  // Trocar a fonte é uma transição nova: toma a geração para que a continuação
+  // da carga anterior não recarregue a URL que acabou de morrer por cima desta.
+  const geracao = novaGeracao(querTocar);
+  audioEngine.load(resolved, { autoplay: querTocar });
+  reconciliarIntencao(geracao);
   armLoadWatchdog(resolved.id, initialWatchdogMs(resolved.id));
   // A fonte antiga apodreceu, mas esta acabou de funcionar: baixa uma cópia
   // LOCAL agora para a próxima reprodução vir do disco e nunca mais tropeçar no
@@ -871,6 +934,7 @@ export const usePlayerStore = create<PlayerState>()(
       function loadIndex(index: number, autoplay: boolean, crossfadeSeconds = 0): void {
         const track = get().queue[index];
         if (!track) return;
+        const geracao = novaGeracao(autoplay);
         playRecorded = false;
         preloadRequested = false;
         crossfadeTriggered = false;
@@ -963,7 +1027,7 @@ export const usePlayerStore = create<PlayerState>()(
         set({ isBuffering: true });
         void (async () => {
           await localSourcesReady(track.id);
-          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+          if (geracao !== geracaoDeCarga) return;
 
           // `ensureLocalAudioUrl` abre o arquivo AGORA se ele existir. O boot
           // deixou de abrir a biblioteca inteira (custava ~10ms por faixa e
@@ -982,8 +1046,9 @@ export const usePlayerStore = create<PlayerState>()(
             (await ensureDownloadedAudioUrl(track.id)) ??
             localAudioUrl(track.id);
           if (local) {
-            audioEngine.load(track, { autoplay, crossfadeSeconds });
+            audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
             applyEngineSettings();
+            reconciliarIntencao(geracao);
             return;
           }
 
@@ -1011,8 +1076,9 @@ export const usePlayerStore = create<PlayerState>()(
            * tocava, hoje não toca" das faixas favoritas.
            */
           if (!track.id.startsWith('local:')) {
-            audioEngine.load(track, { autoplay, crossfadeSeconds });
+            audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
             applyEngineSettings();
+            reconciliarIntencao(geracao);
             armLoadWatchdog(track.id, initialWatchdogMs(track.id));
             sondarFonteEmParalelo(track, index);
             return;
@@ -1021,15 +1087,16 @@ export const usePlayerStore = create<PlayerState>()(
           // Imported track with no audio on THIS device — resolve a stream
           // (uploaded copy or live from the source), then load.
           const resolved = await ensurePlayableSource(track);
-          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+          if (geracao !== geracaoDeCarga) return;
           if (resolved !== track && resolved.streamUrl) {
             set((s) => ({
               queue: s.queue.map((t, i) => (i === index ? resolved : t)),
               currentTrack: resolved,
             }));
           }
-          audioEngine.load(resolved, { autoplay, crossfadeSeconds });
+          audioEngine.load(resolved, { autoplay: querTocar, crossfadeSeconds });
           applyEngineSettings();
+          reconciliarIntencao(geracao);
           armLoadWatchdog(track.id, initialWatchdogMs(track.id)); // sempre local: aqui — teto de 60s
           // A SONDA VEM JUNTO. Faixa `local:` com `streamUrl` pronta passava
           // pelo atalho acima e era sondada lá; agora ela chega aqui, e sem
@@ -1039,7 +1106,7 @@ export const usePlayerStore = create<PlayerState>()(
           sondarFonteEmParalelo(resolved, index);
         })().catch(() => {
           // Nada aqui pode deixar a faixa "carregando" para sempre.
-          if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
+          if (geracao !== geracaoDeCarga) return;
           failCurrentTrack('Não foi possível carregar esta faixa agora.');
         });
       }
@@ -1119,6 +1186,7 @@ export const usePlayerStore = create<PlayerState>()(
           } else if (repeat === 'all' && queue.length > 0) {
             loadIndex(0, true);
           } else {
+            querTocar = false; // fim da fila
             audioEngine.pause();
             set({ isPlaying: false });
           }
@@ -1139,9 +1207,7 @@ export const usePlayerStore = create<PlayerState>()(
           const { isPlaying, currentTrack } = get();
           if (!currentTrack) return;
           if (isPlaying) {
-            audioEngine.pause();
-            set({ isPlaying: false });
-            saveResume(true);
+            get().pause();
           } else {
             get().play();
           }
@@ -1150,6 +1216,7 @@ export const usePlayerStore = create<PlayerState>()(
         play: () => {
           const { currentTrack, queueIndex, progress } = get();
           if (!currentTrack) return;
+          querTocar = true; // a intenção vale mesmo se o áudio ainda estiver a caminho
           // Faixa restaurada de outra sessão (ou engine resetado): o engine
           // ainda não a carregou — carrega agora e retoma NA POSIÇÃO salva.
           if (audioEngine.currentTrack?.id !== currentTrack.id) {
@@ -1166,6 +1233,11 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         pause: () => {
+          // A INTENÇÃO PRIMEIRO, o comando depois. Pausar durante um
+          // carregamento não tem em quem mandar — o motor ainda não recebeu a
+          // faixa. Quem faz o pause valer é `reconciliarIntencao`, no fim da
+          // transição, e ela lê daqui.
+          querTocar = false;
           audioEngine.pause();
           set({ isPlaying: false });
           saveResume(true);
@@ -1276,6 +1348,7 @@ export const usePlayerStore = create<PlayerState>()(
           if (index === queueIndex) {
             set({ queue: nextQueue, originalQueue: nextOriginal });
             if (nextQueue.length === 0) {
+              querTocar = false; // não sobrou faixa nenhuma para tocar
               audioEngine.pause();
               set({
                 currentTrack: null,
@@ -1435,6 +1508,7 @@ export function initPlayerEngine(): void {
     } else if (state.repeat === 'all' && state.queue.length > 0) {
       state.playAt(0);
     } else {
+      querTocar = false; // a fila acabou de verdade
       store.setState({ isPlaying: false, progress: state.duration });
     }
   };
@@ -1592,6 +1666,7 @@ export function initPlayerEngine(): void {
           playRecorded = false;
           preloadRequested = false;
           lastProgressCommit = 0;
+          novaGeracao(true); // transição nova: a carga anterior perde a voz
           audioEngine.load(track, { autoplay: true, crossfadeSeconds });
           store.setState({
             currentTrack: track,
@@ -1701,6 +1776,7 @@ export function initPlayerEngine(): void {
     // permite. É essa a diferença para o caminho antigo, que só chamava play()
     // DEPOIS do fim, com a sessão já derrubada.
     const { crossfadeSeconds } = useSettingsStore.getState();
+    novaGeracao(true); // transição nova: a carga anterior perde a voz
     audioEngine.load(next, {
       autoplay: true,
       crossfadeSeconds: crossfadeSeconds > 0 ? crossfadeSeconds : BG_HANDOFF_XF,
@@ -1785,6 +1861,7 @@ export function initPlayerEngine(): void {
       });
       return;
     }
+    querTocar = false;
     store.setState({ isPlaying: false, isBuffering: false });
     // Toast lazily to avoid a hard dependency for unit tests.
     void import('sonner').then(({ toast }) => toast.error(message));
@@ -1803,6 +1880,11 @@ export function initPlayerEngine(): void {
     clearLoadWatchdog();
     clearEndTimer();
     clearHandoffTimer();
+    // "Nada de retomar sozinho" também vale para a reconciliação: sem zerar a
+    // intenção aqui, o fim de uma transição em curso tomaria o alto-falante de
+    // volta do outro app — exatamente a briga que este ouvinte existe para
+    // encerrar.
+    querTocar = false;
     store.setState({ isPlaying: false, isBuffering: false });
     saveResume(true);
   });

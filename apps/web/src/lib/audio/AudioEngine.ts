@@ -196,6 +196,32 @@ function isHlsUrl(url: string): boolean {
   return /\.m3u8(\?|#|$)/i.test(url);
 }
 
+/**
+ * A REJEIÇÃO QUE NÃO É ERRO — e por que ela precisa de nome próprio (RF1).
+ *
+ * `play()` devolve uma promessa, e o navegador a REJEITA com `AbortError`
+ * sempre que o pedido é interrompido por um `load()`/`pause()` que veio depois.
+ * Ou seja: em toda troca rápida de faixa, sempre. Não é falha de reprodução, é
+ * o navegador dizendo "esse pedido ficou obsoleto, o novo manda".
+ *
+ * Tratá-la como bloqueio de autoplay era o defeito: quem apertava "próxima"
+ * cinco vezes recebia cinco erros de tipo `'play'`, a store parava o player e
+ * mostrava um toast vermelho acusando o navegador de um erro causado pela
+ * própria troca de faixa. Pior, cada um pendurava ouvintes de gesto para
+ * "retomar" um elemento que já não era o da vez.
+ *
+ * `NotAllowedError` — o bloqueio de autoplay de verdade — continua passando: lá
+ * o aviso é útil, porque basta a pessoa tocar na página. Distinguir os dois é
+ * todo o conserto.
+ */
+function ehAbortoDeTroca(erro: unknown): boolean {
+  // `DOMException` nem sempre herda de `Error` (depende do motor), então a
+  // checagem é pelo `name`, que é o contrato da especificação.
+  return (
+    typeof erro === 'object' && erro !== null && (erro as { name?: string }).name === 'AbortError'
+  );
+}
+
 export class AudioEngine {
   private static _instance: AudioEngine | null = null;
 
@@ -695,8 +721,11 @@ export class AudioEngine {
     howl.on('playerror', () => {
       if (slot.seq !== seq || slot !== this.active) return;
       // Retry once after the browser unlocks audio (autoplay policy).
+      // `slot === this.active` também no retorno, e não só o `seq`: um slot
+      // PRÉ-CARREGADO continua com o mesmo `seq` enquanto espera a vez, e
+      // religá-lo aqui poria duas faixas no ar ao mesmo tempo (RNF5).
       howl.once('unlock', () => {
-        if (slot.seq === seq && this.playing) howl.play();
+        if (slot.seq === seq && slot === this.active && this.playing) howl.play();
       });
     });
     slot.cleanup.push(() => howl.unload());
@@ -828,19 +857,28 @@ export class AudioEngine {
     // e uma troca de faixa com a tela apagada é exatamente isso. Sem retomar
     // AQUI, o elemento toca e não sai áudio nenhum.
     void this.ctx?.resume().catch(() => undefined);
+    // TOKEN DE GERAÇÃO DESTE PEDIDO DE PLAY. O `seq` do slot é bumpado por
+    // `resetSlot`/`prepareSlot`, e os slots se alternam: sem prendê-lo AQUI,
+    // uma rejeição que chega tarde poderia falar por uma faixa que já saiu de
+    // cena e por acaso reocupou o mesmo slot.
+    const seq = slot.seq;
+    const daVez = (): boolean => slot.seq === seq && slot === this.active;
     if (slot.source.kind === 'howl') {
       const { howl } = slot.source;
       if (!howl.playing()) howl.play();
     } else {
       const { el } = slot.source;
-      void el.play().catch(() => {
-        if (slot !== this.active) return;
+      void el.play().catch((erro: unknown) => {
+        // Troca de faixa interrompeu este play: é o comportamento normal do
+        // navegador, não uma falha. Ver `ehAbortoDeTroca` (RF1).
+        if (ehAbortoDeTroca(erro)) return;
+        if (!daVez()) return;
         // Autoplay bloqueado: em vez de só reclamar, retoma sozinho no PRIMEIRO
         // gesto do usuário (igual ao 'unlock' do Howler) — senão a faixa fica
         // parada mesmo depois de o usuário interagir com a página.
         const resume = (): void => {
           detach();
-          if (slot === this.active && this.playing) void el.play().catch(() => undefined);
+          if (daVez() && this.playing) void el.play().catch(() => undefined);
         };
         const detach = (): void => {
           document.removeEventListener('pointerdown', resume);
