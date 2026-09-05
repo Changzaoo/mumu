@@ -32,17 +32,18 @@ Running 6 tests using 2 workers
 
 ## O que foi escrito
 
-| Arquivo                                                | Tipo       | O que prende                                                                 |
-| ------------------------------------------------------ | ---------- | ---------------------------------------------------------------------------- |
-| `apps/api/src/app.integracao.test.ts`                  | integração | 27 casos: CORS, autenticação, papéis, entrada inválida, limites, injeção     |
-| `apps/api/src/modules/stream/stream.rotas.test.ts`     | integração | 21 casos: token de stream pela rota, travessia de caminho, RF7 (404 visível) |
-| `apps/api/src/modules/tracks/tracks.escondida.test.ts` | integração | 10 casos: faixa não-pública por id e por download                            |
-| `apps/web/e2e/reproducao.spec.ts`                      | e2e        | 5 casos: reprodução real, com WAV gerado e tocado no Chromium                |
+- `apps/api/src/app.integracao.test.ts` — 27: CORS, autenticação, papéis, entrada inválida,
+  limites, injeção.
+- `apps/api/src/modules/stream/stream.rotas.test.ts` — 21: token de stream pela rota, travessia
+  de caminho, RF7 (404 visível).
+- `apps/api/src/modules/tracks/tracks.escondida.test.ts` — 10: faixa não-pública por id e por
+  download.
+- `apps/web/e2e/reproducao.spec.ts` — 5 (e2e): reprodução real, WAV gerado e tocado no Chromium.
 
 **A pilha do Express nunca tinha sido exercitada.** Toda a API era unidade pura: nada passava
 por `createApp()`, então CORS, `authenticate`, `requireRole`, teto de corpo e envelope de erro
-não tinham um único teste. Banco, Redis, Firebase e cofre entram dublados — o que está sob
-teste é a decisão da API, não o Postgres.
+não tinham um único teste. Banco, Redis, Firebase e cofre entram dublados — sob teste está a
+decisão da API, não o Postgres.
 
 **O e2e não tocava música.** Os 689 testes do web provam as regras contra dublês de `<audio>`;
 nenhum provava que um `HTMLAudioElement` de verdade sai do `readyState 0`. Agora um WAV é
@@ -62,11 +63,9 @@ chega dentro de um `contains`), travessia `..%2F..%2F`, `..%5C..%5C`, byte nulo,
    `GET /tracks/:id` devolvia a faixa marcada como não-pública para **qualquer um, inclusive
    visitante sem conta** — e o DTO carrega `streamUrl` com token de stream **já assinado**.
    `GET /tracks/:id/download` exigia conta e entregava os bytes originais pelo mesmo caminho.
-   Esconder uma faixa não escondia nada. Correção: `visivelPara()` em `tracks.service.ts`
-   (dono continua vendo a própria), 404 e não 403 para não confirmar que a faixa existe;
-   `downloadSource` passou a selecionar `isPublic`/`uploadedByUserId`.
-   **Prova de regressão:** removendo as duas guardas, 4 dos 10 testes do arquivo ficam
-   vermelhos; com elas, 10 verdes.
+   Esconder uma faixa não escondia nada. Correção: `visivelPara()` em `tracks.service.ts` (dono
+   continua vendo a própria), 404 e não 403 para não confirmar que a faixa existe. **Prova de
+   regressão:** removendo as duas guardas, 4 dos 10 testes do arquivo ficam vermelhos.
 2. **Origem de fora da lista virava 500** — `apps/api/src/app.ts`. O callback do CORS emitia
    um `Error` cru, que caía no ramo final do `errorHandler`: `500 INTERNAL` e uma linha de log
    **em nível de erro, com pilha**, por requisição. Qualquer varredura automática enchia o log
@@ -82,13 +81,8 @@ persistia a biblioteca vazia da memória por cima das entradas recém-gravadas.
 ## Cobertura
 
 **Indisponível.** O script `test:coverage` existe nos três pacotes, mas a dependência não:
-
-```
-Error: Cannot find package '@vitest/coverage-v8'
-```
-
-Não instalei: o pedido é "apenas o essencial", cobertura é condicional ("se disponível"), e
-subir dependência nova mexe no lockfile que o deploy usa com `--frozen-lockfile`.
+`Error: Cannot find package '@vitest/coverage-v8'`. Não instalei: cobertura é condicional no
+pedido e dependência nova mexe no lockfile que o deploy usa com `--frozen-lockfile`.
 
 ## Sem cobertura, e por quê
 
