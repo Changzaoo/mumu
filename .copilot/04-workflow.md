@@ -107,7 +107,7 @@ Portões: `pnpm build` e `pnpm --filter @radinho/web test`; caminhos relativos a
       passagem manual com `pnpm dev:web`: tocar, pular 5 faixas rápido, pausar, apagar a tela.
       _Aceite:_ tempo total visível, sem spinner eterno, som continua com a aba oculta;
       screenshot/saída anexada em `.copilot/05-execucao.md`.
-- [ ] **H4. Commit e push.** Commits pequenos por bloco, mensagem descrevendo o sintoma
+- [x] **H4. Commit e push.** Commits pequenos por bloco, mensagem descrevendo o sintoma
       corrigido; `git push` na `main` (deploy da Vercel é automático).
       _Aceite:_ `git status` limpo e `git log --oneline -n 8` mostrando os blocos.
 - [ ] **H5. Conferir o deploy.** Abrir aurial.vercel.app e tocar uma faixa.

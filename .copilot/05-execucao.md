@@ -89,6 +89,27 @@ prende o efeito que RF5 pede — esconder a página não cala a música — nos 
 
 Contra a base: **+7 arquivos de teste, +41 testes**, zero regressão.
 
+## G1 — Memória (saída real de `pnpm --filter @radinho/web perf:memoria`)
+
+```
+┌─────────┬────────┬──────────┬───────────┬────────────┬───────────┬──────────┬─────────────┬─────────┬────────────┐
+│ (index) │ faixas │ assentou │ alças (n) │ alças (MB) │ heap (MB) │ TBT (ms) │ bitmap (MB) │ nós DOM │ TOTAL (MB) │
+├─────────┼────────┼──────────┼───────────┼────────────┼───────────┼──────────┼─────────────┼─────────┼────────────┤
+│ 0       │ 1000   │ true     │ 293       │ 64         │ 13        │ 923      │ 7           │ 2260    │ 84         │
+│ 1       │ 5000   │ true     │ 292       │ 64         │ 15        │ 3796     │ 0           │ 2078    │ 79         │
+└─────────┴────────┴──────────┴───────────┴────────────┴───────────┴──────────┴─────────────┴─────────┴────────────┘
+  3 passed (1.9m)
+```
+
+**Cinco mil faixas não custam mais memória que mil** (79 MB contra 84 MB): o orçamento de
+`alcasDeBlob` segura em 64 MB nos dois casos, que é o que o teto em bytes existe para fazer.
+Ressalva honesta: esta medição é com a aba **parada**, sem tocar nada — as 292 alças são de
+capa, não de áudio. Ela prova o teto, não o ciclo de troca de faixa; quem prova esse é o teste
+unitário de dez trocas em `alcasDeBlob.test.ts`.
+
+O TBT de 3.796 ms com 5.000 faixas é alto e **não** é objeto deste pedido (é custo de abertura,
+não de reprodução). Fica anotado como próximo alvo.
+
 ## H3 — Verificação visual (saída real)
 
 `pnpm --filter @radinho/web e2e` → **1 passed** (`app.spec.ts` — carrega a home, mostra o menu,
