@@ -160,6 +160,126 @@ export async function relatorioDeReproducao(limite = 5): Promise<string> {
 }
 
 /**
+ * QUANTAS FAVORITAS CARREGAM UM ENDEREÇO PODRE — a pergunta "tem mais?".
+ *
+ * Curtidas e playlists não guardam só o id da faixa: guardam uma cópia inteira
+ * do `TrackDto` ao lado dele (`aurial:local-liked-tracks`), tirada no dia em
+ * que a pessoa curtiu, e nunca mais atualizada. Dentro dela vai a `streamUrl`,
+ * que para faixa importada é a cópia do cofre e termina em `?k=<token>`.
+ *
+ * Esse token é sorteado a cada `POST /blob` no importador. Reenviar a faixa —
+ * cura do cofre, reimportação — troca o token, e o cofre passa a responder 403
+ * a quem chega com o antigo. Era isso que fazia uma favorita de meses parar de
+ * tocar enquanto a MESMA música, aberta pela busca, tocava normalmente.
+ *
+ * O player já não confia mais nessa fotografia (ver `ensurePlayableSource` em
+ * playerStore.ts): para faixa `local:` quem manda no endereço é o registro. Mas
+ * "confia em mim, consertei" não é resposta neste projeto. Isto conta, com os
+ * dados desta pessoa, QUANTAS estavam podres — e é o que separa o conserto do
+ * palpite.
+ */
+export async function relatorioDeCurtidasPodres(): Promise<string> {
+  const [{ list: curtidas }, playlists, { API_BASE_URL }] = await Promise.all([
+    import('@/lib/local/localLikes'),
+    import('@/lib/local/localPlaylists'),
+    import('@/lib/apiBase'),
+  ]);
+
+  // Uma faixa que está na Curtidas E em três playlists é UM caso, não quatro.
+  const porId = new Map<string, { titulo: string; guardada: string; onde: Set<string> }>();
+  const anotar = (t: { id: string; title: string; streamUrl?: string | null }, onde: string) => {
+    if (!t.id.startsWith('local:') || !t.streamUrl) return;
+    const atual = porId.get(t.id);
+    if (atual) {
+      atual.onde.add(onde);
+      return;
+    }
+    porId.set(t.id, { titulo: t.title, guardada: t.streamUrl, onde: new Set([onde]) });
+  };
+
+  for (const t of curtidas()) anotar(t, 'Curtidas');
+  for (const p of playlists.list()) {
+    for (const t of playlists.resolveTracks(p.id)) anotar(t, p.title);
+  }
+
+  const linhas: string[] = ['ENDEREÇOS GUARDADOS EM CURTIDAS E PLAYLISTS', ''];
+  if (porId.size === 0) {
+    linhas.push('Nenhuma faixa importada guarda endereço próprio. Nada a conferir.');
+    // eslint-disable-next-line no-console -- ferramenta de console, é a saída
+    console.log(linhas.join('\n'));
+    return linhas.join('\n');
+  }
+
+  linhas.push(`${porId.size} faixa(s) guardam um endereço próprio. Conferindo com o acervo…`, '');
+
+  const podres: string[] = [];
+  const sumidas: string[] = [];
+  let iguais = 0;
+  let indeterminadas = 0;
+
+  for (const [id, caso] of porId) {
+    try {
+      const res = await fetch(`${API_BASE_URL}/catalogo/${encodeURIComponent(id)}`, {
+        headers: { Accept: 'application/json' },
+      });
+      if (res.status === 404) {
+        sumidas.push(`  "${caso.titulo}" — não está mais no acervo (${[...caso.onde].join(', ')})`);
+        continue;
+      }
+      if (!res.ok) {
+        indeterminadas++;
+        continue;
+      }
+      const corpo = (await res.json()) as { data?: Record<string, unknown> };
+      const detalhe = corpo.data ?? (corpo as Record<string, unknown>);
+      const atual =
+        (detalhe.remoteUrl as string | undefined) ??
+        (detalhe.track as { streamUrl?: string } | undefined)?.streamUrl ??
+        null;
+      if (!atual) {
+        sumidas.push(`  "${caso.titulo}" — o acervo não tem cópia (${[...caso.onde].join(', ')})`);
+      } else if (atual === caso.guardada) {
+        iguais++;
+      } else {
+        podres.push(`  "${caso.titulo}" — em ${[...caso.onde].join(', ')}`);
+      }
+    } catch {
+      indeterminadas++;
+    }
+    // O acervo aceita 300 pedidos por minuto por IP. Conferir a coleção inteira
+    // não pode custar à pessoa um 429 no meio da própria música.
+    await new Promise((r) => setTimeout(r, 250));
+  }
+
+  linhas.push(`✓ ${iguais} com o endereço ainda correto`);
+  if (podres.length) {
+    linhas.push(
+      '',
+      `✗ ${podres.length} guardavam endereço VELHO — é este o caso de "antes tocava, hoje não":`,
+      ...podres,
+      '',
+      'Todas voltam a tocar: o player agora pega o endereço no registro, não na',
+      'cópia guardada. Não é preciso recurtir nem reimportar nada.',
+    );
+  }
+  if (sumidas.length) {
+    linhas.push(
+      '',
+      `⚠ ${sumidas.length} sem cópia no acervo (essas não têm conserto aqui):`,
+      ...sumidas,
+    );
+  }
+  if (indeterminadas) {
+    linhas.push('', `? ${indeterminadas} não deu para conferir (rede/limite) — rode de novo.`);
+  }
+
+  const texto = linhas.join('\n');
+  // eslint-disable-next-line no-console -- ferramenta de console, é a saída
+  console.log(texto);
+  return texto;
+}
+
+/**
  * Publica o diagnóstico no console do navegador.
  *
  * É o caminho mais curto entre o problema do usuário e a evidência: ele abre o
@@ -174,4 +294,6 @@ export function instalarDiagnostico(): void {
     console.log(texto);
     return texto;
   };
+  (window as unknown as Record<string, unknown>).radinhoCurtidasPodres = (): Promise<string> =>
+    relatorioDeCurtidasPodres();
 }

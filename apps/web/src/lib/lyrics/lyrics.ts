@@ -346,7 +346,9 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     artistCandidates.map((artist) => ({ title, artist })),
   );
 
-  const escolher = (achados: Array<Lyrics | null>): { synced: Lyrics | null; plain: Lyrics | null } => {
+  const escolher = (
+    achados: Array<Lyrics | null>,
+  ): { synced: Lyrics | null; plain: Lyrics | null } => {
     let synced: Lyrics | null = null;
     let plain: Lyrics | null = null;
     for (const achado of achados) {

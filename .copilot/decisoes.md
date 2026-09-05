@@ -53,3 +53,15 @@
 - **Commits por bloco, não um commit único**: se o deploy quebrar, reverter só o bloco culpado.
 - **Verificação visual é obrigatória antes do push** (H3): Playwright + passagem manual com a
   aba oculta; a regra de áudio de fundo não é observável em teste unitário.
+
+## Fase 5 — construção
+
+- **A2: a árvore suja fica inteira** (`detalheDaFaixa`, `playbackDiagnosis`, `lyrics`,
+  `playerStore`, `urlCongeladaDaCurtida.test.ts`). Todos no tema do pedido, com teste, e a
+  base com eles é verde (648/648). Reverter seria jogar fora conserto de RF7 já provado.
+- **E2 não será "conectar/desconectar o grafo por visibilidade"**: `AudioEngine.ts` documenta,
+  e `audioDeCelular.test.ts` prende, que depois de `createMediaElementSource` desconectar o nó
+  deixa o elemento MUDO — a decisão tem que ser por elemento e para sempre. O projeto já resolve
+  por PLATAFORMA (`SEM_GRAFO_WEB_AUDIO = IS_MOBILE`), que é estritamente mais forte para RF5.
+  E2 vira: provar que no celular nenhum `AudioContext` nasce e que o elemento segue tocando
+  depois de `visibilitychange → hidden`.

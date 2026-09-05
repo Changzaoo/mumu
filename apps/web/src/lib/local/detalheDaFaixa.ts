@@ -81,10 +81,28 @@ const prontos = new Set<string>();
 /** Buscas em voo, por id: dois cliques rápidos na mesma faixa são UMA busca. */
 const emVoo = new Map<string, Promise<boolean>>();
 
-/** A entrada já tem o que é preciso para tocar? */
+/**
+ * A entrada já tem o que é preciso para TOCAR?
+ *
+ * `sourceUrl` saiu desta conta, e a diferença não é sutil: ele é o link da
+ * PÁGINA de origem (um `watch?v=` do YouTube), não áudio. Quem toca é a cópia
+ * do cofre (`remoteUrl`/`track.streamUrl`); o `sourceUrl` só serve para uma
+ * extração ao vivo, que é lenta, falha com frequência e existe como último
+ * recurso — nunca como motivo para não perguntar o endereço bom ao acervo.
+ *
+ * Contá-lo como conteúdo criava um beco sem saída exatamente no caso que este
+ * módulo deveria resolver: `reportDeadRemote` apaga a `remoteUrl` podre e zera
+ * a `streamUrl` para que a próxima busca traga a atual — mas sobrando o
+ * `sourceUrl`, esta função respondia "já tem" e a busca nunca acontecia. A
+ * faixa ficava presa no link de origem para sempre.
+ *
+ * O erro é assimétrico e por isso a escolha é fácil: responder `false` à toa
+ * custa um `GET /catalogo/:id` de uma faixa; responder `true` à toa custa uma
+ * música que não toca mais.
+ */
 function jaTemConteudo(e: LibraryEntry | undefined): boolean {
   if (!e) return false;
-  return Boolean(e.remoteUrl ?? e.track.streamUrl ?? e.sourceUrl);
+  return Boolean(e.remoteUrl ?? e.track.streamUrl);
 }
 
 function entradaDe(id: string): LibraryEntry | undefined {

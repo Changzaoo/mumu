@@ -96,7 +96,9 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
     await ensureDownloadedAudioUrl(track.id);
     return track;
   }
-  if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id) || track.streamUrl) return track;
+  if (localLibraryAudioUrl(track.id) || localAudioUrl(track.id)) return track;
+  // Faixa que NÃO é do acervo local (rádio, podcast, compartilhada, Audius): a
+  // `streamUrl` que veio junto é a única que existe, e é a boa.
   if (!track.id.startsWith('local:')) return track;
   // OFFLINE: nunca sai atrás de rede — sem áudio local, a faixa é indisponível.
   if (typeof navigator !== 'undefined' && !navigator.onLine) return track;
@@ -104,9 +106,37 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
   // diz que a faixa toca. É AQUI, no caminho do play, que o conteúdo é buscado
   // — uma faixa por vez, no clique, em vez de cinco mil na abertura. Quando o
   // assimilador já passou por ela (o caso comum), isto volta na hora, sem rede.
-  if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) await garantirDetalhe(track.id);
+  //
+  // BUSCAR O DETALHE NUNCA PODE IMPEDIR DE TOCAR. Ela é adiantamento: se
+  // falhar (rede, armazenamento bloqueado, resposta estranha), o certo é
+  // seguir com o que já se tem em mãos — que pode ser exatamente a `streamUrl`
+  // logo abaixo. Sem este `catch`, uma hidratação que rejeita emudeceria uma
+  // faixa que tinha endereço bom, trocando um defeito por um pior.
+  if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) {
+    await garantirDetalhe(track.id).catch(() => false);
+  }
+  /**
+   * O REGISTRO MANDA NO ENDEREÇO — a `streamUrl` que veio na faixa é uma FOTO.
+   *
+   * Curtidas e playlists guardam um `TrackDto` inteiro ao lado do id
+   * (`aurial:local-liked-tracks`) e nunca mais o atualizam. A `streamUrl` que
+   * ficou congelada ali é a cópia do cofre, e ela termina em `?k=<token>` —
+   * token sorteado a cada `POST /blob` no importador. Reenviar a faixa (cura
+   * do cofre, reimportação) troca o token, e o cofre passa a responder 403 a
+   * quem chega com o antigo, que é exatamente a prova de morte que o player
+   * aceita. O resultado é o defeito relatado: a música tocava quando foi
+   * curtida e parou de tocar meses depois, enquanto a MESMA faixa, aberta pela
+   * busca ou pelo álbum, toca — porque ali o endereço vem do registro.
+   *
+   * Antes, `track.streamUrl` ser verdadeira encerrava a função aqui em cima, e
+   * o endereço vivo — que o acervo tem e entrega em `GET /catalogo/:id` —
+   * nunca era buscado. Agora a foto só vale quando o registro não sabe nada
+   * melhor: perder isso trocaria um defeito por outro, emudecendo a faixa que
+   * hoje toca só pela foto.
+   */
   const remote = remoteUrlFor(track.id);
-  if (remote) return { ...track, streamUrl: remote };
+  if (remote) return remote === track.streamUrl ? track : { ...track, streamUrl: remote };
+  if (track.streamUrl) return track;
   const sourceUrl = sourceUrlFor(track.id);
   if (!sourceUrl) return track;
   try {
@@ -147,6 +177,24 @@ async function resolveNextSource(track: TrackDto, tried: Set<string>): Promise<T
     return null;
   }
   if (!track.id.startsWith('local:')) return null;
+  /**
+   * HIDRATA ANTES DE DESISTIR — este era o fundo do poço do defeito.
+   *
+   * A entrada do acervo chega MAGRA: a listagem deixou de trazer `remoteUrl` e
+   * `sourceUrl` (ver `CAMPOS_SOB_DEMANDA_DA_ENTRADA` na API), e eles só existem
+   * depois de `garantirDetalhe`. Como esta função lia o registro direto e nunca
+   * hidratava, ela achava `null` nos dois e devolvia "não há mais o que tentar"
+   * — a faixa era declarada indisponível com a cópia boa viva no cofre.
+   *
+   * É também o que fecha o ciclo de cura de `reportDeadRemote`: ele apaga a
+   * `remoteUrl` podre da entrada justamente para que a próxima busca traga a
+   * atual, e sem esta linha não havia próxima busca.
+   */
+  // Best-effort pelo mesmo motivo do outro sítio: procurar socorro não pode
+  // virar mais um jeito de falhar.
+  if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) {
+    await garantirDetalhe(track.id).catch(() => false);
+  }
   const remote = remoteUrlFor(track.id);
   if (remote && !tried.has(remote)) return { ...track, streamUrl: remote };
   const sourceUrl = sourceUrlFor(track.id);
@@ -946,8 +994,23 @@ export const usePlayerStore = create<PlayerState>()(
             return;
           }
 
-          // Existing stream URL or catalog track → load directly.
-          if (track.streamUrl || !track.id.startsWith('local:')) {
+          /**
+           * ATALHO SÓ PARA QUEM NÃO É DO ACERVO LOCAL — e o `track.streamUrl`
+           * saiu daqui porque era ele que segurava o defeito.
+           *
+           * Rádio, podcast, faixa compartilhada, Audius: a `streamUrl` que veio
+           * com elas é a única que existe, e carregar direto é o certo.
+           *
+           * Faixa `local:` é outra coisa. A `streamUrl` que ela carrega pode
+           * ser uma FOTOGRAFIA — curtidas e playlists guardam um `TrackDto`
+           * inteiro e nunca mais o atualizam, e o endereço do cofre termina em
+           * um `?k=<token>` que é sorteado de novo a cada reenvio. Com a
+           * condição antiga, bastava a foto existir para o player carregá-la
+           * sem perguntar nada a ninguém: `ensurePlayableSource` — que é quem
+           * sabe buscar o endereço vivo — nunca era chamada. Era este o "antes
+           * tocava, hoje não toca" das faixas favoritas.
+           */
+          if (!track.id.startsWith('local:')) {
             audioEngine.load(track, { autoplay, crossfadeSeconds });
             applyEngineSettings();
             armLoadWatchdog(track.id, initialWatchdogMs(track.id));
@@ -968,6 +1031,12 @@ export const usePlayerStore = create<PlayerState>()(
           audioEngine.load(resolved, { autoplay, crossfadeSeconds });
           applyEngineSettings();
           armLoadWatchdog(track.id, initialWatchdogMs(track.id)); // sempre local: aqui — teto de 60s
+          // A SONDA VEM JUNTO. Faixa `local:` com `streamUrl` pronta passava
+          // pelo atalho acima e era sondada lá; agora ela chega aqui, e sem
+          // esta linha a cópia morta voltaria a ser descoberta só quando o
+          // elemento de áudio desistisse — os ~4,5s por faixa que a sonda
+          // existe para não pagar (ver `sondarFonteEmParalelo`).
+          sondarFonteEmParalelo(resolved, index);
         })().catch(() => {
           // Nada aqui pode deixar a faixa "carregando" para sempre.
           if (get().queueIndex !== index || get().currentTrack?.id !== track.id) return;
