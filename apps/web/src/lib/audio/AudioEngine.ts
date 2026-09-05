@@ -214,6 +214,25 @@ function isHlsUrl(url: string): boolean {
  * o aviso é útil, porque basta a pessoa tocar na página. Distinguir os dois é
  * todo o conserto.
  */
+/**
+ * FILTRO DE DURAÇÃO — `0` quer dizer "ainda não sei", e é a única resposta
+ * honesta que não estraga a barra (RF2).
+ *
+ * `HTMLMediaElement.duration` mente de três jeitos e sempre os mesmos: `NaN`
+ * antes do `loadedmetadata` (o começo inteiro da faixa), `Infinity` em stream
+ * sem `Content-Length` (o `/stream` do ajudante responde em chunks, que é a
+ * maior parte do acervo importado) e `0` quando a fonte falhou.
+ *
+ * Nenhum dos três é um tempo. Deixá-los escapar produzia "0:00" eterno na
+ * barra, "NaN:aN" quando a faixa também não tinha duração no registro, e uma
+ * exceção no `setPositionState` da tela de bloqueio. Tudo o que sai daqui é
+ * finito, positivo, ou `0` — e quem recebe `0` sabe que precisa perguntar a
+ * outro.
+ */
+function duracaoValida(valor: unknown): number {
+  return typeof valor === 'number' && Number.isFinite(valor) && valor > 0 ? valor : 0;
+}
+
 function ehAbortoDeTroca(erro: unknown): boolean {
   // `DOMException` nem sempre herda de `Error` (depende do motor), então a
   // checagem é pelo `name`, que é o contrato da especificação.
@@ -472,23 +491,33 @@ export class AudioEngine {
     return slot.source?.el.currentTime ?? 0;
   }
 
+  /**
+   * O tempo total da faixa ativa, em segundos. **Sempre finito e ≥ 0.**
+   *
+   * A ordem é a da confiabilidade, e não a da conveniência:
+   *  1. o que o elemento MEDIU — é o número real, quando existe;
+   *  2. o fim do range `seekable` — alguns navegadores só expõem o total por
+   *     aqui, mantendo `duration` em `Infinity` por boa parte do stream;
+   *  3. o que o REGISTRO guarda (`durationMs`, vindo da importação/catálogo) —
+   *     é o que cobre todo o intervalo antes do `loadedmetadata`, e é por ele
+   *     que a barra já mostra o tempo total no instante em que a faixa começa;
+   *  4. `0`, que quer dizer "ninguém sabe" — e é melhor que mentir com `NaN`.
+   */
   getDuration(): number {
     const slot = this.active;
     let duration = 0;
-    if (slot.source?.kind === 'howl') duration = slot.source.howl.duration();
-    else if (slot.source) duration = slot.source.el.duration;
-    // Alguns navegadores só expõem a duração total no range "seekable",
-    // mantendo duration=Infinity/NaN por boa parte do stream.
-    if ((!Number.isFinite(duration) || duration <= 0) && slot.el && slot.el.seekable.length > 0) {
+    if (slot.source?.kind === 'howl') duration = duracaoValida(slot.source.howl.duration());
+    else if (slot.source) duration = duracaoValida(slot.source.el.duration);
+    if (!duration && slot.el && slot.el.seekable.length > 0) {
       try {
-        duration = slot.el.seekable.end(slot.el.seekable.length - 1);
+        duration = duracaoValida(slot.el.seekable.end(slot.el.seekable.length - 1));
       } catch {
         /* range instável durante o carregamento */
       }
     }
-    if (!Number.isFinite(duration) || duration <= 0) {
-      duration = slot.track ? slot.track.durationMs / 1000 : 0;
-    }
+    // `durationMs` pode ser `NaN`/ausente numa faixa importada de arquivo sem
+    // tags — daí passar TAMBÉM pelo filtro, e não só dividir por mil.
+    if (!duration) duration = duracaoValida((slot.track?.durationMs ?? 0) / 1000);
     return duration;
   }
 
@@ -704,9 +733,10 @@ export class AudioEngine {
       this.applyRate(slot);
       this.applyTrim(slot);
       if (slot === this.active) {
-        // howl.duration() ainda pode ser 0 aqui; getDuration() cai para a
-        // metadata do catálogo e o durationchange acima corrige depois.
-        this.emit('loaded', { track, duration: howl.duration() || this.getDuration() });
+        // `getDuration()` já é a cascata inteira (medida → seekable → registro),
+        // e sempre finita. O `howl.duration()` cru estava aqui antes e deixava
+        // `Infinity` passar — porque `Infinity || x` é `Infinity`.
+        this.emit('loaded', { track, duration: this.getDuration() });
         this.emit('buffering', { buffering: false });
       }
     });
@@ -745,7 +775,10 @@ export class AudioEngine {
       this.applyRate(slot);
       this.applyTrim(slot);
       if (slot === this.active) {
-        this.emit('loaded', { track, duration: el.duration });
+        // `el.duration` cru sai daqui pelo mesmo motivo do caminho do howler:
+        // stream em chunks anuncia `Infinity` no `loadedmetadata`, e era isso
+        // que chegava à barra. Ver `getDuration`.
+        this.emit('loaded', { track, duration: this.getDuration() });
         this.emit('buffering', { buffering: false });
       }
     };

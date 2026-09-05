@@ -91,23 +91,42 @@ export function initMediaSession(): void {
     }
 
     // Playback state drives the play/pause glyph on the lock screen.
+    // Em try/catch como todo o resto daqui (RF4): a tela de bloqueio é enfeite,
+    // e nenhum enfeite pode derrubar a assinatura da store — que roda a cada
+    // `setState` do player, ou seja, no meio da música.
     if (state.isPlaying !== lastPlaying) {
       lastPlaying = state.isPlaying;
-      ms.playbackState = state.isPlaying ? 'playing' : 'paused';
+      try {
+        ms.playbackState = state.isPlaying ? 'playing' : 'paused';
+      } catch {
+        /* estado não suportado por este navegador — ignora */
+      }
     }
 
-    // Scrubber position (throttled; guarded — setPositionState throws on bad input).
+    // ── BARREIRA DO `setPositionState` (RF2/RF4) ────────────────────
+    //
+    // Ele LANÇA com qualquer entrada fora do contrato, e as entradas fora do
+    // contrato são o dia a dia deste player: `duration` vale `NaN` antes da
+    // metadata e `Infinity` em stream sem `Content-Length`; `position` pode
+    // passar de `duration` no instante da troca de faixa, quando o playhead já
+    // é o da faixa nova e a duração ainda é a da velha; `playbackRate` vem de
+    // preferência persistida e já chegou como `0`.
+    //
+    // Nada disso pode chegar lá. O `try/catch` continua por baixo porque a
+    // implementação varia entre navegadores, mas ele é a última linha, não a
+    // primeira: silenciar exceção não conserta a barra da tela de bloqueio.
     const now = Date.now();
     if (now - lastPositionCommit > 1000 && typeof ms.setPositionState === 'function') {
       lastPositionCommit = now;
       const duration = state.duration;
+      const rate = state.playbackRate;
       if (Number.isFinite(duration) && duration > 0) {
+        const position = Number.isFinite(state.progress)
+          ? Math.min(Math.max(0, state.progress), duration)
+          : 0;
+        const playbackRate = Number.isFinite(rate) && rate > 0 ? rate : 1;
         try {
-          ms.setPositionState({
-            duration,
-            position: Math.min(Math.max(0, state.progress), duration),
-            playbackRate: state.playbackRate || 1,
-          });
+          ms.setPositionState({ duration, position, playbackRate });
         } catch {
           /* transient out-of-range during load — ignore */
         }

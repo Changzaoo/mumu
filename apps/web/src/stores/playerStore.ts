@@ -41,6 +41,21 @@ import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 const duracaoJaAnotada = new Set<string>();
 
 /**
+ * O tempo total conhecido da faixa, em segundos — **nunca `NaN`** (RF2).
+ *
+ * `durationMs` é a fonte primária da duração: é ela que faz a barra mostrar o
+ * tempo total no instante em que a faixa começa, antes de o elemento de áudio
+ * ter aprendido qualquer coisa. Mas ela pode faltar — faixa importada de um
+ * arquivo sem tags chega com `durationMs` ausente ou `NaN` —, e dividir isso
+ * por mil produzia o "NaN:aN" que aparecia na barra e no relógio do player.
+ * `0` significa "ainda não se sabe", e é o que a interface já trata como 0:00.
+ */
+function segundosConhecidos(track: { durationMs?: number | null }): number {
+  const ms = track.durationMs;
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms / 1000 : 0;
+}
+
+/**
  * A duração real, medida pelo elemento de áudio, volta para a biblioteca.
  *
  * É o conserto de um dado que se perdeu na importação e que nada revisitava:
@@ -953,7 +968,7 @@ export const usePlayerStore = create<PlayerState>()(
           isPlaying: autoplay,
           progress: 0,
           buffered: 0,
-          duration: track.durationMs / 1000,
+          duration: segundosConhecidos(track),
         });
 
         // O GUARDIÃO DO OFFLINE PRECISA SABER O QUE VEM A SEGUIR.
@@ -1462,7 +1477,7 @@ export function initPlayerEngine(): void {
       originalQueue: [resume.track],
       queueIndex: 0,
       progress: resume.progress,
-      duration: resume.track.durationMs / 1000,
+      duration: segundosConhecidos(resume.track),
       isPlaying: false,
       context: { source: 'queue' },
     });
@@ -1674,7 +1689,7 @@ export function initPlayerEngine(): void {
             isPlaying: true,
             progress: 0,
             buffered: 0,
-            duration: track.durationMs / 1000,
+            duration: segundosConhecidos(track),
           });
           crossfadeTriggered = false;
         }
@@ -1787,7 +1802,7 @@ export function initPlayerEngine(): void {
       isPlaying: true,
       progress: 0,
       buffered: 0,
-      duration: next.durationMs / 1000,
+      duration: segundosConhecidos(next),
     });
   };
 
