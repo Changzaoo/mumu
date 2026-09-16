@@ -341,11 +341,7 @@ function quebrarListaDeNomes(texto: string, conhecidos?: ReadonlySet<string>): s
         .split(/\s*(?:,|&|\be\b)\s*/i)
         .map((p) => p.trim())
         .filter((p) => p.length > 0);
-      if (
-        conhecidos &&
-        partes.length >= 2 &&
-        partes.every((p) => conhecidos.has(chave(p)))
-      ) {
+      if (conhecidos && partes.length >= 2 && partes.every((p) => conhecidos.has(chave(p)))) {
         for (const p of partes) saida.push(p);
       } else {
         saida.push(t);
@@ -594,4 +590,221 @@ export function chaveDeIdentidade(titulo: string, artista?: string | null): stri
   // separador não pode virar chave vazia e colidir com todo mundo.
   const a = nomes.length > 0 ? chave(nomes[0]!) : chave(artista ?? '');
   return a ? `${a}::${t}` : t;
+}
+
+/**
+ * O TÍTULO DE UMA FAIXA DO ACERVO — onde o artista JÁ É CONFIÁVEL.
+ *
+ * `lerTituloDeVideo` parte do nome cru de um vídeo e trata o canal como
+ * suspeito, por isso lê "A - B" sempre como "Artista - Música". No acervo a
+ * curadoria já fixou quem canta, e essa leitura destrói títulos reais:
+ *
+ *   "Deus é por Nós - Dj Muka" (MC Marks)        → artista "Deus é por Nós"
+ *   "Primeira Essência - Ministração ao vivo"    → título "Ministração"
+ *
+ * Aqui o artista conhecido decide qual lado é a música. Quando nenhum lado casa
+ * com ele e o outro lado não é crédito de DJ nem sufixo de gravação, a função
+ * DESISTE (devolve `null`): título ambíguo fica como está, porque errar
+ * reescrevendo apaga o nome da música e errar deixando é só feio.
+ */
+export interface TituloDoAcervo {
+  title: string;
+  /** Artistas atuais + convidados/DJs que o título nomeava, sem repetir. */
+  artists: string[];
+  label: string | null;
+}
+
+/** Sufixo de gravação depois do separador: não é artista nem música. */
+const SUFIXO_DE_GRAVACAO =
+  /^(?:ao vivo|live\b|ministracao|versao|version|disco\b|dvd\b|gravacao|remaster|edit\b|clipe|video|audio|faixa\b|ep\b|album\b|single\b|oficial|official|prod\b)/;
+
+/** Crédito de DJ/MC solto: "Dj Muka", "DJ Nenê MPC". */
+const CREDITO_DE_DJ = /^(?:dj|mc)\s+\S/i;
+
+/** Palavras que denunciam o parêntese de divulgação do canal. */
+const PARENTESE_DE_CANAL =
+  /\b(?:clipe|clip|video|videoclipe|audio|lyric|visualizer|oficial|official)\b/;
+
+export function lerTituloDoAcervo(
+  bruto: string,
+  artistasAtuais: readonly string[],
+): TituloDoAcervo | null {
+  const original = (bruto ?? '').trim();
+  if (!original) return null;
+
+  // Artista gravado como lista ("Purple Disco Machine, Kungs") vira nomes.
+  const conhecidos = deduplicarNomes(
+    artistasAtuais
+      .flatMap((a) => a.split(/\s*,\s*/))
+      .map((a) => a.trim())
+      .filter(Boolean),
+  );
+  const chaves = conhecidos.map((a) => chave(a)).filter(Boolean);
+  const ehConhecido = (texto: string): boolean => {
+    const k = chave(texto);
+    return Boolean(k) && chaves.some((c) => c === k || (c.length >= 4 && k.includes(c)));
+  };
+
+  let label: string | null = null;
+  const extras: string[] = [];
+  let texto = original;
+
+  // 0) CAMPOS TROCADOS: a lista de cantores no título e a música no artista.
+  //    "MC Cebezinho, MC Ryan SP, MC Magal e Salvador (DJ Boy)" / "Outfit Valioso".
+  //    Só destroca quando o título é claramente uma lista de MCs/DJs e o
+  //    "artista" é um nome só, sem MC/DJ — senão é gente de verdade.
+  const semParentesesDoTitulo = original.replace(PARENTESES, ' ').trim();
+  const nomesNoTitulo = separarNomes(semParentesesDoTitulo);
+  const ehCredito = (n: string): boolean => /^(?:mc'?s?|dj)\s/i.test(n.replace(/[’']/g, "'"));
+  const unicoArtista = artistasAtuais.length === 1 ? artistasAtuais[0]!.trim() : '';
+  if (
+    unicoArtista &&
+    !/^desconhecido$/i.test(unicoArtista) &&
+    // Artista entre aspas ("“Panamera”") é a música com certeza — basta a lista.
+    (/^["“”].+["“”]$/.test(unicoArtista)
+      ? nomesNoTitulo.length >= 2
+      : nomesNoTitulo.length >= 3 && nomesNoTitulo.filter(ehCredito).length >= 2) &&
+    !ehCredito(unicoArtista) &&
+    !/,/.test(unicoArtista) &&
+    !ehGravadora(unicoArtista)
+  ) {
+    const musica = unicoArtista.replace(/^["“”](.+)["“”]$/, '$1').trim();
+    const djs: string[] = [];
+    original.replace(PARENTESES, (todo, dentro: string) => {
+      if (/^\s*dj\s/i.test(dentro)) djs.push(...separarNomes(dentro));
+      else if (ehGravadora(dentro)) label ??= dentro.trim();
+      return todo;
+    });
+    const artistas = deduplicarNomes([...nomesNoTitulo, ...djs]);
+    if (musica.length >= 2) return { title: musica, artists: artistas, label };
+  }
+
+  // 1) Parênteses de divulgação: "(Vídeo Clipe Sete Sete Records)" → selo.
+  //    Parêntese que é só um selo conhecido ("(GR6 Explode)") também sai.
+  texto = texto.replace(PARENTESES, (todo, dentro: string) => {
+    const k = chave(dentro);
+    // "( DJ Koringa Mpc)": crédito de quem produziu, vai para os artistas.
+    if (/^\s*dj\s+\S/i.test(dentro) && dentro.trim().length <= 30) {
+      extras.push(dentro.trim());
+      return ' ';
+    }
+    if (
+      ehGravadora(dentro) ||
+      /^(?:gr6|kondzilla|sete sete|love funk)(?: explode| records| filmes)?$/.test(k)
+    ) {
+      label ??= dentro.trim();
+      return ' ';
+    }
+    if (!PARENTESE_DE_CANAL.test(k)) return todo;
+    const resto = dentro
+      .replace(
+        /(?:^|\s)(?:v[ií]deo|clipe|clip|videoclipe|[áa]udio|lyric|visualizer|oficial|official)(?=\s|$)/gi,
+        ' ',
+      )
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    // "Sete Sete Records" é selo; o "Music" que sobra de "Official Music Video", não.
+    const selo =
+      ehGravadora(resto) ||
+      (resto.split(' ').length >= 2 &&
+        resto.split(' ').length <= 3 &&
+        /\b(?:records?|music|produ[cç][oõ]es|explode|filmes)\b/i.test(resto));
+    if (resto && selo) label ??= resto;
+    return ' ';
+  });
+
+  // 2) Numeração e crédito de produção no fim: "#Faixa08", "Faixa 6", "Prod. X".
+  texto = texto
+    .replace(/#\s*faixa\s*\d+/gi, ' ')
+    .replace(/\bfaixa\s*\d+\b/gi, ' ')
+    .replace(/\s+-?\s*\bprod\b\.?\s*.*$/i, ' ')
+    // "Áudio Oficial." solto no fim, com ponto — o `limpar` só pega sem ponto.
+    .replace(/\s+(?:[áa]udio|v[ií]deo)\s+(?:oficial|official)\.?\s*$/i, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+
+  // 3) DJ creditado IMEDIATAMENTE depois de um parêntese: "O Funk Chora (Vídeo
+  //    Clip Oficial) DJ Kotim". Sem o parêntese colado, "ft. MC Marks" no fim
+  //    seria confundido com crédito solto.
+  const djDepoisDoParentese = /[)\]]\s+((?:dj|mc)\s+[^()[\]\-–—,#]+?)\s*$/i.exec(
+    original.replace(/#\s*\w+/g, ' ').trim(),
+  );
+  if (djDepoisDoParentese) {
+    const credito = djDepoisDoParentese[1]!.trim();
+    const at = texto.toLowerCase().lastIndexOf(credito.toLowerCase());
+    if (at > 0) {
+      extras.push(credito);
+      texto = texto.slice(0, at).trim();
+    }
+  }
+
+  // 3b) Música entre aspas: `Stray Kids "RUN IT" M/V`, `"Ainda Bem" Marisa Monte`.
+  //     Só vale quando o que sobra fora das aspas é quem canta ou ruído.
+  const citado = trechoEntreAspas(texto);
+  if (citado) {
+    const fora = chave(texto.replace(ASPAS_TODAS, ' ').replace(/\bm\s*\/\s*v\b/gi, ' '));
+    const sobra = fora
+      .split(' ')
+      .filter((palavra) => palavra && !chaves.some((c) => c.split(' ').includes(palavra)))
+      .join(' ');
+    if (!sobra || SO_RUIDO.test(sobra) || /^(?:mv|video|oficial|official)$/.test(sobra)) {
+      texto = citado;
+    }
+  }
+
+  // 4) "A - B": o artista conhecido decide.
+  // Separador DENTRO de parêntese não divide nada: "Star (2009 - Remaster)".
+  const mascarado = texto.replace(/[([][^)\]]*[)\]]/g, (m) => m.replace(/[-–—|]/g, '⁓'));
+  const partes = mascarado
+    .split(SEPARADOR)
+    .map((p) => p.replace(/⁓/g, '-').trim())
+    .filter(Boolean);
+  if (partes.length >= 2) {
+    const [esquerda, ...resto] = partes;
+    const direita = resto.join(' - ');
+    const kDireita = chave(direita);
+    if (ehConhecido(esquerda!) && !ehConhecido(direita)) {
+      texto = direita;
+    } else if (ehConhecido(direita) && !ehConhecido(esquerda!)) {
+      texto = esquerda!;
+    } else if (CREDITO_DE_DJ.test(direita) && direita.length <= 30) {
+      extras.push(direita);
+      texto = esquerda!;
+    } else if (SUFIXO_DE_GRAVACAO.test(kDireita)) {
+      texto = esquerda!;
+    } else {
+      return null; // ambíguo: não arrisca
+    }
+  }
+
+  // 5) Ruído de sempre (hashtags, "(Official Video)", "Ao Vivo" solto no fim).
+  texto = limpar(texto);
+
+  // 6) Convidados: "Luneta ft. MC Marks" → título "Luneta" + MC Marks.
+  const { titulo, convidados } = extrairConvidados(texto);
+  const nomes = [...conhecidos];
+  const semParentese = (n: string): string =>
+    n
+      .replace(/\s*[([].*$/, '')
+      .replace(/[)\]]+$/, '')
+      .trim();
+  for (const c of [...convidados, ...extras.flatMap((e) => separarNomes(e))].map(semParentese)) {
+    if (!c) continue;
+    if (!ehGravadora(c) && !nomes.some((n) => chave(n) === chave(c))) nomes.push(c);
+  }
+
+  // Aspas que embrulham o título inteiro não são parte do nome.
+  const title = titulo
+    .trim()
+    .replace(/^["“”](.+)["“”]$/, '$1')
+    .trim();
+  // Sobrou só o nome de quem canta, ou quase nada: não é um título.
+  if (title.length < 2 || (ehConhecido(title) && chave(title) !== chave(original))) {
+    return null;
+  }
+  const mudouTitulo = title !== original;
+  const mudouArtistas =
+    nomes.length !== artistasAtuais.length || nomes.some((n, i) => n !== artistasAtuais[i]);
+  if (!mudouTitulo && !mudouArtistas && !label) return null;
+  return { title, artists: nomes, label };
 }

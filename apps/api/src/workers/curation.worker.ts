@@ -39,6 +39,7 @@ import {
   forcarGeneroReal,
   generoDoArtista,
   lerTituloDeVideo,
+  lerTituloDoAcervo,
   limparNomeDeArtista,
   promoverArtistaReal,
   separarArtistasGrudados,
@@ -594,9 +595,84 @@ async function uniformizarTitulos(docs: LibraryDoc[]): Promise<number> {
  * que derrubava acervo, sincronia e curtidas juntos. Aqui a mesma varredura é
  * um `SELECT` numa tabela de centenas de linhas, e custa nada.
  */
+/**
+ * O LEITOR DE TÍTULO, AGORA NO ACERVO — que é o que todo mundo vê.
+ *
+ * `uniformizarTitulos` só passava pela biblioteca de quem importou, e o acervo
+ * ficou com centenas de títulos sujos: "Lente Transparente ft. Victor WAO
+ * (Áudio Oficial) #Faixa08", lista de MCs no campo do título e a música no do
+ * artista. Aqui o artista já é curado, então quem decide é `lerTituloDoAcervo`,
+ * que desiste quando o título é ambíguo.
+ *
+ * REVERSÍVEL: a mudança guarda `tituloOriginal` e `artistasOriginais` na própria
+ * faixa, e quem já tem essa marca não é reescrito de novo.
+ *
+ * DESLIGADO POR PADRÃO: reescreve mais de mil faixas de uma vez. Liga com
+ * `CURADORIA_TITULOS_ACERVO=1` depois de conferir a prévia.
+ */
+async function uniformizarTitulosDoAcervo(
+  linhas: { id: string; data: unknown }[],
+): Promise<number> {
+  if (process.env.CURADORIA_TITULOS_ACERVO !== '1') return 0;
+  let corrigidas = 0;
+  for (const linha of linhas) {
+    const dados = linha.data as { track?: Record<string, unknown> };
+    const track = dados.track;
+    if (!track || typeof track.title !== 'string' || track.tituloOriginal) continue;
+    const partes = lerTituloDoAcervo(track.title, artistNames(track as LibraryTrack));
+    if (!partes) continue;
+
+    const slug = (name: string): string =>
+      name
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(/[̀-ͯ]/g, '')
+        .replace(/[^a-z0-9]+/g, '-')
+        .replace(/^-|-$/g, '');
+    const existentes = Array.isArray(track.artists) ? (track.artists as { name?: unknown }[]) : [];
+    const artistas = partes.artists.map(
+      (name, order) =>
+        existentes.find((a) => a?.name === name) ?? {
+          id: `acervo:${slug(name)}`,
+          name,
+          slug: slug(name),
+          imageUrl: null,
+          order,
+        },
+    );
+
+    const novoTrack: Record<string, unknown> = {
+      ...track,
+      title: partes.title,
+      artists: artistas,
+      tituloOriginal: track.title,
+      artistasOriginais: track.artists ?? [],
+    };
+    if (partes.label && !track.label) novoTrack.label = partes.label;
+
+    try {
+      await prisma.catalogTrack.update({
+        where: { id: linha.id },
+        data: { data: { ...dados, track: novoTrack } as object },
+      });
+      dados.track = novoTrack; // as passagens seguintes leem já corrigido
+      corrigidas += 1;
+      log.info({ faixa: linha.id, de: track.title, para: partes.title }, 'título do acervo limpo');
+    } catch (err) {
+      log.warn({ err, faixa: linha.id }, 'falha ao limpar título do acervo');
+    }
+  }
+  if (corrigidas > 0) log.info({ corrigidas }, 'títulos do acervo uniformizados');
+  return corrigidas;
+}
+
 async function curarAcervo(): Promise<number> {
   const linhas = await prisma.catalogTrack.findMany();
   if (linhas.length === 0) return 0;
+
+  // O TÍTULO PRIMEIRO, como na biblioteca: gênero por artista, foto e
+  // duplicata leem esses campos. Ver `uniformizarTitulosDoAcervo`.
+  const titulosLimpos = await uniformizarTitulosDoAcervo(linhas);
 
   const linhaById = new Map(linhas.map((l) => [l.id, l]));
   const faixas: FaixaMinima[] = linhas.map((linha) => {
@@ -640,7 +716,7 @@ async function curarAcervo(): Promise<number> {
   // "Brasileira", padroniza grafia e corrige a faixa que destoa de toda a
   // discografia do artista. As mesmas regras que o app usa — ver
   // shared/ai/generoCoerencia.ts.
-  let corrigidas = 0;
+  let corrigidas = titulosLimpos;
   for (const mudanca of revisarGenerosDeFaixas(faixas)) {
     if (await gravar(mudanca)) corrigidas += 1;
   }
