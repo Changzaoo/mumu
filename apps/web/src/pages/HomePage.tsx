@@ -266,8 +266,6 @@ export default function HomePage() {
   );
 
   const playQueue = usePlayerStore((s) => s.playQueue);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
 
   // A foto só é refeita se foi tirada de uma biblioteca VAZIA e agora há
   // música (primeira abertura): trocar vazio por conteúdo não tira nada de
@@ -367,7 +365,7 @@ export default function HomePage() {
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
-              playing={currentTrack?.id === track.id && isPlaying}
+              trackId={track.id}
               onPlay={() =>
                 playQueue(generoTronco.tracks, index, {
                   source: 'library',
@@ -389,7 +387,7 @@ export default function HomePage() {
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
-              playing={currentTrack?.id === track.id && isPlaying}
+              trackId={track.id}
               onPlay={() =>
                 playQueue(ramo.tracks, index, { source: 'library', sourceId: ramo.key })
               }
@@ -407,7 +405,7 @@ export default function HomePage() {
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
-              playing={currentTrack?.id === track.id && isPlaying}
+              trackId={track.id}
               onPlay={() => playQueue(recentTracks, index, { source: 'home' })}
             />
           ))}
@@ -423,7 +421,7 @@ export default function HomePage() {
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
-              playing={currentTrack?.id === track.id && isPlaying}
+              trackId={track.id}
               onPlay={() => playQueue(daSemente, index, { source: 'library', sourceId: 'semente' })}
             />
           ))}
@@ -545,7 +543,7 @@ export default function HomePage() {
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
-              playing={currentTrack?.id === track.id && isPlaying}
+              trackId={track.id}
               onPlay={() =>
                 playQueue(g.tracks, index, { source: 'library', sourceId: `genre:${g.genre}` })
               }

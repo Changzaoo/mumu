@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { Music } from 'lucide-react';
 import { PlayButton } from '@/components/media/PlayButton';
 import { cn } from '@/lib/utils';
+import { usePlayerStore } from '@/stores/playerStore';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 export interface MediaCardProps extends ComponentProps<'div'> {
@@ -19,6 +20,12 @@ export interface MediaCardProps extends ComponentProps<'div'> {
   to?: string;
   onPlay?: () => void;
   playing?: boolean;
+  /**
+   * Id da faixa do card: com ele o próprio card acompanha "tocando agora".
+   * A página não precisa assinar o player — senão cada play/pause redesenha a
+   * página inteira (na Home, ~280 cards) bem no instante do toque.
+   */
+  trackId?: string;
   /** Show a "30s" corner badge (stream-only Apple preview tracks). */
   previewOnly?: boolean;
 }
@@ -35,11 +42,16 @@ export function MediaCard({
   shape = 'square',
   to,
   onPlay,
-  playing = false,
+  playing: playingProp = false,
+  trackId,
   previewOnly = false,
   className,
   ...props
 }: MediaCardProps) {
+  const tocandoEste = usePlayerStore((st) =>
+    trackId ? st.isPlaying && st.currentTrack?.id === trackId : false,
+  );
+  const playing = trackId ? tocandoEste : playingProp;
   const rounded = shape === 'round' ? 'rounded-full' : 'rounded-xl';
   // A play-only card (no route) plays when tapped anywhere — no hunting for the
   // little corner button.
