@@ -36,6 +36,7 @@ const ensureLocalAudioUrl = vi.fn((id: string): Promise<string | null> => {
 
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.resolve()),
+  registroPronto: vi.fn(() => Promise.resolve()),
   // Síncrono e só sabe das alças JÁ abertas — é o resolvedor que o motor usa.
   localAudioUrl: vi.fn((id: string) => alcasAbertas.get(id) ?? null),
   // Pergunta ao REGISTRO, não ao mapa de alças. É esta a distinção que faz o

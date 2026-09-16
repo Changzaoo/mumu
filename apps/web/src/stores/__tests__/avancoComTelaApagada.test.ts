@@ -115,6 +115,7 @@ vi.mock('@/lib/audio/mediaSession', () => ({ initMediaSession: vi.fn() }));
 
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.resolve()),
+  registroPronto: vi.fn(() => Promise.resolve()),
   localAudioUrl: vi.fn(() => null),
   hasLocalAudio: vi.fn(() => false),
   ensureLocalAudioUrl: vi.fn(() => Promise.resolve(null)),

@@ -18,7 +18,13 @@
  * local (caminho crítico do boot) e este puxa a biblioteca de volta — juntos,
  * fariam um ciclo de import.
  */
-import { aplicarCatalogo, hydrate, list, registroPronto } from '@/lib/local/localLibrary';
+import {
+  aplicarCatalogo,
+  hydrate,
+  list,
+  marcarAssentada,
+  registroPronto,
+} from '@/lib/local/localLibrary';
 import { reconciliarAcervo, subscribeCatalogo } from '@/lib/sync/catalogo';
 
 let iniciado = false;
@@ -29,26 +35,36 @@ export function initCatalogo(): void {
 
   // Sem depender de login: visitante também ouve o acervo (a prévia de 30s
   // continua valendo para ele).
-  subscribeCatalogo((entradas) => {
-    void (async () => {
-      // ESPERA A TRAVA DO REGISTRO, NÃO A HIDRATAÇÃO INTEIRA.
-      //
-      // O que protege esta escrita é só uma coisa: o registro já ter vindo do
-      // disco, senão o acervo grava por cima de uma biblioteca pela metade.
-      // Esperar `hydrate()` completo punha o acervo atrás da restauração de
-      // capas — até 150 imagens por abertura, em lotes que devolvem a vez para
-      // a tela entre um e outro. A atualização do acervo chegava segundos
-      // depois da lista, e a lista mudava de tamanho na cara de quem olhava.
-      void hydrate(); // idempotente: garante que a trava vai cair, sem esperá-la
-      await registroPronto();
-      aplicarCatalogo(entradas);
+  // A aplicação do snapshot é assíncrona; "conferido" só vale depois dela.
+  let aplicacao: Promise<unknown> = Promise.resolve();
+  subscribeCatalogo(
+    (entradas) => {
+      aplicacao = (async () => {
+        // ESPERA A TRAVA DO REGISTRO, NÃO A HIDRATAÇÃO INTEIRA.
+        //
+        // O que protege esta escrita é só uma coisa: o registro já ter vindo do
+        // disco, senão o acervo grava por cima de uma biblioteca pela metade.
+        // Esperar `hydrate()` completo punha o acervo atrás da restauração de
+        // capas — até 150 imagens por abertura, em lotes que devolvem a vez para
+        // a tela entre um e outro. A atualização do acervo chegava segundos
+        // depois da lista, e a lista mudava de tamanho na cara de quem olhava.
+        void hydrate(); // idempotente: garante que a trava vai cair, sem esperá-la
+        await registroPronto();
+        aplicarCatalogo(entradas);
 
-      // Só quem PODE escrever consegue completar o acervo; para o ouvinte
-      // comum a tentativa é recusada pela regra e para por aí. Por isso a
-      // reconciliação só olha o que é do próprio aparelho.
-      const idsNoAcervo = new Set(entradas.map((e) => e.track.id));
-      const minhas = list().filter((e) => e.origem !== 'catalogo');
-      await reconciliarAcervo(minhas, idsNoAcervo);
-    })().catch(() => undefined);
-  });
+        // Só quem PODE escrever consegue completar o acervo; para o ouvinte
+        // comum a tentativa é recusada pela regra e para por aí. Por isso a
+        // reconciliação só olha o que é do próprio aparelho.
+        const idsNoAcervo = new Set(entradas.map((e) => e.track.id));
+        const minhas = list().filter((e) => e.origem !== 'catalogo');
+        await reconciliarAcervo(minhas, idsNoAcervo);
+      })().catch(() => undefined);
+    },
+    () => {
+      void aplicacao.then(async () => {
+        await registroPronto();
+        marcarAssentada();
+      });
+    },
+  );
 }

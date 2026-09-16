@@ -5,6 +5,7 @@ import { useTrackLikes } from '@/features/library/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 /**
  * O FIO DE PROGRESSO, ISOLADO.
@@ -82,7 +83,11 @@ export function MiniPlayer() {
             >
               <span className="relative size-11 shrink-0 overflow-hidden rounded-sm bg-fg/6">
                 {track.coverUrl ? (
-                  <img src={track.coverUrl} alt="" className="size-full object-cover" />
+                  <img
+                    src={capaNoTamanho(track.coverUrl, 'linha') ?? undefined}
+                    alt=""
+                    className="size-full object-cover"
+                  />
                 ) : (
                   <span className="grid size-full place-items-center text-fg-subtle">
                     <Music className="size-4" />

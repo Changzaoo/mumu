@@ -34,6 +34,7 @@ import * as localPlaylists from '@/lib/local/localPlaylists';
 import { cn } from '@/lib/utils';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { useUiStore } from '@/stores/uiStore';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 interface NavEntry {
   to: string;
@@ -143,7 +144,12 @@ function LibraryItem({
         )}
       >
         {imageUrl ? (
-          <img src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+          <img
+            src={capaNoTamanho(imageUrl, 'linha') ?? undefined}
+            alt=""
+            loading="lazy"
+            className="size-full object-cover"
+          />
         ) : (
           <Icon className="size-5" />
         )}

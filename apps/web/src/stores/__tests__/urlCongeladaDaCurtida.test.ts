@@ -93,6 +93,7 @@ const sourceUrlFor = vi.fn<(id: string) => string | null>(() => null);
 const reportDeadRemote = vi.fn<(id: string, deadUrl: string) => void>();
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.resolve()),
+  registroPronto: vi.fn(() => Promise.resolve()),
   localAudioUrl: vi.fn(() => null),
   hasLocalAudio: vi.fn(() => false),
   ensureLocalAudioUrl: vi.fn(() => Promise.resolve(null)),

@@ -64,6 +64,8 @@ const sourceUrlFor = vi.fn<(id: string) => string | null>(() => null);
 const reportDeadRemote = vi.fn<(id: string, deadUrl: string) => void>();
 vi.mock('@/lib/local/localLibrary', () => ({
   hydrate: vi.fn(() => Promise.reject(new Error('cache storage indisponível'))),
+  // A trava nunca cai quando o registro não carrega: o play tem de seguir mesmo assim.
+  registroPronto: vi.fn(() => new Promise<void>(() => undefined)),
   localAudioUrl: vi.fn(() => null),
   // Sem áudio neste aparelho: é a premissa de TODO este arquivo — só assim o
   // player recorre à cópia enviada e ao stream, que é o que se testa aqui.

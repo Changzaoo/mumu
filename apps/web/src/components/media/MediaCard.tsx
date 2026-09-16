@@ -4,6 +4,7 @@ import { Link } from 'react-router';
 import { Music } from 'lucide-react';
 import { PlayButton } from '@/components/media/PlayButton';
 import { cn } from '@/lib/utils';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 export interface MediaCardProps extends ComponentProps<'div'> {
   title: string;
@@ -74,7 +75,7 @@ export function MediaCard({
           {collage.map((url, i) => (
             <img
               key={`${url}:${i}`}
-              src={url}
+              src={capaNoTamanho(url, 'linha') ?? undefined}
               alt=""
               loading="lazy"
               decoding="async"
@@ -84,7 +85,7 @@ export function MediaCard({
         </div>
       ) : imageUrl && !broken ? (
         <img
-          src={imageUrl}
+          src={capaNoTamanho(imageUrl, 'card') ?? undefined}
           alt=""
           loading="lazy"
           decoding="async"

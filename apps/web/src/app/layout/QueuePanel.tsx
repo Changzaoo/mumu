@@ -8,6 +8,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { cn, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 interface QueueEntry {
   /** Stable-ish key: same track may repeat in a queue. */
@@ -38,7 +39,7 @@ function QueueRow({
         <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
           {entry.track.coverUrl ? (
             <img
-              src={entry.track.coverUrl}
+              src={capaNoTamanho(entry.track.coverUrl, 'linha') ?? undefined}
               alt=""
               loading="lazy"
               className="size-full object-cover"

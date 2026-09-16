@@ -43,6 +43,8 @@ import { makeTrack } from '@/test/factories';
 // test's seeded localStorage is actually read.
 async function renderHome(): Promise<void> {
   const { default: HomePage } = await import('@/pages/HomePage');
+  // A Home só tira a foto depois que a biblioteca assenta (acervo conferido).
+  (await import('@/lib/local/localLibrary')).marcarAssentada();
   const queryClient = new QueryClient({ defaultOptions: { queries: { retry: false } } });
   const wrapper = ({ children }: { children: ReactNode }) => (
     <QueryClientProvider client={queryClient}>

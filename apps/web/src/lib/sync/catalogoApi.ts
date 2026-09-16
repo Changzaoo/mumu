@@ -154,7 +154,11 @@ async function buscar(etagAtual: string | null): Promise<Resposta> {
  * sem rede) e depois a cada mudança de verdade. Nada de repetir o mesmo
  * conteúdo: uma revalidação sem novidade não acorda ninguém.
  */
-export function subscribeCatalogo(callback: (entradas: LibraryEntry[]) => void): () => void {
+export function subscribeCatalogo(
+  callback: (entradas: LibraryEntry[]) => void,
+  /** Chamado uma vez, quando a primeira conferência com o servidor termina (com ou sem novidade). */
+  aoConferir?: () => void,
+): () => void {
   let cancelado = false;
   let etag: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -193,6 +197,7 @@ export function subscribeCatalogo(callback: (entradas: LibraryEntry[]) => void):
     }
     // 2. Depois a rede, para pegar o que mudou.
     await revalidar();
+    aoConferir?.();
     agendar();
   })();
 

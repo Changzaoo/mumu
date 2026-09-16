@@ -28,6 +28,7 @@ import {
   hydrate as hydrateLocalLibrary,
   localAudioUrl as localLibraryAudioUrl,
   remoteUrlFor,
+  registroPronto,
   reportDeadRemote,
   setTrackDuration,
   sourceUrlFor,
@@ -317,9 +318,17 @@ function localAudioReady(): Promise<unknown> {
  * qualquer faixa — esses sempre esperamos.
  */
 function localSourcesReady(trackId: string): Promise<unknown> {
-  return trackId.startsWith('local:')
-    ? Promise.all([localLibraryReady(), downloadsReady()])
-    : downloadsReady();
+  if (!trackId.startsWith('local:')) return downloadsReady();
+  // SÓ A TRAVA DO REGISTRO, NÃO A HIDRATAÇÃO INTEIRA.
+  //
+  // `hydrate()` inclui restaurar até 150 capas em lotes e normalizar artistas —
+  // segundos num celular. O play não usa nada disso: `ensureLocalAudioUrl`
+  // confere o cofre da faixa pedida sozinho, e `remoteUrlFor`/`sourceUrlFor`
+  // só precisam do registro lido. Esperar o resto era o "demora pra começar"
+  // de quem toca logo que abre o app.
+  // Corrida com a hidratação: ela engole rejeição, então a espera nunca fica
+  // pendurada mesmo que a trava não caia.
+  return Promise.all([Promise.race([registroPronto(), localLibraryReady()]), downloadsReady()]);
 }
 
 /**
@@ -1040,6 +1049,24 @@ export const usePlayerStore = create<PlayerState>()(
         // on a fresh boot (especially OFFLINE) the object-URL maps may still be
         // rebuilding, and a downloaded track must NEVER go to the server.
         set({ isBuffering: true });
+        // O DETALHE EM PARALELO COM O COFRE LOCAL. Quem ouve do acervo quase
+        // nunca tem a faixa no aparelho, e a busca do endereço vivo esperava
+        // em série atrás das checagens locais. Se a faixa estiver no aparelho,
+        // o custo é um GET pequeno desperdiçado.
+        if (
+          track.id.startsWith('local:') &&
+          !hasLocalAudio(track.id) &&
+          !hasDownloadedAudio(track.id) &&
+          (typeof navigator === 'undefined' || navigator.onLine)
+        ) {
+          void Promise.race([registroPronto(), localLibraryReady()])
+            .then(() => {
+              if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) {
+                return garantirDetalhe(track.id);
+              }
+            })
+            .catch(() => undefined);
+        }
         void (async () => {
           await localSourcesReady(track.id);
           if (geracao !== geracaoDeCarga) return;

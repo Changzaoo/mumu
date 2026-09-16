@@ -194,6 +194,28 @@ export function subscribe(listener: () => void): () => void {
   };
 }
 
+/**
+ * A BIBLIOTECA ASSENTOU: registro lido E o acervo conferido com o servidor.
+ *
+ * Antes disso a lista ainda muda de tamanho (disco → servidor), e quem monta
+ * vitrine com ela pinta uma Home, depois outra, depois outra — as "três músicas
+ * diferentes antes de carregar". A Home espera este sinal e tira UMA foto.
+ * Há um teto de tempo (sem rede o servidor nunca responde) para ninguém ficar
+ * preso no esqueleto.
+ */
+let assentada = false;
+const TETO_PARA_ASSENTAR_MS = 4000;
+
+export function bibliotecaAssentada(): boolean {
+  return assentada;
+}
+
+export function marcarAssentada(): void {
+  if (assentada) return;
+  assentada = true;
+  emit();
+}
+
 // ── registry (IndexedDB; localStorage é só a ponte da migração) ──
 //
 // O REGISTRO NÃO CABE MAIS NO localStorage, e isso não é teoria: medi 1352
@@ -2294,6 +2316,7 @@ export function hydrate(): Promise<void> {
     if (doAcervo.length > 0) aplicarCatalogo(doAcervo);
     await medirEtapa('hydrate:emit-1', () => emit());
     marcarBoot('biblioteca-local');
+    setTimeout(marcarAssentada, TETO_PARA_ASSENTAR_MS);
 
     // UMA pergunta para o cofre inteiro, não uma por faixa.
     //

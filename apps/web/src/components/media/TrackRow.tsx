@@ -27,6 +27,7 @@ import {
 import { formatDuration, cn, trackArtistNames } from '@/lib/utils';
 import { useLocalCover } from '@/hooks/useLocalCover';
 import { usePlayerStore } from '@/stores/playerStore';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 /**
  * Para onde o nome do artista leva.
@@ -194,7 +195,7 @@ export function TrackRow({
           <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
             {coverUrl ? (
               <img
-                src={coverUrl}
+                src={capaNoTamanho(coverUrl, 'linha') ?? undefined}
                 alt=""
                 loading="lazy"
                 decoding="async"

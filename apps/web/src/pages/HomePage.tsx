@@ -4,7 +4,7 @@
  * artist/genre, albums, genres and artists. No external 30s-preview catalog —
  * only real, user-added songs.
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useState, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import type { IconType } from 'react-icons';
@@ -14,6 +14,7 @@ import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
+import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import * as localHistory from '@/lib/local/localHistory';
 import * as gostoInicial from '@/lib/local/gostoInicial';
@@ -33,10 +34,11 @@ import { ramificacoesDoGenero } from '@/lib/reco/ramificacoes';
 import { prateleiraDaSemente } from '@/lib/reco/semente';
 import { artistasDoUsuario } from '@/lib/reco/artistasDoUsuario';
 import { lyricsCacheEntries } from '@/lib/lyrics/lyrics';
-import { ensureVectors, hydrateVectors, vectorCount } from '@/lib/reco/embeddings';
+import { ensureVectors, hydrateVectors } from '@/lib/reco/embeddings';
 import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
 const EMPTY: localLibrary.LibraryEntry[] = [];
 
@@ -126,7 +128,12 @@ function QuickAccess({
             style={round ? { borderRadius: '0 9999px 9999px 0' } : undefined}
           >
             {imageUrl ? (
-              <img src={imageUrl} alt="" loading="lazy" className="size-full object-cover" />
+              <img
+                src={capaNoTamanho(imageUrl, 'linha') ?? undefined}
+                alt=""
+                loading="lazy"
+                className="size-full object-cover"
+              />
             ) : (
               Icon && <Icon className="size-5" />
             )}
@@ -150,203 +157,167 @@ function cnTile(gradient?: boolean): string {
   ].join(' ');
 }
 
+/**
+ * Tudo o que a Home mostra, calculado de uma vez.
+ *
+ * É uma FOTO: tirada quando a biblioteca assenta e mantida enquanto a página
+ * estiver montada. Antes cada prateleira recalculava a cada mudança da
+ * biblioteca, do histórico ou das curtidas — e tocar uma música grava no
+ * histórico. O resultado era a pessoa ir apertar num álbum e ele trocar de
+ * lugar debaixo do dedo, e o celular recalculando recomendação sobre milhares
+ * de faixas a cada faixa tocada. Sair e voltar tira uma foto nova.
+ */
+function montarHome(
+  entries: localLibrary.LibraryEntry[],
+  history: ReturnType<typeof localHistory.listForCurrentUser>,
+  semente: ReturnType<typeof gostoInicial.snapshot>,
+) {
+  const liked = localLikes.list();
+  const faixas = entries.map((e) => e.track);
+  const genres = localLibrary.genreGroups();
+  const artistasDoAcervo = localLibrary.artists();
+  const albums = localLibrary.albumGroups();
+
+  // Recently played, deduped by track (latest first).
+  const seen = new Set<string>();
+  const recentTracks: TrackDto[] = [];
+  for (const h of history) {
+    if (seen.has(h.track.id)) continue;
+    seen.add(h.track.id);
+    recentTracks.push(h.track);
+    if (recentTracks.length >= 12) break;
+  }
+
+  // Artistas DELA para a grade de atalhos — não os maiores do acervo
+  // (ver lib/reco/artistasDoUsuario).
+  const meusArtistas = artistasDoUsuario(history, liked, semente.artistas, artistasDoAcervo);
+
+  // Prateleiras de gênero ordenadas pelo gosto. O primeiro é o TRONCO: sobe
+  // para o topo e as ramificações dele vêm logo abaixo (lib/reco/ramificacoes).
+  const generosGosto = generosDoGosto(genres, history, liked, { sementes: semente.generos });
+  const [generoTronco, ...outrosGeneros] = generosGosto;
+
+  const generoDaFaixa = new Map<string, string>();
+  for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
+  const perfil = perfilDeGosto({
+    historico: history,
+    curtidas: liked,
+    generoDaFaixa,
+    sementesDeGenero: semente.generos,
+    sementesDeArtista: semente.artistas,
+  });
+  const ramos = generoTronco
+    ? ramificacoesDoGenero({
+        genero: generoTronco.genre,
+        biblioteca: faixas,
+        historico: history,
+        perfil,
+      })
+    : [];
+
+  const letras = new Map(lyricsCacheEntries());
+  const prateleirasDeAgentes = construirPrateleirasDeAgentes(
+    { entries, history, liked, now: new Date() },
+    (trackId) => {
+      const l = letras.get(trackId);
+      return l ? l.lines.map((x) => x.text).join(' ') : null;
+    },
+  );
+
+  return {
+    vazia: entries.length === 0,
+    entriesCount: entries.length,
+    artistasDoAcervo,
+    albums,
+    recentTracks,
+    meusArtistas,
+    generoTronco,
+    outrosGeneros,
+    ramos,
+    daSemente: prateleiraDaSemente(faixas, semente.artistas),
+    recos: buildRecommendations(),
+    albumRecos: buildAlbumRecommendations(),
+    prateleirasDeAgentes,
+    semanticRecos: buildSemanticMixes({ entries, history, liked }),
+  };
+}
+
+type FotoDaHome = ReturnType<typeof montarHome>;
+
 export default function HomePage() {
   const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
+  const assentada = useSyncExternalStore(
+    localLibrary.subscribe,
+    localLibrary.bibliotecaAssentada,
+    () => false,
+  );
   const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
-  // O HISTÓRICO É DA CONTA, NÃO DO APARELHO.
-  //
-  // A Home lia `localHistory.list()`, que devolve o histórico do APARELHO. Num
-  // celular compartilhado — que é o caso comum aqui — isso significa a Home de
-  // uma pessoa montada com o que a outra ouviu: o gosto de quem entrou por
-  // último decidindo a tela de quem entrou agora. A Biblioteca já lia certo
-  // (`listForCurrentUser`); a Home não, e as duas telas discordavam sobre quem
-  // era o dono do gosto.
+  // O HISTÓRICO É DA CONTA, NÃO DO APARELHO (listForCurrentUser).
   const history = useSyncExternalStore(
     localHistory.subscribe,
     localHistory.listForCurrentUser,
     () => [],
   );
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
-  const genres = localLibrary.genreGroups();
-  const artistasDoAcervo = localLibrary.artists();
-  const albums = localLibrary.albumGroups();
-
-  const playQueue = usePlayerStore((s) => s.playQueue);
-  const currentTrack = usePlayerStore((s) => s.currentTrack);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
-
-  // Recently played, deduped by track (latest first).
-  const recentTracks = useMemo(() => {
-    const seen = new Set<string>();
-    const out: TrackDto[] = [];
-    for (const h of history) {
-      if (seen.has(h.track.id)) continue;
-      seen.add(h.track.id);
-      out.push(h.track);
-      if (out.length >= 12) break;
-    }
-    return out;
-  }, [history]);
-
-  // Motor de recomendação local (lib/reco): afinidade com decaimento temporal,
-  // mixes diários por cluster, nostalgia, descobertas e hora-consciente —
-  // memoizado no módulo, muda quando a biblioteca/histórico/dia mudam.
-  // `likedCount` entra nas deps de propósito: curtir é o sinal de gosto mais
-  // forte (peso ×3) e sem ele a prateleira não reagia a likes.
-  // A ESCOLHA DO ONBOARDING. Reativa porque ela pode chegar DEPOIS da primeira
-  // pintura — vinda de outro aparelho pela sincronia — e a Home tem de se
-  // reordenar quando isso acontece, e não só na próxima abertura.
   const semente = useSyncExternalStore(
     gostoInicial.subscribe,
     gostoInicial.snapshot,
     gostoInicial.snapshot,
   );
 
-  /**
-   * A prateleira dos artistas que a pessoa escolheu ao entrar.
-   *
-   * Fica no topo de propósito, acima até de "Feito para você": no primeiro dia
-   * é a única coisa na tela que ela reconhece como resposta ao que acabou de
-   * dizer. Some sozinha quando a escolha não casa com nada tocável — prateleira
-   * vazia é pior que prateleira ausente.
-   */
-  const daSemente = useMemo(
-    () =>
-      prateleiraDaSemente(
-        entries.map((e) => e.track),
-        semente.artistas,
-      ),
+  const playQueue = usePlayerStore((s) => s.playQueue);
+  const currentTrack = usePlayerStore((s) => s.currentTrack);
+  const isPlaying = usePlayerStore((s) => s.isPlaying);
 
-    [entries, semente.artistas],
-  );
+  // A foto só é refeita se foi tirada de uma biblioteca VAZIA e agora há
+  // música (primeira abertura): trocar vazio por conteúdo não tira nada de
+  // debaixo do dedo de ninguém.
+  // Estado derivado no próprio render (e não num efeito): voltando para a Home
+  // com a biblioteca já assentada, a foto sai no primeiro quadro, sem piscar
+  // o esqueleto.
+  const [foto, setFoto] = useState<FotoDaHome | null>(null);
+  if (assentada && (foto === null || (foto.vazia && entries.length > 0))) {
+    setFoto(montarHome(entries, history, semente));
+  }
 
-  /**
-   * Os artistas DELA para a grade de atalhos — não os maiores do acervo.
-   *
-   * `localLibrary.artists()` conta a biblioteca inteira, incluindo o acervo
-   * compartilhado: a grade saía idêntica para todo mundo. Ver
-   * `lib/reco/artistasDoUsuario`.
-   */
-  const meusArtistas = useMemo(
-    () => artistasDoUsuario(history, localLikes.list(), semente.artistas, artistasDoAcervo),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [history, likedCount, semente.artistas, artistasDoAcervo],
-  );
-
-  const recos = useMemo(
-    () => buildRecommendations(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, history, likedCount],
-  );
-  const albumRecos = useMemo(
-    () => buildAlbumRecommendations(),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, albums, history, likedCount],
-  );
-
-  // Prateleiras de gênero ordenadas pelo gosto (plays com decaimento + curtidas),
-  // no máximo 8, cada uma com variedade diária e teto por artista. Substitui o
-  // antigo despejo cru "um carrossel por gênero com todas as faixas".
-  const generosGosto = useMemo(
-    () => generosDoGosto(genres, history, localLikes.list(), { sementes: semente.generos }),
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, history, likedCount, semente.generos],
-  );
-
-  /**
-   * O TRONCO E OS RAMOS — o que abre a Home.
-   *
-   * `generosGosto` já vem ordenado pelo gosto, então o primeiro da lista é o
-   * gênero que esta pessoa mais ouve. Ele sobe para o topo da página e as
-   * ramificações dele vêm logo abaixo, ANTES de qualquer outro assunto: quem
-   * ouve gospel abre o app em gospel, e o que segue continua sendo gospel por
-   * mais algumas fileiras — o que ela mais ouve dele, os cantores dela, o que
-   * ainda não tocou, o que sumiu do rodízio.
-   *
-   * Os demais gêneros continuam na página, mais abaixo, na mesma ordem de
-   * afinidade de antes. "Só o que ela mais ouve" no topo não é "só isso na
-   * tela": um app que se fecha no gosto de ontem para de apresentar qualquer
-   * coisa nova, e aí o gosto congela junto.
-   */
-  const [generoTronco, ...outrosGeneros] = generosGosto;
-
-  const perfil = useMemo(() => {
-    const generoDaFaixa = new Map<string, string>();
-    for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
-    return perfilDeGosto({
-      historico: history,
-      curtidas: localLikes.list(),
-      generoDaFaixa,
-      sementesDeGenero: semente.generos,
-      sementesDeArtista: semente.artistas,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-  }, [entries, history, likedCount, semente.generos, semente.artistas]);
-
-  const ramos = useMemo(() => {
-    if (!generoTronco) return [];
-    return ramificacoesDoGenero({
-      genero: generoTronco.genre,
-      biblioteca: entries.map((e) => e.track),
-      historico: history,
-      perfil,
-    });
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-  }, [entries, history, perfil, generoTronco?.genre]);
-
-  // Time de agentes (lib/reco/agents): relógio (hora × tipo de dia),
-  // calendário (semana vs. fim de semana), singles e letras. Cada um responde
-  // uma pergunta diferente e some quando não tem sinal — prateleira vazia é
-  // pior que prateleira ausente.
-  const prateleirasDeAgentes = useMemo(() => {
-    const letras = new Map(lyricsCacheEntries());
-    return construirPrateleirasDeAgentes(
-      { entries, history, liked: localLikes.list(), now: new Date() },
-      (trackId) => {
-        const l = letras.get(trackId);
-        return l ? l.lines.map((x) => x.text).join(' ') : null;
-      },
-    );
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-  }, [entries, history, likedCount]);
-
-  // ── prateleiras semânticas (embeddings) ─────────────────────────
-  // Aditivas: se a IA não estiver disponível, `ready` nunca sobe e a Home
-  // fica exatamente como era. A vetorização roda em segundo plano, com teto
-  // por rodada, para não virar uma rajada na primeira abertura.
-  const [vectorsReadyCount, setVectorsReadyCount] = useState(0);
+  // Vetorização em segundo plano: alimenta a PRÓXIMA foto, não repinta esta.
   useEffect(() => {
+    if (!assentada) return;
     let cancelled = false;
-    void (async () => {
-      await hydrateVectors();
-      if (cancelled) return;
-      setVectorsReadyCount(vectorCount());
-      const tracks = entries.map((e) => e.track);
-      if (tracks.length === 0) return;
-      const added = await ensureVectors(tracks);
-      if (!cancelled && added > 0) setVectorsReadyCount(vectorCount());
-    })();
+    const id = setTimeout(() => {
+      void (async () => {
+        await hydrateVectors();
+        if (cancelled) return;
+        const tracks = localLibrary.list().map((e) => e.track);
+        if (tracks.length > 0) await ensureVectors(tracks);
+      })();
+    }, 3000);
     return () => {
       cancelled = true;
+      clearTimeout(id);
     };
-  }, [entries]);
+  }, [assentada]);
 
-  const semanticRecos = useMemo(
-    () =>
-      buildSemanticMixes({
-        entries,
-        history,
-        liked: localLikes.list(),
-      }),
-    // `vectorsReadyCount` entra porque os vetores chegam DEPOIS do primeiro
-    // render — sem ele a prateleira só apareceria na próxima navegação.
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- fontes reativas
-    [entries, history, likedCount, vectorsReadyCount],
-  );
+  if (!foto) return <PageSkeleton variant="home" />;
+
+  const {
+    artistasDoAcervo,
+    albums,
+    recentTracks,
+    meusArtistas,
+    generoTronco,
+    outrosGeneros,
+    ramos,
+    daSemente,
+    recos,
+    albumRecos,
+    prateleirasDeAgentes,
+    semanticRecos,
+  } = foto;
 
   const playlistCover = (trackIds: string[]): string | null => {
     for (const id of trackIds) {
-      const cover = entries.find((e) => e.track.id === id)?.track.coverUrl;
+      const cover = localLibrary.entryFor(id)?.track.coverUrl;
       if (cover) return cover;
     }
     return null;
@@ -597,7 +568,7 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {entries.length === 0 && (
+      {foto.vazia && (
         <div className="px-3">
           <EmptyState
             icon={Music}
