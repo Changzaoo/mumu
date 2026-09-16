@@ -37,6 +37,19 @@ interface Play {
   cargas?: number;
 }
 
+interface QuadroLongo {
+  duration: number;
+  scripts?: {
+    duration: number;
+    invoker?: string;
+    sourceFunctionName?: string;
+    sourceURL?: string;
+    sourceCharPosition?: number;
+  }[];
+}
+
+const travamentos: { em: string; ms: number; rota: string; scripts: string[] }[] = [];
+
 let instalado = false;
 let tarefasLongas = 0;
 let maiorTarefaMs = 0;
@@ -92,6 +105,34 @@ export function instalarAoVivo(): void {
     }).observe({ type: 'longtask', buffered: false });
   } catch {
     /* sem longtask neste navegador */
+  }
+
+  // QUEM TRAVOU: Long Animation Frames diz a função e o arquivo, coisa que o
+  // `longtask` não diz. Guarda os piores quadros da sessão.
+  try {
+    new PerformanceObserver((lista) => {
+      for (const e of lista.getEntries() as unknown as QuadroLongo[]) {
+        if (e.duration < 300) continue;
+        const scripts = (e.scripts ?? [])
+          .filter((sc) => sc.duration > 50)
+          .sort((x, y) => y.duration - x.duration)
+          .slice(0, 3)
+          .map(
+            (sc) =>
+              `${Math.round(sc.duration)}ms ${sc.invoker ?? ''} ${sc.sourceFunctionName ?? ''} ${(sc.sourceURL ?? '').split('/').pop() ?? ''}:${sc.sourceCharPosition ?? ''}`,
+          );
+        travamentos.push({
+          em: new Date().toISOString().slice(11, 19),
+          ms: Math.round(e.duration),
+          rota: location.pathname,
+          scripts,
+        });
+        travamentos.sort((x, y) => y.ms - x.ms);
+        if (travamentos.length > 8) travamentos.pop();
+      }
+    }).observe({ type: 'long-animation-frame', buffered: true });
+  } catch {
+    /* navegador sem LoAF */
   }
 
   window.addEventListener('error', (e) => anotarErro(String(e.message ?? 'erro')));
@@ -208,6 +249,7 @@ export function coletarAoVivo(): Record<string, unknown> {
     vetores: vetores(),
     alcas,
     plays,
+    travamentos,
     erros,
     amostras,
     mortesSuspeitas,
