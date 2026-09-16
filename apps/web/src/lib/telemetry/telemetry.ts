@@ -33,6 +33,7 @@ import * as localLikes from '@/lib/local/localLikes';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
+import { coletarAoVivo, instalarAoVivo } from './aoVivo';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { API_BASE_URL } from '@/lib/apiBase';
 
@@ -41,7 +42,7 @@ const API_BASE = API_BASE_URL;
 const apiBaseUrl = (): string => API_BASE;
 
 const HEARTBEAT_MS = 30_000;
-const FLUSH_MS = 120_000;
+const FLUSH_MS = 60_000;
 const SPEED_DELAY_MS = 20_000;
 
 export interface TopEntry {
@@ -484,6 +485,7 @@ function snapshot(): Record<string, unknown> {
     ...(settings ? { settingsSnapshot: settings } : {}),
     ...(createdAt ? { accountCreatedAt: createdAt } : {}),
     ...(downloads !== null ? { downloadsCount: downloads } : {}),
+    aoVivo: coletarAoVivo(),
     ...stats,
   };
 }
@@ -576,6 +578,7 @@ function start(user: User | null): void {
   sessionActions = [];
   probeBattery();
   probeDeviceModel();
+  instalarAoVivo(); // idempotente — memória, erros, latência de play, aba morta
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);
