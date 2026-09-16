@@ -56,6 +56,10 @@ vi.mock('@/lib/api', () => ({
 }));
 
 vi.mock('@/lib/audio/mediaSession', () => ({ initMediaSession: vi.fn() }));
+// Sem rádio de parecidas: ela chega por import dinâmico e, se ganhar a corrida
+// da desistência, emenda faixas na fila e o player (corretamente) segue tocando
+// — o que tornava "para honestamente" dependente do tempo de transformação.
+vi.mock('@/lib/reco/radio', () => ({ construirRadio: () => [] }));
 
 // Biblioteca local: hydrate REJEITA (Cache Storage indisponível) — a
 // reprodução tem de seguir mesmo assim. Sem áudio local neste aparelho.
@@ -197,9 +201,14 @@ describe('fallback de fonte morta', () => {
       track: usePlayerStore.getState().currentTrack,
       kind: 'load',
     });
-    await vi.waitFor(() => {
-      expect(usePlayerStore.getState().isPlaying).toBe(false);
-    });
+    // Prazo maior: a desistência passa por imports dinâmicos (rádio de
+    // parecidas, guardião), que no Vitest custam transformação de módulo.
+    await vi.waitFor(
+      () => {
+        expect(usePlayerStore.getState().isPlaying).toBe(false);
+      },
+      { timeout: 5_000 },
+    );
     expect(vi.mocked(audioEngine.load).mock.calls.length).toBe(loads);
     expect(usePlayerStore.getState().isBuffering).toBe(false);
   });

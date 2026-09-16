@@ -1888,6 +1888,10 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('buffering', ({ buffering }) => {
     store.setState({ isBuffering: buffering });
+    // Downloads de fundo esperam a faixa de agora carregar.
+    void import('@/lib/offline/guardiaoOffline')
+      .then((m) => m.informarCarregando(buffering))
+      .catch(() => undefined);
   });
 
   audioEngine.on('error', ({ message, track, kind }) => {

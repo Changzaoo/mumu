@@ -11,6 +11,7 @@
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { relatorio as relatorioDeAlcas } from '@/lib/perf/alcasDeBlob';
+import { audioEngine } from '@/lib/audio/AudioEngine';
 import { usePlayerStore } from '@/stores/playerStore';
 
 const CHAVE_VIVO = 'aurial:aba-viva';
@@ -26,6 +27,14 @@ interface Amostra {
 interface Play {
   faixa: string;
   ms: number;
+  /** Do pedido até o motor receber a faixa (resolução de fonte no player). */
+  ateMotor?: number;
+  /** Do pedido até o elemento de áudio dizer que carregou. */
+  ateCarregar?: number;
+  /** De onde veio: blob (aparelho), importer (cofre), stream, outro. */
+  fonte?: string;
+  /** Houve troca de fonte (fallback) no meio? */
+  cargas?: number;
 }
 
 let instalado = false;
@@ -91,17 +100,51 @@ export function instalarAoVivo(): void {
     anotarErro(`rejeição: ${r instanceof Error ? r.message : String(r)}`);
   });
 
-  // LATÊNCIA DO PLAY: do pedido da faixa até o primeiro avanço de posição.
-  let pedida: { id: string; t0: number } | null = null;
+  // LATÊNCIA DO PLAY, EM FASES: pedido → motor → carregado → som.
+  let pedida: {
+    id: string;
+    t0: number;
+    ateMotor?: number;
+    ateCarregar?: number;
+    fonte?: string;
+    cargas: number;
+  } | null = null;
+  const carregarOriginal = audioEngine.load.bind(audioEngine);
+  audioEngine.load = (track, options) => {
+    if (pedida && pedida.id === track.id) {
+      pedida.cargas += 1;
+      pedida.ateMotor ??= Math.round(performance.now() - pedida.t0);
+      const url = track.streamUrl ?? '';
+      pedida.fonte = /^blob:/.test(url)
+        ? 'blob'
+        : /\/blob\//.test(url)
+          ? 'cofre'
+          : /\/stream/.test(url)
+            ? 'stream'
+            : url
+              ? new URL(url, location.href).host.slice(0, 30)
+              : 'local';
+    }
+    carregarOriginal(track, options);
+  };
+  audioEngine.on('loaded', () => {
+    if (pedida && pedida.ateCarregar === undefined) {
+      pedida.ateCarregar = Math.round(performance.now() - pedida.t0);
+    }
+  });
   usePlayerStore.subscribe((s, antes) => {
     const id = s.currentTrack?.id;
     if (id && id !== antes.currentTrack?.id && s.isPlaying) {
-      pedida = { id, t0: performance.now() };
+      pedida = { id, t0: performance.now(), cargas: 0 };
     }
     if (pedida && id === pedida.id && s.progress > 0 && antes.progress === 0) {
       plays.push({
         faixa: s.currentTrack?.title?.slice(0, 40) ?? id,
         ms: Math.round(performance.now() - pedida.t0),
+        ateMotor: pedida.ateMotor,
+        ateCarregar: pedida.ateCarregar,
+        fonte: pedida.fonte,
+        cargas: pedida.cargas,
       });
       if (plays.length > 12) plays.shift();
       pedida = null;

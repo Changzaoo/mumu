@@ -179,8 +179,10 @@ describe('ritmoDoAparelho — rápido sem esganar o aparelho', () => {
     // `garantirAudioLocal` faz `res.blob()` antes de gravar. Quatro em paralelo
     // são quatro faixas de ~8 MB vivas ao mesmo tempo — num aparelho de 2 GB
     // isso é dinheiro que não existe.
+    // Medido num moto g34 (4 GB) com 516 MB de heap: um por vez até 4 GB.
     const r = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 2, memoriaGb: 2 });
-    expect(r.simultaneos).toBe(2);
+    expect(r.simultaneos).toBe(1);
+    expect(ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 8, memoriaGb: 4 }).simultaneos).toBe(1);
   });
 
   it('O PIOR SINAL MANDA: 2G num celular potente continua sendo 2G', () => {
@@ -220,14 +222,14 @@ describe('ritmoDoAparelho — rápido sem esganar o aparelho', () => {
     // o navegador não conta nada. Quem viu o travamento acontecer foi o monitor
     // de quadros; sem esta linha, a observação morria no CSS e o guardião
     // continuava baixando de três em três no aparelho que já estava no chão.
-    const semMedicao = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 4, memoriaGb: 4 });
+    const semMedicao = ritmoDoAparelho({ tipoDeConexao: '4g', nucleos: 8, memoriaGb: 8 });
     const comMedicao = ritmoDoAparelho({
       tipoDeConexao: '4g',
-      nucleos: 4,
-      memoriaGb: 4,
+      nucleos: 8,
+      memoriaGb: 8,
       travouAntes: true,
     });
-    expect(semMedicao.simultaneos).toBe(3);
+    expect(semMedicao.simultaneos).toBe(4);
     expect(comMedicao.simultaneos).toBe(1);
     expect(comMedicao.respiroMs).toBeGreaterThan(semMedicao.respiroMs);
   });

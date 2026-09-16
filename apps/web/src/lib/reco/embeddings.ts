@@ -29,6 +29,16 @@ interface StoredVector {
   vector: number[];
 }
 
+/**
+ * EM MEMÓRIA É Float32Array. Como array comum, 5.141 vetores de 512 posições
+ * custavam 64 MB de heap (medido); tipado, ~11 MB fora do heap. Num celular de
+ * 4 GB com teto de heap de 936 MB, essa diferença é o app vivo ou morto.
+ */
+interface VetorEmMemoria {
+  hash: string;
+  vector: Float32Array;
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function supported(): boolean {
@@ -82,7 +92,7 @@ function hashText(text: string): string {
 
 // Espelho em memória: a Home consulta a cada render e ir ao IndexedDB
 // sincronamente não é possível.
-const memory = new Map<string, StoredVector>();
+const memory = new Map<string, VetorEmMemoria>();
 let hydrated = false;
 let hydratePromise: Promise<void> | null = null;
 
@@ -105,7 +115,12 @@ export function hydrateVectors(): Promise<void> {
             return;
           }
           const value = cursor.value as StoredVector | undefined;
-          if (value?.vector?.length) memory.set(String(cursor.key), value);
+          if (value?.vector?.length) {
+            memory.set(String(cursor.key), {
+              hash: value.hash,
+              vector: Float32Array.from(value.vector),
+            });
+          }
           cursor.continue();
         };
         cursorReq.onerror = () => resolve(); // cache é otimização, não requisito
@@ -119,7 +134,7 @@ export function hydrateVectors(): Promise<void> {
 }
 
 /** Vetor já conhecido de uma faixa (síncrono), ou null. */
-export function vectorOf(track: TrackDto): number[] | null {
+export function vectorOf(track: TrackDto): Float32Array | null {
   const stored = memory.get(track.id);
   if (!stored) return null;
   // Texto mudou (metadata corrigida): o vetor antigo descreve outra coisa.
@@ -137,7 +152,7 @@ export function vectorsReady(): boolean {
 }
 
 async function persist(id: string, entry: StoredVector): Promise<void> {
-  memory.set(id, entry);
+  memory.set(id, { hash: entry.hash, vector: Float32Array.from(entry.vector) });
   if (!supported()) return;
   await tx('readwrite', (store) => store.put(entry, id)).catch(() => undefined);
 }

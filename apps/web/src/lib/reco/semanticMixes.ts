@@ -83,7 +83,7 @@ export function buildSemanticMixes(inputs: SemanticInputs): Recommendation[] {
   if (withVector.length < MIN_VECTORS) return [];
 
   // ── vetor de gosto ────────────────────────────────────────────
-  const signals: Array<{ vector: readonly number[]; weight: number }> = [];
+  const signals: Array<{ vector: ArrayLike<number>; weight: number }> = [];
   for (const track of liked) {
     const vector = vectorOf(track);
     if (vector) signals.push({ vector, weight: PESO_CURTIDA });

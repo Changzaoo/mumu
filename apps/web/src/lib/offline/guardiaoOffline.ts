@@ -153,7 +153,16 @@ export function ordemDeDownload(
     }
   }
   for (const id of contexto.recentes) empurrar(id);
-  for (const entrada of candidatas) empurrar(entrada.track.id);
+  // O RESTO DA BIBLIOTECA SÓ QUANDO ELA É DA PESSOA, não o acervo emprestado.
+  //
+  // Com o acervo (5.000 faixas) dentro da biblioteca, este passo virava "baixar
+  // o app inteiro": o celular passava a sessão com três downloads abertos,
+  // dividindo o 4G com a música que a pessoa mandou tocar (começo lento) e
+  // segurando cada arquivo inteiro na memória antes de gravar (a aba morria).
+  // Offline é o que ela vai ouvir — a fila, os álbuns marcados, o histórico.
+  for (const entrada of candidatas) {
+    if (entrada.origem !== 'catalogo') empurrar(entrada.track.id);
+  }
   return fila;
 }
 
@@ -268,10 +277,13 @@ export function ritmoDoAparelho(sinais: SinaisDoAparelho): Ritmo {
   // Sem sinal de conexão (Safari) tratamos como boa: a ausência de informação
   // não é evidência de aparelho ruim, e a cota e o tempo máximo já seguram o
   // exagero. Punir o desconhecido deixaria todo iPhone no ritmo de 2G.
-  const nucleos = sinais.nucleos ?? 4;
-  const memoria = sinais.memoriaGb ?? 4;
-  if (memoria <= 2 || nucleos <= 2) candidatos.push({ simultaneos: 2, respiroMs: 900 });
-  else if (memoria <= 4 || nucleos <= 4) candidatos.push({ simultaneos: 3, respiroMs: 400 });
+  // Sem sinal (Safari) conta como aparelho bom: ausência não é evidência.
+  const nucleos = sinais.nucleos ?? 8;
+  const memoria = sinais.memoriaGb ?? 8;
+  // Celular de 4 GB: cada download segura o arquivo inteiro na RAM até gravar.
+  // Um por vez, com folga — medido num moto g34 com 516 MB de heap.
+  if (memoria <= 4 || nucleos <= 2) candidatos.push({ simultaneos: 1, respiroMs: 2_000 });
+  else if (nucleos <= 4) candidatos.push({ simultaneos: 3, respiroMs: 400 });
   else candidatos.push({ simultaneos: SIMULTANEOS_MAX, respiroMs: 200 });
 
   return candidatos.reduce((pior, atual) => ({
@@ -313,7 +325,18 @@ export function informarContexto(proximo: ContextoDeEscuta): void {
 /** Tocando agora? Então o guardião espera — ouvir é o serviço. */
 function podeTrabalhar(): boolean {
   if (typeof navigator === 'undefined' || !navigator.onLine) return false;
+  // A MÚSICA DE AGORA PASSA NA FRENTE. Enquanto a faixa pedida carrega, um
+  // download de fundo só disputa banda com ela.
+  if (tocandoCarregando()) return false;
   return true;
+}
+
+let carregandoAgora = false;
+const tocandoCarregando = (): boolean => carregandoAgora;
+
+/** O player avisa (sem este módulo importar o player, que o importa). */
+export function informarCarregando(carregando: boolean): void {
+  carregandoAgora = carregando;
 }
 
 /**

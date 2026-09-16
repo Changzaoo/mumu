@@ -156,8 +156,16 @@ async function run(): Promise<void> {
   try {
     await revisarGravados();
     const attempts = readAttempts();
+    // A LISTA MÍNIMA UMA VEZ POR RODADA, não uma vez por faixa. Recriada a cada
+    // candidata, eram 5.000 × 5.000 objetos numa biblioteca do acervo — CPU e
+    // coletor de lixo presos no celular a cada despertar do agente. Quando uma
+    // faixa herda gênero, a lista é atualizada no lugar.
+    const minimas = faixasMinimas();
+    const porId = new Map(minimas.map((f) => [f.id, f]));
     for (const entry of localLibrary.list()) {
       if (classifiedThisSession >= ritmo().orcamento) break;
+      // O acervo é curado no servidor; classificar cópia dele aqui só gasta.
+      if (entry.origem === 'catalogo') continue;
       const t = entry.track;
       if (t.genre?.trim()) continue;
       if ((attempts[t.id] ?? 0) >= MAX_ATTEMPTS) continue;
@@ -178,10 +186,12 @@ async function run(): Promise<void> {
       // faixa nova nasce com ele — de graça, e sem o sorteio independente que
       // punha uma faixa de trap sozinha na prateleira de sertanejo. Ver
       // generoCoerencia.ts.
-      const voto = generoDoArtista(faixasMinimas(), artist, t.id);
+      const voto = generoDoArtista(minimas, artist, t.id);
       const herdado = herdarDoArtista(voto);
       if (herdado) {
         localLibrary.setTrackGenre(t.id, herdado);
+        const minima = porId.get(t.id);
+        if (minima) minima.genre = herdado;
         delete attempts[t.id];
         writeAttempts(attempts);
         emit();
@@ -196,6 +206,8 @@ async function run(): Promise<void> {
       const genre = aceitarSugestao(resposta, voto);
       if (genre) {
         localLibrary.setTrackGenre(t.id, genre);
+        const minima = porId.get(t.id);
+        if (minima) minima.genre = genre;
         delete attempts[t.id];
       } else {
         attempts[t.id] = (attempts[t.id] ?? 0) + 1;
@@ -212,6 +224,10 @@ async function run(): Promise<void> {
 
 /** Acorda o agente (debounced) — chamado quando a biblioteca muda. */
 function wake(): void {
+  // Orçamento da sessão gasto: nada a fazer até a próxima abertura. Sem isto,
+  // toda mudança na biblioteca (capa, sincronia, curtida) acordava o agente
+  // para varrer as 5.000 faixas e não classificar nenhuma.
+  if (classifiedThisSession >= ritmo().orcamento) return;
   if (wakeTimer) clearTimeout(wakeTimer);
   wakeTimer = setTimeout(() => void run(), WAKE_DEBOUNCE_MS);
 }

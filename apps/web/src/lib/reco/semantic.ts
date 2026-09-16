@@ -30,7 +30,9 @@ export function trackEmbeddingText(track: TrackDto): string {
 }
 
 /** Cosseno de dois vetores. Assume dimensões iguais; 0 quando algum é nulo. */
-export function cosine(a: readonly number[], b: readonly number[]): number {
+export type Vetor = ArrayLike<number>;
+
+export function cosine(a: Vetor, b: Vetor): number {
   const len = Math.min(a.length, b.length);
   if (len === 0) return 0;
   let dot = 0;
@@ -48,16 +50,17 @@ export function cosine(a: readonly number[], b: readonly number[]): number {
 }
 
 /** Vetor unitário (norma 1). Devolve o próprio vetor quando a norma é 0. */
-export function normalize(v: readonly number[]): number[] {
+export function normalize(v: Vetor): number[] {
+  const arr = Array.from(v);
   let norm = 0;
-  for (const x of v) norm += x * x;
+  for (const x of arr) norm += x * x;
   norm = Math.sqrt(norm);
-  if (norm === 0) return [...v];
-  return v.map((x) => x / norm);
+  if (norm === 0) return arr;
+  return arr.map((x) => x / norm);
 }
 
 export interface TasteSignal {
-  vector: readonly number[];
+  vector: Vetor;
   /** Peso relativo do sinal (like vale mais que play, play recente vale mais). */
   weight: number;
 }
@@ -109,9 +112,9 @@ export interface Scored<T> {
  * score 0, que os faria parecer "recomendados, porém ruins".
  */
 export function rankBySimilarity<T>(
-  taste: readonly number[],
+  taste: Vetor,
   candidates: readonly T[],
-  vectorOf: (item: T) => readonly number[] | null,
+  vectorOf: (item: T) => Vetor | null,
 ): Array<Scored<T>> {
   const out: Array<Scored<T>> = [];
   for (const item of candidates) {
