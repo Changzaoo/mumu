@@ -1,11 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { useQuery } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MicVocal } from 'lucide-react';
 import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
-import { fetchLyrics } from '@/lib/lyrics/lyrics';
+import { cachedLyrics, fetchLyrics } from '@/lib/lyrics/lyrics';
 import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -27,30 +27,38 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   const isCurrent = usePlayerStore((s) => s.currentTrack?.id === track.id);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
 
+  const queryClient = useQueryClient();
+  // A LETRA APARECE COM O QUE JÁ EXISTE. Antes a consulta só terminava depois
+  // de sincronizar pelo áudio (decodificar a faixa inteira) ou transcrever — a
+  // letra já estava em mãos e a tela seguia no esqueleto por segundos. Agora a
+  // consulta devolve a letra encontrada e o upgrade vem depois, trocando-a.
   const { data: lyrics, isLoading } = useQuery({
     queryKey: ['lyrics', track.id],
-    queryFn: async () => {
-      const found = await fetchLyrics(track);
-      // Letra existe mas sem tempo: tenta ganhar sincronia a partir do áudio
-      // que já está no aparelho. Se não rolar, seguimos com a letra plana —
-      // por isso o resultado nulo cai de volta em `found`.
-      if (found && !found.synced) {
-        const synced = await syncLyricsFromAudio(track).catch(() => null);
-        if (synced) return synced;
-      }
-      // Nenhuma letra publicada — o caso da maioria das músicas pouco
-      // conhecidas, em que esta tela ficava simplesmente vazia. Transcreve o
-      // áudio e mostra o resultado rotulado como transcrição. Texto com erro
-      // declarado serve mais que tela em branco.
-      if (!found) {
-        const transcrita = await transcribeToLyrics(track).catch(() => null);
-        if (transcrita) return transcrita;
-      }
-      return found;
-    },
+    queryFn: () => fetchLyrics(track),
+    // Já buscada quando a faixa começou (playerStore): aparece no primeiro quadro.
+    initialData: () => cachedLyrics(track.id) ?? undefined,
     staleTime: Infinity,
     retry: false,
   });
+
+  const encontrada = lyrics;
+  const terminouBusca = !isLoading;
+  useEffect(() => {
+    if (!terminouBusca || encontrada?.synced) return;
+    let cancelado = false;
+    void (async () => {
+      // Letra sem tempo: tenta ganhar sincronia pelo áudio do aparelho.
+      // Nenhuma letra publicada: transcreve, rotulado como transcrição.
+      const melhor = encontrada
+        ? await syncLyricsFromAudio(track).catch(() => null)
+        : await transcribeToLyrics(track).catch(() => null);
+      if (!cancelado && melhor) queryClient.setQueryData(['lyrics', track.id], melhor);
+    })();
+    return () => {
+      cancelado = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma tentativa por faixa
+  }, [terminouBusca, Boolean(encontrada), track.id]);
 
   // Karaokê fluido: a posição do STORE é throttled a ~5/s (passos visíveis e
   // ~200ms atrasados). Amostramos a posição REAL do engine por rAF — mas só da

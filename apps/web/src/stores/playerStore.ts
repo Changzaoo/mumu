@@ -1036,6 +1036,15 @@ export const usePlayerStore = create<PlayerState>()(
         void import('@/lib/lyrics/syncFromAudio')
           .then((m) => m.queueLyricsSync(track, { agora: true }))
           .catch(() => undefined);
+        // A LETRA JÁ VEM BUSCADA quando a pessoa abrir a tela: a desta faixa e
+        // a da próxima. É uma consulta leve ao LRCLIB e o resultado fica em cache.
+        void import('@/lib/lyrics/lyrics')
+          .then((m) => {
+            m.prefetchLyrics(track);
+            const proxima = get().queue[index + 1];
+            if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
+          })
+          .catch(() => undefined);
 
         // Local audio already resolvable THIS instant → play with zero network.
         const localNow = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
