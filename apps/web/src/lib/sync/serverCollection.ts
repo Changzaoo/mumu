@@ -124,7 +124,7 @@ export function serverCollection<T>(config: ServerCollectionConfig<T>): ServerCo
     if (!uid || drenando) return;
     drenando = true;
     try {
-      const fila = (await pendentes()).filter((p) => p.colecao === config.name);
+      const fila = (await pendentes(config.name)).filter((p) => p.colecao === config.name);
       if (fila.length === 0) return;
       const cabecalho = await autorizacao();
 
@@ -184,7 +184,11 @@ export function serverCollection<T>(config: ServerCollectionConfig<T>): ServerCo
 
       // PRIMEIRA SINCRONIA: união. O que existe só aqui sobe — é o que impede
       // uma biblioteca importada offline de sumir ao entrar na conta.
-      if (!semeado) {
+      // SÓ SEMEIA COM A COLEÇÃO COMPLETA NA MÃO. Com cursor, o servidor manda
+      // apenas o que MUDOU desde a última vez; comparar isso com a biblioteca
+      // local faria cada faixa parecer ausente no servidor e reenviaria todas
+      // (5 mil faixas, com os dados inteiros, enfileiradas a cada abertura).
+      if (!semeado && !cursor) {
         semeado = true;
         const idsRemotos = new Set(itens.map((i) => i.id));
         let enviados = 0;
