@@ -49,7 +49,14 @@ async function montar(): Promise<typeof LocalLibrary> {
  * Esvazia a store em vez de apagar o banco: o módulo do teste anterior ainda
  * segura a conexão aberta, e `deleteDatabase` fica bloqueado esperando por ela.
  */
-function zerarDisco(): Promise<void> {
+async function zerarDisco(): Promise<void> {
+  // O registro por faixa mora num banco próprio (ver `DB_FAIXAS`).
+  await new Promise<void>((resolve) => {
+    const req = indexedDB.deleteDatabase('aurial-registro-faixas');
+    req.onsuccess = () => resolve();
+    req.onerror = () => resolve();
+    req.onblocked = () => resolve();
+  });
   return new Promise((resolve) => {
     const req = indexedDB.open('aurial-registro', 1);
     req.onupgradeneeded = () => {

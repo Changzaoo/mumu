@@ -281,36 +281,183 @@ function abrirRegistro(): Promise<IDBDatabase> {
   return dbRegistro;
 }
 
+// ── registro POR FAIXA ──────────────────────────────────────────
+//
+// O registro era UM array numa chave só. Ler ou gravar esse array é uma
+// (des)serialização inteira numa única tarefa da thread principal, e num moto
+// g34 com 5.116 faixas isso mediu 2,2–2,9s para ler e 0,9–3s para CADA
+// gravação — com a sincronia trazendo mudanças, várias vezes por minuto.
+//
+// Agora cada faixa é uma entrada. A leitura vem em lotes (cada lote é uma
+// tarefa curta) e a gravação escreve só o que mudou. O formato antigo continua
+// sendo lido: quando existe, é a fonte, migra uma vez e é apagado.
+const DB_FAIXAS = 'aurial-registro-faixas';
+const STORE_FAIXAS = 'faixas';
+const LOTE_DE_REGISTRO = 400;
+
+let dbFaixas: Promise<IDBDatabase> | null = null;
+
+function abrirFaixas(): Promise<IDBDatabase> {
+  dbFaixas ??= new Promise<IDBDatabase>((resolve, reject) => {
+    const req = indexedDB.open(DB_FAIXAS, 1);
+    req.onupgradeneeded = () => {
+      const db = req.result;
+      if (!db.objectStoreNames.contains(STORE_FAIXAS)) db.createObjectStore(STORE_FAIXAS);
+    };
+    req.onsuccess = () => {
+      const db = req.result;
+      // Outra aba (ou versão nova) quer atualizar/apagar o banco: solta a
+      // conexão em vez de deixá-la presa esperando esta aba fechar.
+      db.onversionchange = () => {
+        db.close();
+        dbFaixas = null;
+      };
+      resolve(db);
+    };
+    req.onerror = () => reject(req.error ?? new Error('IndexedDB indisponível'));
+  });
+  return dbFaixas;
+}
+
+/** Formato antigo (um array numa chave). `null` quando não existe mais. */
+async function lerRegistroAntigo(): Promise<LibraryEntry[] | null> {
+  const db = await abrirRegistro();
+  return new Promise<LibraryEntry[] | null>((resolve) => {
+    const req = db
+      .transaction(STORE_REGISTRO, 'readonly')
+      .objectStore(STORE_REGISTRO)
+      .get(CHAVE_REGISTRO);
+    req.onsuccess = () => {
+      const valor = req.result as unknown;
+      resolve(Array.isArray(valor) ? (valor as LibraryEntry[]) : null);
+    };
+    req.onerror = () => resolve(null);
+  });
+}
+
+async function apagarRegistroAntigo(): Promise<void> {
+  const db = await abrirRegistro();
+  await new Promise<void>((resolve) => {
+    const tx = db.transaction(STORE_REGISTRO, 'readwrite');
+    tx.objectStore(STORE_REGISTRO).delete(CHAVE_REGISTRO);
+    tx.oncomplete = () => resolve();
+    tx.onerror = () => resolve();
+    tx.onabort = () => resolve();
+  });
+}
+
+/** Lê o registro por faixa em lotes. `null` quando o banco novo está vazio. */
+async function lerFaixas(): Promise<LibraryEntry[] | null> {
+  const db = await abrirFaixas();
+  const todas: LibraryEntry[] = [];
+  let depoisDe: IDBValidKey | null = null;
+  for (;;) {
+    const faixa: IDBKeyRange | undefined =
+      depoisDe === null ? undefined : IDBKeyRange.lowerBound(depoisDe, true);
+    const lote = await new Promise<{ valores: LibraryEntry[]; chaves: IDBValidKey[] }>(
+      (resolve) => {
+        const store = db.transaction(STORE_FAIXAS, 'readonly').objectStore(STORE_FAIXAS);
+        const reqValores = store.getAll(faixa, LOTE_DE_REGISTRO);
+        const reqChaves = store.getAllKeys(faixa, LOTE_DE_REGISTRO);
+        let valores: LibraryEntry[] | null = null;
+        let chaves: IDBValidKey[] | null = null;
+        const talvez = (): void => {
+          if (valores && chaves) resolve({ valores, chaves });
+        };
+        reqValores.onsuccess = () => {
+          valores = (reqValores.result as LibraryEntry[] | undefined) ?? [];
+          talvez();
+        };
+        reqChaves.onsuccess = () => {
+          chaves = reqChaves.result ?? [];
+          talvez();
+        };
+        reqValores.onerror = () => resolve({ valores: [], chaves: [] });
+      },
+    );
+    todas.push(...lote.valores);
+    if (lote.chaves.length < LOTE_DE_REGISTRO) break;
+    depoisDe = lote.chaves[lote.chaves.length - 1]!;
+  }
+  return todas.length > 0 ? todas : null;
+}
+
 async function lerRegistroDoDisco(): Promise<LibraryEntry[] | null> {
   if (typeof indexedDB === 'undefined') return null;
   try {
-    const db = await abrirRegistro();
-    return await new Promise<LibraryEntry[] | null>((resolve) => {
-      const req = db
-        .transaction(STORE_REGISTRO, 'readonly')
-        .objectStore(STORE_REGISTRO)
-        .get(CHAVE_REGISTRO);
-      req.onsuccess = () => {
-        const valor = req.result as unknown;
-        resolve(Array.isArray(valor) ? (valor as LibraryEntry[]) : null);
-      };
-      req.onerror = () => resolve(null);
-    });
+    const antigo = await lerRegistroAntigo().catch(() => null);
+    if (antigo) {
+      // Migração: o formato antigo é a fonte. A próxima gravação (logo depois
+      // de carregar) escreve tudo no banco novo e só então apaga o antigo.
+      migrarDoAntigo = true;
+      return antigo;
+    }
+    return await lerFaixas();
   } catch {
     return null;
   }
 }
 
-async function gravarRegistroNoDisco(entradas: LibraryEntry[]): Promise<void> {
+/** O disco ainda está no formato antigo e precisa de uma gravação completa. */
+let migrarDoAntigo = false;
+
+/**
+ * Gravações em FILA: como cada uma escreve só a diferença para a anterior, duas
+ * rodando juntas poderiam se cruzar e deixar o disco com a mais velha.
+ */
+let filaDeGravacao: Promise<unknown> = Promise.resolve();
+
+function enfileirarGravacao(
+  entradas: LibraryEntry[],
+  anteriores: readonly LibraryEntry[],
+): Promise<void> {
+  const proxima = filaDeGravacao.then(() => gravarRegistroNoDisco(entradas, anteriores));
+  filaDeGravacao = proxima.catch(() => undefined);
+  return proxima;
+}
+
+/**
+ * Grava o registro no banco por faixa: só o que mudou em relação a `anteriores`.
+ * Em lotes, devolvendo a vez para a tela entre um e outro.
+ */
+async function gravarRegistroNoDisco(
+  entradas: LibraryEntry[],
+  anteriores: readonly LibraryEntry[] = [],
+): Promise<void> {
   if (typeof indexedDB === 'undefined') throw new Error('IndexedDB indisponível');
-  const db = await abrirRegistro();
-  await new Promise<void>((resolve, reject) => {
-    const tx = db.transaction(STORE_REGISTRO, 'readwrite');
-    tx.objectStore(STORE_REGISTRO).put(entradas, CHAVE_REGISTRO);
-    tx.oncomplete = () => resolve();
-    tx.onerror = () => reject(tx.error ?? new Error('falha ao gravar o registro'));
-    tx.onabort = () => reject(tx.error ?? new Error('gravação do registro abortada'));
-  });
+  const completa = migrarDoAntigo;
+  const antes = new Map(completa ? [] : anteriores.map((e) => [e.track.id, e]));
+  const atuais = new Set(entradas.map((e) => e.track.id));
+  const gravar = entradas.filter((e) => antes.get(e.track.id) !== e);
+  const apagar = completa ? [] : [...antes.keys()].filter((id) => !atuais.has(id));
+  const db = await abrirFaixas();
+
+  const rodar = (fazer: (store: IDBObjectStore) => void): Promise<void> =>
+    new Promise<void>((resolve, reject) => {
+      const tx = db.transaction(STORE_FAIXAS, 'readwrite');
+      fazer(tx.objectStore(STORE_FAIXAS));
+      tx.oncomplete = () => resolve();
+      tx.onerror = () => reject(tx.error ?? new Error('falha ao gravar o registro'));
+      tx.onabort = () => reject(tx.error ?? new Error('gravação do registro abortada'));
+    });
+
+  if (completa) await rodar((store) => store.clear());
+  for (let i = 0; i < gravar.length; i += LOTE_DE_REGISTRO) {
+    const lote = gravar.slice(i, i + LOTE_DE_REGISTRO);
+    await rodar((store) => {
+      for (const e of lote) store.put(storableEntry(e), e.track.id);
+    });
+    if (i + LOTE_DE_REGISTRO < gravar.length) await new Promise((r) => setTimeout(r, 0));
+  }
+  if (apagar.length > 0) {
+    await rodar((store) => {
+      for (const id of apagar) store.delete(id);
+    });
+  }
+  if (completa) {
+    migrarDoAntigo = false;
+    await apagarRegistroAntigo().catch(() => undefined);
+  }
 }
 
 /**
@@ -343,10 +490,12 @@ async function carregarRegistro(): Promise<void> {
   // segundo de tela congelada no celular, para gravar exatamente o que acabou
   // de ser lido.
   const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
-  if (doDisco && proprias.length === doDisco.length) {
+  if (doDisco && proprias.length === doDisco.length && !migrarDoAntigo) {
     ultimasGravadas = proprias;
     return;
   }
+  const anterioresDoDisco = migrarDoAntigo ? [] : (doDisco ?? []);
+  ultimasGravadas = proprias;
 
   // A REGRAVAÇÃO NÃO SEGURA A PRIMEIRA LISTA.
   //
@@ -361,9 +510,7 @@ async function carregarRegistro(): Promise<void> {
   // entrar vence — e a última é sempre a que tem os dados mais novos.
   void (async () => {
     try {
-      await gravarRegistroNoDisco(
-        (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry),
-      );
+      await enfileirarGravacao(proprias, anterioresDoDisco);
       window.localStorage.removeItem(STORAGE_KEY);
     } catch (erro) {
       // Sem IndexedDB (aba anônima antiga, storage desligado) seguimos com o
@@ -449,11 +596,12 @@ function flushWrite(): void {
       proprias.length !== ultimasGravadas.length ||
       proprias.some((e, i) => e !== ultimasGravadas[i]);
     if (mudou) {
+      const anteriores = ultimasGravadas;
       ultimasGravadas = proprias;
       // O REGISTRO VAI PARA O IndexedDB — 1352 bytes por faixa medidos em
       // produção fazem 4 mil faixas passarem de 5 MB, e o `setItem` estoura
       // POR INTEIRO nesse ponto (ver o comentário do cofre lá em cima).
-      void gravarRegistroNoDisco(proprias.map(storableEntry)).catch(registrarFalhaDePersistencia);
+      void enfileirarGravacao(proprias, anteriores).catch(registrarFalhaDePersistencia);
     }
   } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
