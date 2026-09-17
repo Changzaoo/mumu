@@ -673,6 +673,82 @@ function agruparPorConta(docs: TelemetryDoc[]): TelemetryDoc[] {
   return contas.sort(recente);
 }
 
+/**
+ * O resumo que cabe numa linha: o suficiente para saber quem é a pessoa e
+ * como usa o app sem precisar expandir o card.
+ */
+function detalhesDaLinha(t: TelemetryDoc): string[] {
+  const out: string[] = [];
+  out.push(`${t.sessions ?? 0} sessões`);
+  if (t.totalSeconds) out.push(`${formatHours(t.totalSeconds)} de uso`);
+  out.push(`${t.totalPlays ?? 0} plays`);
+  if (t.libraryCount) out.push(`${t.libraryCount} na biblioteca`);
+  if (t.likedCount) out.push(`${t.likedCount} ♥`);
+  if (t.downloadsCount) out.push(`${t.downloadsCount} downloads`);
+  const peak = peakHour(t.hourHistogram);
+  if (peak) out.push(`pico às ${peak}`);
+  if (t.topArtists?.[0]) out.push(`curte ${t.topArtists[0].name}`);
+  const ultima = t.recentPlays?.[0];
+  if (ultima) out.push(`última: ${ultima.title} · ${ultima.artist}`);
+  if (t.pwaInstalled) out.push('app instalado');
+  if (t.accountCreatedAt) out.push(`conta desde ${formatClock(t.accountCreatedAt).split(',')[0]}`);
+  if ((t.jsErrors ?? 0) > 0) out.push(`${t.jsErrors} erros`);
+  return out;
+}
+
+/** Sem e-mail = aparelho que nunca fez login. */
+function naoIdentificado(t: TelemetryDoc): boolean {
+  return !t.email;
+}
+
+/** Lista recolhível — guarda o que só polui a tela principal. */
+function GrupoOculto({
+  titulo,
+  descricao,
+  users,
+  expandedUid,
+  onToggle,
+}: {
+  titulo: string;
+  descricao: string;
+  users: TelemetryDoc[];
+  expandedUid: string | null;
+  onToggle: (uid: string) => void;
+}) {
+  const [aberto, setAberto] = useState(false);
+  if (users.length === 0) return null;
+  return (
+    <section className="rounded-xl border border-dashed border-border">
+      <button
+        type="button"
+        onClick={() => setAberto((v) => !v)}
+        aria-expanded={aberto}
+        className="flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors hover:bg-fg/4"
+      >
+        <span className="min-w-0">
+          <span className="block text-[13px] font-semibold text-fg">
+            {titulo} <span className="text-fg-subtle">({users.length})</span>
+          </span>
+          <span className="block text-[11px] text-fg-subtle">{descricao}</span>
+        </span>
+        <span className="shrink-0 text-[12px] text-fg-muted">{aberto ? 'Ocultar' : 'Mostrar'}</span>
+      </button>
+      {aberto && (
+        <div className="space-y-1.5 border-t border-border p-2">
+          {users.map((t) => (
+            <UserRow
+              key={t.uid}
+              t={t}
+              expanded={expandedUid === t.uid}
+              onToggle={() => onToggle(t.uid)}
+            />
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
 /** Linha compacta (modo Lista) — expande para o card completo ao clicar. */
 function UserRow({
   t,
@@ -714,6 +790,13 @@ function UserRow({
             )}
           </span>
           <span className="block truncate pl-4 text-[11px] text-fg-muted">{identificacao(t)}</span>
+          <span className="flex flex-wrap gap-x-2.5 gap-y-0.5 pl-4 pt-0.5 text-[11px] text-fg-subtle">
+            {detalhesDaLinha(t).map((d) => (
+              <span key={d} className="whitespace-nowrap">
+                {d}
+              </span>
+            ))}
+          </span>
         </span>
         <SegmentBadge name={seg.primary} />
         <span className="hidden text-[12px] text-fg-muted sm:block">
@@ -1527,7 +1610,22 @@ export default function TelemetryPage() {
   }, [docs, query, platformFilter, categoryFilter]);
 
   // UMA LINHA POR PESSOA: agrupa os aparelhos da mesma conta depois de filtrar.
-  const contasView = useMemo(() => agruparPorConta(filteredDocs), [filteredDocs]);
+  const todasContas = useMemo(() => agruparPorConta(filteredDocs), [filteredDocs]);
+
+  // A tela principal mostra só quem importa: contas identificadas e ativas.
+  // Não identificados (sem login) e inativos (>7 dias) ficam recolhidos no fim.
+  const { contasView, inativos, anonimos } = useMemo(() => {
+    const principais: TelemetryDoc[] = [];
+    const inat: TelemetryDoc[] = [];
+    const anon: TelemetryDoc[] = [];
+    for (const t of todasContas) {
+      if (naoIdentificado(t)) anon.push(t);
+      else if (categorize(t).primary === 'Inativo') inat.push(t);
+      else principais.push(t);
+    }
+    return { contasView: principais, inativos: inat, anonimos: anon };
+  }, [todasContas]);
+  const toggleExpanded = (uid: string) => setExpandedUid((cur) => (cur === uid ? null : uid));
 
   const categories = [
     'Ouvinte pesado',
@@ -1675,19 +1773,23 @@ export default function TelemetryPage() {
                 </option>
               ))}
             </select>
-            {contasView.length !== docs.length && (
-              <span className="text-[12px] text-fg-subtle">
-                {contasView.length} de {docs.length}
-              </span>
-            )}
+            <span className="text-[12px] text-fg-subtle">
+              {contasView.length} ativos · {inativos.length + anonimos.length} ocultos
+            </span>
           </div>
 
-          {contasView.length === 0 && (
+          {todasContas.length === 0 && (
             <EmptyState
               icon={Search}
               title="Nenhum usuário encontrado"
               description="Nenhum usuário corresponde à busca e aos filtros atuais."
             />
+          )}
+
+          {todasContas.length > 0 && contasView.length === 0 && (
+            <p className="text-[13px] text-fg-muted">
+              Nenhuma conta ativa aqui — veja os grupos ocultos abaixo.
+            </p>
           )}
 
           {/* Lista compacta — escala para centenas de usuários; clique expande. */}
@@ -1746,6 +1848,24 @@ export default function TelemetryPage() {
               ))}
             </div>
           )}
+
+          {/* Recolhidos: não poluem a tela, mas estão a um clique. */}
+          <div className="space-y-2">
+            <GrupoOculto
+              titulo="Inativos"
+              descricao="Contas com login que não abrem o app há mais de 7 dias"
+              users={inativos}
+              expandedUid={expandedUid}
+              onToggle={toggleExpanded}
+            />
+            <GrupoOculto
+              titulo="Não identificados"
+              descricao="Aparelhos que nunca fizeram login"
+              users={anonimos}
+              expandedUid={expandedUid}
+              onToggle={toggleExpanded}
+            />
+          </div>
         </>
       )}
 
