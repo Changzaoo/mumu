@@ -338,6 +338,16 @@ async function carregarRegistro(): Promise<void> {
   registroCarregado = true;
   liberarRegistro();
 
+  // VEIO DO DISCO E NADA ENTROU ANTES? Então o disco já está certo. Regravar
+  // aqui era serializar as 5 mil faixas de novo a cada abertura — mais um
+  // segundo de tela congelada no celular, para gravar exatamente o que acabou
+  // de ser lido.
+  const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
+  if (doDisco && proprias.length === doDisco.length) {
+    ultimasGravadas = proprias;
+    return;
+  }
+
   // A REGRAVAÇÃO NÃO SEGURA A PRIMEIRA LISTA.
   //
   // Ela existe para largar os ~5 MB que a biblioteca ocupava no localStorage e
@@ -384,6 +394,8 @@ function read(): LibraryEntry[] {
 // coalesce rajadas em uma escrita/emissão a cada ~300ms; a memória (cache) é
 // atualizada na hora, então toda leitura continua vendo o estado novo.
 let writeTimer: ReturnType<typeof setTimeout> | null = null;
+/** O que foi gravado por último — para não regravar 5 mil faixas iguais. */
+let ultimasGravadas: LibraryEntry[] = [];
 
 /**
  * O que pode ir para o localStorage.
@@ -425,11 +437,24 @@ function flushWrite(): void {
     // a memória já está certa e a próxima passada grava tudo.
     if (!registroCarregado) return;
 
-    const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo').map(storableEntry);
-    // O REGISTRO VAI PARA O IndexedDB — 1352 bytes por faixa medidos em
-    // produção fazem 4 mil faixas passarem de 5 MB, e o `setItem` estoura
-    // POR INTEIRO nesse ponto (ver o comentário do cofre lá em cima).
-    void gravarRegistroNoDisco(proprias).catch(registrarFalhaDePersistencia);
+    const proprias = (cache ?? []).filter((e) => e.origem !== 'catalogo');
+    // NADA DO QUE É DA PESSOA MUDOU? ENTÃO NÃO GRAVA.
+    //
+    // O `put` do IndexedDB serializa o array inteiro NA THREAD PRINCIPAL. Num
+    // moto g34 com 5.116 faixas próprias isso mediu 1,6s, 1,4s e 0,9s de tela
+    // congelada — três vezes seguidas na abertura, disparadas por mudanças do
+    // ACERVO, que nem entra no registro. As entradas são imutáveis (toda
+    // alteração cria objeto novo), então comparar referências basta.
+    const mudou =
+      proprias.length !== ultimasGravadas.length ||
+      proprias.some((e, i) => e !== ultimasGravadas[i]);
+    if (mudou) {
+      ultimasGravadas = proprias;
+      // O REGISTRO VAI PARA O IndexedDB — 1352 bytes por faixa medidos em
+      // produção fazem 4 mil faixas passarem de 5 MB, e o `setItem` estoura
+      // POR INTEIRO nesse ponto (ver o comentário do cofre lá em cima).
+      void gravarRegistroNoDisco(proprias.map(storableEntry)).catch(registrarFalhaDePersistencia);
+    }
   } catch (erro) {
     // Quota / private mode — registry stays in memory for the session.
     // Registrado, não engolido: um aparelho nesta situação parece normal na
