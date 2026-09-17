@@ -8,6 +8,7 @@ import {
   Gauge,
   ListMusic,
   MicVocal,
+  MonitorSpeaker,
   Music,
   Repeat,
   Repeat1,
@@ -42,6 +43,8 @@ import { Slider } from '@/components/ui/slider';
 import { useDominantColor } from '@/hooks/useDominantColor';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { api } from '@/lib/api';
+import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
+import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { cn, formatTime, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -101,6 +104,17 @@ function NowPlayingSeek({
 }
 
 /**
+ * O relógio do APARELHO REMOTO, no mesmo componente-folha isolado: a posição
+ * vem da presença do outro aparelho (estimada entre pulsos) e arrastar manda um
+ * `seek` para lá. Sem forma de onda — os picos são da faixa carregada aqui, que
+ * neste caso não é a que está tocando.
+ */
+function RemoteSeek({ onSeek }: { onSeek: (seconds: number) => void }) {
+  const { progress, duration } = useNowPlayingProgress();
+  return <SeekSlider value={progress} duration={duration} buffered={0} onSeek={onSeek} />;
+}
+
+/**
  * Theater mode (DESIGN §7): fullscreen sheet with ambient artwork glow,
  * waveform seek, transport, lyrics pane, spectrum visualizer, sleep timer
  * and playback-rate menus. Drag down to dismiss (mobile).
@@ -127,6 +141,23 @@ export function NowPlaying() {
   const { toggle, next, prev, seek, setVolume, toggleMute, toggleShuffle, cycleRepeat, setRate } =
     usePlayerStore.getState();
 
+  // A BARRA E A TELA CHEIA TÊM QUE MOSTRAR A MESMA MÚSICA.
+  //
+  // A barra segue quem está TOCANDO (ver `useNowPlaying`): com o celular tocando
+  // e o computador parado, ela espelha a faixa do celular. A tela cheia lia só o
+  // player local — então expandir no PC trocava a música do celular pela última
+  // faixa carregada aqui. Agora ela espelha a mesma fonte.
+  const agora = useNowPlaying();
+  const remoto = agora && agora.source === 'remote' ? agora : null;
+  const controleRemoto = useRemoteControl();
+  // Com o remoto no comando, a faixa daqui não deve pintar nada: capa, letra,
+  // créditos e fila são dela, não da que está tocando.
+  const faixaLocal = remoto ? null : track;
+  const capaUrl = remoto ? remoto.coverUrl : (track?.coverUrl ?? null);
+  const titulo = remoto ? remoto.title : track?.title;
+  const artistas = remoto ? remoto.artists : (track?.artists ?? []);
+  const tocando = remoto ? remoto.isPlaying : isPlaying;
+
   const sleepTimer = useSettingsStore((s) => s.sleepTimerMinutes);
   const setSleepTimer = useSettingsStore((s) => s.setSleepTimer);
 
@@ -135,14 +166,14 @@ export function NowPlaying() {
   const likes = useTrackLikes();
   const isTouch = useMediaQuery('(pointer: coarse)');
   const isDesktopQueue = useMediaQuery('(min-width: 1024px)');
-  const dominant = useDominantColor(track?.coverUrl);
-  const glow = track?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
+  const dominant = useDominantColor(capaUrl);
+  const glow = faixaLocal?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
   const { data: credits } = useQuery({
-    queryKey: ['credits', track?.id],
-    enabled: open && Boolean(track),
+    queryKey: ['credits', faixaLocal?.id],
+    enabled: open && Boolean(faixaLocal),
     staleTime: Infinity,
     retry: false,
-    queryFn: () => fetchCredits(track as NonNullable<typeof track>),
+    queryFn: () => fetchCredits(faixaLocal as NonNullable<typeof faixaLocal>),
   });
 
   const sourceLabels: Record<string, string> = {
@@ -161,7 +192,7 @@ export function NowPlaying() {
 
   return (
     <AnimatePresence>
-      {open && track && (
+      {open && (track || remoto) && (
         <motion.section
           key="now-playing"
           aria-label="Tocando agora"
@@ -193,10 +224,10 @@ export function NowPlaying() {
               scrim é um degradê (mais forte embaixo, onde ficam os controles)
               para a legibilidade. Em aparelho fraco o guard de perf tira só o
               blur (a capa continua). */}
-          {track.coverUrl && (
+          {capaUrl && (
             <div aria-hidden className="pointer-events-none absolute inset-0 overflow-hidden">
               <img
-                src={track.coverUrl}
+                src={capaUrl}
                 alt=""
                 className="size-full scale-125 object-cover opacity-70 blur-3xl"
                 style={{ animation: 'kenburns 24s ease-in-out infinite' }}
@@ -210,20 +241,33 @@ export function NowPlaying() {
             <IconButton aria-label="Fechar" onClick={() => setOpen(false)}>
               <ChevronDown />
             </IconButton>
-            <p className="text-[11px] font-medium uppercase tracking-[0.18em] text-fg-muted">
-              Tocando {context ? (sourceLabels[context.source] ?? '') : ''}
+            <p className="flex items-center gap-1.5 text-[11px] font-medium uppercase tracking-[0.18em] text-fg-muted">
+              {remoto ? (
+                <>
+                  <MonitorSpeaker className="size-3.5" aria-hidden />
+                  Tocando em {remoto.deviceName}
+                </>
+              ) : (
+                <>Tocando {context ? (sourceLabels[context.source] ?? '') : ''}</>
+              )}
             </p>
-            <IconButton
-              aria-label="Fila"
-              onClick={() => {
-                // Desktop: painel lateral; mobile: o painel não existe — abre
-                // a folha com a fila AQUI (antes o botão não fazia nada).
-                if (isDesktopQueue) toggleQueue();
-                else setQueueSheetOpen(true);
-              }}
-            >
-              <ListMusic />
-            </IconButton>
+            {/* A fila é a DAQUI; com o outro aparelho no comando ela não diz
+                nada sobre o que virá a seguir lá. */}
+            {remoto ? (
+              <span className="size-10" aria-hidden />
+            ) : (
+              <IconButton
+                aria-label="Fila"
+                onClick={() => {
+                  // Desktop: painel lateral; mobile: o painel não existe — abre
+                  // a folha com a fila AQUI (antes o botão não fazia nada).
+                  if (isDesktopQueue) toggleQueue();
+                  else setQueueSheetOpen(true);
+                }}
+              >
+                <ListMusic />
+              </IconButton>
+            )}
           </header>
 
           {/* Fila (mobile): folha com a playlist do que está tocando agora. */}
@@ -305,14 +349,14 @@ export function NowPlaying() {
                     : 'aspect-square w-[min(70vw,340px)]',
                 )}
               >
-                {visualizer ? (
+                {visualizer && faixaLocal ? (
                   <div className="absolute inset-0 grid place-items-end bg-bg-elevated p-6">
                     <SpectrumVisualizer className="h-3/4" />
                   </div>
-                ) : lyricsOpen ? (
-                  <LyricsView track={track} className="h-full px-2" />
-                ) : track.coverUrl ? (
-                  <img src={track.coverUrl} alt="" className="size-full object-cover" />
+                ) : lyricsOpen && faixaLocal ? (
+                  <LyricsView track={faixaLocal} className="h-full px-2" />
+                ) : capaUrl ? (
+                  <img src={capaUrl} alt="" className="size-full object-cover" />
                 ) : (
                   <div className="grid size-full place-items-center text-fg-subtle">
                     <Music className="size-16" />
@@ -324,31 +368,37 @@ export function NowPlaying() {
               <div className="w-full text-center">
                 <div className="flex items-center justify-center gap-2">
                   <h1 className="line-clamp-2 min-w-0 text-2xl font-bold tracking-tight text-fg">
-                    {track.title}
+                    {titulo}
                   </h1>
-                  <LikeButton
-                    liked={likes.isLiked(track)}
-                    onToggle={(liked) => likes.toggle(track, liked)}
-                    className="shrink-0"
-                  />
+                  {/* Curtir age sobre a faixa DAQUI; do remoto só temos título e
+                      artista em texto, não a faixa do catálogo. */}
+                  {faixaLocal && (
+                    <LikeButton
+                      liked={likes.isLiked(faixaLocal)}
+                      onToggle={(liked) => likes.toggle(faixaLocal, liked)}
+                      className="shrink-0"
+                    />
+                  )}
                 </div>
                 <p className="mt-1 line-clamp-1 text-sm text-fg-muted">
-                  {track.id.startsWith('local:') && track.artists[0]?.name ? (
+                  {faixaLocal &&
+                  faixaLocal.id.startsWith('local:') &&
+                  faixaLocal.artists[0]?.name ? (
                     <Link
-                      to={`/artista/${encodeURIComponent(track.artists[0].name)}`}
+                      to={`/artista/${encodeURIComponent(faixaLocal.artists[0].name)}`}
                       onClick={() => setOpen(false)}
                       className="transition-colors hover:text-fg hover:underline"
                     >
-                      {trackArtistNames(track)}
+                      {trackArtistNames({ artists: artistas })}
                     </Link>
                   ) : (
-                    trackArtistNames(track)
+                    trackArtistNames({ artists: artistas })
                   )}
                 </p>
-                {(credits || track.composer) && !lyricsOpen && (
+                {faixaLocal && (credits || faixaLocal.composer) && !lyricsOpen && (
                   <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
                     {(() => {
-                      const primary = track.artists[0]?.name;
+                      const primary = faixaLocal.artists[0]?.name;
                       const extra = (credits?.performers ?? []).filter((p) => p !== primary);
                       return extra.length > 0 ? <p>Com {extra.join(', ')}</p> : null;
                     })()}
@@ -357,8 +407,8 @@ export function NowPlaying() {
                         (TCOM) ou do catálogo — melhor que esconder o crédito. */}
                     {credits && credits.composers.length > 0 ? (
                       <p>Composição: {credits.composers.join(', ')}</p>
-                    ) : track.composer ? (
-                      <p>Composição: {track.composer}</p>
+                    ) : faixaLocal.composer ? (
+                      <p>Composição: {faixaLocal.composer}</p>
                     ) : null}
                     {credits && credits.lyricists.length > 0 && (
                       <p>Letra: {credits.lyricists.join(', ')}</p>
@@ -372,126 +422,182 @@ export function NowPlaying() {
 
               {/* Seek: waveform when peaks exist, slider otherwise */}
               <div className="w-full">
-                <NowPlayingSeek trackId={track.id} onSeek={seek} />
+                {remoto ? (
+                  <RemoteSeek onSeek={remoto.seek} />
+                ) : (
+                  <NowPlayingSeek trackId={faixaLocal?.id} onSeek={seek} />
+                )}
               </div>
 
               {/* Transport */}
               <div className="flex items-center gap-3">
-                <IconButton aria-label="Aleatório" active={shuffle} onClick={toggleShuffle}>
-                  <Shuffle />
-                </IconButton>
-                <IconButton aria-label="Anterior" size="lg" onClick={prev}>
+                {/* Aleatório e repetição são modos da fila daqui — com o outro
+                    aparelho tocando, não há o que embaralhar deste lado. */}
+                {!remoto && (
+                  <IconButton aria-label="Aleatório" active={shuffle} onClick={toggleShuffle}>
+                    <Shuffle />
+                  </IconButton>
+                )}
+                <IconButton aria-label="Anterior" size="lg" onClick={remoto ? remoto.prev : prev}>
                   <SkipBack className="fill-current" />
                 </IconButton>
-                <PlayButton playing={isPlaying} size="lg" onClick={toggle} />
-                <IconButton aria-label="Próxima" size="lg" onClick={next}>
+                <PlayButton playing={tocando} size="lg" onClick={remoto ? remoto.toggle : toggle} />
+                <IconButton aria-label="Próxima" size="lg" onClick={remoto ? remoto.next : next}>
                   <SkipForward className="fill-current" />
                 </IconButton>
-                <IconButton
-                  aria-label={
-                    repeat === 'off' ? 'Repetir' : repeat === 'all' ? 'Repetir uma' : 'Não repetir'
-                  }
-                  active={repeat !== 'off'}
-                  onClick={cycleRepeat}
-                >
-                  {repeat === 'one' ? <Repeat1 /> : <Repeat />}
-                </IconButton>
+                {!remoto && (
+                  <IconButton
+                    aria-label={
+                      repeat === 'off'
+                        ? 'Repetir'
+                        : repeat === 'all'
+                          ? 'Repetir uma'
+                          : 'Não repetir'
+                    }
+                    active={repeat !== 'off'}
+                    onClick={cycleRepeat}
+                  >
+                    {repeat === 'one' ? <Repeat1 /> : <Repeat />}
+                  </IconButton>
+                )}
               </div>
 
               {/* Utility row */}
               <div className="flex w-full items-center justify-center gap-1">
-                <IconButton
-                  aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
-                  size="sm"
-                  active={lyricsOpen}
-                  onClick={() => {
-                    toggleLyrics();
-                    setVisualizer(false);
-                  }}
-                >
-                  <MicVocal />
-                </IconButton>
-                <IconButton
-                  aria-label="Visualizador de espectro"
-                  size="sm"
-                  active={visualizer}
-                  onClick={() => {
-                    const next = !visualizer;
-                    setVisualizer(next);
-                    if (next && lyricsOpen) toggleLyrics();
-                  }}
-                >
-                  <AudioLines />
-                </IconButton>
-                <IconButton
-                  aria-label="Equalizador"
-                  size="sm"
-                  onClick={() => setActiveModal('equalizer')}
-                >
-                  <SlidersHorizontal />
-                </IconButton>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
-                    <IconButton aria-label="Timer de sono" size="sm" active={sleepTimer !== null}>
-                      <Timer />
-                    </IconButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center">
-                    <DropdownMenuLabel>Timer de sono</DropdownMenuLabel>
-                    {SLEEP_OPTIONS.map((minutes) => (
-                      <DropdownMenuItem key={minutes} onSelect={() => setSleepTimer(minutes)}>
-                        {minutes} minutos
-                        {sleepTimer === minutes && <span className="ml-auto text-accent">●</span>}
-                      </DropdownMenuItem>
-                    ))}
-                    <DropdownMenuItem
-                      disabled={sleepTimer === null}
-                      onSelect={() => setSleepTimer(null)}
-                    >
-                      Desligar
-                    </DropdownMenuItem>
-                  </DropdownMenuContent>
-                </DropdownMenu>
-
-                <DropdownMenu>
-                  <DropdownMenuTrigger asChild>
+                {/* Letra, espectro, equalizador, sono e velocidade agem sobre o
+                    áudio DESTE aparelho — que está em silêncio. Com o remoto no
+                    comando sobra o volume, e esse o `useRemoteControl` manda
+                    para onde o som de fato sai. */}
+                {remoto ? (
+                  <div className="flex items-center gap-2">
+                    <span className="grid size-9 place-items-center text-fg-muted" aria-hidden>
+                      {controleRemoto.volume === 0 ? (
+                        <VolumeX className="size-5" />
+                      ) : controleRemoto.volume < 0.5 ? (
+                        <Volume1 className="size-5" />
+                      ) : (
+                        <Volume2 className="size-5" />
+                      )}
+                    </span>
+                    <Slider
+                      aria-label={`Volume em ${remoto.deviceName ?? 'outro aparelho'}`}
+                      value={[Math.round(controleRemoto.volume * 100)]}
+                      max={100}
+                      step={1}
+                      onValueChange={([v]) => controleRemoto.setVolume((v ?? 0) / 100)}
+                      className="w-40"
+                    />
+                  </div>
+                ) : (
+                  <>
                     <IconButton
-                      aria-label="Velocidade de reprodução"
+                      aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
                       size="sm"
-                      active={playbackRate !== 1}
+                      active={lyricsOpen}
+                      onClick={() => {
+                        toggleLyrics();
+                        setVisualizer(false);
+                      }}
                     >
-                      <Gauge />
+                      <MicVocal />
                     </IconButton>
-                  </DropdownMenuTrigger>
-                  <DropdownMenuContent align="center">
-                    <DropdownMenuLabel>Velocidade</DropdownMenuLabel>
-                    {RATE_OPTIONS.map((rate) => (
-                      <DropdownMenuItem key={rate} onSelect={() => setRate(rate)}>
-                        {rate}×
-                        {playbackRate === rate && <span className="ml-auto text-accent">●</span>}
-                      </DropdownMenuItem>
-                    ))}
-                  </DropdownMenuContent>
-                </DropdownMenu>
+                    <IconButton
+                      aria-label="Visualizador de espectro"
+                      size="sm"
+                      active={visualizer}
+                      onClick={() => {
+                        const next = !visualizer;
+                        setVisualizer(next);
+                        if (next && lyricsOpen) toggleLyrics();
+                      }}
+                    >
+                      <AudioLines />
+                    </IconButton>
+                    <IconButton
+                      aria-label="Equalizador"
+                      size="sm"
+                      onClick={() => setActiveModal('equalizer')}
+                    >
+                      <SlidersHorizontal />
+                    </IconButton>
 
-                <div className="ml-2 hidden items-center gap-2 sm:flex">
-                  <IconButton
-                    aria-label={muted ? 'Ativar som' : 'Silenciar'}
-                    size="sm"
-                    onClick={toggleMute}
-                  >
-                    {muted || volume === 0 ? <VolumeX /> : volume < 0.5 ? <Volume1 /> : <Volume2 />}
-                  </IconButton>
-                  <Slider
-                    aria-label="Volume"
-                    value={[muted ? 0 : Math.round(volume * 100)]}
-                    max={100}
-                    step={1}
-                    onValueChange={([v]) => setVolume((v ?? 0) / 100)}
-                    className="w-24"
-                  />
-                </div>
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton
+                          aria-label="Timer de sono"
+                          size="sm"
+                          active={sleepTimer !== null}
+                        >
+                          <Timer />
+                        </IconButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center">
+                        <DropdownMenuLabel>Timer de sono</DropdownMenuLabel>
+                        {SLEEP_OPTIONS.map((minutes) => (
+                          <DropdownMenuItem key={minutes} onSelect={() => setSleepTimer(minutes)}>
+                            {minutes} minutos
+                            {sleepTimer === minutes && (
+                              <span className="ml-auto text-accent">●</span>
+                            )}
+                          </DropdownMenuItem>
+                        ))}
+                        <DropdownMenuItem
+                          disabled={sleepTimer === null}
+                          onSelect={() => setSleepTimer(null)}
+                        >
+                          Desligar
+                        </DropdownMenuItem>
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <DropdownMenu>
+                      <DropdownMenuTrigger asChild>
+                        <IconButton
+                          aria-label="Velocidade de reprodução"
+                          size="sm"
+                          active={playbackRate !== 1}
+                        >
+                          <Gauge />
+                        </IconButton>
+                      </DropdownMenuTrigger>
+                      <DropdownMenuContent align="center">
+                        <DropdownMenuLabel>Velocidade</DropdownMenuLabel>
+                        {RATE_OPTIONS.map((rate) => (
+                          <DropdownMenuItem key={rate} onSelect={() => setRate(rate)}>
+                            {rate}×
+                            {playbackRate === rate && (
+                              <span className="ml-auto text-accent">●</span>
+                            )}
+                          </DropdownMenuItem>
+                        ))}
+                      </DropdownMenuContent>
+                    </DropdownMenu>
+
+                    <div className="ml-2 hidden items-center gap-2 sm:flex">
+                      <IconButton
+                        aria-label={muted ? 'Ativar som' : 'Silenciar'}
+                        size="sm"
+                        onClick={toggleMute}
+                      >
+                        {muted || volume === 0 ? (
+                          <VolumeX />
+                        ) : volume < 0.5 ? (
+                          <Volume1 />
+                        ) : (
+                          <Volume2 />
+                        )}
+                      </IconButton>
+                      <Slider
+                        aria-label="Volume"
+                        value={[muted ? 0 : Math.round(volume * 100)]}
+                        max={100}
+                        step={1}
+                        onValueChange={([v]) => setVolume((v ?? 0) / 100)}
+                        className="w-24"
+                      />
+                    </div>
+                  </>
+                )}
               </div>
             </div>
           </div>
