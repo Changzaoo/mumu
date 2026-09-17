@@ -1040,6 +1040,7 @@ export const usePlayerStore = create<PlayerState>()(
         // a da próxima. É uma consulta leve ao LRCLIB e o resultado fica em cache.
         void import('@/lib/lyrics/lyrics')
           .then((m) => {
+            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
             m.prefetchLyrics(track);
             const proxima = get().queue[index + 1];
             if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
