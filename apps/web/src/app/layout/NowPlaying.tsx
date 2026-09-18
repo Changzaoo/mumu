@@ -441,7 +441,12 @@ export function NowPlaying() {
                 <IconButton aria-label="Anterior" size="lg" onClick={remoto ? remoto.prev : prev}>
                   <SkipBack className="fill-current" />
                 </IconButton>
-                <PlayButton playing={tocando} size="lg" onClick={remoto ? remoto.toggle : toggle} />
+                <PlayButton
+                  aura
+                  playing={tocando}
+                  size="lg"
+                  onClick={remoto ? remoto.toggle : toggle}
+                />
                 <IconButton aria-label="Próxima" size="lg" onClick={remoto ? remoto.next : next}>
                   <SkipForward className="fill-current" />
                 </IconButton>

@@ -113,6 +113,45 @@
       background-position: -200% 0;
     }
   }
+  /* A AURA DO BOTÃO PLAY — fumaça, não halo parado.
+     Três véus de cor giram em velocidades e sentidos diferentes, cada um
+     respirando numa escala própria; sobrepostos e borrados, o que se vê é uma
+     névoa que nunca repete o mesmo desenho. Só `transform` e `opacity`: a
+     composição roda fora da thread principal e não repinta nada. */
+  @keyframes aura-drift-a {
+    0%,
+    100% {
+      transform: rotate(0deg) scale(1);
+      opacity: 0.55;
+    }
+    50% {
+      transform: rotate(180deg) scale(1.22);
+      opacity: 0.9;
+    }
+  }
+  @keyframes aura-drift-b {
+    0%,
+    100% {
+      transform: rotate(0deg) scale(1.15);
+      opacity: 0.85;
+    }
+    50% {
+      transform: rotate(-180deg) scale(0.92);
+      opacity: 0.45;
+    }
+  }
+  @keyframes aura-pulse {
+    0%,
+    100% {
+      transform: scale(0.96);
+      opacity: 0.5;
+    }
+    50% {
+      transform: scale(1.14);
+      opacity: 0.85;
+    }
+  }
+
   /* Slow "living cover" motion for the miniclip ambient background. */
   @keyframes kenburns {
     0%,

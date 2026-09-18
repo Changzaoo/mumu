@@ -186,7 +186,7 @@ export function PlayerBar() {
                   <Spinner size="md" />
                 </span>
               ) : (
-                <PlayButton playing={isPlaying} onClick={toggle} />
+                <PlayButton aura playing={isPlaying} onClick={toggle} />
               )}
               <IconButton aria-label="Próxima" onClick={next}>
                 <SkipForward className="fill-current" />

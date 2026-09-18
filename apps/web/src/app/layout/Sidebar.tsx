@@ -200,6 +200,13 @@ export function Sidebar() {
         // direita, que só fazia sentido quando menu e conteúdo eram a mesma
         // folha coladas. A separação agora é a calha entre os painéis.
         'glass hidden shrink-0 flex-col overflow-hidden rounded-xl md:flex',
+        // CELULAR DEITADO — a tela tem a largura de um tablet (o menu aparece)
+        // e a altura de nada: ~360px para header, oito atalhos, os filtros da
+        // biblioteca e as ferramentas. O que não cabia ficava cortado pelo
+        // `overflow-hidden`, sem jeito de alcançar: o único trecho rolável era
+        // a lista da biblioteca, lá no meio. Em tela baixa o menu INTEIRO passa
+        // a rolar — as fatias de altura fixa dão lugar a uma coluna só.
+        '[@media(max-height:640px)]:overflow-y-auto [@media(max-height:640px)]:overscroll-contain',
         collapsed ? 'w-18' : 'w-75',
       )}
     >
@@ -209,7 +216,7 @@ export function Sidebar() {
         // (`size-10`). Nada de `w-full` (que o wrapper do Tooltip da nav
         // encolhia) nem `mx-auto`. Assim marca, botão e todos os ícones abaixo
         // caem no mesmo eixo — o centro dos 72px do trilho.
-        <div className="flex flex-col items-center gap-0.5 py-3">
+        <div className="flex shrink-0 flex-col items-center gap-0.5 py-3">
           <div className="grid size-10 place-items-center">
             <RadinhoMark className="size-6" />
           </div>
@@ -223,7 +230,7 @@ export function Sidebar() {
           </button>
         </div>
       ) : (
-        <div className="flex h-16 items-center justify-between px-4">
+        <div className="flex h-16 shrink-0 items-center justify-between px-4">
           <RadinhoLogo />
           <IconButton aria-label="Recolher menu" size="sm" onClick={toggleSidebar}>
             <PanelLeft />
@@ -233,7 +240,13 @@ export function Sidebar() {
 
       <nav
         aria-label="Menu principal"
-        className={cn('flex min-h-0 flex-1 flex-col pb-3', collapsed ? 'px-0' : 'px-3')}
+        className={cn(
+          'flex min-h-0 flex-1 flex-col pb-3',
+          // Em tela baixa quem rola é o `aside`: a nav cresce com o conteúdo
+          // em vez de disputar uma altura que não existe.
+          '[@media(max-height:640px)]:min-h-max [@media(max-height:640px)]:flex-none',
+          collapsed ? 'px-0' : 'px-3',
+        )}
       >
         <div className={collapsed ? 'flex flex-col items-center gap-0.5' : 'space-y-0.5'}>
           {MAIN_NAV.map((entry) => (
@@ -290,7 +303,9 @@ export function Sidebar() {
               ))}
             </div>
 
-            <ScrollArea className="mt-2 min-h-0 flex-1">
+            {/* A área rolável da biblioteca só existe quando há altura para
+                fatiar; em tela baixa ela vira conteúdo comum e rola junto. */}
+            <ScrollArea className="mt-2 min-h-0 flex-1 [@media(max-height:640px)]:h-auto [@media(max-height:640px)]:flex-none">
               <div className="space-y-0.5 pr-2">
                 <LibraryItem
                   to="/liked"
