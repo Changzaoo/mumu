@@ -30,6 +30,12 @@ export interface AudioTags {
   publisher: string | null;
   /** Ano de lançamento (TYER / TDRC), só o ano. */
   year: number | null;
+  /**
+   * Número da faixa dentro do disco (TRCK, "4" ou "4/12") — só o primeiro
+   * número. É a prova de que o arquivo veio de um lançamento maior: quem é a
+   * faixa 4 de algum lugar não é um single, mesmo sozinho na biblioteca.
+   */
+  trackNumber: number | null;
   /** Capa embutida (APIC) como data URL — já limitada de tamanho. */
   coverDataUrl: string | null;
 }
@@ -41,6 +47,7 @@ const EMPTY: AudioTags = {
   composer: null,
   publisher: null,
   year: null,
+  trackNumber: null,
   coverDataUrl: null,
 };
 
@@ -213,6 +220,13 @@ const TEXT_FRAMES: Record<string, keyof AudioTags> = {
 };
 
 const YEAR_FRAMES = new Set(['TYER', 'TYE', 'TDRC', 'TDRL', 'TORY']);
+const TRACK_FRAMES = new Set(['TRCK', 'TRK']);
+
+/** "4", "4/12", "04" → 4. Fora de 1..999 é tag podre e não vale nada. */
+function trackNumberFrom(value: string | null): number | null {
+  const n = Number.parseInt((value ?? '').trim().split('/')[0] ?? '', 10);
+  return Number.isFinite(n) && n >= 1 && n <= 999 ? n : null;
+}
 
 /**
  * Lê a tag ID3v2 de um bloco de bytes que COMEÇA nela. Puro e defensivo: para
@@ -257,8 +271,10 @@ export function parseId3v2(bytes: Uint8Array): AudioTags {
     const data = bytes.subarray(dataStart, dataStart + size);
 
     const field = TEXT_FRAMES[id];
-    if (field && field !== 'year' && field !== 'coverDataUrl') {
+    if (field && field !== 'year' && field !== 'trackNumber' && field !== 'coverDataUrl') {
       tags[field] ??= textFrame(data);
+    } else if (TRACK_FRAMES.has(id)) {
+      tags.trackNumber ??= trackNumberFrom(textFrame(data));
     } else if (YEAR_FRAMES.has(id)) {
       tags.year ??= yearFrom(textFrame(data));
     } else if (id === 'APIC' || id === 'PIC') {
@@ -295,6 +311,9 @@ export function parseId3v1(bytes: Uint8Array): AudioTags {
   tags.artist = v1Field(bytes, 33, 30);
   tags.album = v1Field(bytes, 63, 30);
   tags.year = yearFrom(v1Field(bytes, 93, 4));
+  // ID3v1.1 roubou o último byte do comentário para o número da faixa (o byte
+  // 125 fica zerado quando é v1.1; num v1.0 puro o comentário usa os 30).
+  if ((bytes[125] ?? 0) === 0) tags.trackNumber = trackNumberFrom(String(bytes[126] ?? 0));
   return tags;
 }
 
@@ -307,6 +326,7 @@ export function mergeTags(primary: AudioTags, fallback: AudioTags): AudioTags {
     composer: primary.composer ?? fallback.composer,
     publisher: primary.publisher ?? fallback.publisher,
     year: primary.year ?? fallback.year,
+    trackNumber: primary.trackNumber ?? fallback.trackNumber,
     coverDataUrl: primary.coverDataUrl ?? fallback.coverDataUrl,
   };
 }

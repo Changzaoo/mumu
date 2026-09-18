@@ -31,6 +31,7 @@ import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
+import { artistIdentityKey, melhorGrafia } from '@/lib/local/artistIdentity';
 import { aiSplitArtists, aiVerifyArtist } from '@/lib/ai/ai';
 // O TIME DE METADADOS (5 agentes — ver metaTeam.ts). Aqui vive o AUDITOR;
 // os demais agentes são consultados em cada decisão de crédito.
@@ -939,6 +940,8 @@ interface LocalTrackExtras {
   /** Gravadora / selo (tag TPUB). */
   label?: string | null;
   releaseYear?: number | null;
+  /** Número da faixa no disco (tag TRCK) — separa álbum de single. */
+  trackNumber?: number | null;
 }
 
 function localTrackDto(
@@ -955,7 +958,15 @@ function localTrackDto(
   // A credit can name several artists ("A feat. B", "A & B"). Split it so the
   // track is attributed to EACH artist — never merged into one.
   const rawNames = Array.isArray(artist) ? artist : splitArtistNames(artist);
-  const names = rawNames.map((n) => sanitizeText(n, 120)).filter(Boolean);
+  // A DUPLICATA MORRE NA PORTA. Se a biblioteca já conhece esta pessoa por
+  // outra grafia ("DJ Kennedi" quando chega "Kennedi"), a faixa nova entra com
+  // a grafia que já está lá. Sem isso, a ficha continuaria uma só (a chave de
+  // identidade agrupa), mas o nome exibido dançaria conforme a última
+  // importação — e qualquer lista feita por nome cru voltaria a se partir.
+  const names = rawNames
+    .map((n) => sanitizeText(n, 120))
+    .filter(Boolean)
+    .map((n) => grafiaConhecida(n));
   const safeNames = names.length > 0 ? names : ['Desconhecido'];
   const safeAlbum = album ? sanitizeText(album, 200) || null : null;
   const cover = safeCoverUrl(coverUrl);
@@ -963,7 +974,7 @@ function localTrackDto(
     id,
     title: safeTitle,
     durationMs,
-    trackNumber: null,
+    trackNumber: extras.trackNumber ?? null,
     discNumber: null,
     explicit: false,
     playsCount: 0,
@@ -1288,6 +1299,7 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
       composer: tags.composer,
       label: tags.publisher,
       releaseYear: tags.year,
+      trackNumber: tags.trackNumber,
     });
 
     // Num LOTE, a cota costuma estourar no meio: as primeiras entram e as
@@ -1923,9 +1935,25 @@ export function albumKeyForTrack(track: TrackDto): string | null {
 }
 
 /**
- * Group library tracks into real albums. A track counts as an album only when
- * its album has 2+ tracks OR the album name differs from the track name (a
- * genuine release, not an auto "Title - Single"). Everything else is a single.
+ * Marca declarada de lançamento avulso no título: "Fulano - Single",
+ * "Tudo Ok (Single)", "Nome — Single". Quem escreve isso é a loja (iTunes e
+ * afins batizam assim o lançamento de uma faixa só) e a tag do arquivo herda.
+ */
+const MARCA_DE_SINGLE = /[-–—]\s*single\s*$|\(\s*single\s*\)\s*$|\[\s*single\s*\]\s*$/i;
+
+/**
+ * ÁLBUM É ÁLBUM; SINGLE É SINGLE.
+ *
+ * A regra antiga promovia a álbum COMPLETO qualquer faixa solta cujo nome de
+ * álbum diferisse do nome da faixa — e é o que quase todo single faz: a faixa
+ * "Tudo Ok" vem com álbum "Tudo Ok (Deluxe)", "Tudo Ok - Single", ou o nome do
+ * projeto. Resultado: a estante enchia de "álbuns" de uma faixa só.
+ *
+ * Agora um lançamento só conta como álbum quando há prova disso:
+ *  • duas ou mais faixas dele na biblioteca; ou
+ *  • uma faixa só, mas numerada a partir da segunda — quem é a faixa 4 de algum
+ *    lugar veio de um disco, mesmo que só ela tenha sido baixada.
+ * E o que se diz single no título nunca é álbum, tenha o nome que tiver.
  */
 function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlbum[] {
   const byKey = new Map<string, LocalAlbum>();
@@ -1943,9 +1971,11 @@ function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlb
     album.tracks.push(t);
     if (!album.coverUrl && t.coverUrl) album.coverUrl = t.coverUrl;
   }
-  return [...byKey.values()].filter(
-    (a) => a.tracks.length >= 2 || normName(a.title) !== normName(a.tracks[0]?.title ?? ''),
-  );
+  return [...byKey.values()].filter((a) => {
+    if (MARCA_DE_SINGLE.test(a.title)) return false;
+    if (a.tracks.length >= 2) return true;
+    return (a.tracks[0]?.trackNumber ?? 0) >= 2;
+  });
 }
 
 /** Memo dos derivados — recalcula UMA vez por mudança da biblioteca. */
@@ -2013,21 +2043,60 @@ export function artists(): LocalArtist[] {
   return ensureGroups().artists;
 }
 
+/**
+ * A GRAFIA QUE JÁ VALE nesta biblioteca para a pessoa que este nome nomeia.
+ *
+ * Monta-se uma vez, na primeira faixa que entra: identidade → grafia mais usada
+ * (o `computeArtists` já devolve ordenado por número de faixas). Depois o mapa
+ * só CRESCE, com os nomes novos que vão chegando — refazê-lo a cada arquivo
+ * transformaria uma importação de mil faixas num trabalho quadrático, e o que
+ * se perde ficando levemente desatualizado é nada: a ficha do artista é
+ * agrupada por identidade de qualquer jeito.
+ */
+let grafiasPorIdentidade: Map<string, string> | null = null;
+
+function grafiaConhecida(name: string): string {
+  const chave = artistIdentityKey(name);
+  if (!chave) return name;
+  if (!grafiasPorIdentidade) {
+    const mapa = new Map<string, string>();
+    for (const a of computeArtists()) {
+      const k = artistIdentityKey(a.name) || normName(a.name);
+      if (!mapa.has(k)) mapa.set(k, a.name);
+    }
+    grafiasPorIdentidade = mapa;
+  }
+  const conhecida = grafiasPorIdentidade.get(chave);
+  if (conhecida) return conhecida;
+  grafiasPorIdentidade.set(chave, name);
+  return name;
+}
+
 function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[] {
+  // UMA FICHA POR PESSOA. A chave não é mais o nome quase cru: é a identidade
+  // (ver `artistIdentity`), que faz "DJ Kennedi" e "Kennedi", "Brandão" e
+  // "Brandao", "Fulano Oficial" e "Fulano" caírem no mesmo artista. Antes cada
+  // grafia abria uma ficha com um pedaço das faixas.
   const byName = new Map<string, LocalArtist>();
+  // Quantas faixas cada GRAFIA tem — é o que decide qual delas fica na ficha.
+  const porGrafia = new Map<string, number>();
   for (const entry of collapseForDisplay(entries)) {
     for (const artist of entry.track.artists) {
       const name = artist.name?.trim();
       if (!name || name === 'Desconhecido') continue;
-      const key = normName(name);
+      const key = artistIdentityKey(name) || normName(name);
+      const grafiaKey = `${key}|${name}`;
+      const grafiaCount = (porGrafia.get(grafiaKey) ?? 0) + 1;
+      porGrafia.set(grafiaKey, grafiaCount);
       let a = byName.get(key);
       if (!a) {
         a = { name, coverUrl: entry.track.coverUrl ?? null, trackCount: 0 };
         byName.set(key, a);
-      } else if (a.name === a.name.toLowerCase() && name !== name.toLowerCase()) {
-        // Rede de segurança para faixas que entraram DEPOIS da normalização:
-        // uma grafia com maiúsculas ganha da que está toda em minúscula.
-        a.name = name;
+      } else if (a.name !== name) {
+        a.name = melhorGrafia(
+          { name: a.name, trackCount: porGrafia.get(`${key}|${a.name}`) ?? 0 },
+          { name, trackCount: grafiaCount },
+        );
       }
       a.trackCount += 1;
       if (!a.coverUrl && entry.track.coverUrl) a.coverUrl = entry.track.coverUrl;
@@ -2036,18 +2105,22 @@ function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[
   return [...byName.values()].sort((x, y) => y.trackCount - x.trackCount);
 }
 
-/** All tracks credited to an artist (by name). */
+/**
+ * Todas as faixas creditadas a um artista — por IDENTIDADE, não por grafia.
+ * A ficha de "DJ Kennedi" tem que trazer também o que foi creditado a
+ * "Kennedi": é a mesma pessoa, e era exatamente aí que as faixas sumiam.
+ */
 export function artistTracks(name: string): TrackDto[] {
-  const key = normName(name);
+  const key = artistIdentityKey(name) || normName(name);
   return collapseForDisplay(read())
     .map((e) => e.track)
-    .filter((t) => t.artists.some((a) => normName(a.name) === key));
+    .filter((t) => t.artists.some((a) => (artistIdentityKey(a.name) || normName(a.name)) === key));
 }
 
-/** Real albums by a given artist. */
+/** Real albums by a given artist (mesma identidade, qualquer grafia). */
 export function artistAlbums(name: string): LocalAlbum[] {
-  const key = normName(name);
-  return albumGroups().filter((a) => normName(a.artist) === key);
+  const key = artistIdentityKey(name) || normName(name);
+  return albumGroups().filter((a) => (artistIdentityKey(a.artist) || normName(a.artist)) === key);
 }
 
 export interface LocalGenre {

@@ -235,6 +235,7 @@ describe('mergeTags', () => {
       composer: 'Alguém',
       publisher: null,
       year: null,
+      trackNumber: null,
       coverDataUrl: null,
     };
     const antigo = parseId3v1(v1('Do ID3v1', 'Artista', 'Álbum', '1998'));
