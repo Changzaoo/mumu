@@ -30,6 +30,24 @@ const sizes = {
  * Fica quieta quando a música está pausada (aura de som que não sai é ruído
  * visual) e some inteira sob `prefers-reduced-motion`.
  */
+const PLUMAS = [
+  {
+    animacao: 'aura-exalar-a',
+    duracao: '4.5s',
+    atraso: '-0.2s',
+    blur: 'blur-lg',
+    origem: '50% 60%',
+  },
+  { animacao: 'aura-exalar-b', duracao: '6s', atraso: '-2.4s', blur: 'blur-xl', origem: '42% 58%' },
+  {
+    animacao: 'aura-exalar-c',
+    duracao: '5.2s',
+    atraso: '-3.9s',
+    blur: 'blur-lg',
+    origem: '58% 62%',
+  },
+] as const;
+
 function Aura({ playing }: { playing: boolean }) {
   return (
     <span
@@ -63,6 +81,22 @@ function Aura({ playing }: { playing: boolean }) {
           animation: playing ? 'aura-pulse 5s ease-in-out infinite' : undefined,
         }}
       />
+      {/* AS PLUMAS — a fumaça saindo. Só com a música tocando: parado, um botão
+          que fumega sozinho promete um som que não está saindo. Os atrasos são
+          NEGATIVOS, para que as três já estejam no meio do caminho no primeiro
+          quadro em vez de largarem juntas do zero. */}
+      {playing &&
+        PLUMAS.map((pluma) => (
+          <span
+            key={pluma.animacao}
+            className={cn('absolute inset-[18%] rounded-full', pluma.blur)}
+            style={{
+              background: `radial-gradient(closest-side at ${pluma.origem}, hsl(var(--accent) / 0.6) 0%, hsl(var(--accent) / 0.18) 50%, transparent 75%)`,
+              animation: `${pluma.animacao} ${pluma.duracao} linear infinite`,
+              animationDelay: pluma.atraso,
+            }}
+          />
+        ))}
     </span>
   );
 }
@@ -82,9 +116,26 @@ export function PlayButton({
       className={cn(
         'grid shrink-0 select-none place-items-center rounded-full bg-accent text-accent-fg',
         'transition-transform duration-200',
-        // Com a aura viva atrás, a sombra colorida vira sujeira: duas camadas
+        // O BOTÃO NÃO PODE SUMIR.
+        //
+        // O destaque deste app é preto e branco: no tema escuro o botão é um
+        // círculo BRANCO. Sobre capa clara — a tela cheia põe a capa borrada no
+        // fundo, o card põe a capa inteira — branco sobre branco é um botão
+        // invisível, e a aura, que também é da cor de destaque, só piorava.
+        //
+        // O anel resolve sem depender de adivinhar o fundo: `accent-fg` é, por
+        // definição do tema, a cor legível SOBRE o destaque — ou seja, sempre o
+        // oposto do círculo. Fundo igual ao botão, o anel desenha a silhueta;
+        // fundo contrastante, ele é só um contorno discreto. A sombra escura
+        // por baixo dá a mesma ajuda na direção contrária.
+        'ring-1 ring-accent-fg/40 shadow-[0_2px_10px_rgba(0,0,0,0.45)]',
+        // Com a aura viva atrás, a sombra COLORIDA vira sujeira: duas camadas
         // da mesma cor disputando a mesma borda.
-        aura ? 'relative' : 'shadow-[0_8px_24px_hsl(var(--accent)/0.35)]',
+        // Sem aura (os cards, as capas), a sombra colorida VOLTA — mas junto
+        // com a escura, que é o que segura o botão contra uma capa clara.
+        aura
+          ? 'relative'
+          : 'shadow-[0_8px_24px_hsl(var(--accent)/0.35),0_2px_10px_rgba(0,0,0,0.45)]',
         'hover:scale-105 active:scale-95 disabled:pointer-events-none disabled:opacity-50',
         sizes[size],
         className,

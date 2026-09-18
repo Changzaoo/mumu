@@ -140,6 +140,50 @@
       opacity: 0.45;
     }
   }
+  /* A EXALAÇÃO — o que sai do botão.
+     Cada pluma nasce colada ao botão, sobe um pouco e se abre até sumir; três
+     delas, em tempos diferentes e começando fora de fase, fazem um fio contínuo
+     de fumaça em vez de três sopros marcados. A opacidade cai bem antes do fim
+     da escala: fumaça não tem borda, e o que se vê desaparecer é o rastro. */
+  @keyframes aura-exalar-a {
+    0% {
+      transform: scale(0.55) translate3d(0, 6%, 0);
+      opacity: 0;
+    }
+    18% {
+      opacity: 0.6;
+    }
+    100% {
+      transform: scale(1.75) translate3d(-8%, -22%, 0);
+      opacity: 0;
+    }
+  }
+  @keyframes aura-exalar-b {
+    0% {
+      transform: scale(0.6) translate3d(0, 8%, 0);
+      opacity: 0;
+    }
+    22% {
+      opacity: 0.5;
+    }
+    100% {
+      transform: scale(1.9) translate3d(10%, -26%, 0);
+      opacity: 0;
+    }
+  }
+  @keyframes aura-exalar-c {
+    0% {
+      transform: scale(0.5) translate3d(0, 4%, 0);
+      opacity: 0;
+    }
+    25% {
+      opacity: 0.45;
+    }
+    100% {
+      transform: scale(1.6) translate3d(2%, -30%, 0);
+      opacity: 0;
+    }
+  }
   @keyframes aura-pulse {
     0%,
     100% {
