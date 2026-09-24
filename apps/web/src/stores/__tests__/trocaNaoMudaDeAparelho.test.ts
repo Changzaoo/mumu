@@ -12,6 +12,9 @@
  */
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
+type Handler = (payload: unknown) => void;
+const engineHandlers = new Map<string, Handler[]>();
+
 vi.mock('@/lib/audio/AudioEngine', () => {
   const engine = {
     load: vi.fn(),
@@ -25,11 +28,17 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     preloadNext: vi.fn(),
     setEq: vi.fn(),
     setNormalizeVolume: vi.fn(),
+    setLocalSourceResolver: vi.fn(),
     getPosition: vi.fn(() => 0),
     getDuration: vi.fn(() => 0),
     getBufferedEnd: vi.fn(() => 0),
     isTrackEnded: vi.fn(() => false),
-    on: vi.fn(() => () => undefined),
+    on: vi.fn((event: string, handler: Handler) => {
+      const list = engineHandlers.get(event) ?? [];
+      list.push(handler);
+      engineHandlers.set(event, list);
+      return () => undefined;
+    }),
     off: vi.fn(),
     destroy: vi.fn(),
     analyser: null,
@@ -50,10 +59,12 @@ vi.mock('@/lib/api', () => ({
   resolveMediaUrl: (url: string) => url,
 }));
 
+vi.mock('@/lib/audio/mediaSession', () => ({ initMediaSession: vi.fn() }));
+
 const sendCommand = vi.fn(() => Promise.resolve());
 vi.mock('@/lib/devices/presence', () => ({ sendCommand }));
 
-import { usePlayerStore } from '@/stores/playerStore';
+import { initPlayerEngine, usePlayerStore } from '@/stores/playerStore';
 import { definirAlvoRemoto } from '@/lib/devices/alvoRemoto';
 import { makeTrack } from '@/test/factories';
 
@@ -114,6 +125,26 @@ describe('com outro aparelho tocando', () => {
 describe('sem ninguém tocando fora', () => {
   it('toca aqui mesmo, como sempre', async () => {
     usePlayerStore.getState().playTrack(faixas[1] as never);
+    await assentar();
+
+    expect(sendCommand).not.toHaveBeenCalled();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('b');
+  });
+});
+
+describe('o fim da faixa', () => {
+  it('avança AQUI mesmo com outro aparelho marcado como tocando', async () => {
+    initPlayerEngine();
+    usePlayerStore.getState().playQueue(faixas as never, 0);
+    await assentar();
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('a');
+
+    // No instante do 'ended' o `isPlaying` pode já estar em falso, e uma
+    // presença velha do celular ainda diz "tocando". A fila tem que andar
+    // aqui — mandar a próxima para lá deixaria este aparelho mudo.
+    definirAlvoRemoto({ id: 'celular', name: 'moto g' });
+    usePlayerStore.setState({ isPlaying: false });
+    for (const handler of engineHandlers.get('ended') ?? []) handler({ track: faixas[0] });
     await assentar();
 
     expect(sendCommand).not.toHaveBeenCalled();

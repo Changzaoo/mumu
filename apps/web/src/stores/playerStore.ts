@@ -364,7 +364,18 @@ let querTocar = false;
  *
  * `false` quer dizer "toque aqui mesmo", e é o caminho normal.
  */
+/**
+ * O avanço AUTOMÁTICO nunca viaja. `advanceFromTrackEnd` passa por `playAt`
+ * como um clique na fila passaria — e no fim de uma faixa o `isPlaying` pode já
+ * estar em falso. Com uma presença velha de outro aparelho dizendo "tocando",
+ * a próxima música seria mandada para lá e este aparelho ficaria mudo no meio
+ * da fila. Só o que a PESSOA pede muda de lugar; o que a fila faz sozinha
+ * continua onde o som já está.
+ */
+let avancoAutomatico = false;
+
 function mandarParaQuemToca(get: () => PlayerState, tracks: TrackDto[], index: number): boolean {
+  if (avancoAutomatico) return false;
   const alvo = alvoRemotoAtual();
   if (!alvo || get().isPlaying) return false;
   const faixa = tracks[index];
@@ -1594,10 +1605,21 @@ export function initPlayerEngine(): void {
       return;
     }
     const nextIndex = state.queueIndex + 1;
-    if (nextIndex < state.queue.length) {
-      state.playAt(nextIndex);
-    } else if (state.repeat === 'all' && state.queue.length > 0) {
-      state.playAt(0);
+    const alvo =
+      nextIndex < state.queue.length
+        ? nextIndex
+        : state.repeat === 'all' && state.queue.length > 0
+          ? 0
+          : null;
+    if (alvo !== null) {
+      // `playAt` decide de forma síncrona se desvia — a marca só precisa
+      // valer durante a chamada.
+      avancoAutomatico = true;
+      try {
+        state.playAt(alvo);
+      } finally {
+        avancoAutomatico = false;
+      }
     } else {
       querTocar = false; // a fila acabou de verdade
       store.setState({ isPlaying: false, progress: state.duration });
