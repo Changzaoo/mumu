@@ -113,99 +113,6 @@
       background-position: -200% 0;
     }
   }
-  /* A AURA DO BOTÃO PLAY — fumaça, não halo parado.
-     Três véus de cor giram em velocidades e sentidos diferentes, cada um
-     respirando numa escala própria; sobrepostos e borrados, o que se vê é uma
-     névoa que nunca repete o mesmo desenho. Só `transform` e `opacity`: a
-     composição roda fora da thread principal e não repinta nada. */
-  @keyframes aura-drift-a {
-    0%,
-    100% {
-      transform: rotate(0deg) scale(1);
-      opacity: 0.55;
-    }
-    50% {
-      transform: rotate(180deg) scale(1.22);
-      opacity: 0.9;
-    }
-  }
-  @keyframes aura-drift-b {
-    0%,
-    100% {
-      transform: rotate(0deg) scale(1.15);
-      opacity: 0.85;
-    }
-    50% {
-      transform: rotate(-180deg) scale(0.92);
-      opacity: 0.45;
-    }
-  }
-  /* A EXALAÇÃO — o que sai do botão.
-     Cada pluma nasce colada ao botão, sobe um pouco e se abre até sumir; três
-     delas, em tempos diferentes e começando fora de fase, fazem um fio contínuo
-     de fumaça em vez de três sopros marcados. A opacidade cai bem antes do fim
-     da escala: fumaça não tem borda, e o que se vê desaparecer é o rastro. */
-  @keyframes aura-exalar-a {
-    0% {
-      transform: scale(0.55) translate3d(0, 6%, 0);
-      opacity: 0;
-    }
-    18% {
-      opacity: 0.6;
-    }
-    100% {
-      transform: scale(1.75) translate3d(-8%, -22%, 0);
-      opacity: 0;
-    }
-  }
-  @keyframes aura-exalar-b {
-    0% {
-      transform: scale(0.6) translate3d(0, 8%, 0);
-      opacity: 0;
-    }
-    22% {
-      opacity: 0.5;
-    }
-    100% {
-      transform: scale(1.9) translate3d(10%, -26%, 0);
-      opacity: 0;
-    }
-  }
-  @keyframes aura-exalar-c {
-    0% {
-      transform: scale(0.5) translate3d(0, 4%, 0);
-      opacity: 0;
-    }
-    25% {
-      opacity: 0.45;
-    }
-    100% {
-      transform: scale(1.6) translate3d(2%, -30%, 0);
-      opacity: 0;
-    }
-  }
-  @keyframes aura-pulse {
-    0%,
-    100% {
-      transform: scale(0.96);
-      opacity: 0.5;
-    }
-    50% {
-      transform: scale(1.14);
-      opacity: 0.85;
-    }
-  }
-
-  /* Slow "living cover" motion for the miniclip ambient background. */
-  @keyframes kenburns {
-    0%,
-    100% {
-      transform: scale(1.15) translate3d(0, 0, 0);
-    }
-    50% {
-      transform: scale(1.3) translate3d(-3%, -3%, 0);
-    }
-  }
   @keyframes fade-in {
     from {
       opacity: 0;
@@ -631,5 +538,115 @@
   img {
     user-select: none;
     -webkit-user-drag: none;
+  }
+}
+
+/* ── ANIMAÇÕES USADAS POR ESTILO INLINE — FORA DO @theme, DE PROPÓSITO ──────
+   O Tailwind v4 só emite um @keyframes declarado dentro de `@theme` quando
+   alguma variável `--animate-*` o usa. Estas são chamadas por `style={{
+   animation }}`, que o Tailwind não enxerga — lá dentro elas eram descartadas
+   no build, em silêncio: a fumaça do play nunca se mexeu e a capa da tela
+   cheia nunca "respirou". Aqui, no nível de cima, keyframe é CSS comum e sai
+   sempre. */
+
+/* Slow "living cover" motion for the miniclip ambient background. */
+@keyframes kenburns {
+  0%,
+  100% {
+    transform: scale(1.15) translate3d(0, 0, 0);
+  }
+  50% {
+    transform: scale(1.3) translate3d(-3%, -3%, 0);
+  }
+}
+
+/* A AURA DO BOTÃO PLAY — a base: névoa que gira e respira em volta.
+   Só `transform` e `opacity`: a composição roda fora da thread principal. */
+@keyframes aura-drift-a {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1);
+    opacity: 0.55;
+  }
+  50% {
+    transform: rotate(180deg) scale(1.2);
+    opacity: 0.85;
+  }
+}
+@keyframes aura-drift-b {
+  0%,
+  100% {
+    transform: rotate(0deg) scale(1.12);
+    opacity: 0.8;
+  }
+  50% {
+    transform: rotate(-180deg) scale(0.94);
+    opacity: 0.45;
+  }
+}
+
+/* A FUMAÇA SUBINDO. Cada fio nasce colado ao botão, sobe mais de um diâmetro
+   balançando para os lados, se abre e some — como fumaça, que perde a forma
+   enquanto sobe. Três fios com tempos que não fecham entre si (e começando fora
+   de fase) fazem uma coluna contínua em vez de três sopros marcados. A
+   opacidade cai antes do fim: fumaça não tem borda, o que some é o rastro. */
+@keyframes fumaca-a {
+  0% {
+    transform: translate3d(0, 10%, 0) scale(0.45);
+    opacity: 0;
+  }
+  15% {
+    opacity: 0.75;
+  }
+  45% {
+    transform: translate3d(-12%, -45%, 0) scale(0.85);
+  }
+  75% {
+    transform: translate3d(8%, -85%, 0) scale(1.15);
+    opacity: 0.3;
+  }
+  100% {
+    transform: translate3d(-4%, -120%, 0) scale(1.4);
+    opacity: 0;
+  }
+}
+@keyframes fumaca-b {
+  0% {
+    transform: translate3d(0, 12%, 0) scale(0.5);
+    opacity: 0;
+  }
+  20% {
+    opacity: 0.65;
+  }
+  50% {
+    transform: translate3d(14%, -50%, 0) scale(0.9);
+  }
+  80% {
+    transform: translate3d(-10%, -95%, 0) scale(1.2);
+    opacity: 0.25;
+  }
+  100% {
+    transform: translate3d(6%, -130%, 0) scale(1.5);
+    opacity: 0;
+  }
+}
+@keyframes fumaca-c {
+  0% {
+    transform: translate3d(0, 8%, 0) scale(0.4);
+    opacity: 0;
+  }
+  18% {
+    opacity: 0.6;
+  }
+  40% {
+    transform: translate3d(6%, -38%, 0) scale(0.8);
+  }
+  70% {
+    transform: translate3d(-14%, -80%, 0) scale(1.1);
+    opacity: 0.28;
+  }
+  100% {
+    transform: translate3d(10%, -115%, 0) scale(1.35);
+    opacity: 0;
   }
 }

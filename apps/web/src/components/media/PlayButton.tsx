@@ -16,84 +16,67 @@ const sizes = {
 } as const;
 
 /**
- * A AURA — fumaça, não sombra.
+ * A AURA — fumaça subindo, não sombra.
  *
- * O que havia atrás do botão era uma `box-shadow` colorida: um disco parado,
- * do mesmo tamanho para sempre. Aura é outra coisa — tem que se mexer.
+ * Embaixo, dois véus da cor de destaque giram em sentidos opostos e respiram
+ * (13s e 9s): a névoa que envolve o botão. Por cima, três FIOS DE FUMAÇA nascem
+ * colados ao círculo e sobem mais de um diâmetro, balançando para os lados e se
+ * abrindo até sumir. Os tempos não fecham entre si e os atrasos são negativos
+ * (os fios já estão no meio do caminho no primeiro quadro), então o que se vê
+ * é uma coluna contínua, não sopros marcados. Fica atrás do círculo opaco do
+ * botão — só aparece o que extravasa.
  *
- * São três véus da cor de destaque, cada um borrado a ponto de perder a borda,
- * girando em sentidos opostos e respirando em tempos que não fecham entre si
- * (13s, 9s, 5s): como os ciclos não coincidem, a silhueta nunca se repete e o
- * olho lê névoa, não animação em laço. Fica atrás do círculo opaco do botão, e
- * só se vê o que extravasa — a fumaça ao redor.
+ * O PORQUÊ DE ELA NUNCA TER SE MEXIDO: os @keyframes moravam dentro do
+ * `@theme` do Tailwind v4, que descarta no build todo keyframe não usado por
+ * uma variável `--animate-*`. Como estes são chamados por estilo inline, o
+ * Tailwind não os via e o CSS final saía sem nenhum. Agora vivem no nível de
+ * cima de `globals.css`.
  *
- * Fica quieta quando a música está pausada (aura de som que não sai é ruído
- * visual) e some inteira sob `prefers-reduced-motion`.
+ * Com a música pausada fica só a névoa, parada e mais fraca — um botão que
+ * fumega sem som saindo promete o que não está acontecendo. Sob
+ * `prefers-reduced-motion` a névoa continua lá, só sem movimento: sumir com ela
+ * inteira deixava o botão "sem aura nenhuma" para quem desligou as animações
+ * do Windows, e movimento não é a única coisa que ela entrega.
  */
-const PLUMAS = [
-  {
-    animacao: 'aura-exalar-a',
-    duracao: '4.5s',
-    atraso: '-0.2s',
-    blur: 'blur-lg',
-    origem: '50% 60%',
-  },
-  { animacao: 'aura-exalar-b', duracao: '6s', atraso: '-2.4s', blur: 'blur-xl', origem: '42% 58%' },
-  {
-    animacao: 'aura-exalar-c',
-    duracao: '5.2s',
-    atraso: '-3.9s',
-    blur: 'blur-lg',
-    origem: '58% 62%',
-  },
+const FIOS = [
+  { animacao: 'fumaca-a', duracao: '3.6s', atraso: '-0.4s', blur: 'blur-md', x: '46%' },
+  { animacao: 'fumaca-b', duracao: '4.4s', atraso: '-2.1s', blur: 'blur-lg', x: '56%' },
+  { animacao: 'fumaca-c', duracao: '4s', atraso: '-3.2s', blur: 'blur-md', x: '40%' },
 ] as const;
 
 function Aura({ playing }: { playing: boolean }) {
   return (
     <span
       aria-hidden
-      className={cn(
-        'pointer-events-none absolute inset-[-55%] hidden motion-safe:block',
-        !playing && 'opacity-45',
-      )}
+      className={cn('pointer-events-none absolute inset-[-55%]', !playing && 'opacity-45')}
     >
       <span
-        className="absolute inset-0 rounded-full blur-xl"
+        className="absolute inset-0 rounded-full blur-xl motion-reduce:!animate-none"
         style={{
           background:
-            'radial-gradient(closest-side, hsl(var(--accent) / 0.85) 0%, hsl(var(--accent) / 0.25) 55%, transparent 78%)',
+            'radial-gradient(closest-side, hsl(var(--accent) / 0.8) 0%, hsl(var(--accent) / 0.22) 55%, transparent 78%)',
           animation: playing ? 'aura-drift-a 13s ease-in-out infinite' : undefined,
         }}
       />
       <span
-        className="absolute inset-[12%] rounded-full blur-lg"
+        className="absolute inset-[12%] rounded-full blur-lg motion-reduce:!animate-none"
         style={{
           background:
-            'radial-gradient(closest-side at 62% 38%, hsl(var(--accent) / 0.7) 0%, transparent 70%)',
+            'radial-gradient(closest-side at 62% 38%, hsl(var(--accent) / 0.6) 0%, transparent 70%)',
           animation: playing ? 'aura-drift-b 9s ease-in-out infinite' : undefined,
         }}
       />
-      <span
-        className="absolute inset-[22%] rounded-full blur-md"
-        style={{
-          background:
-            'radial-gradient(closest-side, hsl(var(--accent) / 0.55) 0%, transparent 72%)',
-          animation: playing ? 'aura-pulse 5s ease-in-out infinite' : undefined,
-        }}
-      />
-      {/* AS PLUMAS — a fumaça saindo. Só com a música tocando: parado, um botão
-          que fumega sozinho promete um som que não está saindo. Os atrasos são
-          NEGATIVOS, para que as três já estejam no meio do caminho no primeiro
-          quadro em vez de largarem juntas do zero. */}
+      {/* OS FIOS DE FUMAÇA — só com a música tocando e só com movimento
+          permitido: fumaça parada no ar não é fumaça, é mancha. */}
       {playing &&
-        PLUMAS.map((pluma) => (
+        FIOS.map((fio) => (
           <span
-            key={pluma.animacao}
-            className={cn('absolute inset-[18%] rounded-full', pluma.blur)}
+            key={fio.animacao}
+            className={cn('absolute inset-[22%] hidden rounded-full motion-safe:block', fio.blur)}
             style={{
-              background: `radial-gradient(closest-side at ${pluma.origem}, hsl(var(--accent) / 0.6) 0%, hsl(var(--accent) / 0.18) 50%, transparent 75%)`,
-              animation: `${pluma.animacao} ${pluma.duracao} linear infinite`,
-              animationDelay: pluma.atraso,
+              background: `radial-gradient(closest-side at ${fio.x} 55%, hsl(var(--accent) / 0.75) 0%, hsl(var(--accent) / 0.25) 45%, transparent 72%)`,
+              animation: `${fio.animacao} ${fio.duracao} ease-out infinite`,
+              animationDelay: fio.atraso,
             }}
           />
         ))}
