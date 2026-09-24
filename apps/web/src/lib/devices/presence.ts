@@ -30,6 +30,7 @@ import type { User } from 'firebase/auth';
 import type { TrackDto } from '@radinho/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { resumeAt, usePlayerStore } from '@/stores/playerStore';
+import { definirAlvoRemoto } from '@/lib/devices/alvoRemoto';
 
 const DEVICE_ID_KEY = 'aurial:deviceId';
 const HEARTBEAT_MS = 25_000;
@@ -142,9 +143,30 @@ export interface RemotePlayback {
 }
 
 /** Comandos que um aparelho pode mandar para outro. */
-export type DeviceCommandType = 'play' | 'pause' | 'next' | 'prev' | 'seek' | 'volume' | 'stop';
+export type DeviceCommandType =
+  | 'play'
+  | 'pause'
+  | 'next'
+  | 'prev'
+  | 'seek'
+  | 'volume'
+  | 'stop'
+  /** "Toque ESTA música aí" — trocar de faixa sem trazer o som para cá. */
+  | 'playTrack';
 
-interface DeviceCommand {
+/** O que vai junto do `playTrack`: a faixa e, se houver, a fila em volta dela. */
+export interface CargaDeComando {
+  trackId?: string;
+  /** Ids da fila, na ordem; o outro aparelho monta com o que ele tiver. */
+  queue?: string[];
+  /** Posição da faixa dentro de `queue`. */
+  index?: number;
+}
+
+/** Fila grande vira documento grande — o que passa disso não ajuda ninguém. */
+const MAX_FILA_NO_COMANDO = 200;
+
+interface DeviceCommand extends CargaDeComando {
   to: string;
   from: string;
   type: DeviceCommandType;
@@ -210,6 +232,11 @@ function emitRemote(next: RemotePlayback | null): void {
 
 function emitDevices(next: DeviceInfo[]): void {
   deviceState = next;
+  // O player lê daqui, sem importar este módulo, para saber se um clique numa
+  // música deve tocar aqui ou ser mandado para o aparelho que está com o som.
+  const me = getDeviceId();
+  const tocandoFora = next.find((d) => d.id !== me && d.online && d.isPlaying && d.track);
+  definirAlvoRemoto(tocandoFora ? { id: tocandoFora.id, name: tocandoFora.name } : null);
   for (const listener of deviceListeners) listener(deviceState);
 }
 
@@ -385,6 +412,11 @@ function publish(force = false): void {
  */
 export function claimPlayback(): void {
   lastClaimAt = Date.now(); // abre a carência ANTES de qualquer await
+  // QUEM ASSUME O SOM DEIXA DE TER PARA ONDE MANDAR. Sem esta linha, "ouvir
+  // aqui" se sabotava: o outro aparelho recebe o `pause`, mas a presença dele
+  // só chega uns dois segundos depois — e no meio-tempo o `playTrack` da
+  // transferência era desviado de volta para lá, exatamente o que ela desfaz.
+  definirAlvoRemoto(null);
   if (!db || !currentUser) return;
   activeDeviceId = getDeviceId(); // otimista: a UI reage na hora
   const uid = currentUser.uid;
@@ -404,6 +436,7 @@ export async function sendCommand(
   toDeviceId: string,
   type: DeviceCommandType,
   value?: number,
+  carga?: CargaDeComando,
 ): Promise<void> {
   if (!db || !currentUser) return;
   const payload: DeviceCommand = {
@@ -412,6 +445,10 @@ export async function sendCommand(
     type,
     at: new Date().toISOString(),
     ...(value !== undefined ? { value } : {}),
+    ...(carga?.trackId ? { trackId: carga.trackId } : {}),
+    ...(carga?.queue && carga.queue.length > 0
+      ? { queue: carga.queue.slice(0, MAX_FILA_NO_COMANDO), index: carga.index ?? 0 }
+      : {}),
   };
   const { addDoc, collection } = await firestore();
   await addDoc(collection(db, 'users', currentUser.uid, 'commands'), payload).catch(
@@ -494,6 +531,36 @@ async function acharFaixa(trackId: string): Promise<TrackDto | null> {
   }
 }
 
+/**
+ * "TOQUE ESTA AÍ" — o clique aconteceu no computador, o som sai aqui.
+ *
+ * Monta a fila com o que este aparelho tem das faixas pedidas (a biblioteca é a
+ * mesma, mas pode estar a meio caminho de sincronizar) e começa na faixa que
+ * foi clicada. Sem nenhuma delas, não faz nada: melhor a música seguir como
+ * está do que parar por um comando que não deu para cumprir.
+ */
+async function tocarFaixaPedida(command: DeviceCommand): Promise<void> {
+  const principal = command.trackId ? await acharFaixa(command.trackId) : null;
+  if (!principal) return;
+  claimPlayback();
+  const player = usePlayerStore.getState();
+
+  const ids = command.queue ?? [];
+  if (ids.length > 1) {
+    const fila = (await Promise.all(ids.map((id) => acharFaixa(id)))).filter(
+      (t): t is TrackDto => t !== null,
+    );
+    const inicio = fila.findIndex((t) => t.id === principal.id);
+    if (inicio >= 0 && fila.length > 1) {
+      player.playQueue(fila, inicio);
+      publish(true);
+      return;
+    }
+  }
+  player.playTrack(principal);
+  publish(true);
+}
+
 /** Aplica um comando recebido no player LOCAL. */
 function applyCommand(command: DeviceCommand): void {
   const player = usePlayerStore.getState();
@@ -522,6 +589,13 @@ function applyCommand(command: DeviceCommand): void {
     case 'stop':
       player.pause();
       break;
+    case 'playTrack':
+      // ASSÍNCRONO de propósito: a faixa pode não estar na fila daqui e ter que
+      // vir da biblioteca. O `publish` no fim deste corpo sai antes disso e
+      // ainda conta a faixa ANTIGA; o próximo pulso (ou o próprio play) conta a
+      // nova. Um segundo de atraso na pílula é melhor que segurar o comando.
+      void tocarFaixaPedida(command);
+      return;
   }
   publish(true); // devolve o novo estado para quem mandou, sem esperar o heartbeat
 }

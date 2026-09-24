@@ -14,6 +14,7 @@ import { api } from '@/lib/api';
 import { subscribeAuth } from '@/lib/firebase';
 import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
+import { alvoRemotoAtual } from '@/lib/devices/alvoRemoto';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   ensureDownloadedAudioUrl,
@@ -347,6 +348,40 @@ function localSourcesReady(trackId: string): Promise<unknown> {
  * transição termina em `reconciliarIntencao`, que aproxima a realidade dela.
  */
 let querTocar = false;
+
+/**
+ * TROCAR DE MÚSICA NÃO É TROCAR DE APARELHO — a regra do Spotify Connect.
+ *
+ * Com o som saindo do celular e o computador apenas espelhando, clicar numa
+ * música no computador começava a tocar NO COMPUTADOR: duas músicas no ar, ou
+ * o som saindo de onde ninguém está. O clique escolhe A MÚSICA; quem escolhe o
+ * aparelho é o seletor de dispositivos (ou o "ouvir aqui").
+ *
+ * Então, enquanto outro aparelho da conta está tocando e este aqui não está, o
+ * pedido viaja: vai a faixa e a fila em volta dela, e quem toca continua sendo
+ * quem já tocava. As duas condições importam — se ESTE aparelho está tocando,
+ * o clique é dele e nada é desviado; é a mesma regra estrita do volume remoto.
+ *
+ * `false` quer dizer "toque aqui mesmo", e é o caminho normal.
+ */
+function mandarParaQuemToca(get: () => PlayerState, tracks: TrackDto[], index: number): boolean {
+  const alvo = alvoRemotoAtual();
+  if (!alvo || get().isPlaying) return false;
+  const faixa = tracks[index];
+  if (!faixa) return false;
+  // O envio é assíncrono (Firestore) e o import é tardio de propósito: a
+  // presença importa este módulo, e trazê-la aqui em cima fecharia o ciclo.
+  void import('@/lib/devices/presence')
+    .then(({ sendCommand }) =>
+      sendCommand(alvo.id, 'playTrack', undefined, {
+        trackId: faixa.id,
+        queue: tracks.map((t) => t.id),
+        index,
+      }),
+    )
+    .catch(() => undefined);
+  return true;
+}
 
 /**
  * TOKEN DE GERAÇÃO DA CARGA — o mesmo remédio do `seq` dos slots do motor.
@@ -1181,6 +1216,7 @@ export const usePlayerStore = create<PlayerState>()(
         context: null,
 
         playTrack: (track, context) => {
+          if (mandarParaQuemToca(get, [track], 0)) return;
           const ctx = context ?? { source: 'queue' };
           set({ queue: [track], originalQueue: [track], context: ctx });
           loadIndex(0, true);
@@ -1215,6 +1251,7 @@ export const usePlayerStore = create<PlayerState>()(
         playQueue: (tracks, startIndex = 0, context) => {
           if (tracks.length === 0) return;
           const index = clamp(startIndex, 0, tracks.length - 1);
+          if (mandarParaQuemToca(get, tracks, index)) return;
           const { shuffle } = get();
           const queue = shuffle ? shuffleKeepingFirst(tracks, index) : [...tracks];
           set({
@@ -1226,7 +1263,9 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         playAt: (index) => {
-          if (index < 0 || index >= get().queue.length) return;
+          const fila = get().queue;
+          if (index < 0 || index >= fila.length) return;
+          if (mandarParaQuemToca(get, fila, index)) return;
           loadIndex(index, true);
         },
 
