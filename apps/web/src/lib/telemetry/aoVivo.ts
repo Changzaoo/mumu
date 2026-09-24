@@ -13,6 +13,7 @@ import * as localLibrary from '@/lib/local/localLibrary';
 import { relatorio as relatorioDeAlcas } from '@/lib/perf/alcasDeBlob';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { usePlayerStore } from '@/stores/playerStore';
+import { lerAvancos } from '@/lib/telemetry/avancoDeFaixa';
 
 const CHAVE_VIVO = 'aurial:aba-viva';
 
@@ -254,5 +255,7 @@ export function coletarAoVivo(): Record<string, unknown> {
     amostras,
     mortesSuspeitas,
     ultimaMorte,
+    // Como a fila avançou (ou não) — ver `avancoDeFaixa`.
+    avancos: lerAvancos(),
   };
 }

@@ -15,6 +15,12 @@ import { subscribeAuth } from '@/lib/firebase';
 import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { alvoRemotoAtual } from '@/lib/devices/alvoRemoto';
+import {
+  anotarAvanco,
+  avancoFalhou,
+  somSaiu,
+  type ViaDeAvanco,
+} from '@/lib/telemetry/avancoDeFaixa';
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   ensureDownloadedAudioUrl,
@@ -1594,7 +1600,7 @@ export function initPlayerEngine(): void {
   // OS lock-screen / notification controls + background-play signalling.
   initMediaSession();
 
-  const advanceFromTrackEnd = (): void => {
+  const advanceFromTrackEnd = (via: ViaDeAvanco): void => {
     const state = store.getState();
     syntheticEndHandledTrackId = null;
     if (state.repeat === 'one') {
@@ -1612,6 +1618,7 @@ export function initPlayerEngine(): void {
           ? 0
           : null;
     if (alvo !== null) {
+      anotarAvanco(via, state.currentTrack, state.queue[alvo]);
       // `playAt` decide de forma síncrona se desvia — a marca só precisa
       // valer durante a chamada.
       avancoAutomatico = true;
@@ -1648,6 +1655,7 @@ export function initPlayerEngine(): void {
     // faixa PRÉ-CARREGADA promovida, que não redispara 'loaded'.
     if (position > 0) {
       resetDeadRun();
+      somSaiu(state.currentTrack?.id);
       // Saiu som: se esta faixa estava no mapa de falhas, o caso está
       // encerrado. É a ÚNICA prova aceitável de reparo — "o importador disse
       // que baixou" não é a mesma coisa que "a pessoa ouviu".
@@ -1713,7 +1721,7 @@ export function initPlayerEngine(): void {
       syntheticEndHandledTrackId !== state.currentTrack.id
     ) {
       syntheticEndHandledTrackId = state.currentTrack.id;
-      advanceFromTrackEnd();
+      advanceFromTrackEnd('fimSintetico');
       return;
     }
 
@@ -1834,7 +1842,7 @@ export function initPlayerEngine(): void {
           return;
         }
         syntheticEndHandledTrackId = endTimerTrackId;
-        advanceFromTrackEnd();
+        advanceFromTrackEnd('relogioDeFim');
       },
       restante * 1000 + END_TIMER_SLACK_MS,
     );
@@ -1879,6 +1887,7 @@ export function initPlayerEngine(): void {
     }
 
     handoffDoneTrackId = track.id;
+    anotarAvanco('trocaAntecipada', track, next);
     playRecorded = false;
     preloadRequested = false;
     lastProgressCommit = 0;
@@ -1967,6 +1976,7 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('error', ({ message, track, kind }) => {
     clearLoadWatchdog();
+    avancoFalhou(kind === 'play' ? 'recusado' : 'erro');
     const current = store.getState().currentTrack;
     // Fonte morta ≠ faixa morta: blob evictado do cofre (LRU), cofre fora do
     // ar ou token expirado na URL gravada — tenta a próxima fonte antes de
@@ -2009,7 +2019,7 @@ export function initPlayerEngine(): void {
   audioEngine.on('ended', () => {
     clearEndTimer();
     clearHandoffTimer();
-    advanceFromTrackEnd();
+    advanceFromTrackEnd('ended');
   });
 
   // Play/pause e seek mudam o "quanto falta": os alvos dos temporizadores têm
