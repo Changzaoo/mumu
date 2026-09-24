@@ -836,6 +836,107 @@ export function prepararRetomadaTocando(): void {
   }
 }
 
+// ── A FILA SOBREVIVE AO RECARREGAR ───────────────────────────────
+// A retomada guardava só a faixa atual, e o boot montava a fila como
+// `[essa faixa]`: recarregar a página apagava tudo o que vinha depois, e quando
+// a faixa restaurada acabava o player parava. A fila agora é gravada à parte.
+//
+// Faixa da biblioteca vai só pelo id — ela está no registro local, com capa e
+// fonte de verdade, e gravar o objeto inteiro de centenas delas disputaria a
+// cota do localStorage com o próprio registro. Faixa de fora (catálogo) vai
+// inteira, porque não há outro lugar de onde reconstruí-la. A janela é limitada
+// em volta da faixa atual: o que já passou há muito não precisa voltar.
+const FILA_KEY = 'aurial:fila';
+const FILA_ANTES = 50;
+const FILA_DEPOIS = 250;
+
+type ItemDaFila = string | TrackDto;
+interface FilaGravada {
+  itens: ItemDaFila[];
+  index: number;
+  trackId: string;
+  context: PlayContext | null;
+}
+
+let filaTimer: ReturnType<typeof setTimeout> | null = null;
+
+/** Object URL morre com a página: gravá-lo seria gravar uma capa quebrada. */
+function semAlcaMorta(track: TrackDto): TrackDto {
+  return track.coverUrl?.startsWith('blob:') ? { ...track, coverUrl: null } : track;
+}
+
+function saveFila(): void {
+  if (filaTimer !== null) clearTimeout(filaTimer);
+  // Uma escrita por rajada: reordenar a fila ou avançar faixa dispara várias
+  // mudanças seguidas, e cada uma serializaria centenas de itens.
+  filaTimer = setTimeout(() => {
+    filaTimer = null;
+    const s = usePlayerStore.getState();
+    if (!s.currentTrack || s.queue.length === 0) return;
+    const ini = Math.max(0, s.queueIndex - FILA_ANTES);
+    const janela = s.queue.slice(ini, s.queueIndex + FILA_DEPOIS + 1);
+    const gravada: FilaGravada = {
+      itens: janela.map((t) => (t.id.startsWith('local:') ? t.id : semAlcaMorta(t))),
+      index: s.queueIndex - ini,
+      trackId: s.currentTrack.id,
+      context: s.context,
+    };
+    try {
+      window.localStorage.setItem(FILA_KEY, JSON.stringify(gravada));
+    } catch {
+      /* cota: perde a fila, nunca a música */
+    }
+  }, 1000);
+}
+
+function readFila(): FilaGravada | null {
+  try {
+    const lido = JSON.parse(window.localStorage.getItem(FILA_KEY) ?? 'null') as FilaGravada | null;
+    return lido && Array.isArray(lido.itens) && typeof lido.trackId === 'string' ? lido : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remonta a fila gravada em cima da faixa restaurada. Assíncrono porque as
+ * faixas da biblioteca vêm do registro local, que hidrata depois do boot; e só
+ * aplica se a pessoa não tiver trocado de música nesse meio-tempo.
+ */
+async function restaurarFila(trackId: string): Promise<void> {
+  const gravada = readFila();
+  if (!gravada || gravada.trackId !== trackId || gravada.itens.length <= 1) return;
+  let porId = new Map<string, TrackDto>();
+  if (gravada.itens.some((item) => typeof item === 'string')) {
+    try {
+      const { hydrate, list } = await import('@/lib/local/localLibrary');
+      await hydrate().catch(() => undefined);
+      porId = new Map(list().map((e) => [e.track.id, e.track]));
+    } catch {
+      /* sem biblioteca, remonta só com as faixas gravadas inteiras */
+    }
+  }
+  const atual = usePlayerStore.getState();
+  if (atual.currentTrack?.id !== trackId || atual.queue.length > 1) return;
+  const fila: TrackDto[] = [];
+  let index = -1;
+  gravada.itens.forEach((item, i) => {
+    const track = typeof item === 'string' ? porId.get(item) : item;
+    if (!track) return; // saiu da biblioteca desde então
+    if (i === gravada.index) index = fila.length;
+    fila.push(track);
+  });
+  if (index < 0 || fila.length <= 1) return;
+  // A faixa atual continua sendo o MESMO objeto que o player já carregou.
+  fila[index] = atual.currentTrack;
+  usePlayerStore.setState({
+    queue: fila,
+    originalQueue: fila,
+    queueIndex: index,
+    context: gravada.context ?? atual.context,
+  });
+}
+
 function readResume(): { track: TrackDto; progress: number; tocando?: boolean } | null {
   try {
     const parsed: unknown = JSON.parse(window.localStorage.getItem(RESUME_KEY) ?? 'null');
@@ -1584,7 +1685,69 @@ export function initPlayerEngine(): void {
       resumeAt(resume.progress);
       void store.getState().play();
     }
+    void restaurarFila(resume.track.id);
   }
+
+  // ── A MÚSICA NÃO ACABA SOZINHA (o "Reprodução automática" do Spotify) ──
+  // Quando a faixa atual é a ÚLTIMA da fila, a fila é estendida com músicas
+  // parecidas enquanto essa faixa ainda toca — não no fim dela. O momento
+  // importa: estendida antes, a próxima já existe quando a troca antecipada do
+  // segundo plano mira o fim da faixa (ver `handoffTimer`); estendida só no
+  // 'ended', o play da seguinte chegaria depois de um `import()` com a sessão de
+  // mídia já caída, e no iPhone isso é silêncio até a pessoa voltar ao app.
+  //
+  // Repetir (uma ou todas) já responde "o que vem depois", e podcast/rádio têm
+  // a própria ordem — nesses casos não se mexe.
+  let continuacaoPedidaPara: string | null = null;
+  const garantirContinuacao = (): void => {
+    const s = store.getState();
+    const track = s.currentTrack;
+    if (!track || s.repeat !== 'off') return;
+    if (s.queueIndex < s.queue.length - 1) return;
+    if (s.context?.source === 'podcast' || s.context?.source === 'radio') return;
+    if (continuacaoPedidaPara === track.id) return;
+    continuacaoPedidaPara = track.id;
+    void import('@/lib/reco/radio')
+      .then(({ construirRadio }) => {
+        const st = store.getState();
+        if (st.currentTrack?.id !== track.id || st.queueIndex < st.queue.length - 1) return;
+        const parecidas = construirRadio(track);
+        // Primeiro o que ainda não tocou nesta fila; se a biblioteca já deu
+        // tudo, aceita repetir — mas não o que acabou de tocar.
+        const naFila = new Set(st.queue.map((t) => t.id));
+        let novas = parecidas.filter((t) => !naFila.has(t.id));
+        if (novas.length === 0) {
+          const recentes = new Set(st.queue.slice(-20).map((t) => t.id));
+          novas = parecidas.filter((t) => !recentes.has(t.id));
+        }
+        if (novas.length === 0) return;
+        store.setState({
+          queue: [...st.queue, ...novas],
+          originalQueue: [...st.originalQueue, ...novas],
+        });
+      })
+      .catch(() => undefined);
+  };
+  store.subscribe((state, prev) => {
+    if (
+      state.currentTrack?.id !== prev.currentTrack?.id ||
+      state.queue.length !== prev.queue.length ||
+      state.repeat !== prev.repeat
+    ) {
+      garantirContinuacao();
+    }
+  });
+
+  // Grava a fila sempre que ela, a posição ou o contexto mudam (ver FILA_KEY).
+  store.subscribe((state, prev) => {
+    if (
+      state.queue !== prev.queue ||
+      state.queueIndex !== prev.queueIndex ||
+      state.context !== prev.context
+    ) {
+      saveFila();
+    }
+  });
   // Última chance de gravar a posição ao sair/minimizar o app.
   window.addEventListener('pagehide', () => saveResume(true));
   document.addEventListener('visibilitychange', () => {
