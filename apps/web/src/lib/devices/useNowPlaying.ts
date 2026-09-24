@@ -30,6 +30,9 @@ const EMPTY: DeviceInfo[] = [];
 export interface NowPlaying {
   /** De onde vem: a barra é a mesma; só o `deviceName` muda. */
   source: 'local' | 'remote';
+  /** Id da faixa daqui — é ele que diz se o nome do artista leva à página
+   *  local ou à do catálogo (ver `lib/linksDeFaixa`). `null` no remoto. */
+  trackId: string | null;
   title: string;
   artists: ArtistRef[];
   coverUrl: string | null;
@@ -60,6 +63,7 @@ export function useNowPlaying(): NowPlaying | null {
     const p = usePlayerStore.getState();
     return {
       source: 'local',
+      trackId: localTrack.id,
       title: localTrack.title,
       artists: localTrack.artists,
       coverUrl: localTrack.coverUrl,
@@ -77,6 +81,7 @@ export function useNowPlaying(): NowPlaying | null {
     const id = remoto.id;
     return {
       source: 'remote',
+      trackId: null,
       title: remoto.track.title,
       artists: remoto.track.artist
         ? [{ id: '', name: remoto.track.artist, slug: '', imageUrl: null }]

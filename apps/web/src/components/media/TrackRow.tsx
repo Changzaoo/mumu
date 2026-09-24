@@ -28,28 +28,11 @@ import { formatDuration, cn, trackArtistNames } from '@/lib/utils';
 import { useLocalCover } from '@/hooks/useLocalCover';
 import { usePlayerStore } from '@/stores/playerStore';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
+import { albumHref, artistHref } from '@/lib/linksDeFaixa';
 
-/**
- * Para onde o nome do artista leva.
- *
- * ISSO EXISTE PORQUE `/artist/:id` e `/album/:id` consultam a API central, que
- * NÃO está no ar: tocar no nome do artista de qualquer faixa da biblioteca
- * caía numa tela de erro. Faixa da biblioteca vai para as páginas locais, que
- * são as que têm dados de verdade; só o catálogo (Audius) usa as rotas por id.
- */
-function artistHref(track: TrackDto, artist: TrackDto['artists'][number]): string {
-  if (track.id.startsWith('local:')) return `/artista/${encodeURIComponent(artist.name)}`;
-  return `/artist/${artist.id}`;
-}
-
-/** Idem para o álbum. `null` = não há para onde ir; o nome vira texto simples. */
-function albumHref(track: TrackDto): string | null {
-  if (track.id.startsWith('local:')) {
-    const key = albumKeyForTrack(track);
-    return key ? `/disco/${encodeURIComponent(key)}` : null;
-  }
-  return track.album ? `/album/${track.album.id}` : null;
-}
+/** A regra de navegação da faixa vive em `lib/linksDeFaixa` — a barra do
+ *  player precisa dela tanto quanto esta lista. */
+const hrefDoAlbum = (track: TrackDto): string | null => albumHref(track, albumKeyForTrack(track));
 
 /** Animated "now playing" bars (pauses with playback). */
 function EqBars({ playing }: { playing: boolean }) {
@@ -240,18 +223,27 @@ export function TrackRow({
             )}
           </button>
           <p className="line-clamp-1 text-[13px] text-fg-muted">
-            {track.artists.map((artist, i) => (
-              <Fragment key={artist.id}>
-                {i > 0 && ', '}
-                <Link
-                  to={artistHref(track, artist)}
-                  className="hover:text-fg hover:underline"
-                  onClick={(e) => e.stopPropagation()}
-                >
-                  {artist.name}
-                </Link>
-              </Fragment>
-            ))}
+            {track.artists.map((artist, i) => {
+              // Artista do catálogo sem id não tem página: vira texto, não um
+              // link que leva a lugar nenhum.
+              const href = artistHref(track.id, artist);
+              return (
+                <Fragment key={artist.id}>
+                  {i > 0 && ', '}
+                  {href ? (
+                    <Link
+                      to={href}
+                      className="hover:text-fg hover:underline"
+                      onClick={(e) => e.stopPropagation()}
+                    >
+                      {artist.name}
+                    </Link>
+                  ) : (
+                    <span>{artist.name}</span>
+                  )}
+                </Fragment>
+              );
+            })}
           </p>
         </div>
       </div>
@@ -260,9 +252,9 @@ export function TrackRow({
       {showAlbum && (
         <span className="hidden min-w-0 md:block">
           {track.album &&
-            (albumHref(track) ? (
+            (hrefDoAlbum(track) ? (
               <Link
-                to={albumHref(track)!}
+                to={hrefDoAlbum(track)!}
                 className="line-clamp-1 text-[13px] text-fg-muted hover:text-fg hover:underline"
                 onClick={(e) => e.stopPropagation()}
               >
@@ -346,14 +338,17 @@ export function TrackRow({
             >
               <Share2 /> Compartilhar
             </DropdownMenuItem>
-            {track.album && albumHref(track) && (
-              <DropdownMenuItem onSelect={() => void navigate(albumHref(track)!)}>
+            {track.album && hrefDoAlbum(track) && (
+              <DropdownMenuItem onSelect={() => void navigate(hrefDoAlbum(track)!)}>
                 <Disc3 /> Ir para o álbum
               </DropdownMenuItem>
             )}
             {track.artists[0] && (
               <DropdownMenuItem
-                onSelect={() => void navigate(artistHref(track, track.artists[0]!))}
+                onSelect={() => {
+                  const href = artistHref(track.id, track.artists[0]!);
+                  if (href) void navigate(href);
+                }}
               >
                 <MicVocal /> Ir para o artista
               </DropdownMenuItem>

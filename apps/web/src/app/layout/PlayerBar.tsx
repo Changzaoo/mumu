@@ -25,6 +25,7 @@ import { Slider } from '@/components/ui/slider';
 import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
+import { artistHref } from '@/lib/linksDeFaixa';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -137,18 +138,28 @@ export function PlayerBar() {
                 {track.title}
               </button>
               <p className="line-clamp-1 text-[13px] text-fg-muted">
-                {track.artists.map((artist, i) => (
-                  <Fragment key={artist.id || artist.name}>
-                    {i > 0 && ', '}
-                    {track.source === 'remote' || !artist.id ? (
-                      <span>{artist.name}</span>
-                    ) : (
-                      <Link to={`/artist/${artist.id}`} className="hover:text-fg hover:underline">
-                        {artist.name}
-                      </Link>
-                    )}
-                  </Fragment>
-                ))}
+                {track.artists.map((artist, i) => {
+                  // A BARRA MANDAVA TODO MUNDO PARA A PÁGINA QUE ERRA.
+                  //
+                  // Aqui o link era sempre `/artist/:id`, a página da API
+                  // central — que não está no ar. Com uma faixa da biblioteca
+                  // tocando (o caso normal), clicar no nome do artista no
+                  // computador dava tela de erro. A regra certa é a mesma da
+                  // lista de faixas, agora compartilhada.
+                  const href = track.source === 'remote' ? null : artistHref(track.trackId, artist);
+                  return (
+                    <Fragment key={artist.id || artist.name}>
+                      {i > 0 && ', '}
+                      {href ? (
+                        <Link to={href} className="hover:text-fg hover:underline">
+                          {artist.name}
+                        </Link>
+                      ) : (
+                        <span>{artist.name}</span>
+                      )}
+                    </Fragment>
+                  );
+                })}
               </p>
               {/* Onde está tocando — pequeno, clicável ("Tocar neste dispositivo"). */}
               {track.source === 'remote' && track.deviceName && track.deviceId && (
