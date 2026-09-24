@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { MonitorSpeaker, Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
+import { useTextoDeCarga } from '@/components/media/StatusDeCarga';
 import { useTrackLikes } from '@/features/library/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -43,6 +44,9 @@ export function MiniPlayer() {
   const next = np?.next ?? (() => undefined);
   const prev = np?.prev ?? (() => undefined);
   const artistas = np?.artists.map((a) => a.name).join(', ') ?? '';
+  // A carga é a DAQUI: espelhando outro aparelho, não há o que contar.
+  const textoDeCarga = useTextoDeCarga();
+  const statusDeCarga = np?.source === 'local' ? textoDeCarga : null;
 
   return (
     <AnimatePresence>
@@ -96,8 +100,23 @@ export function MiniPlayer() {
               </span>
               <span className="min-w-0">
                 <span className="line-clamp-1 text-sm font-medium text-fg">{track.title}</span>
-                <span className="line-clamp-1 text-xs text-fg-muted">
-                  {track.source === 'remote' && track.deviceName ? (
+                <span
+                  className="line-clamp-1 text-xs text-fg-muted"
+                  title={statusDeCarga ?? undefined}
+                >
+                  {statusDeCarga ? (
+                    // Enquanto a música não sai, a linha do artista conta o
+                    // que está acontecendo — é a única linha que cabe aqui.
+                    <span className="flex items-center gap-1.5">
+                      <span
+                        aria-hidden
+                        className="inline-block size-1.5 shrink-0 animate-pulse rounded-full bg-accent"
+                      />
+                      <span className="truncate" role="status" aria-live="polite">
+                        {statusDeCarga}
+                      </span>
+                    </span>
+                  ) : track.source === 'remote' && track.deviceName ? (
                     <span className="flex items-center gap-1 text-accent">
                       <MonitorSpeaker className="size-3 shrink-0" />
                       <span className="truncate">

@@ -153,6 +153,12 @@ describe('faixa clicada que falha', () => {
 
     // Ainda nela — nada de pular para a próxima.
     expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:a');
+    // E a espera é DITA: a linha de status do player conta qual tentativa é.
+    expect(usePlayerStore.getState().carga).toMatchObject({
+      fase: 'reconstruindo',
+      tentativa: 1,
+      total: 3,
+    });
 
     await vi.advanceTimersByTimeAsync(4_500);
     expect(cargasDe('cat:a')).toBe(2);
@@ -183,5 +189,16 @@ describe('faixa clicada que falha', () => {
 
     expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:b');
     expect(cargasDe('cat:a')).toBe(1);
+  });
+
+  it('o primeiro som apaga o status', async () => {
+    servidorResponde(503);
+    await tocarEFalharAPrimeira();
+    expect(usePlayerStore.getState().carga).not.toBeNull();
+
+    await vi.advanceTimersByTimeAsync(4_500); // a nova tentativa carrega
+    emit('timeupdate', { position: 0.4, duration: 180 });
+
+    expect(usePlayerStore.getState().carga).toBeNull();
   });
 });

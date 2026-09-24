@@ -28,6 +28,7 @@ import { LyricsView } from '@/components/media/LyricsView';
 import { useTrackLikes } from '@/features/library/api';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
+import { StatusDeCarga } from '@/components/media/StatusDeCarga';
 import { SpectrumVisualizer } from '@/components/media/SpectrumVisualizer';
 import { WaveformSeeker } from '@/components/media/WaveformSeeker';
 import {
@@ -427,6 +428,7 @@ export function NowPlaying() {
                 ) : (
                   <NowPlayingSeek trackId={faixaLocal?.id} onSeek={seek} />
                 )}
+                {!remoto && <StatusDeCarga className="mt-2 text-center" />}
               </div>
 
               {/* Transport */}

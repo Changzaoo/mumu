@@ -15,6 +15,7 @@ import { subscribeAuth } from '@/lib/firebase';
 import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { alvoRemotoAtual } from '@/lib/devices/alvoRemoto';
+import type { EstadoDeCarga, FaseDeCarga } from '@/lib/audio/estadoDeCarga';
 import {
   anotarAvanco,
   avancoFalhou,
@@ -259,6 +260,8 @@ export interface PlayerState {
   shuffle: boolean;
   playbackRate: number;
   isBuffering: boolean;
+  /** O que o player está fazendo enquanto a música não sai (ver `estadoDeCarga`). */
+  carga: EstadoDeCarga | null;
   context: PlayContext | null;
 
   playTrack: (track: TrackDto, context?: PlayContext) => void;
@@ -751,6 +754,17 @@ const FALHA_RAPIDA_MS = 8_000;
 /** Quando a carga da faixa atual começou (ver `loadIndex`). */
 let cargaIniciadaEm = 0;
 
+/** Marca a fase da carga — só ao mudar de fase, para o "desde" não reiniciar. */
+function marcarCarga(fase: FaseDeCarga, extra: Partial<EstadoDeCarga> = {}): void {
+  const atual = usePlayerStore.getState().carga;
+  if (atual?.fase === fase && atual.tentativa === extra.tentativa) return;
+  usePlayerStore.setState({ carga: { fase, desde: Date.now(), ...extra } });
+}
+
+function limparCarga(): void {
+  if (usePlayerStore.getState().carga !== null) usePlayerStore.setState({ carga: null });
+}
+
 function cancelarRetentativa(): void {
   if (retentativaTimer !== null) clearTimeout(retentativaTimer);
   retentativaTimer = null;
@@ -764,6 +778,11 @@ function cancelarRetentativa(): void {
  * dizer nada de útil.
  */
 const DO_IMPORTADOR = /\/blob\/[^/?]+\?k=|\/stream\?url=/;
+
+/** O `/stream` do importador extrai da fonte original na hora — é o lento. */
+function ehExtracaoAoVivo(url: string | null | undefined): boolean {
+  return Boolean(url && /\/stream\?url=/.test(url));
+}
 
 async function veredictoDasFontes(urls: string[]): Promise<Veredito> {
   const status = await Promise.all(
@@ -823,11 +842,13 @@ function failCurrentTrack(message: string): void {
     }
     retentativa = { trackId: track.id, n: n + 1 };
     usePlayerStore.setState({ isBuffering: true });
-    if (n === 0) {
-      void import('sonner').then(({ toast }) =>
-        toast(`"${track.title}" não carregou — tentando de novo.`),
-      );
-    }
+    // O aviso é a linha de status do player, não um toast: ela fica ali o tempo
+    // todo da espera e diz qual tentativa é — o toast sumia antes de a espera
+    // acabar e deixava a pessoa sem saber se ainda havia algo acontecendo.
+    marcarCarga(veredito === 'reconstruindo' ? 'reconstruindo' : 'tentandoDeNovo', {
+      tentativa: n + 1,
+      total: esperas.length,
+    });
     const indice = st.queueIndex;
     // Travou NO MEIO (o watchdog também passa por aqui): a nova tentativa
     // volta ao ponto onde parou, senão a música recomeçaria do zero.
@@ -895,7 +916,7 @@ function pularFaixaMorta(message: string): void {
 
 function pararComErro(message: string): void {
   querTocar = false; // fim da linha: uma carga atrasada não pode ressuscitar o som
-  usePlayerStore.setState({ isPlaying: false, isBuffering: false });
+  usePlayerStore.setState({ isPlaying: false, isBuffering: false, carga: null });
   void import('sonner').then(({ toast }) => toast.error(message));
 }
 
@@ -1151,6 +1172,7 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
   if (s.currentTrack?.id !== track.id) return true; // trocou de faixa — encerra
   if (!resolved?.streamUrl) return false;
   fallbackTried.add(resolved.streamUrl);
+  marcarCarga(ehExtracaoAoVivo(resolved.streamUrl) ? 'buscandoOrigem' : 'trocandoFonte');
   usePlayerStore.setState((st) => ({
     queue: st.queue.map((t, i) => (i === st.queueIndex && t.id === track.id ? resolved : t)),
     currentTrack: resolved,
@@ -1284,6 +1306,7 @@ export const usePlayerStore = create<PlayerState>()(
           progress: 0,
           buffered: 0,
           duration: segundosConhecidos(track),
+          carga: { fase: 'preparando', desde: Date.now() },
         });
 
         // O GUARDIÃO DO OFFLINE PRECISA SABER O QUE VEM A SEGUIR.
@@ -1404,6 +1427,7 @@ export const usePlayerStore = create<PlayerState>()(
             (await ensureDownloadedAudioUrl(track.id)) ??
             localAudioUrl(track.id);
           if (local) {
+            marcarCarga('carregando');
             audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
             applyEngineSettings();
             reconciliarIntencao(geracao);
@@ -1434,6 +1458,7 @@ export const usePlayerStore = create<PlayerState>()(
            * tocava, hoje não toca" das faixas favoritas.
            */
           if (!track.id.startsWith('local:')) {
+            marcarCarga('carregando');
             audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
             applyEngineSettings();
             reconciliarIntencao(geracao);
@@ -1444,8 +1469,12 @@ export const usePlayerStore = create<PlayerState>()(
 
           // Imported track with no audio on THIS device — resolve a stream
           // (uploaded copy or live from the source), then load.
+          // Sem cópia no servidor, o caminho é extrair da origem: é a espera
+          // longa, e dizer isso antes de começar evita o "travou?".
+          marcarCarga(remoteUrlFor(track.id) ? 'carregando' : 'buscandoOrigem');
           const resolved = await ensurePlayableSource(track);
           if (geracao !== geracaoDeCarga) return;
+          marcarCarga(ehExtracaoAoVivo(resolved.streamUrl) ? 'buscandoOrigem' : 'carregando');
           if (resolved !== track && resolved.streamUrl) {
             set((s) => ({
               queue: s.queue.map((t, i) => (i === index ? resolved : t)),
@@ -1484,6 +1513,7 @@ export const usePlayerStore = create<PlayerState>()(
         shuffle: false,
         playbackRate: 1,
         isBuffering: false,
+        carga: null,
         context: null,
 
         playTrack: (track, context) => {
@@ -1972,6 +2002,9 @@ export function initPlayerEngine(): void {
     if (position > 0) {
       resetDeadRun();
       somSaiu(state.currentTrack?.id);
+      // Saiu som: toda fase de ANTES do som acabou. "Esperando a rede" é do
+      // meio da música e quem a encerra é o evento de buffering.
+      if (state.carga !== null && state.carga.fase !== 'esperandoRede') limparCarga();
       // Saiu som: se esta faixa estava no mapa de falhas, o caso está
       // encerrado. É a ÚNICA prova aceitável de reparo — "o importador disse
       // que baixou" não é a mesma coisa que "a pessoa ouviu".
@@ -2226,6 +2259,7 @@ export function initPlayerEngine(): void {
       progress: 0,
       buffered: 0,
       duration: segundosConhecidos(next),
+      carga: { fase: 'carregando', desde: Date.now() },
     });
   };
 
@@ -2284,6 +2318,12 @@ export function initPlayerEngine(): void {
 
   audioEngine.on('buffering', ({ buffering }) => {
     store.setState({ isBuffering: buffering });
+    // Parar no MEIO da música é outra espera: já tocou, a rede é que não
+    // acompanha. Antes do primeiro som quem fala é a fase da carga.
+    if (audioEngine.getPosition() > 0) {
+      if (buffering) marcarCarga('esperandoRede');
+      else limparCarga();
+    }
     // Downloads de fundo esperam a faixa de agora carregar.
     void import('@/lib/offline/guardiaoOffline')
       .then((m) => m.informarCarregando(buffering))
@@ -2305,7 +2345,7 @@ export function initPlayerEngine(): void {
       return;
     }
     querTocar = false;
-    store.setState({ isPlaying: false, isBuffering: false });
+    store.setState({ isPlaying: false, isBuffering: false, carga: null });
     // Toast lazily to avoid a hard dependency for unit tests.
     void import('sonner').then(({ toast }) => toast.error(message));
   });

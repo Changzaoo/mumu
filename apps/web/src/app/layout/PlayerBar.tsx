@@ -26,6 +26,7 @@ import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { artistHref } from '@/lib/linksDeFaixa';
+import { StatusDeCarga } from '@/components/media/StatusDeCarga';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -161,6 +162,11 @@ export function PlayerBar() {
                   );
                 })}
               </p>
+              {/* O que o player está fazendo enquanto a música não sai. Só da
+                  faixa DAQUI — espelhando outro aparelho não há carga local. */}
+              {track.source === 'local' && (
+                <StatusDeCarga className="mt-0.5 line-clamp-1 text-[11px]" />
+              )}
               {/* Onde está tocando — pequeno, clicável ("Tocar neste dispositivo"). */}
               {track.source === 'remote' && track.deviceName && track.deviceId && (
                 <RemoteDeviceChip
