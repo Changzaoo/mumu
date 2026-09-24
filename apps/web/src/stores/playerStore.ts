@@ -660,6 +660,7 @@ const MAX_DEAD_TRACK_SKIPS = 40;
 function resetDeadRun(): void {
   consecutiveDeadTracks = 0;
   deadRunStartedAt = 0;
+  retentativa = { trackId: '', n: 0 };
 }
 
 /**
@@ -701,15 +702,164 @@ function registrarNoMapa(track: TrackDto | null): void {
   }
 }
 
+// ── ANTES DE PULAR, TENTA DE NOVO A MESMA FAIXA ───────────────────
+//
+// "Às vezes clico numa faixa, dá erro e ele sai pulando um monte de faixas sem
+// nem tentar de novo a que deu erro." Era exatamente isso: a cadeia de fontes
+// tenta OUTRAS fontes, nunca a mesma de novo, e ao esgotá-las a faixa era dada
+// como morta na hora.
+//
+// O caso mais comum não é morte, é o cofre RECONSTRUINDO: quando a poda levou
+// os bytes, o importador reextrai da origem sob o mesmo endereço, e isso leva
+// uns 20 segundos respondendo 503. O <audio> não espera — falha em
+// milissegundos. A faixa clicada "morria", o player pulava, a seguinte estava
+// no mesmo estado, e a fila inteira era atravessada em segundos: até 40 faixas
+// dentro do orçamento de 20s, porque falha rápida quase não consome tempo.
+//
+// Quem separa os dois casos é o servidor, não o elemento de áudio: uma sonda
+// de um byte nos endereços que falharam. Só espera o que o servidor PROVA ser
+// passageiro:
+//  - 503: reconstrução. Espera o tempo dela e recarrega a MESMA faixa;
+//  - outro 5xx ou 429: servidor sobrecarregado. Duas tentativas rápidas;
+//  - 2xx: a cópia está lá e o elemento tropeçou (rede oscilou no meio). Uma.
+// 404/403 é morte de verdade (cópia podada sem meta), e sem resposta nenhuma
+// (rede, CORS) não há prova de nada: nesses casos o pulo imediato continua
+// sendo o certo — é para isso que o orçamento de pulos existe, e trocar a
+// travessia de uma sequência podada por esperas seria o defeito ao contrário.
+type Veredito = 'morta' | 'reconstruindo' | 'sobrecarregado' | 'viva' | 'semProva';
+
+/** Esperas entre tentativas, por veredito (a soma para 503 cobre os ~20s). */
+const ESPERAS_DE_RETENTATIVA: Record<Veredito, readonly number[]> = {
+  morta: [],
+  semProva: [],
+  reconstruindo: [4_000, 8_000, 12_000],
+  sobrecarregado: [2_000, 5_000],
+  viva: [2_000],
+};
+
+let retentativa = { trackId: '', n: 0 };
+let retentativaTimer: ReturnType<typeof setTimeout> | null = null;
+
 /**
- * Fim da linha para a faixa ATUAL (todas as fontes falharam): se a fila tem
- * próxima e estávamos tocando, PULA para ela em vez de parar tudo.
+ * SÓ A FALHA RÁPIDA GANHA OUTRA CHANCE. A cascata do defeito é feita de falhas
+ * instantâneas — o 503 volta em milissegundos. Faixa que já consumiu o
+ * watchdog inteiro (18 a 60s pendurada, ou travada no meio depois de duas
+ * checagens) já foi tentada por tempo de sobra; recarregá-la seria só esticar
+ * o spinner que o watchdog existe para encerrar.
+ */
+const FALHA_RAPIDA_MS = 8_000;
+/** Quando a carga da faixa atual começou (ver `loadIndex`). */
+let cargaIniciadaEm = 0;
+
+function cancelarRetentativa(): void {
+  if (retentativaTimer !== null) clearTimeout(retentativaTimer);
+  retentativaTimer = null;
+}
+
+/**
+ * Só o NOSSO importador tem o que esperar: a cópia do cofre (`/blob/<id>?k=`)
+ * se reconstrói, e a extração ao vivo (`/stream?url=`) pode estar só
+ * sobrecarregada. Audius, rádio, podcast não reconstroem nada — sondá-los
+ * atrasaria o pulo de uma faixa morta à toa, esperando uma rede que não vai
+ * dizer nada de útil.
+ */
+const DO_IMPORTADOR = /\/blob\/[^/?]+\?k=|\/stream\?url=/;
+
+async function veredictoDasFontes(urls: string[]): Promise<Veredito> {
+  const status = await Promise.all(
+    urls.map(async (url) => {
+      try {
+        const res = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+        // Mesmo cuidado da sonda: servidor que ignora `Range` mandaria a
+        // faixa inteira por este pedido.
+        await res.body?.cancel().catch(() => undefined);
+        return res.status;
+      } catch {
+        return 0; // rede/CORS: não prova morte
+      }
+    }),
+  );
+  if (status.some((st) => st === 503)) return 'reconstruindo';
+  if (status.some((st) => st === 429 || st >= 500)) return 'sobrecarregado';
+  if (status.some((st) => st >= 200 && st < 300)) return 'viva';
+  if (status.every((st) => st === 404 || st === 403)) return 'morta';
+  return 'semProva';
+}
+
+/**
+ * Fim da linha para a faixa ATUAL (todas as fontes falharam). Antes de dá-la
+ * como morta, decide se ela merece outra tentativa (ver o bloco acima); se não,
+ * `pularFaixaMorta` segue a regra de sempre.
+ */
+function failCurrentTrack(message: string): void {
+  const s = usePlayerStore.getState();
+  const track = s.currentTrack;
+  const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+  const rapida = Date.now() - cargaIniciadaEm < FALHA_RAPIDA_MS;
+  // Sem rede ou sem intenção de tocar, esperar não muda nada; e quem já foi
+  // tentado por tempo de sobra (ver FALHA_RAPIDA_MS) não ganha mais espera.
+  if (!track || !s.isPlaying || offline || !rapida) {
+    pularFaixaMorta(message);
+    return;
+  }
+  const n = retentativa.trackId === track.id ? retentativa.n : 0;
+  const urls = [...new Set([...fallbackTried, track.streamUrl ?? ''])].filter(
+    (u) => /^https?:/.test(u) && DO_IMPORTADOR.test(u),
+  );
+  // Nada do importador entre as fontes que falharam: não há reconstrução a
+  // esperar, e a decisão sai NA HORA, como sempre saiu.
+  if (urls.length === 0) {
+    pularFaixaMorta(message);
+    return;
+  }
+  void veredictoDasFontes(urls).then((veredito) => {
+    const st = usePlayerStore.getState();
+    if (st.currentTrack?.id !== track.id) return; // a pessoa já foi para outra
+    const esperas = ESPERAS_DE_RETENTATIVA[veredito];
+    const espera = esperas[n];
+    if (espera === undefined) {
+      pularFaixaMorta(message);
+      return;
+    }
+    retentativa = { trackId: track.id, n: n + 1 };
+    usePlayerStore.setState({ isBuffering: true });
+    if (n === 0) {
+      void import('sonner').then(({ toast }) =>
+        toast(`"${track.title}" não carregou — tentando de novo.`),
+      );
+    }
+    const indice = st.queueIndex;
+    // Travou NO MEIO (o watchdog também passa por aqui): a nova tentativa
+    // volta ao ponto onde parou, senão a música recomeçaria do zero.
+    const posicao = st.progress;
+    cancelarRetentativa();
+    retentativaTimer = setTimeout(() => {
+      retentativaTimer = null;
+      const agora = usePlayerStore.getState();
+      if (agora.currentTrack?.id !== track.id || !querTocar) return;
+      // Recarregar a mesma posição é coisa da fila, não da pessoa: não viaja
+      // para outro aparelho (ver `avancoAutomatico`).
+      avancoAutomatico = true;
+      try {
+        agora.playAt(indice);
+      } finally {
+        avancoAutomatico = false;
+      }
+      // Depois do `playAt`, que zera o seek pendente de uma troca normal.
+      if (posicao > 1) resumeAt(posicao);
+    }, espera);
+  });
+}
+
+/**
+ * A faixa está morta de verdade: se a fila tem próxima e estávamos tocando,
+ * PULA para ela em vez de parar tudo.
  *
  * O AVISO SAI UMA VEZ POR SEQUÊNCIA, não por faixa. Um toast a cada pulo
  * transformava a travessia de uma sequência ruim numa pilha de reclamações na
  * tela — barulho sobre um problema que o app já está resolvendo sozinho.
  */
-function failCurrentTrack(message: string): void {
+function pularFaixaMorta(message: string): void {
   const s = usePlayerStore.getState();
   registrarNoMapa(s.currentTrack);
   consecutiveDeadTracks++;
@@ -781,8 +931,9 @@ async function continuarNumaParecida(morta: TrackDto | null, message: string): P
 
 // ── retomar de onde parou (Spotify-like) ────────────────────────
 // Ao reabrir o app, a ÚLTIMA faixa volta pausada na posição exata.
-// Persistência leve: só {faixa, segundos} — nunca a fila inteira (stringify
-// de fila grande já congelou o app uma vez).
+// Persistência leve: só {faixa, segundos}. A fila vai À PARTE (ver FILA_KEY),
+// em janela limitada e com escrita agrupada — stringify de fila grande a cada
+// mudança já congelou o app uma vez.
 const RESUME_KEY = 'aurial:resume';
 let lastResumeSave = 0;
 /** Posição a buscar assim que o engine carregar a faixa restaurada. */
@@ -1122,6 +1273,8 @@ export const usePlayerStore = create<PlayerState>()(
         lastProgressCommit = 0;
         fallbackTried = new Set();
         fallbackAttempts = 0;
+        cancelarRetentativa(); // trocou de faixa (ou é a própria retentativa): a espera acabou
+        cargaIniciadaEm = Date.now();
         clearLoadWatchdog();
         clearHandoffTimer();
         set({

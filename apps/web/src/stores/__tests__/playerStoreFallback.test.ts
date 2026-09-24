@@ -181,6 +181,12 @@ describe('fallback de fonte morta', () => {
   });
 
   it('para honestamente quando as alternativas se esgotam', async () => {
+    // As cópias estão mortas DE VERDADE: é o servidor quem diz (404), e só com
+    // essa prova o player desiste sem esperar a reconstrução do cofre.
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(() => Promise.resolve({ status: 404, body: { cancel: () => Promise.resolve() } })),
+    );
     sourceUrlFor.mockReturnValue('https://www.youtube.com/watch?v=abc');
     buildStreamUrl.mockResolvedValue(FRESH_STREAM);
 
@@ -211,6 +217,7 @@ describe('fallback de fonte morta', () => {
     );
     expect(vi.mocked(audioEngine.load).mock.calls.length).toBe(loads);
     expect(usePlayerStore.getState().isBuffering).toBe(false);
+    vi.unstubAllGlobals();
   });
 
   it('reporta a URL morta à biblioteca para curar o cofre', async () => {
