@@ -3,6 +3,7 @@
 # Required repository secrets:
 #   SSH_HOST  → server address (e.g. 192.168.0.100, or its Tailscale/VPN name)
 #   SSH_USER  → deploy user (e.g. v)
+#   DEPLOY_PATH → (optional) checkout on the server, default /opt/aurial
 #   SSH_KEY   → PRIVATE key (PEM/OpenSSH) whose public half is in the server's
 #               ~/.ssh/authorized_keys (infra/scripts/setup-ssh-key.ps1 sets
 #               this up — generate a dedicated CI key, never reuse yours)
@@ -51,5 +52,5 @@ jobs:
           command_timeout: 25m
           script: |
             set -euo pipefail
-            cd /opt/radinho
+            cd "${{ secrets.DEPLOY_PATH || '/opt/aurial' }}"
             ./infra/scripts/deploy-api.sh

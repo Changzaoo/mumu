@@ -66,7 +66,11 @@ export function createApp(): Express {
 
   // Health check (compose/nginx) — no auth, no rate limit, no envelope ceremony.
   app.get('/healthz', (_req, res) => {
-    res.status(200).json({ data: { status: 'ok', uptime: process.uptime() } });
+    // `version` = commit do build (GIT_SHA vem do deploy-api.sh) — é por ele que o
+    // deploy confere que o container no ar é mesmo o código recém-puxado do git.
+    res.status(200).json({
+      data: { status: 'ok', uptime: process.uptime(), version: process.env.GIT_SHA ?? 'unknown' },
+    });
   });
 
   // Dev static hosting for LocalDiskStorage public URLs (covers etc.).

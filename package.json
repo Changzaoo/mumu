@@ -43,7 +43,10 @@
   },
   "pnpm": {
     "overrides": {
-      "ioredis": "^5.11.1"
+      "ioredis": "^5.11.1",
+      "socket.io-parser": "^4.2.7",
+      "fast-xml-parser": "^5.10.1",
+      "qs": "^6.16.0"
     },
     "onlyBuiltDependencies": [
       "@firebase/util",

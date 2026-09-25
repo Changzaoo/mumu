@@ -45,8 +45,7 @@ const PROTO_FILE = 'riva/proto/riva_asr.proto';
 const RIVA_TARGET = process.env.RIVA_TARGET ?? 'grpc.nvcf.nvidia.com:443';
 /** parakeet-tdt-0.6b-v2 — a ÚNICA função NVCF sondada que devolve `words[]`
  *  com tempo por palavra (offline/unária, inglês). */
-const RIVA_FUNCTION_ID =
-  process.env.RIVA_FUNCTION_ID ?? 'd3fe9151-442b-4204-a70d-5fcc597fd610';
+const RIVA_FUNCTION_ID = process.env.RIVA_FUNCTION_ID ?? 'd3fe9151-442b-4204-a70d-5fcc597fd610';
 /** en-US: a tdt-0.6b-v2 é monolíngue e recusa outros códigos com erro. */
 const RIVA_LANGUAGE = process.env.RIVA_LANGUAGE ?? 'en-US';
 

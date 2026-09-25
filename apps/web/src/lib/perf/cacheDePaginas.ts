@@ -19,7 +19,7 @@
  * existe porque ele já lotou e derrubou o cliente). O cache de páginas chega a
  * megabytes; jogá-lo lá seria reabrir exatamente aquele incêndio.
  */
-import { QueryClient } from '@tanstack/react-query';
+import type { QueryClient } from '@tanstack/react-query';
 import { createAsyncStoragePersister } from '@tanstack/query-async-storage-persister';
 import {
   persistQueryClient,
@@ -43,7 +43,10 @@ function abrirDb(): Promise<IDBDatabase> {
   }));
 }
 
-function noStore<T>(mode: IDBTransactionMode, run: (s: IDBObjectStore) => IDBRequest<T>): Promise<T> {
+function noStore<T>(
+  mode: IDBTransactionMode,
+  run: (s: IDBObjectStore) => IDBRequest<T>,
+): Promise<T> {
   return abrirDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
@@ -92,7 +95,8 @@ export function ligarCacheDePaginas(
   if (typeof indexedDB === 'undefined') return null; // SSR/teste sem IDB: segue sem persistir
   const persister = createAsyncStoragePersister({
     storage: {
-      getItem: (k) => noStore<string | undefined>('readonly', (s) => s.get(k)).then((v) => v ?? null),
+      getItem: (k) =>
+        noStore<string | undefined>('readonly', (s) => s.get(k)).then((v) => v ?? null),
       setItem: (k, v) => noStore('readwrite', (s) => s.put(v, k)).then(() => undefined),
       removeItem: (k) => noStore('readwrite', (s) => s.delete(k)).then(() => undefined),
     },
