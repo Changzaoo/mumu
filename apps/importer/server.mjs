@@ -1015,7 +1015,11 @@ const reconstruindo = new Map();
  * ocupa uma das três vagas para sempre — três links mortos bastavam para o
  * cofre nunca mais reconstruir nada.
  */
-const RECONSTRUCAO_TIMEOUT_MS = Number(process.env.RECONSTRUCAO_TIMEOUT_MS ?? 180_000);
+// 10 MINUTOS, NÃO 3. A reconstrução reencoda para MP3 320k, e no Celeron do
+// servidor isso anda a ~2x o tempo real (medido em 2026-09-25): uma faixa de 6
+// minutos leva 3. Com teto de 180s, toda música mais longa que isso era morta
+// no meio — e, pelo defeito corrigido em `matar()`, nunca terminava de morrer.
+const RECONSTRUCAO_TIMEOUT_MS = Number(process.env.RECONSTRUCAO_TIMEOUT_MS ?? 600_000);
 
 /**
  * VEREDITO DA ÚLTIMA RECONSTRUÇÃO, por id de blob.
@@ -1142,10 +1146,23 @@ async function reconstruirBlob(id, meta) {
     const saida = createWriteStream(parcial);
     let bytes = 0;
     let estourou = false;
+    // MATAR TEM QUE MATAR. Destruir a conexão de download NÃO fecha a entrada
+    // do ffmpeg (o `pipe` só fecha o destino quando a origem TERMINA, não
+    // quando ela é destruída), e o ffmpeg trata SIGTERM como "saio depois da
+    // leitura atual" — bloqueado lendo uma entrada que nunca fecha, ele não
+    // saía nunca. Medido em 2026-09-25: um ffmpeg preso 7 horas a 0% de CPU,
+    // segurando uma das 3 vagas de reconstrução e deixando a faixa em 503 para
+    // sempre. Três travas assim e o cofre não reconstruiria mais nada.
+    // Agora: fecha a entrada, pede com SIGTERM e, se em 3s ainda estiver vivo,
+    // SIGKILL — que não se ignora.
     const matar = () => {
       fonte?.destroy(); // a conexão com a CDN morre junto, não fica puxando bytes
-      yt?.kill();
-      ff.kill();
+      yt?.kill('SIGKILL');
+      ff.stdin.destroy();
+      ff.kill('SIGTERM');
+      setTimeout(() => {
+        if (ff.exitCode === null && ff.signalCode === null) ff.kill('SIGKILL');
+      }, 3_000).unref();
     };
     const relogio = setTimeout(() => {
       estourou = true;
@@ -1167,6 +1184,11 @@ async function reconstruirBlob(id, meta) {
       saida.on('close', () => resolve(!estourou && bytes > 0 && bytes <= MAX_BLOB));
       ff.on('error', () => resolve(false));
       yt?.on('error', () => resolve(false));
+      // Rede de segurança: se o ffmpeg encerrou e o arquivo ainda não fechou
+      // em 5s, a tarefa resolve assim mesmo — nunca mais fica pendurada.
+      ff.on('close', () => {
+        setTimeout(() => resolve(!estourou && bytes > 0 && bytes <= MAX_BLOB), 5_000).unref();
+      });
     });
     clearTimeout(relogio);
     saida.destroy();
