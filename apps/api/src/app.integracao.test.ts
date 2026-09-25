@@ -121,6 +121,7 @@ describe('portaria pública', () => {
     const res = await request(app).get('/healthz');
     expect(res.status).toBe(200);
     expect(res.body.data.status).toBe('ok');
+    expect(typeof res.body.data.version).toBe('string');
   });
 
   it('não anuncia o servidor no cabeçalho', async () => {

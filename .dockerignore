@@ -1,0 +1,19 @@
+# Contexto do build da API (apps/api/Dockerfile, context = raiz do repo).
+# Sem isto o docker enviava TUDO a cada deploy — node_modules do host e o cofre
+# de áudio do importador (apps/importer/blobs, GBs) — e o disco do servidor enchia.
+**/node_modules
+**/dist
+**/coverage
+.git
+.env
+.env.*
+!.env.example
+apps/importer
+apps/web
+apps/signaling
+apps/api/storage
+apps/api/tmp
+backups
+docs
+.copilot
+.claude

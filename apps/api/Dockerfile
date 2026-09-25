@@ -38,6 +38,9 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 ENV NODE_ENV=production
 COPY --from=build /app /app
+# Commit do build, exposto em /healthz. Por último para não invalidar o cache.
+ARG GIT_SHA=unknown
+ENV GIT_SHA=$GIT_SHA
 WORKDIR /app/apps/api
 EXPOSE 4000
 CMD ["node", "dist/main.js"]

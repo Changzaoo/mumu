@@ -21,7 +21,7 @@
  */
 import http from 'node:http';
 import crypto from 'node:crypto';
-import { spawn } from 'node:child_process';
+import { execFileSync, spawn } from 'node:child_process';
 import {
   mkdtemp,
   readdir,
@@ -166,6 +166,20 @@ async function verifyFirebaseToken(idToken) {
 const MAX_MINUTES = Number(process.env.AURIAL_MAX_MINUTES ?? 90);
 const MAX_BYTES = 600 * 1024 * 1024;
 const HERE = path.dirname(fileURLToPath(import.meta.url));
+// Commit do checkout em que ESTE processo subiu — /health devolve, e o
+// deploy-api.sh compara com o HEAD para pegar importador rodando código velho.
+const VERSION = (() => {
+  try {
+    return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
+      cwd: HERE,
+      stdio: ['ignore', 'pipe', 'ignore'],
+    })
+      .toString()
+      .trim();
+  } catch {
+    return 'unknown';
+  }
+})();
 
 /** Media-page hosts this helper knows how to resolve. Keep in sync with the web. */
 const HOSTS = [
@@ -232,7 +246,12 @@ function download(url, dest) {
     const get = (u) =>
       https
         .get(u, (res) => {
-          if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
+          if (
+            res.statusCode &&
+            res.statusCode >= 300 &&
+            res.statusCode < 400 &&
+            res.headers.location
+          ) {
             res.resume();
             get(res.headers.location);
             return;
@@ -623,9 +642,7 @@ async function importToMp3(ytdlp, url, quality) {
       if (stderr.length > 8192) stderr = stderr.slice(-8192);
     });
     p.on('error', reject);
-    p.on('close', (code) =>
-      code === 0 ? resolve() : reject(new Error(interpret(stderr))),
-    );
+    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(interpret(stderr)))));
   });
 
   const files = await readdir(dir);
@@ -643,7 +660,8 @@ async function importToMp3(ytdlp, url, quality) {
   try {
     const info = JSON.parse(await readFile(path.join(dir, 'audio.info.json'), 'utf8'));
     if (typeof info.title === 'string' && info.title.trim()) title = info.title.trim();
-    if (typeof info.thumbnail === 'string' && info.thumbnail.trim()) thumbnail = info.thumbnail.trim();
+    if (typeof info.thumbnail === 'string' && info.thumbnail.trim())
+      thumbnail = info.thumbnail.trim();
     // YouTube Music (and many music videos) carry proper song metadata — far more
     // reliable than parsing the video title. `artist` may be a string or array.
     const rawArtist = Array.isArray(info.artists)
@@ -812,10 +830,7 @@ const BLOB_DIR_EXTERNAL = Boolean(process.env.BLOB_DIR);
 // a renomeação num apagão: o cofre existente ficaria "não pronto", todo upload
 // viraria 503 e toda reprodução cairia para streaming ao vivo. Aceitar só o
 // antigo travaria o nome velho para sempre. Os dois convivem.
-const BLOB_MARKERS = [
-  path.join(BLOB_DIR, '.radinho-blobs'),
-  path.join(BLOB_DIR, '.aurial-blobs'),
-];
+const BLOB_MARKERS = [path.join(BLOB_DIR, '.radinho-blobs'), path.join(BLOB_DIR, '.aurial-blobs')];
 // Teto do cofre (LRU): ao passar, os blobs MAIS ANTIGOS saem primeiro. São
 // cópias para streaming entre aparelhos — o original continua no aparelho do
 // dono e a faixa segue tocável via streaming ao vivo da fonte.
@@ -860,7 +875,9 @@ async function garantirEspaco(bytes) {
   let livre = await espacoLivre();
   if (livre === null) return true;
   if (livre - bytes >= MIN_LIVRE_BYTES) return true;
-  log(`disco apertado: ${(livre / 1024 ** 2).toFixed(0)}MB livres, pedindo ${(bytes / 1024 ** 2).toFixed(0)}MB — podando`);
+  log(
+    `disco apertado: ${(livre / 1024 ** 2).toFixed(0)}MB livres, pedindo ${(bytes / 1024 ** 2).toFixed(0)}MB — podando`,
+  );
   await sweepBlobStore({ liberar: bytes });
   livre = await espacoLivre();
   if (livre === null) return true;
@@ -1246,7 +1263,9 @@ async function sweepBlobStore({ liberar = 0 } = {}) {
       return;
     }
     if (cofreForaDesde !== null) {
-      log(`cofre de blobs VOLTOU depois de ${((Date.now() - cofreForaDesde) / 3600_000).toFixed(1)}h`);
+      log(
+        `cofre de blobs VOLTOU depois de ${((Date.now() - cofreForaDesde) / 3600_000).toFixed(1)}h`,
+      );
       cofreForaDesde = null;
     }
     const names = await readdir(BLOB_DIR);
@@ -1488,7 +1507,10 @@ function applyCors(req, res) {
     res.setHeader('Access-Control-Allow-Origin', '*');
   }
   res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
-  res.setHeader('Access-Control-Allow-Headers', 'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id, X-Aurial-Source');
+  res.setHeader(
+    'Access-Control-Allow-Headers',
+    'Content-Type, Authorization, X-Aurial-Token, X-Blob-Id, X-Aurial-Source',
+  );
   res.setHeader(
     'Access-Control-Expose-Headers',
     'X-Aurial-Title, X-Aurial-Cover, X-Aurial-Artist, X-Aurial-Track, X-Aurial-Album, X-Aurial-Uploader',
@@ -1565,7 +1587,8 @@ async function authorize(req) {
       return false;
     }
   }
-  if (IMPORT_TOKEN) return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
+  if (IMPORT_TOKEN)
+    return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
   return true;
 }
 
@@ -1653,10 +1676,9 @@ function mbFetch(path) {
 async function deezerCover(title, artist) {
   const q = [artist, title].filter(Boolean).join(' ').trim();
   if (!q) return null;
-  const r = await fetch(
-    `https://api.deezer.com/search?limit=5&q=${encodeURIComponent(q)}`,
-    { signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS) },
-  );
+  const r = await fetch(`https://api.deezer.com/search?limit=5&q=${encodeURIComponent(q)}`, {
+    signal: AbortSignal.timeout(COVER_FETCH_TIMEOUT_MS),
+  });
   if (!r.ok) return null;
   const d = await r.json().catch(() => ({}));
   const rows = Array.isArray(d?.data) ? d.data : [];
@@ -1674,7 +1696,8 @@ async function deezerCover(title, artist) {
     }
   }
   if (!best) return null;
-  const cover = best?.album?.cover_xl || best?.album?.cover_big || best?.album?.cover_medium || null;
+  const cover =
+    best?.album?.cover_xl || best?.album?.cover_big || best?.album?.cover_medium || null;
   if (!cover) return null;
   return {
     coverUrl: cover,
@@ -1729,7 +1752,8 @@ async function deezerArtistCatalog(name) {
     for (const album of list) {
       if (!album?.id) continue;
       const full = await jf(`https://api.deezer.com/album/${album.id}`);
-      const cover = full?.cover_xl || full?.cover_big || album?.cover_xl || album?.cover_big || null;
+      const cover =
+        full?.cover_xl || full?.cover_big || album?.cover_xl || album?.cover_big || null;
       for (const t of Array.isArray(full?.tracks?.data) ? full.tracks.data : []) {
         if (!t || typeof t.title !== 'string') continue;
         const key = `${norm(t.title)}|${t.duration ?? 0}`;
@@ -1840,6 +1864,7 @@ async function main() {
           JSON.stringify({
             ok: true,
             service: 'radinho-importer',
+            version: VERSION,
             hosts: HOSTS,
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
@@ -1971,7 +1996,10 @@ async function main() {
             /* leave null */
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
         res.end(JSON.stringify({ imageUrl, name: matched }));
         return;
       }
@@ -2035,7 +2063,10 @@ async function main() {
             log(`artist-top falhou para "${name}": ${err?.message ?? err}`);
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
         res.end(JSON.stringify({ artist, tracks }));
         return;
       }
@@ -2097,7 +2128,10 @@ async function main() {
             /* leave null */
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
         res.end(JSON.stringify({ album: payload }));
         return;
       }
@@ -2122,8 +2156,13 @@ async function main() {
             log(`cover falhou para "${title}": ${err?.message ?? err}`);
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
-        res.end(JSON.stringify(payload ?? { coverUrl: null, album: null, artist: null, title: null }));
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
+        res.end(
+          JSON.stringify(payload ?? { coverUrl: null, album: null, artist: null, title: null }),
+        );
         return;
       }
 
@@ -2165,7 +2204,10 @@ async function main() {
             }
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
         res.end(JSON.stringify({ tracks }));
         return;
       }
@@ -2190,7 +2232,10 @@ async function main() {
             log(`credits falhou para "${title}": ${err?.message ?? err}`);
           }
         }
-        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'max-age=86400' });
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
         res.end(
           JSON.stringify(
             payload ?? { label: null, catalogNumber: null, composer: null, coverUrl: null },
@@ -2978,7 +3023,9 @@ async function main() {
         }
         try {
           const body = JSON.parse((await readBody(req)) || '{}');
-          const input = Array.isArray(body.input) ? body.input.filter((t) => typeof t === 'string') : [];
+          const input = Array.isArray(body.input)
+            ? body.input.filter((t) => typeof t === 'string')
+            : [];
           if (input.length === 0) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'input obrigatório.' }));

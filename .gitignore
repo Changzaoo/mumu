@@ -52,3 +52,9 @@ apps/web/dev-dist/
 
 # Worktrees temporários de agentes
 .claude/worktrees/
+
+# Cofre de áudio do importador (padrão quando BLOB_DIR não é definido)
+apps/importer/blobs/
+# Estado local do deploy (infra/scripts/deploy-api.sh)
+.deploy/
+backups/

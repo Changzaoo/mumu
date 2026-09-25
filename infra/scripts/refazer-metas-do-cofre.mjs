@@ -72,7 +72,20 @@ const existe = (p) =>
 async function main() {
   const { stdout } = await execFileAsync(
     'docker',
-    ['exec', '-i', 'aurial-postgres-1', 'psql', '-U', 'aurial', '-d', 'aurial', '-t', '-A', '-c', SQL],
+    [
+      'exec',
+      '-i',
+      'aurial-postgres-1',
+      'psql',
+      '-U',
+      'aurial',
+      '-d',
+      'aurial',
+      '-t',
+      '-A',
+      '-c',
+      SQL,
+    ],
     { maxBuffer: 128 * 1024 * 1024 },
   );
 

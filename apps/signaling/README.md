@@ -25,10 +25,10 @@ Environment:
 
 ## Deploy (LAN / Tailscale box)
 
-Runs directly on Node (no Docker). See `infra/systemd/aurial-signaling.service`
+Runs directly on Node (no Docker). See `infra/systemd/radinho-signaling.service`
 and the `/rtc` WebSocket block in `infra/nginx/aurial.site.conf`.
 
 ```bash
-sudo cp infra/systemd/aurial-signaling.service /etc/systemd/system/
-sudo systemctl enable --now aurial-signaling
+sudo cp infra/systemd/radinho-signaling.service /etc/systemd/system/
+sudo systemctl enable --now radinho-signaling
 ```
