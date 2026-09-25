@@ -16,6 +16,7 @@ import * as localHistory from '@/lib/local/localHistory';
 import { clamp } from '@/lib/utils';
 import { alvoRemotoAtual } from '@/lib/devices/alvoRemoto';
 import type { EstadoDeCarga, FaseDeCarga } from '@/lib/audio/estadoDeCarga';
+import { perdoarPulos, registrarPulo } from '@/lib/reco/pulos';
 import {
   anotarAvanco,
   avancoFalhou,
@@ -382,6 +383,22 @@ let querTocar = false;
  * continua onde o som já está.
  */
 let avancoAutomatico = false;
+
+/**
+ * A PESSOA PULOU a faixa atual? Anota (ver `lib/reco/pulos`). Pulo que a fila
+ * fez sozinha — faixa morta, travada, fim natural — não é escolha de ninguém
+ * e não conta: é para isso que `avancoAutomatico` vale aqui também.
+ */
+function anotarPuloDaAtual(): void {
+  if (avancoAutomatico) return;
+  const s = usePlayerStore.getState();
+  if (!s.currentTrack) return;
+  try {
+    registrarPulo(s.currentTrack, s.progress, s.duration);
+  } catch {
+    /* diagnóstico de gosto nunca atrapalha o pular */
+  }
+}
 
 function mandarParaQuemToca(get: () => PlayerState, tracks: TrackDto[], index: number): boolean {
   if (avancoAutomatico) return false;
@@ -911,7 +928,13 @@ function pularFaixaMorta(message: string): void {
       void import('sonner').then(({ toast }) => toast(`"${title}" indisponível — pulando.`));
     }
     if (hasNext) {
-      s.next();
+      // Quem pula aqui é o player, não a pessoa: não conta como pulo.
+      avancoAutomatico = true;
+      try {
+        s.next();
+      } finally {
+        avancoAutomatico = false;
+      }
       return;
     }
     // FILA DE UMA FAIXA SÓ e ela morreu. Parar aqui era exatamente o silêncio
@@ -955,7 +978,12 @@ async function continuarNumaParecida(morta: TrackDto | null, message: string): P
     }
     const fila = [morta, ...similares];
     usePlayerStore.setState({ queue: fila, originalQueue: fila });
-    usePlayerStore.getState().next();
+    avancoAutomatico = true;
+    try {
+      usePlayerStore.getState().next();
+    } finally {
+      avancoAutomatico = false;
+    }
   } catch {
     pararComErro(message);
   }
@@ -1578,10 +1606,13 @@ export const usePlayerStore = create<PlayerState>()(
           const fila = get().queue;
           if (index < 0 || index >= fila.length) return;
           if (mandarParaQuemToca(get, fila, index)) return;
+          // Clicar em outra faixa da fila com esta tocando também é pular.
+          if (index !== get().queueIndex) anotarPuloDaAtual();
           loadIndex(index, true);
         },
 
         next: () => {
+          anotarPuloDaAtual();
           const { queue, queueIndex, repeat } = get();
           const nextIndex = queueIndex + 1;
           if (nextIndex < queue.length) {
@@ -1893,6 +1924,17 @@ export function initPlayerEngine(): void {
   // Repetir (uma ou todas) já responde "o que vem depois", e podcast/rádio têm
   // a própria ordem — nesses casos não se mexe.
   let continuacaoPedidaPara: string | null = null;
+  /**
+   * PLAYLIST EMENDADA: quando uma playlist acaba, a próxima entra no fim da
+   * fila, mas o CONTEXTO ("Tocando da playlist X") só muda quando a primeira
+   * faixa dela começa — antes disso ainda está tocando a antiga.
+   */
+  let contextoAFrente: { aPartirDe: number; context: PlayContext; titulo: string } | null = null;
+  /** Emendadas nesta sessão: sem isso, duas parecidas viram pingue-pongue. */
+  const playlistsEmendadas = new Set<string>();
+  /** A troca de contexto é a da própria emenda (não a pessoa começando outra coisa). */
+  let contextoPorEmenda = false;
+
   const garantirContinuacao = (): void => {
     const s = store.getState();
     const track = s.currentTrack;
@@ -1901,28 +1943,96 @@ export function initPlayerEngine(): void {
     if (s.context?.source === 'podcast' || s.context?.source === 'radio') return;
     if (continuacaoPedidaPara === track.id) return;
     continuacaoPedidaPara = track.id;
-    void import('@/lib/reco/radio')
-      .then(({ construirRadio }) => {
-        const st = store.getState();
-        if (st.currentTrack?.id !== track.id || st.queueIndex < st.queue.length - 1) return;
-        const parecidas = construirRadio(track);
-        // Primeiro o que ainda não tocou nesta fila; se a biblioteca já deu
-        // tudo, aceita repetir — mas não o que acabou de tocar.
-        const naFila = new Set(st.queue.map((t) => t.id));
-        let novas = parecidas.filter((t) => !naFila.has(t.id));
-        if (novas.length === 0) {
-          const recentes = new Set(st.queue.slice(-20).map((t) => t.id));
-          novas = parecidas.filter((t) => !recentes.has(t.id));
-        }
-        if (novas.length === 0) return;
+    void (async () => {
+      const [
+        { construirRadio },
+        playlists,
+        { escolherProximaPlaylist, reordenarPeloGosto },
+        sinais,
+      ] = await Promise.all([
+        import('@/lib/reco/radio'),
+        import('@/lib/local/localPlaylists'),
+        import('@/lib/reco/continuacao'),
+        import('@/lib/reco/sinaisDoAparelho'),
+      ]);
+      const st = store.getState();
+      if (st.currentTrack?.id !== track.id || st.queueIndex < st.queue.length - 1) return;
+      const naFila = new Set(st.queue.map((t) => t.id));
+      const emendar = (novas: TrackDto[]): void => {
         store.setState({
           queue: [...st.queue, ...novas],
           originalQueue: [...st.originalQueue, ...novas],
         });
-      })
-      .catch(() => undefined);
+      };
+
+      // 1) ACABOU UMA PLAYLIST: emenda a mais parecida das playlists da pessoa.
+      //    A ordem é dela — só o pulo recente mexe (manda o pulado para o fim).
+      const idAtual = st.context?.source === 'playlist' ? st.context.sourceId : undefined;
+      if (idAtual) {
+        const atual = playlists.get(idAtual);
+        const candidatas = playlists
+          .list()
+          .map((p) => ({ id: p.id, title: p.title, faixas: playlists.resolveTracks(p.id) }));
+        playlistsEmendadas.add(idAtual);
+        const proxima = escolherProximaPlaylist(
+          { id: idAtual, title: atual?.title ?? '', faixas: st.queue },
+          candidatas,
+          playlistsEmendadas,
+        );
+        if (proxima) {
+          const faixas = reordenarPeloGosto(
+            proxima.faixas.filter((t) => !naFila.has(t.id)),
+            sinais.sinaisDoAparelho({ comGosto: false }),
+          );
+          if (faixas.length > 0) {
+            playlistsEmendadas.add(proxima.id);
+            contextoAFrente = {
+              aPartirDe: st.queue.length,
+              context: { source: 'playlist', sourceId: proxima.id },
+              titulo: proxima.title,
+            };
+            emendar(faixas);
+            return;
+          }
+        }
+      }
+
+      // 2) SEM PLAYLIST PARECIDA (ou não era playlist): rádio de parecidas,
+      //    com o gosto dela por cima — pulado recente desce, favorito sobe.
+      const parecidas = reordenarPeloGosto(construirRadio(track), sinais.sinaisDoAparelho());
+      // Primeiro o que ainda não tocou nesta fila; se a biblioteca já deu
+      // tudo, aceita repetir — mas não o que acabou de tocar.
+      let novas = parecidas.filter((t) => !naFila.has(t.id));
+      if (novas.length === 0) {
+        const recentes = new Set(st.queue.slice(-20).map((t) => t.id));
+        novas = parecidas.filter((t) => !recentes.has(t.id));
+      }
+      if (novas.length > 0) emendar(novas);
+    })().catch(() => undefined);
   };
   store.subscribe((state, prev) => {
+    // Chegou na primeira faixa da playlist emendada: agora o contexto é ela.
+    if (contextoAFrente && state.queueIndex >= contextoAFrente.aPartirDe) {
+      const { context, titulo } = contextoAFrente;
+      contextoAFrente = null;
+      contextoPorEmenda = true;
+      try {
+        store.setState({ context });
+      } finally {
+        contextoPorEmenda = false;
+      }
+      void import('sonner').then(({ toast }) => toast(`Tocando agora a playlist "${titulo}"`));
+      // Sem `return`: esta faixa também pode ser a última, e a continuação
+      // abaixo precisa olhar para ela.
+    } else if (state.context !== prev.context && !contextoPorEmenda) {
+      // A PESSOA COMEÇOU OUTRA COISA: a sessão de emendas recomeça do zero.
+      // Sem isto as travas viviam para sempre — tocar a mesma playlist até o
+      // fim uma segunda vez PARAVA a música, porque a última faixa já tinha
+      // "pedido" continuação e a parecida já constava como emendada.
+      contextoAFrente = null;
+      continuacaoPedidaPara = null;
+      playlistsEmendadas.clear();
+    }
     if (
       state.currentTrack?.id !== prev.currentTrack?.id ||
       state.queue.length !== prev.queue.length ||
@@ -2065,6 +2175,8 @@ export function initPlayerEngine(): void {
           source: input.source,
         });
       }
+      // Tocou até contar como play: um pulo antigo desta faixa deixa de valer.
+      perdoarPulos(state.currentTrack.id);
       void api.post('/me/history', input).catch(() => undefined);
       onPlayRecorded?.(input);
     }

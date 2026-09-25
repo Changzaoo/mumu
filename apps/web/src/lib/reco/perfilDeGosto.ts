@@ -286,15 +286,14 @@ export function perfilDeGosto(entradas: EntradasDoPerfil): PerfilDeGosto {
 }
 
 /**
- * SINAL_QUE_FALTA — o pulo.
+ * SINAL_QUE_FALTA — o pulo. (Deixou de faltar: ver `lib/reco/pulos.ts`.)
  *
  * O Spotify conta como FALHA a faixa pulada antes dos 30s, e é metade do que
- * ensina o modelo dele: sem o lado negativo, um gênero só pode subir. Aqui o
- * pulo não deixa rastro — o player só chama `localHistory.record` quando o play
- * dá certo. Enquanto for assim, este perfil sabe do que a pessoa gosta e não
- * sabe do que ela foge, e nenhuma linha deste arquivo deve fingir que sabe.
- *
- * Fechar a lacuna significa gravar o abandono (faixa trocada antes dos 30s, com
- * o motivo) — mudança no `playerStore`, não aqui.
+ * ensina o modelo dele: sem o lado negativo, um gênero só pode subir. O player
+ * passou a gravar o pulo (`anotarPuloDaAtual` no playerStore), e ele pesa onde
+ * a FILA é montada — rádio e playlist emendada, via `reordenarPeloGosto` —
+ * não aqui. É de propósito: pular diz "não agora", não "não gosto", então o
+ * pulo rebaixa a FAIXA por uns dias e mal toca o artista; transformá-lo em
+ * afinidade negativa de gênero seria ler no sinal mais do que ele diz.
  */
-export const SINAL_QUE_FALTA = 'pulo antes de 30s nao e registrado' as const;
+export const SINAL_QUE_FALTA = 'pulo pesa na fila (pulos.ts), nao no perfil' as const;
