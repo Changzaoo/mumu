@@ -2333,6 +2333,24 @@ async function main() {
           res.end('bad id');
           return;
         }
+        // DISCO FORA NÃO É CÓPIA MORTA. Com o disco externo desmontado, a meta
+        // não abre e este pedido caía no 404 logo abaixo — e 404 é, para o app,
+        // PROVA de morte: `reportDeadRemote` apaga o link do cofre da faixa em
+        // todos os aparelhos e deixa uma cicatriz que sobrevive à sincronia.
+        // Numa queda de 27h (setembro de 2026), cada música tocada arriscava
+        // perder a cópia guardada para sempre, e passar a ser extraída ao vivo
+        // em todo play — a espera longa. "Não consigo ler o disco agora" é 503;
+        // o corpo diz qual 503 é, para o app não esperar uma reconstrução que
+        // não vem (a do cofre fora do ar não se resolve em segundos).
+        if (!(await blobStoreReady())) {
+          res.writeHead(503, {
+            'Content-Type': 'text/plain',
+            'Retry-After': '300',
+            'Cache-Control': 'no-store',
+          });
+          res.end('cofre-indisponivel');
+          return;
+        }
         let meta;
         try {
           meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));

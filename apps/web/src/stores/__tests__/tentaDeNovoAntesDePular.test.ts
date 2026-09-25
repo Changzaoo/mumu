@@ -183,6 +183,23 @@ describe('faixa clicada que falha', () => {
     expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:y');
   });
 
+  it('disco do cofre fora do ar (503 cofre-indisponivel): não espera reconstrução', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn((url: string) =>
+        Promise.resolve(
+          url.includes('/blob/a?')
+            ? { status: 503, text: () => Promise.resolve('cofre-indisponivel') }
+            : { status: 206, body: { cancel: () => Promise.resolve() } },
+        ),
+      ),
+    );
+    await tocarEFalharAPrimeira();
+
+    // O disco não volta em segundos: esperar 24s por ele seria só atraso.
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:b');
+  });
+
   it('cópia podada (404): pula na hora, como sempre', async () => {
     servidorResponde(404);
     await tocarEFalharAPrimeira();

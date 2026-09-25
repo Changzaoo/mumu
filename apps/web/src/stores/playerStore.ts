@@ -784,11 +784,22 @@ function ehExtracaoAoVivo(url: string | null | undefined): boolean {
   return Boolean(url && /\/stream\?url=/.test(url));
 }
 
+/** Status sintético da sonda: o disco do cofre está fora do ar (ver o importador). */
+const COFRE_FORA = -1;
+
 async function veredictoDasFontes(urls: string[]): Promise<Veredito> {
   const status = await Promise.all(
     urls.map(async (url) => {
       try {
         const res = await fetch(url, { headers: { Range: 'bytes=0-0' } });
+        // DOIS 503 DIFERENTES. "Reconstruindo" se resolve em ~20s e vale a
+        // espera; "cofre-indisponivel" é o disco do servidor fora do ar, que
+        // não volta em segundos — esperar ali só atrasaria o pulo. O corpo é
+        // um texto curto, então lê-lo não custa nada.
+        if (res.status === 503 && typeof res.text === 'function') {
+          const corpo = await res.text().catch(() => '');
+          return corpo.includes('cofre-indisponivel') ? COFRE_FORA : 503;
+        }
         // Mesmo cuidado da sonda: servidor que ignora `Range` mandaria a
         // faixa inteira por este pedido.
         await res.body?.cancel().catch(() => undefined);
