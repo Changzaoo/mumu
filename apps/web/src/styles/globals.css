@@ -227,6 +227,24 @@
   }
 }
 
+/* A BARRA DE CIMA, QUANDO A PÁGINA ROLA. Era `.glass`, que traz uma borda de
+   1px e um brilho branco no topo (o inset) — ótimos num cartão flutuando, mas
+   numa barra encostada no topo da tela, com cantos arredondados, os dois
+   desenhavam um CONTORNO BRANCO em volta dela, bem visível no celular. Aqui
+   fica o vidro sem contorno: só a sombra embaixo separa a barra do conteúdo
+   que passa por trás. */
+@utility glass-topo {
+  background: hsl(var(--bg-elevated) / 0.72);
+  /* Só o padrão — ver a nota em `.glass`. */
+  backdrop-filter: blur(30px) saturate(180%);
+  border: 0;
+  box-shadow: 0 10px 28px -16px hsl(var(--bg-deep) / 0.75);
+
+  @supports not (backdrop-filter: blur(1px)) {
+    background: hsl(var(--bg-elevated) / 0.98);
+  }
+}
+
 /* TRANSPARÊNCIA REDUZIDA (acessibilidade do sistema — "Reduce transparency" no
    iOS/macOS, "Transparency effects: off" no Windows). Quem liga isso está
    pedindo superfícies OPACAS, normalmente por dificuldade de ler texto sobre
@@ -234,7 +252,8 @@
    não é custo de GPU, é legibilidade. O vidro vira parede. */
 @media (prefers-reduced-transparency: reduce) {
   .glass,
-  .glass-strong {
+  .glass-strong,
+  .glass-topo {
     background: hsl(var(--bg-elevated));
     backdrop-filter: none;
   }
@@ -387,7 +406,8 @@
    as superfícies viram fundo chapado: perde-se o vidro, ganha-se a rolagem.
    ────────────────────────────────────────────────────────────── */
 :root[data-perf='baixo'] .glass,
-:root[data-perf='baixo'] .glass-strong {
+:root[data-perf='baixo'] .glass-strong,
+:root[data-perf='baixo'] .glass-topo {
   background: hsl(var(--bg-elevated));
   /* Só o padrão — ver a nota em `.glass`. Aqui o corte importa duas vezes: se
      sobra só a versão prefixada, este desligamento não chega ao Chrome e o

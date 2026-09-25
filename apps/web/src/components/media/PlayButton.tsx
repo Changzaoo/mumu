@@ -1,5 +1,6 @@
 import type { ComponentProps } from 'react';
 import { Pause, Play } from 'lucide-react';
+import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
 
 export interface PlayButtonProps extends Omit<ComponentProps<'button'>, 'children'> {
@@ -39,23 +40,47 @@ const sizes = {
  * do Windows, e movimento não é a única coisa que ela entrega.
  */
 const FIOS = [
-  { animacao: 'fumaca-a', duracao: '3.6s', atraso: '-0.4s', blur: 'blur-md', x: '46%' },
-  { animacao: 'fumaca-b', duracao: '4.4s', atraso: '-2.1s', blur: 'blur-lg', x: '56%' },
-  { animacao: 'fumaca-c', duracao: '4s', atraso: '-3.2s', blur: 'blur-md', x: '40%' },
+  { id: 'a', animacao: 'fumaca-a', duracao: '3.6s', atraso: '-0.4s', blur: 'blur-md', x: '46%' },
+  { id: 'b', animacao: 'fumaca-b', duracao: '4.4s', atraso: '-2.1s', blur: 'blur-lg', x: '56%' },
+  { id: 'c', animacao: 'fumaca-c', duracao: '4s', atraso: '-3.2s', blur: 'blur-md', x: '40%' },
+] as const;
+
+/**
+ * NO CELULAR A FUMAÇA É MAIS VIVA. "Tá muito parado" — e tinha razão: o botão
+ * é menor, a tela está na mão, e fios lentos de 4s num círculo de 40px quase
+ * não se mexem aos olhos. Em tela de toque são cinco fios, mais rápidos (2,2 a
+ * 3,2s, também fora de fase), mais fortes e subindo mais; a névoa de baixo gira
+ * no dobro da velocidade. Só `transform` e `opacity`, como os outros: o custo é
+ * de composição, não de pintura.
+ */
+const FIOS_TOQUE = [
+  { id: 'a', animacao: 'fumaca-a', duracao: '2.4s', atraso: '-0.3s', blur: 'blur-sm', x: '46%' },
+  { id: 'b', animacao: 'fumaca-b', duracao: '3.2s', atraso: '-1.5s', blur: 'blur-md', x: '58%' },
+  { id: 'c', animacao: 'fumaca-c', duracao: '2.8s', atraso: '-2.2s', blur: 'blur-sm', x: '38%' },
+  { id: 'd', animacao: 'fumaca-b', duracao: '2.2s', atraso: '-0.9s', blur: 'blur-md', x: '50%' },
+  { id: 'e', animacao: 'fumaca-a', duracao: '3s', atraso: '-2.7s', blur: 'blur-sm', x: '62%' },
 ] as const;
 
 function Aura({ playing }: { playing: boolean }) {
+  const toque = useMediaQuery('(pointer: coarse)');
+  const fios = toque ? FIOS_TOQUE : FIOS;
   return (
     <span
       aria-hidden
-      className={cn('pointer-events-none absolute inset-[-55%]', !playing && 'opacity-45')}
+      className={cn(
+        'pointer-events-none absolute',
+        toque ? 'inset-[-65%]' : 'inset-[-55%]',
+        !playing && 'opacity-45',
+      )}
     >
       <span
         className="absolute inset-0 rounded-full blur-xl motion-reduce:!animate-none"
         style={{
           background:
             'radial-gradient(closest-side, hsl(var(--accent) / 0.8) 0%, hsl(var(--accent) / 0.22) 55%, transparent 78%)',
-          animation: playing ? 'aura-drift-a 13s ease-in-out infinite' : undefined,
+          animation: playing
+            ? `aura-drift-a ${toque ? '6s' : '13s'} ease-in-out infinite`
+            : undefined,
         }}
       />
       <span
@@ -63,18 +88,26 @@ function Aura({ playing }: { playing: boolean }) {
         style={{
           background:
             'radial-gradient(closest-side at 62% 38%, hsl(var(--accent) / 0.6) 0%, transparent 70%)',
-          animation: playing ? 'aura-drift-b 9s ease-in-out infinite' : undefined,
+          animation: playing
+            ? `aura-drift-b ${toque ? '4.5s' : '9s'} ease-in-out infinite`
+            : undefined,
         }}
       />
       {/* OS FIOS DE FUMAÇA — só com a música tocando e só com movimento
           permitido: fumaça parada no ar não é fumaça, é mancha. */}
       {playing &&
-        FIOS.map((fio) => (
+        fios.map((fio) => (
           <span
-            key={fio.animacao}
-            className={cn('absolute inset-[22%] hidden rounded-full motion-safe:block', fio.blur)}
+            key={fio.id}
+            className={cn(
+              'absolute hidden rounded-full motion-safe:block',
+              // No toque os fios são mais grossos: no escuro, fio fino e
+              // borrado num botão de 40px quase não se enxerga.
+              toque ? 'inset-[14%]' : 'inset-[22%]',
+              fio.blur,
+            )}
             style={{
-              background: `radial-gradient(closest-side at ${fio.x} 55%, hsl(var(--accent) / 0.75) 0%, hsl(var(--accent) / 0.25) 45%, transparent 72%)`,
+              background: `radial-gradient(closest-side at ${fio.x} 55%, hsl(var(--accent) / ${toque ? 0.9 : 0.75}) 0%, hsl(var(--accent) / 0.28) 45%, transparent 72%)`,
               animation: `${fio.animacao} ${fio.duracao} ease-out infinite`,
               animationDelay: fio.atraso,
             }}

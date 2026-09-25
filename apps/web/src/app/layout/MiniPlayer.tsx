@@ -1,6 +1,7 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { MonitorSpeaker, Music, Pause, Play, SkipBack, SkipForward } from 'lucide-react';
+import { MonitorSpeaker, Music, SkipBack, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
+import { PlayButton } from '@/components/media/PlayButton';
 import { useTextoDeCarga } from '@/components/media/StatusDeCarga';
 import { useTrackLikes } from '@/features/library/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
@@ -64,7 +65,12 @@ export function MiniPlayer() {
           // Agora o fundo é exatamente a altura das abas, e só os cantos de
           // CIMA são arredondados: as duas peças leem como um bloco só, que é o
           // que a borda inferior arredondada contrariava mesmo sem vão nenhum.
-          className="glass-strong fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 h-16 overflow-hidden rounded-b-none rounded-t-xl border-x-0 md:hidden"
+          //
+          // Corte SÓ NA HORIZONTAL (`overflow-x-clip`, não `overflow-hidden`):
+          // o arraste de pular faixa continua contido nas laterais, e a fumaça
+          // do play fica livre para SUBIR acima do mini player — com o corte
+          // nos dois eixos ela batia na borda de cima e virava um brilho parado.
+          className="glass-strong fixed inset-x-0 bottom-[calc(4rem+env(safe-area-inset-bottom))] z-40 h-16 overflow-x-clip overflow-y-visible rounded-b-none rounded-t-xl border-x-0 md:hidden"
         >
           {/* Swipe lateral (Spotify): arrastar para a ESQUERDA pula para a
               próxima, para a DIREITA volta — solta e o card volta ao lugar. */}
@@ -149,18 +155,10 @@ export function MiniPlayer() {
             >
               <SkipBack className="size-5 fill-current" />
             </button>
-            <button
-              type="button"
-              aria-label={isPlaying ? 'Pausar' : 'Reproduzir'}
-              onClick={toggle}
-              className="grid size-10 shrink-0 place-items-center rounded-full text-fg active:scale-95"
-            >
-              {isPlaying ? (
-                <Pause className="size-5 fill-current" />
-              ) : (
-                <Play className="ml-0.5 size-5 fill-current" />
-              )}
-            </button>
+            {/* O play do celular ganhou círculo e fumaça. Era só um ícone — e
+                a fumaça atrás de um ícone branco, sem o círculo opaco na
+                frente, apagaria o próprio ícone. */}
+            <PlayButton aura playing={isPlaying} onClick={toggle} />
             <button
               type="button"
               aria-label="Próxima"

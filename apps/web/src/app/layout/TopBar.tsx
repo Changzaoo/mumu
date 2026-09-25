@@ -123,7 +123,12 @@ export function TopBar() {
         // (`:root[data-perf='baixo'] .glass` em globals.css) casa só com o
         // token exato "glass" — a variante escapava da regra e o desfoque
         // continuava ligado justamente durante a rolagem, o pior momento.
-        scrolled && 'glass rounded-t-xl border-x-0 border-t-0',
+        //
+        // `glass-topo`, não `glass`: a borda e o brilho do vidro comum
+        // desenhavam um contorno branco na barra ao rolar. E o arredondado só
+        // no computador — no celular não há painel com canto para respeitar,
+        // e o canto curvo encostado no topo da tela só deixava o vão à mostra.
+        scrolled && 'glass-topo md:rounded-t-xl',
       )}
     >
       <div className="hidden items-center gap-1 md:flex">
