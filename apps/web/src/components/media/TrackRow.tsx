@@ -114,6 +114,7 @@ export function TrackRow({
   return (
     <div
       role="listitem"
+      data-giro="item"
       data-track-row
       tabIndex={-1}
       aria-label={`${track.title} — ${trackArtistNames(track)}`}

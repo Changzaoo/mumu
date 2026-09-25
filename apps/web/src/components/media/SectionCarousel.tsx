@@ -132,7 +132,7 @@ export function SectionCarousel({
       )}
       {...props}
     >
-      <header className="mb-3 flex items-end justify-between gap-4 px-3">
+      <header data-giro="item" className="mb-3 flex items-end justify-between gap-4 px-3">
         <div>
           {href ? (
             <Link to={href} className="group/title inline-block">

@@ -53,6 +53,7 @@ export function MiniPlayer() {
     <AnimatePresence>
       {track && (
         <motion.div
+          data-giro="barra"
           key="mini-player"
           initial={{ y: 80, opacity: 0 }}
           animate={{ y: 0, opacity: 1 }}

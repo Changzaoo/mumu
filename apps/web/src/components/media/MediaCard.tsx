@@ -139,6 +139,7 @@ export function MediaCard({
 
   return (
     <div
+      data-giro="item"
       className={cn(
         'group w-40 shrink-0 snap-start rounded-xl p-3 transition-[colors,transform] duration-200 hover:-translate-y-0.5 hover:bg-fg/5 md:w-44',
         // Cards fora da viewport (prateleiras longas) não são renderizados —

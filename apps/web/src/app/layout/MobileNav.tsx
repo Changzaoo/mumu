@@ -88,6 +88,7 @@ export function MobileNav() {
       {/* Solid bar (Spotify-like): only a hair of fade at the very top edge —
           content scrolls "under" it without the tabs ever looking see-through. */}
       <nav
+        data-giro="barra"
         aria-label="Navegação"
         // SÓLIDO E SEM FOLGA NO TOPO. O gradiente e o `pt-3` existiam para o
         // conteúdo sumir suavemente por baixo das abas — mas com o mini player

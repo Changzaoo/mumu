@@ -195,6 +195,7 @@ export function Sidebar() {
 
   return (
     <aside
+      data-giro="barra"
       className={cn(
         // Painel próprio dentro da moldura: cantos arredondados e sem a borda
         // direita, que só fazia sentido quando menu e conteúdo eram a mesma

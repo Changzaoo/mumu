@@ -111,6 +111,7 @@ export function TopBar() {
 
   return (
     <div
+      data-giro="barra"
       data-scrolled={scrolled || undefined}
       className={cn(
         'sticky top-0 z-30 -mx-4 flex h-16 items-center gap-2 px-4 transition-colors duration-200 md:-mx-6 md:px-6 lg:-mx-8 lg:px-8',
