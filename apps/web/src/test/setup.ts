@@ -19,6 +19,20 @@ afterEach(() => {
 
 // ── jsdom polyfills ─────────────────────────────────────────────
 
+// O Blob do jsdom não tem `stream()`, e o `new Response(blob)` do Node (undici)
+// o exige — sem isto, gravar no Cache Storage falhava só nos testes.
+if (typeof Blob.prototype.stream !== 'function') {
+  Blob.prototype.stream = function stream(this: Blob) {
+    const lerBytes = (): Promise<ArrayBuffer> => this.arrayBuffer();
+    return new ReadableStream<Uint8Array>({
+      async start(controller) {
+        controller.enqueue(new Uint8Array(await lerBytes()));
+        controller.close();
+      },
+    });
+  } as Blob['stream'];
+}
+
 if (typeof window.matchMedia !== 'function') {
   window.matchMedia = (query: string): MediaQueryList =>
     ({

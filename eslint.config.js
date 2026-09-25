@@ -53,6 +53,14 @@ export default tseslint.config(
     },
   },
   {
+    // Scripts Node puros (importer, scripts de infra, utilitários).
+    files: ['**/*.mjs'],
+    languageOptions: {
+      sourceType: 'module',
+      globals: { ...globals.node },
+    },
+  },
+  {
     files: ['**/*.cjs'],
     languageOptions: {
       sourceType: 'commonjs',

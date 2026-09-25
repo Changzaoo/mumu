@@ -248,8 +248,7 @@ describe('revisarGeneros — o gênero de carreira vem de qualquer creditado', (
  * impede isso de achatar um artista genuinamente eclético.
  */
 describe('forcarGeneroReal — o gênero verdadeiro do artista', () => {
-  const v = (nome: string, genero: Genre): ReadonlyMap<string, Genre> =>
-    new Map([[nome, genero]]);
+  const v = (nome: string, genero: Genre): ReadonlyMap<string, Genre> => new Map([[nome, genero]]);
 
   it('artista espalhado sem maioria converge para o veredicto', () => {
     // Alee em pequeno: 4 gêneros empatados, dominante mal chega a 21%.

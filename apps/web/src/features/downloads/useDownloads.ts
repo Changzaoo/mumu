@@ -1,9 +1,5 @@
 import { useCallback, useSyncExternalStore } from 'react';
-import {
-  downloadStateOf,
-  subscribeDownloadManager,
-  type DownloadState,
-} from './downloadManager';
+import { downloadStateOf, subscribeDownloadManager, type DownloadState } from './downloadManager';
 
 const IDLE: DownloadState = { status: 'idle', progress: 0 };
 

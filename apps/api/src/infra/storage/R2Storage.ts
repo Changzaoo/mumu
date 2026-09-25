@@ -55,9 +55,7 @@ export class R2Storage implements StorageProvider {
 
   async size(key: string): Promise<number | null> {
     try {
-      const res = await this.client.send(
-        new HeadObjectCommand({ Bucket: this.bucket, Key: key }),
-      );
+      const res = await this.client.send(new HeadObjectCommand({ Bucket: this.bucket, Key: key }));
       return res.ContentLength ?? null;
     } catch {
       return null;

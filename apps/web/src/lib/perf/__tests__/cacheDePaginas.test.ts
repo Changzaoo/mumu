@@ -33,7 +33,7 @@ const esperarGravacao = (): Promise<void> => new Promise((r) => setTimeout(r, 30
 let ligarCacheDePaginas: Modulo['ligarCacheDePaginas'];
 
 beforeEach(async () => {
-  indexedDB = new IDBFactory(); // banco zerado: cada teste é um "aparelho" novo
+  globalThis.indexedDB = new IDBFactory(); // banco zerado: cada teste é um "aparelho" novo
   vi.resetModules();
   ({ ligarCacheDePaginas } = await import('@/lib/perf/cacheDePaginas'));
 });

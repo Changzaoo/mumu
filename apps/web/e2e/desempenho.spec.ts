@@ -78,8 +78,6 @@ interface Medida {
   custos: Record<string, number>;
 }
 
-
-
 async function medir(page: Page, cdp: CDPSession, faixas: number, nome: string): Promise<Medida> {
   await cdp.send('Emulation.setCPUThrottlingRate', { rate: 1 });
   await page.goto('/');
