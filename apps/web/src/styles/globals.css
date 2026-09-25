@@ -670,3 +670,28 @@
     opacity: 0;
   }
 }
+
+/* O GIRO DA TELA (ver lib/perf/giroDeTela.ts). O layout novo nasce um pouco
+   reduzido e translúcido e assenta na curva de mola do iOS. Vai em cada filho
+   do body, não só no #root: folhas, diálogos e avisos moram em portais fora
+   dele e saltariam sozinhos. Fora do @theme, como os outros keyframes chamados
+   de fora dele (ver a nota "ANIMAÇÕES USADAS POR ESTILO INLINE"). */
+@keyframes giro-assenta {
+  from {
+    transform: scale(0.94);
+    opacity: 0.35;
+  }
+  to {
+    transform: none;
+    opacity: 1;
+  }
+}
+html[data-giro] body > * {
+  animation: giro-assenta 520ms cubic-bezier(0.32, 0.72, 0, 1) both;
+  transform-origin: 50% 50%;
+}
+@media (prefers-reduced-motion: reduce) {
+  html[data-giro] body > * {
+    animation: none;
+  }
+}

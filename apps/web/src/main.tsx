@@ -10,6 +10,7 @@ import { instalarDiagnostico } from '@/lib/local/playbackDiagnosis';
 import { instalarBootPerf, marcarBoot } from '@/lib/telemetry/bootPerf';
 import { instalarSyncDiagnostico } from '@/lib/sync/syncStatus';
 import { preconectarFontesDeAudio } from '@/lib/perf/preconectar';
+import { instalarGiroDeTela } from '@/lib/perf/giroDeTela';
 
 // Primeira linha executável do app: daqui para trás é download + parse do
 // bundle, e é isso que esta marca mede. `radinhoPerf()` imprime a linha do
@@ -39,6 +40,10 @@ instalarDiagnostico();
 // erro foi engolido no caminho. Mesmo motivo do de cima — "não atualiza" é um
 // sintoma com seis causas, e todas elas eram silenciosas.
 instalarSyncDiagnostico();
+
+// Girar o aparelho assenta o layout novo em vez de fazê-lo saltar (ver o
+// módulo). Instalado cedo: o primeiro giro pode vir antes de o app terminar.
+instalarGiroDeTela();
 
 // Abre a conexão com os servidores de áudio ANTES de o usuário apertar play:
 // medido, o aperto de mão (DNS + TCP + TLS) com o nó do Audius custa ~0,7s num
