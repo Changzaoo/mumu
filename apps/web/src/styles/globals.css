@@ -605,69 +605,17 @@
   }
 }
 
-/* A FUMAÇA SUBINDO. Cada fio nasce colado ao botão, sobe mais de um diâmetro
-   balançando para os lados, se abre e some — como fumaça, que perde a forma
-   enquanto sobe. Três fios com tempos que não fecham entre si (e começando fora
-   de fase) fazem uma coluna contínua em vez de três sopros marcados. A
-   opacidade cai antes do fim: fumaça não tem borda, o que some é o rastro. */
-@keyframes fumaca-a {
-  0% {
-    transform: translate3d(0, 10%, 0) scale(0.45);
-    opacity: 0;
+/* A FUMAÇA SUBINDO não mora mais aqui: keyframe fixo é ciclo que o olho acha.
+   Ela é desenhada na hora, sorteada, num canvas — ver `FumacaDoPlay.tsx`. */
+
+/* O DISCO GIRANDO no lugar do play enquanto a música é trazida. Uma volta a
+   cada 1,8s — 33⅓ rotações por minuto, a de um LP. Só `transform`. */
+@keyframes disco-gira {
+  from {
+    transform: rotate(0deg);
   }
-  15% {
-    opacity: 0.75;
-  }
-  45% {
-    transform: translate3d(-12%, -45%, 0) scale(0.85);
-  }
-  75% {
-    transform: translate3d(8%, -85%, 0) scale(1.15);
-    opacity: 0.3;
-  }
-  100% {
-    transform: translate3d(-4%, -120%, 0) scale(1.4);
-    opacity: 0;
-  }
-}
-@keyframes fumaca-b {
-  0% {
-    transform: translate3d(0, 12%, 0) scale(0.5);
-    opacity: 0;
-  }
-  20% {
-    opacity: 0.65;
-  }
-  50% {
-    transform: translate3d(14%, -50%, 0) scale(0.9);
-  }
-  80% {
-    transform: translate3d(-10%, -95%, 0) scale(1.2);
-    opacity: 0.25;
-  }
-  100% {
-    transform: translate3d(6%, -130%, 0) scale(1.5);
-    opacity: 0;
-  }
-}
-@keyframes fumaca-c {
-  0% {
-    transform: translate3d(0, 8%, 0) scale(0.4);
-    opacity: 0;
-  }
-  18% {
-    opacity: 0.6;
-  }
-  40% {
-    transform: translate3d(6%, -38%, 0) scale(0.8);
-  }
-  70% {
-    transform: translate3d(-14%, -80%, 0) scale(1.1);
-    opacity: 0.28;
-  }
-  100% {
-    transform: translate3d(10%, -115%, 0) scale(1.35);
-    opacity: 0;
+  to {
+    transform: rotate(360deg);
   }
 }
 

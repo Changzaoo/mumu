@@ -1414,6 +1414,28 @@ export const usePlayerStore = create<PlayerState>()(
             if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
           })
           .catch(() => undefined);
+        // A CALIBRAÇÃO PRECISA ESTAR PRONTA QUANDO A LETRA FOR ABERTA, não
+        // começar naquele instante — o caminho pt-BR (faster-whisper) leva
+        // ~50s por música de 4 min, e quem abrisse a tela via a letra
+        // desalinhada esse tempo todo. Disparado aqui, junto com o som, e
+        // também para a PRÓXIMA da fila (mesmo atraso do prefetch de letra
+        // acima, para não competir com o que a faixa atual ainda precisa).
+        // `manterVivo` desiste sem gastar mais uma pergunta ao importador se a
+        // pessoa pular para longe antes da resposta chegar.
+        void import('@/lib/lyrics/calibragem')
+          .then((m) => {
+            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+            const ehRelevante = (id: string) => (): boolean => {
+              const { currentTrack, queue, queueIndex } = get();
+              return currentTrack?.id === id || queue[queueIndex + 1]?.id === id;
+            };
+            m.aquecerCalibracao(track, ehRelevante(track.id));
+            const proxima = get().queue[index + 1];
+            if (proxima) {
+              setTimeout(() => m.aquecerCalibracao(proxima, ehRelevante(proxima.id)), 8_000);
+            }
+          })
+          .catch(() => undefined);
 
         // Local audio already resolvable THIS instant → play with zero network.
         const localNow = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);

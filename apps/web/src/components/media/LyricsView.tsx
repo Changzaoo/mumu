@@ -5,16 +5,10 @@ import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
-import { cachedLyrics, fetchLyrics, writeLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
-import {
-  buscarTempo,
-  palavrasEmLinhas,
-  recalibrarLetra,
-  urlDoTempo,
-} from '@/lib/lyrics/recalibrar';
-import { remoteUrlFor } from '@/lib/local/localLibrary';
+import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
+import { pedirCalibracao } from '@/lib/lyrics/calibragem';
 import { linhaAtiva, palavraAtiva, palavrasDaLinha } from '@/lib/lyrics/karaoke';
-import { dicaDeIdioma, syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
+import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -100,42 +94,24 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   // cantada no arquivo do cofre; aqui a letra é reancorada nele — uma vez por
   // faixa, guardado no cache. Enquanto o cálculo roda (até ~1 min em
   // português), a letra que já existe continua na tela.
+  //
+  // `pedirCalibracao` é o MESMO mecanismo que o playerStore já disparou
+  // quando esta faixa começou a tocar (letra ainda fechada, ver
+  // `aquecerCalibracao`/lib/lyrics/calibragem.ts) — se aquele pedido ainda
+  // estiver em voo, este efeito reaproveita a mesma promessa em vez de abrir
+  // um segundo laço de perguntas ao importador para a mesma faixa. Se já
+  // tiver terminado, `writeLyrics` já deixou a versão calibrada no cache e o
+  // guarda acima (`lyrics?.calibrada`) nem deixa este efeito rodar.
   useEffect(() => {
     if (!terminouBusca || !isCurrent || lyrics?.calibrada) return;
-    const remota = remoteUrlFor(track.id) ?? track.streamUrl ?? null;
-    if (!remota) return;
-    const texto = lyrics?.lines.map((l) => l.text).join(' ') ?? '';
-    const idioma = lyrics ? (dicaDeIdioma(texto) === 'en' ? 'en' : 'pt') : 'auto';
-    const url = urlDoTempo(remota, idioma);
-    if (!url) return;
     let cancelado = false;
-    let espera: ReturnType<typeof setTimeout> | undefined;
-    let tentativas = 0;
-    const perguntar = async (): Promise<void> => {
-      const r = await buscarTempo(url);
-      if (cancelado) return;
-      if (r.tipo === 'esperar' && tentativas++ < 30) {
-        espera = setTimeout(() => void perguntar(), 10_000);
-        return;
-      }
-      if (r.tipo !== 'pronto') return;
-      const atual = queryClient.getQueryData<Lyrics | null>(['lyrics', track.id]) ?? null;
-      const nova: Lyrics | null = atual
-        ? recalibrarLetra(atual, r.words)
-        : {
-            synced: true,
-            lines: palavrasEmLinhas(r.words),
-            source: 'Transcrição do áudio',
-          };
-      if (!nova || nova.lines.length === 0) return;
-      const pronta = { ...nova, calibrada: true };
-      writeLyrics(track.id, pronta);
-      queryClient.setQueryData(['lyrics', track.id], pronta);
-    };
-    void perguntar();
+    void pedirCalibracao(track).then((pronta) => {
+      if (cancelado || !pronta) return;
+      const jaTinha = queryClient.getQueryData<Lyrics | null>(['lyrics', track.id])?.calibrada;
+      if (!jaTinha) queryClient.setQueryData(['lyrics', track.id], pronta);
+    });
     return () => {
       cancelado = true;
-      if (espera) clearTimeout(espera);
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma calibração por faixa
   }, [terminouBusca, isCurrent, track.id, Boolean(lyrics?.calibrada)]);

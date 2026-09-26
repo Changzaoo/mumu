@@ -10,6 +10,7 @@
  * pessoa não está esperando som, e um "carregando" ali soaria como defeito.
  */
 import { useEffect, useState } from 'react';
+import { PlayButton, type PlayButtonProps } from '@/components/media/PlayButton';
 import { textoDeCarga } from '@/lib/audio/estadoDeCarga';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -49,4 +50,25 @@ export function StatusDeCarga({ className }: { className?: string }) {
       {texto}
     </p>
   );
+}
+
+/**
+ * O PLAY DO PLAYER, que vira DISCO GIRANDO enquanto a música é trazida.
+ *
+ * A regra é a mesma do texto: enquanto há mensagem de carga na tela, o botão
+ * gira; a música saiu, o texto some e o botão volta a ser play/pausa. Mora
+ * aqui, num componente-folha, porque o relógio de 1s da carga acorda só ele —
+ * não a tela cheia inteira, que fica montada o tempo todo.
+ *
+ * `local`: a carga é a DAQUI; espelhando outro aparelho não há o que girar.
+ * `aguardando`: um sinal extra de espera (a barra do computador já trocava o
+ * botão durante o `isBuffering`, antes de haver texto — agora troca pelo disco).
+ */
+export function PlayDoPlayer({
+  local,
+  aguardando = false,
+  ...props
+}: Omit<PlayButtonProps, 'carregando'> & { local: boolean; aguardando?: boolean }) {
+  const texto = useTextoDeCarga();
+  return <PlayButton {...props} carregando={local && (texto !== null || aguardando)} />;
 }

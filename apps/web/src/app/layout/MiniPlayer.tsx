@@ -1,8 +1,9 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { MonitorSpeaker, Music, SkipBack, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
-import { PlayButton } from '@/components/media/PlayButton';
-import { useTextoDeCarga } from '@/components/media/StatusDeCarga';
+import { PlayDoPlayer, useTextoDeCarga } from '@/components/media/StatusDeCarga';
+import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
+import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useTrackLikes } from '@/features/library/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -42,8 +43,21 @@ export function MiniPlayer() {
   const track = np;
   const isPlaying = np?.isPlaying ?? false;
   const toggle = np?.toggle ?? (() => undefined);
-  const next = np?.next ?? (() => undefined);
-  const prev = np?.prev ?? (() => undefined);
+  // Quem pede a troca carimba o lado ANTES de trocar: a faixa nova entra por
+  // ele (ver `TrocaDeFaixa`). "Próxima" vem da direita; "anterior", da esquerda.
+  const marcarDirecao = useUiStore((s) => s.marcarDirecaoDaTroca);
+  const irProxima = np?.next ?? (() => undefined);
+  const irAnterior = np?.prev ?? (() => undefined);
+  const next = () => {
+    marcarDirecao(1);
+    irProxima();
+  };
+  const prev = () => {
+    marcarDirecao(-1);
+    irAnterior();
+  };
+  const chaveDaFaixa = np ? `${np.source}:${np.trackId ?? np.title}` : '';
+  const direcao = useDirecaoDaTroca(chaveDaFaixa);
   const artistas = np?.artists.map((a) => a.name).join(', ') ?? '';
   // A carga é a DAQUI: espelhando outro aparelho, não há o que contar.
   const textoDeCarga = useTextoDeCarga();
@@ -90,22 +104,30 @@ export function MiniPlayer() {
               type="button"
               aria-label="Abrir reprodução em tela cheia"
               onClick={() => setNowPlayingOpen(true)}
-              className="flex min-w-0 flex-1 items-center gap-3 text-left"
+              className="relative flex min-w-0 flex-1 items-center gap-3 text-left"
             >
               <span className="relative size-11 shrink-0 overflow-hidden rounded-sm bg-fg/6">
-                {track.coverUrl ? (
-                  <img
-                    src={capaNoTamanho(track.coverUrl, 'linha') ?? undefined}
-                    alt=""
-                    className="size-full object-cover"
-                  />
-                ) : (
-                  <span className="grid size-full place-items-center text-fg-subtle">
-                    <Music className="size-4" />
-                  </span>
-                )}
+                <TrocaDeFaixa
+                  chave={chaveDaFaixa}
+                  direcao={direcao}
+                  sobreposto
+                  como="span"
+                  className="absolute inset-0"
+                >
+                  {track.coverUrl ? (
+                    <img
+                      src={capaNoTamanho(track.coverUrl, 'linha') ?? undefined}
+                      alt=""
+                      className="size-full object-cover"
+                    />
+                  ) : (
+                    <span className="grid size-full place-items-center text-fg-subtle">
+                      <Music className="size-4" />
+                    </span>
+                  )}
+                </TrocaDeFaixa>
               </span>
-              <span className="min-w-0">
+              <TrocaDeFaixa chave={chaveDaFaixa} direcao={direcao} como="span" className="min-w-0">
                 <span className="line-clamp-1 text-sm font-medium text-fg">{track.title}</span>
                 <span
                   className="line-clamp-1 text-xs text-fg-muted"
@@ -135,7 +157,7 @@ export function MiniPlayer() {
                     artistas
                   )}
                 </span>
-              </span>
+              </TrocaDeFaixa>
             </button>
             {track.source === 'local' && localTrack && (
               <LikeButton
@@ -159,7 +181,12 @@ export function MiniPlayer() {
             {/* O play do celular ganhou círculo e fumaça. Era só um ícone — e
                 a fumaça atrás de um ícone branco, sem o círculo opaco na
                 frente, apagaria o próprio ícone. */}
-            <PlayButton aura playing={isPlaying} onClick={toggle} />
+            <PlayDoPlayer
+              local={track.source === 'local'}
+              aura
+              playing={isPlaying}
+              onClick={toggle}
+            />
             <button
               type="button"
               aria-label="Próxima"

@@ -18,15 +18,15 @@ import {
 import { Fragment } from 'react';
 import { LikeButton } from '@/components/media/LikeButton';
 import { DevicePickerButton, RemoteDeviceChip } from '@/components/media/DevicePicker';
-import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
 import { IconButton } from '@/components/ui/icon-button';
 import { Slider } from '@/components/ui/slider';
-import { Spinner } from '@/components/ui/spinner';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { artistHref } from '@/lib/linksDeFaixa';
-import { StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
+import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
@@ -83,8 +83,20 @@ export function PlayerBar() {
   const track = np;
   const isPlaying = np?.isPlaying ?? false;
   const toggle = np?.toggle ?? (() => undefined);
-  const next = np?.next ?? (() => undefined);
-  const prev = np?.prev ?? (() => undefined);
+  // O lado da troca é carimbado antes de pedir a faixa (ver `TrocaDeFaixa`).
+  const marcarDirecao = useUiStore((s) => s.marcarDirecaoDaTroca);
+  const irProxima = np?.next ?? (() => undefined);
+  const irAnterior = np?.prev ?? (() => undefined);
+  const next = () => {
+    marcarDirecao(1);
+    irProxima();
+  };
+  const prev = () => {
+    marcarDirecao(-1);
+    irAnterior();
+  };
+  const chaveDaFaixa = np ? `${np.source}:${np.trackId ?? np.title}` : '';
+  const direcao = useDirecaoDaTroca(chaveDaFaixa);
   const seek = np?.seek ?? (() => undefined);
 
   const queueOpen = useUiStore((s) => s.queueOpen);
@@ -119,50 +131,61 @@ export function PlayerBar() {
           {/* Left — track identity */}
           <div className="flex min-w-0 items-center gap-3">
             <span className="relative size-14 shrink-0 overflow-hidden rounded-sm bg-fg/6">
-              {track.coverUrl ? (
-                <img
-                  src={capaNoTamanho(track.coverUrl, 'linha') ?? undefined}
-                  alt=""
-                  className="size-full object-cover"
-                />
-              ) : (
-                <span className="grid size-full place-items-center text-fg-subtle">
-                  <Music className="size-5" />
-                </span>
-              )}
-            </span>
-            <div className="min-w-0">
-              <button
-                type="button"
-                onClick={toggle}
-                className="line-clamp-1 text-left text-sm font-medium text-fg hover:underline"
+              <TrocaDeFaixa
+                chave={chaveDaFaixa}
+                direcao={direcao}
+                sobreposto
+                como="span"
+                className="absolute inset-0"
               >
-                {track.title}
-              </button>
-              <p className="line-clamp-1 text-[13px] text-fg-muted">
-                {track.artists.map((artist, i) => {
-                  // A BARRA MANDAVA TODO MUNDO PARA A PÁGINA QUE ERRA.
-                  //
-                  // Aqui o link era sempre `/artist/:id`, a página da API
-                  // central — que não está no ar. Com uma faixa da biblioteca
-                  // tocando (o caso normal), clicar no nome do artista no
-                  // computador dava tela de erro. A regra certa é a mesma da
-                  // lista de faixas, agora compartilhada.
-                  const href = track.source === 'remote' ? null : artistHref(track.trackId, artist);
-                  return (
-                    <Fragment key={artist.id || artist.name}>
-                      {i > 0 && ', '}
-                      {href ? (
-                        <Link to={href} className="hover:text-fg hover:underline">
-                          {artist.name}
-                        </Link>
-                      ) : (
-                        <span>{artist.name}</span>
-                      )}
-                    </Fragment>
-                  );
-                })}
-              </p>
+                {track.coverUrl ? (
+                  <img
+                    src={capaNoTamanho(track.coverUrl, 'linha') ?? undefined}
+                    alt=""
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <span className="grid size-full place-items-center text-fg-subtle">
+                    <Music className="size-5" />
+                  </span>
+                )}
+              </TrocaDeFaixa>
+            </span>
+            <div className="relative min-w-0">
+              <TrocaDeFaixa chave={chaveDaFaixa} direcao={direcao}>
+                <button
+                  type="button"
+                  onClick={toggle}
+                  className="line-clamp-1 text-left text-sm font-medium text-fg hover:underline"
+                >
+                  {track.title}
+                </button>
+                <p className="line-clamp-1 text-[13px] text-fg-muted">
+                  {track.artists.map((artist, i) => {
+                    // A BARRA MANDAVA TODO MUNDO PARA A PÁGINA QUE ERRA.
+                    //
+                    // Aqui o link era sempre `/artist/:id`, a página da API
+                    // central — que não está no ar. Com uma faixa da biblioteca
+                    // tocando (o caso normal), clicar no nome do artista no
+                    // computador dava tela de erro. A regra certa é a mesma da
+                    // lista de faixas, agora compartilhada.
+                    const href =
+                      track.source === 'remote' ? null : artistHref(track.trackId, artist);
+                    return (
+                      <Fragment key={artist.id || artist.name}>
+                        {i > 0 && ', '}
+                        {href ? (
+                          <Link to={href} className="hover:text-fg hover:underline">
+                            {artist.name}
+                          </Link>
+                        ) : (
+                          <span>{artist.name}</span>
+                        )}
+                      </Fragment>
+                    );
+                  })}
+                </p>
+              </TrocaDeFaixa>
               {/* O que o player está fazendo enquanto a música não sai. Só da
                   faixa DAQUI — espelhando outro aparelho não há carga local. */}
               {track.source === 'local' && (
@@ -199,13 +222,15 @@ export function PlayerBar() {
               <IconButton aria-label="Anterior" onClick={prev}>
                 <SkipBack className="fill-current" />
               </IconButton>
-              {isBuffering ? (
-                <span className="grid size-10 place-items-center">
-                  <Spinner size="md" />
-                </span>
-              ) : (
-                <PlayButton aura playing={isPlaying} onClick={toggle} />
-              )}
+              {/* Carregando, o play vira o disco girando (era um spinner
+                  genérico, e só aqui no computador). */}
+              <PlayDoPlayer
+                local={track.source === 'local'}
+                aguardando={isBuffering}
+                aura
+                playing={isPlaying}
+                onClick={toggle}
+              />
               <IconButton aria-label="Próxima" onClick={next}>
                 <SkipForward className="fill-current" />
               </IconButton>

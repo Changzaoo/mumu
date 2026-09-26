@@ -26,9 +26,9 @@ import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
 import { useTrackLikes } from '@/features/library/api';
-import { PlayButton } from '@/components/media/PlayButton';
 import { SeekSlider } from '@/components/media/SeekSlider';
-import { StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
 import { SpectrumVisualizer } from '@/components/media/SpectrumVisualizer';
 import { WaveformSeeker } from '@/components/media/WaveformSeeker';
 import {
@@ -41,6 +41,7 @@ import {
 import { IconButton } from '@/components/ui/icon-button';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
+import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useDominantColor } from '@/hooks/useDominantColor';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { api } from '@/lib/api';
@@ -158,6 +159,12 @@ export function NowPlaying() {
   const titulo = remoto ? remoto.title : track?.title;
   const artistas = remoto ? remoto.artists : (track?.artists ?? []);
   const tocando = remoto ? remoto.isPlaying : isPlaying;
+  // A troca de faixa desliza do lado de onde a pessoa apertou (ver
+  // `TrocaDeFaixa`). O hook roda também com a tela FECHADA, de propósito: assim
+  // ele acompanha as trocas e, ao abrir, não confunde "abri" com "troquei".
+  const chaveDaFaixa = remoto ? `remoto:${remoto.title}` : (track?.id ?? '');
+  const direcao = useDirecaoDaTroca(chaveDaFaixa);
+  const marcarDirecao = useUiStore((s) => s.marcarDirecaoDaTroca);
 
   const sleepTimer = useSettingsStore((s) => s.sleepTimerMinutes);
   const setSleepTimer = useSettingsStore((s) => s.setSleepTimer);
@@ -356,46 +363,57 @@ export function NowPlaying() {
                   </div>
                 ) : lyricsOpen && faixaLocal ? (
                   <LyricsView track={faixaLocal} className="h-full px-2" />
-                ) : capaUrl ? (
-                  <img src={capaUrl} alt="" className="size-full object-cover" />
                 ) : (
-                  <div className="grid size-full place-items-center text-fg-subtle">
-                    <Music className="size-16" />
-                  </div>
+                  <TrocaDeFaixa
+                    chave={chaveDaFaixa}
+                    direcao={direcao}
+                    sobreposto
+                    className="absolute inset-0"
+                  >
+                    {capaUrl ? (
+                      <img src={capaUrl} alt="" className="size-full object-cover" />
+                    ) : (
+                      <div className="grid size-full place-items-center text-fg-subtle">
+                        <Music className="size-16" />
+                      </div>
+                    )}
+                  </TrocaDeFaixa>
                 )}
               </div>
 
               {/* Title (+ curtir, como no Spotify) */}
-              <div className="w-full text-center">
-                <div className="flex items-center justify-center gap-2">
-                  <h1 className="line-clamp-2 min-w-0 text-2xl font-bold tracking-tight text-fg">
-                    {titulo}
-                  </h1>
-                  {/* Curtir age sobre a faixa DAQUI; do remoto só temos título e
+              <div className="relative w-full text-center">
+                <TrocaDeFaixa chave={chaveDaFaixa} direcao={direcao}>
+                  <div className="flex items-center justify-center gap-2">
+                    <h1 className="line-clamp-2 min-w-0 text-2xl font-bold tracking-tight text-fg">
+                      {titulo}
+                    </h1>
+                    {/* Curtir age sobre a faixa DAQUI; do remoto só temos título e
                       artista em texto, não a faixa do catálogo. */}
-                  {faixaLocal && (
-                    <LikeButton
-                      liked={likes.isLiked(faixaLocal)}
-                      onToggle={(liked) => likes.toggle(faixaLocal, liked)}
-                      className="shrink-0"
-                    />
-                  )}
-                </div>
-                <p className="mt-1 line-clamp-1 text-sm text-fg-muted">
-                  {faixaLocal &&
-                  faixaLocal.id.startsWith('local:') &&
-                  faixaLocal.artists[0]?.name ? (
-                    <Link
-                      to={`/artista/${encodeURIComponent(faixaLocal.artists[0].name)}`}
-                      onClick={() => setOpen(false)}
-                      className="transition-colors hover:text-fg hover:underline"
-                    >
-                      {trackArtistNames({ artists: artistas })}
-                    </Link>
-                  ) : (
-                    trackArtistNames({ artists: artistas })
-                  )}
-                </p>
+                    {faixaLocal && (
+                      <LikeButton
+                        liked={likes.isLiked(faixaLocal)}
+                        onToggle={(liked) => likes.toggle(faixaLocal, liked)}
+                        className="shrink-0"
+                      />
+                    )}
+                  </div>
+                  <p className="mt-1 line-clamp-1 text-sm text-fg-muted">
+                    {faixaLocal &&
+                    faixaLocal.id.startsWith('local:') &&
+                    faixaLocal.artists[0]?.name ? (
+                      <Link
+                        to={`/artista/${encodeURIComponent(faixaLocal.artists[0].name)}`}
+                        onClick={() => setOpen(false)}
+                        className="transition-colors hover:text-fg hover:underline"
+                      >
+                        {trackArtistNames({ artists: artistas })}
+                      </Link>
+                    ) : (
+                      trackArtistNames({ artists: artistas })
+                    )}
+                  </p>
+                </TrocaDeFaixa>
                 {faixaLocal && (credits || faixaLocal.composer) && !lyricsOpen && (
                   <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
                     {(() => {
@@ -440,16 +458,31 @@ export function NowPlaying() {
                     <Shuffle />
                   </IconButton>
                 )}
-                <IconButton aria-label="Anterior" size="lg" onClick={remoto ? remoto.prev : prev}>
+                <IconButton
+                  aria-label="Anterior"
+                  size="lg"
+                  onClick={() => {
+                    marcarDirecao(-1);
+                    (remoto ? remoto.prev : prev)();
+                  }}
+                >
                   <SkipBack className="fill-current" />
                 </IconButton>
-                <PlayButton
+                <PlayDoPlayer
+                  local={!remoto}
                   aura
                   playing={tocando}
                   size="lg"
                   onClick={remoto ? remoto.toggle : toggle}
                 />
-                <IconButton aria-label="Próxima" size="lg" onClick={remoto ? remoto.next : next}>
+                <IconButton
+                  aria-label="Próxima"
+                  size="lg"
+                  onClick={() => {
+                    marcarDirecao(1);
+                    (remoto ? remoto.next : next)();
+                  }}
+                >
                   <SkipForward className="fill-current" />
                 </IconButton>
                 {!remoto && (

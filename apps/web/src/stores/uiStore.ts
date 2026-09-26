@@ -15,6 +15,18 @@ export interface UiState {
   lyricsOpen: boolean;
   commandOpen: boolean;
   activeModal: ActiveModal;
+  /**
+   * DE QUE LADO A PRÓXIMA FAIXA ENTRA — marcado por quem pediu a troca.
+   *
+   * O player não sabe (nem precisa saber) se o "próxima" veio de um botão, de
+   * um arrasto ou do fim natural da faixa; a tela sabe. O botão/gesto carimba
+   * aqui a direção ANTES de chamar `next()`/`prev()`, e a capa que entra lê o
+   * carimbo (ver `useDirecaoDaTroca`). 1 = próxima (entra pela direita),
+   * -1 = anterior (entra pela esquerda), 0 = sem direção (só funde).
+   */
+  direcaoDaTroca: DirecaoDaTroca;
+  /** `Date.now()` do carimbo — carimbo velho não vale para uma troca nova. */
+  direcaoMarcadaEm: number;
 
   toggleSidebar: () => void;
   setQueueOpen: (open: boolean) => void;
@@ -26,7 +38,10 @@ export interface UiState {
   setCommandOpen: (open: boolean) => void;
   toggleCommand: () => void;
   setActiveModal: (modal: ActiveModal) => void;
+  marcarDirecaoDaTroca: (direcao: DirecaoDaTroca) => void;
 }
+
+export type DirecaoDaTroca = 1 | -1 | 0;
 
 export const useUiStore = create<UiState>()(
   persist(
@@ -37,6 +52,8 @@ export const useUiStore = create<UiState>()(
       lyricsOpen: false,
       commandOpen: false,
       activeModal: null,
+      direcaoDaTroca: 0,
+      direcaoMarcadaEm: 0,
 
       toggleSidebar: () => set({ sidebarCollapsed: !get().sidebarCollapsed }),
       setQueueOpen: (queueOpen) => set({ queueOpen }),
@@ -48,6 +65,8 @@ export const useUiStore = create<UiState>()(
       setCommandOpen: (commandOpen) => set({ commandOpen }),
       toggleCommand: () => set({ commandOpen: !get().commandOpen }),
       setActiveModal: (activeModal) => set({ activeModal }),
+      marcarDirecaoDaTroca: (direcaoDaTroca) =>
+        set({ direcaoDaTroca, direcaoMarcadaEm: Date.now() }),
     }),
     {
       name: 'aurial:ui',

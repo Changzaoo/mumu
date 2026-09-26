@@ -11,7 +11,6 @@ import {
   AudioWaveform,
   Bell,
   Globe,
-  Info,
   Loader2,
   Lock,
   Search,
@@ -27,7 +26,6 @@ import {
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import { AUDIO_QUALITIES, type AudioQuality } from '@radinho/shared';
-import { RadinhoMark } from '@/components/brand/RadinhoMark';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
@@ -57,8 +55,6 @@ import { useSettingsStore, type ThemeSetting } from '@/stores/settingsStore';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 import { equalizadorDisponivel } from '@/lib/audio/AudioEngine';
-
-const APP_VERSION = '0.1.0';
 
 const QUALITY_LABEL: Record<AudioQuality, string> = {
   low: 'Econômica (96 kbps)',
@@ -550,30 +546,6 @@ export default function SettingsPage() {
             </Button>
           </Row>
         )}
-      </SettingsCard>
-
-      {/* Sobre */}
-      <SettingsCard icon={Info} title="Sobre">
-        <div className="flex items-center gap-3">
-          <RadinhoMark className="size-8" />
-          <div>
-            <p className="text-sm font-medium text-fg">radinho.online</p>
-            <p className="font-mono text-xs tabular-nums text-fg-muted">versão {APP_VERSION}</p>
-          </div>
-        </div>
-        <div className="flex flex-wrap gap-4 text-[13px]">
-          <a href="/docs" className="text-fg-muted transition-colors hover:text-fg">
-            Documentação
-          </a>
-          <a
-            href="https://github.com"
-            target="_blank"
-            rel="noreferrer noopener"
-            className="text-fg-muted transition-colors hover:text-fg"
-          >
-            Código-fonte
-          </a>
-        </div>
       </SettingsCard>
 
       {/* Clear history confirm */}
