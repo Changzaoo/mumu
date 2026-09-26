@@ -670,3 +670,17 @@
     opacity: 0;
   }
 }
+
+/* ── Letra (LyricsView) ─────────────────────────────────────────────
+   A palavra sendo cantada ganha um brilho leve, além de crescer (scale no
+   componente). O brilho acompanha a cor do texto, então vale nos dois temas. */
+.letra-palavra-agora {
+  text-shadow:
+    0 0 14px color-mix(in oklab, currentColor 55%, transparent),
+    0 0 2px color-mix(in oklab, currentColor 35%, transparent);
+}
+/* Desfoque das linhas distantes custa pintura; aparelho que já provou que
+   trava fica só com escala e opacidade, que saem de graça no compositor. */
+:root[data-perf='baixo'] .letra-desfoque {
+  filter: none !important;
+}

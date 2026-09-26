@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState, type CSSProperties } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { MicVocal } from 'lucide-react';
 import type { TrackDto } from '@radinho/shared';
@@ -6,6 +6,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { cachedLyrics, fetchLyrics } from '@/lib/lyrics/lyrics';
+import { linhaAtiva, palavraAtiva, palavrasDaLinha } from '@/lib/lyrics/karaoke';
 import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -13,14 +14,37 @@ import { usePlayerStore } from '@/stores/playerStore';
 /** Sem antecipação artificial: evita letra "adiantada" perceptivelmente. */
 const LEAD_MS = 0;
 
+/**
+ * Escala, opacidade e desfoque por DISTÂNCIA da linha cantada. Transform e
+ * opacidade ficam no compositor — não refazem layout, então a lista não pula
+ * quando a linha ativa troca.
+ */
+function estiloDeProfundidade(distancia: number): {
+  style: CSSProperties;
+  desfoca: boolean;
+} {
+  const escala = [1, 0.82, 0.74, 0.68][Math.min(distancia, 3)] as number;
+  const opacidade = [1, 0.55, 0.32, 0.18][Math.min(distancia, 3)] as number;
+  const desfoque = distancia >= 2 ? Math.min(distancia - 1, 2) * 0.6 : 0;
+  return {
+    style: {
+      transform: `scale(${escala})`,
+      opacity: opacidade,
+      ...(desfoque > 0 ? { filter: `blur(${desfoque}px)` } : {}),
+    },
+    desfoca: desfoque > 0,
+  };
+}
+
 export interface LyricsViewProps {
   track: TrackDto;
   className?: string;
 }
 
 /**
- * Synced lyrics pane (LRCLIB): active line highlighted + auto-scroll.
- * Click a line to seek (synced lyrics only).
+ * Letra sincronizada: a linha cantada em primeiro plano, a palavra cantada em
+ * destaque, e as vizinhas menores e mais apagadas conforme se afastam.
+ * Clicar numa linha leva a música até ela (só letra sincronizada).
  */
 export function LyricsView({ track, className }: LyricsViewProps) {
   const seek = usePlayerStore((s) => s.seek);
@@ -60,31 +84,41 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma tentativa por faixa
   }, [terminouBusca, Boolean(encontrada), track.id]);
 
-  // Karaokê fluido: a posição do STORE é throttled a ~5/s (passos visíveis e
-  // ~200ms atrasados). Amostramos a posição REAL do engine por rAF — mas só da
-  // faixa que está tocando, para não destacar linha na letra de outra faixa.
-  const [positionMs, setPositionMs] = useState(0);
+  // ONDE A VOZ ESTÁ — linha e palavra. A posição REAL do engine é amostrada a
+  // cada quadro (a do store é estrangulada a ~5/s e chega ~200 ms atrasada),
+  // mas o estado só muda quando a linha ou a palavra MUDA: antes cada quadro
+  // re-renderizava a letra inteira, 60 vezes por segundo, e num celular fraco
+  // o próprio destaque atrasava. Só a faixa que está tocando é acompanhada.
   const synced = Boolean(lyrics?.synced) && isCurrent;
+  const palavrasPorLinha = useMemo(
+    () =>
+      lyrics?.synced
+        ? lyrics.lines.map((linha, i) =>
+            palavrasDaLinha(linha, lyrics.lines[i + 1]?.timeMs ?? null),
+          )
+        : [],
+    [lyrics],
+  );
+  const [ativa, setAtiva] = useState({ linha: -1, palavra: -1 });
   useEffect(() => {
-    if (!synced) return;
+    if (!synced || !lyrics) {
+      setAtiva({ linha: -1, palavra: -1 });
+      return;
+    }
     let raf = 0;
     const tick = (): void => {
-      setPositionMs(audioEngine.getPosition() * 1000 + LEAD_MS);
+      const posMs = audioEngine.getPosition() * 1000 + LEAD_MS;
+      const linha = linhaAtiva(lyrics.lines, posMs);
+      const palavra = linha >= 0 ? palavraAtiva(palavrasPorLinha[linha] ?? [], posMs) : -1;
+      setAtiva((atual) =>
+        atual.linha === linha && atual.palavra === palavra ? atual : { linha, palavra },
+      );
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);
     return () => cancelAnimationFrame(raf);
-  }, [synced, isPlaying, track.id]);
-
-  const activeIndex = useMemo(() => {
-    if (!synced || !lyrics) return -1;
-    let index = -1;
-    for (let i = 0; i < lyrics.lines.length; i++) {
-      if ((lyrics.lines[i]?.timeMs ?? Infinity) <= positionMs) index = i;
-      else break;
-    }
-    return index;
-  }, [synced, lyrics, positionMs]);
+  }, [synced, isPlaying, track.id, lyrics, palavrasPorLinha]);
+  const activeIndex = ativa.linha;
 
   const activeRef = useRef<HTMLButtonElement>(null);
   useEffect(() => {
@@ -119,6 +153,16 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     >
       {lyrics.lines.map((line, index) => {
         const active = index === activeIndex;
+        // PROFUNDIDADE: quanto mais longe da linha cantada, menor, mais
+        // apagada e mais desfocada — a atual fica em primeiro plano. Antes da
+        // primeira linha, a primeira é a "próxima" (distância 1).
+        const distancia = synced
+          ? activeIndex < 0
+            ? index + 1
+            : Math.abs(index - activeIndex)
+          : null;
+        const profundidade = distancia === null ? null : estiloDeProfundidade(distancia);
+        const palavras = active ? (palavrasPorLinha[index] ?? []) : [];
         return (
           <button
             key={`${line.timeMs}-${index}`}
@@ -126,31 +170,43 @@ export function LyricsView({ track, className }: LyricsViewProps) {
             type="button"
             disabled={!lyrics.synced}
             onClick={() => seek(line.timeMs / 1000)}
+            aria-current={active ? 'true' : undefined}
+            style={profundidade?.style}
             className={cn(
-              'block w-full rounded-lg px-3 py-2 text-left text-xl font-semibold tracking-tight transition-colors duration-200',
+              'block w-full origin-left rounded-lg px-3 py-2 text-left text-2xl font-bold tracking-tight sm:text-3xl',
+              // Encolher/crescer anima; a COR não — o destaque tem que trocar
+              // no instante da voz, não 200 ms depois.
+              'transition-[transform,opacity,filter] duration-500 ease-out motion-reduce:transition-none',
               lyrics.synced && 'cursor-pointer hover:bg-fg/5',
-              active ? 'text-fg' : 'text-fg-muted/60',
+              profundidade?.desfoca && 'letra-desfoque',
+              distancia === null ? 'text-fg-muted/80' : active ? 'text-fg' : 'text-fg-muted',
             )}
           >
-            {/* Linha ativa COM tempo por palavra: o destaque anda junto com a
-                voz. Sem isso a linha inteira acende de uma vez e fica quatro
-                segundos parada, sempre um pouco fora do que está sendo cantado.
-                As demais linhas seguem como texto simples — animar o que não
-                está sendo cantado só custa renderização. */}
-            {active && line.words && line.words.length > 0 ? (
+            {active && palavras.length > 0 ? (
               <span>
-                {line.words.map((palavra, i) => (
-                  <span
-                    key={`${palavra.timeMs}-${i}`}
-                    className={cn(
-                      'transition-colors duration-150',
-                      positionMs >= palavra.timeMs ? 'text-fg' : 'text-fg-muted/50',
-                    )}
-                  >
-                    {palavra.text}
-                    {i < line.words!.length - 1 ? ' ' : ''}
-                  </span>
-                ))}
+                {palavras.map((palavra, i) => {
+                  const cantada = i < ativa.palavra;
+                  const agora = i === ativa.palavra;
+                  return (
+                    <span key={`${palavra.timeMs}-${i}`}>
+                      <span
+                        className={cn(
+                          // Ênfase por ELEVAÇÃO e brilho, não por escala: crescer a palavra a
+                          // fazia invadir o espaço da vizinha ("Ascachorra").
+                          'inline-block transition-transform duration-150 ease-out motion-reduce:transition-none',
+                          agora
+                            ? 'letra-palavra-agora -translate-y-0.5 text-fg'
+                            : cantada
+                              ? 'text-fg'
+                              : 'text-fg-muted/70',
+                        )}
+                      >
+                        {palavra.text}
+                      </span>
+                      {i < palavras.length - 1 ? ' ' : ''}
+                    </span>
+                  );
+                })}
               </span>
             ) : (
               line.text || '♪'

@@ -9,6 +9,7 @@
 import type { TrackDto } from '@radinho/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+import { lerPalavrasMarcadas } from './karaoke';
 
 export interface LyricLine {
   timeMs: number;
@@ -67,8 +68,14 @@ function parseLrc(lrc: string): LyricLine[] {
       end = LRC_TIME.lastIndex;
     }
     if (times.length === 0) continue;
-    const text = raw.slice(end).trim();
-    for (const t of times) out.push({ timeMs: Math.max(0, t - offset), text });
+    // LRC estendido traz `<mm:ss.xx>` por palavra: vira tempo real por
+    // palavra em vez de aparecer como texto na tela.
+    const { text, words } = lerPalavrasMarcadas(raw.slice(end), offset);
+    for (const t of times) {
+      // Marcas de palavra são absolutas: só valem para uma linha de tempo único.
+      const comPalavras = words && times.length === 1;
+      out.push({ timeMs: Math.max(0, t - offset), text, ...(comPalavras ? { words } : {}) });
+    }
   }
   return out.sort((a, b) => a.timeMs - b.timeMs);
 }
