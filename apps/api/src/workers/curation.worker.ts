@@ -311,13 +311,7 @@ async function curateUser(userId: string): Promise<number> {
   // biblioteca inteira à vista esse voto passa a ser a discografia INTEIRA em
   // vez de um pedaço arbitrário de 160. É exatamente o que separa um trap solto
   // no sertanejo de um sertanejo de verdade.
-  const todas = await prisma.userCollectionItem.findMany({
-    where: { userId, collection: 'library', deleted: false },
-    orderBy: { itemId: 'asc' },
-  });
-  const docsCompletos = todas.map((linha) =>
-    docDoPostgres(userId, linha.itemId, (linha.data ?? {}) as LibraryEntry),
-  );
+  const docsCompletos = await bibliotecaSemDna(userId);
   corrigidas += await curarCategorias(docsCompletos);
 
   // DNA e fusão de duplicatas seguem na janela: o primeiro tem custo de rede por
@@ -898,7 +892,13 @@ export function aplicarPatch(dados: LibraryEntry, patch: Record<string, unknown>
  * o que sumiu pela lápide — uma remoção de verdade seria invisível para os
  * aparelhos, que continuariam mostrando a faixa fundida para sempre.
  */
-function docDoPostgres(userId: string, itemId: string, inicial: LibraryEntry): LibraryDoc {
+function docDoPostgres(
+  userId: string,
+  itemId: string,
+  inicial: LibraryEntry,
+  /** Lido SEM o `dna` (ver `bibliotecaSemDna`): a gravação devolve o que estava no banco. */
+  semDna = false,
+): LibraryDoc {
   let dados = inicial;
   const chave = { userId_collection_itemId: { userId, collection: 'library', itemId } };
   return {
@@ -907,6 +907,24 @@ function docDoPostgres(userId: string, itemId: string, inicial: LibraryEntry): L
     ref: {
       async update(patch) {
         dados = aplicarPatch(dados, patch);
+        if (semDna) {
+          // O documento em memória não tem o vetor; regravá-lo inteiro APAGARIA
+          // o `dna` da faixa. O banco devolve o que já tinha — a não ser que a
+          // própria mudança traga um vetor novo. `updatedAt` é carimbado à mão
+          // (o Prisma só faz isso sozinho no update dele): é o cursor da
+          // sincronia por delta dos aparelhos.
+          const json = JSON.stringify(dados);
+          await prisma.$executeRaw`
+            UPDATE "UserCollectionItem"
+            SET data = CASE
+                  WHEN ${json}::jsonb ? 'dna' OR NOT (data::jsonb ? 'dna') THEN ${json}::jsonb
+                  ELSE ${json}::jsonb || jsonb_build_object('dna', data::jsonb -> 'dna')
+                END,
+                "updatedAt" = now()
+            WHERE "userId" = ${userId} AND collection = 'library' AND "itemId" = ${itemId}
+          `;
+          return;
+        }
         await prisma.userCollectionItem.update({
           where: chave,
           data: { data: dados as object },
@@ -920,6 +938,27 @@ function docDoPostgres(userId: string, itemId: string, inicial: LibraryEntry): L
       },
     },
   };
+}
+
+/**
+ * A BIBLIOTECA INTEIRA, SEM O VETOR `dna` — que nem sai do banco.
+ *
+ * A revisão de categorias precisa ver TODAS as faixas do usuário (a coerência
+ * de gênero é por artista, na biblioteca toda), mas só lê título, artista,
+ * gênero e selo. O `dna` (2.048 números por faixa) é 175 dos 181 MB da
+ * biblioteca do dono. Lido junto, o Postgres mandava 181 MB, o Prisma guardava
+ * uma cópia e o V8 outra: o worker passava de 1 GB e era morto por falta de
+ * memória a cada volta (medido em 2026-09-26: 18 mortes seguidas, código 137,
+ * logo depois de o container ganhar o teto de 1 GB).
+ */
+async function bibliotecaSemDna(userId: string): Promise<LibraryDoc[]> {
+  const linhas = await prisma.$queryRaw<Array<{ itemId: string; data: unknown }>>`
+    SELECT "itemId", (data::jsonb - 'dna') AS data
+    FROM "UserCollectionItem"
+    WHERE "userId" = ${userId} AND collection = 'library' AND deleted = false
+    ORDER BY "itemId" ASC
+  `;
+  return linhas.map((l) => docDoPostgres(userId, l.itemId, (l.data ?? {}) as LibraryEntry, true));
 }
 
 /** As faixas do lote na forma que as regras de gênero consomem. */
