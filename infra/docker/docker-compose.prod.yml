@@ -128,16 +128,20 @@ services:
       - ../../.env
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=768
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
+    # Swap proibido: igual ao teto de memoria, como era antes (24/09/2026).
+    # Worker no swap congela a maquina inteira, inclusive o site ao lado.
+    memswap_limit: 1g
     deploy:
       resources:
         limits:
-          cpus: '2.0'
-          memory: 2g
+          cpus: '0.5'
+          memory: 1g
 
   # One-shot: apply pending Prisma migrations. Not started by `up`;
   # run explicitly (deploy-api.sh does this on every deploy):
