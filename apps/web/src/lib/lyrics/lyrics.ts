@@ -26,6 +26,8 @@ export interface Lyrics {
   synced: boolean;
   lines: LyricLine[];
   source: string | null;
+  /** Já reancorada no áudio do cofre (ver lib/lyrics/recalibrar) — não refaz. */
+  calibrada?: boolean;
 }
 
 interface CachedLyricsEntry {

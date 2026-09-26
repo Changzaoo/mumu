@@ -50,6 +50,7 @@ import {
   transcribeSegments,
   transcribeWords,
 } from './riva.mjs';
+import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
@@ -1370,6 +1371,22 @@ const safeBlobId = (s) => typeof s === 'string' && /^[A-Za-z0-9:_-]{1,128}$/.tes
 const blobPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.bin`);
 const blobMetaPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.json`);
 
+// Relógio das letras: o instante de cada palavra cantada, por faixa do cofre.
+// Fica FORA do cofre de propósito — a poda do cofre não pode levar isto junto,
+// e o cofre não pode contar estes arquivos como áudio. Ver tempoDasPalavras.mjs.
+const TEMPO_DIR = process.env.TEMPO_DIR ?? path.join(path.dirname(BLOB_DIR), 'tempos');
+const tempoDasPalavras = criarTempoDasPalavras({
+  dir: TEMPO_DIR,
+  log: (...a) => console.log('[radinho-importer]', ...a),
+  rivaPalavras: transcribeConfigured()
+    ? async (arquivo) => {
+        const wav = await toWav16k(await readFile(arquivo), FFMPEG_BIN);
+        const words = await transcribeWords(wav, { language: 'en-US' });
+        return words.length > 0 && !timestampsAreDegenerate(words) ? words : null;
+      }
+    : undefined,
+});
+
 /** Buffer a request body (binary-safe) up to `limit` bytes, else reject. */
 function readBinaryBody(req, limit) {
   return new Promise((resolve, reject) => {
@@ -2471,6 +2488,54 @@ async function main() {
         void sweepBlobStore(); // mantém o cofre dentro do teto (LRU)
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id, token }));
+        return;
+      }
+
+      // ── TEMPO DAS PALAVRAS de uma faixa do cofre ──────────────────────────
+      // Mesmo token de capacidade do áudio: quem pode ouvir pode sincronizar a
+      // letra. 200 com as palavras quando pronto; 202 enquanto calcula (o app
+      // pergunta de novo); 422 quando o motor não conseguiu.
+      if (req.method === 'GET' && /^\/blob\/[^/]+\/tempo$/.test(pathname)) {
+        const id = decodeURIComponent(pathname.slice('/blob/'.length, -'/tempo'.length));
+        const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        if (!safeBlobId(id)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id inválido.' }));
+          return;
+        }
+        let meta = null;
+        try {
+          meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
+        } catch {
+          meta = null;
+        }
+        if (!meta || params.get('k') !== meta.token) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        if (!existsSync(blobPath(id))) {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '30' });
+          res.end(JSON.stringify({ status: 'sem-audio' }));
+          return;
+        }
+        const pedido = (params.get('lang') ?? 'auto').toLowerCase();
+        const idioma = pedido.startsWith('en') ? 'en' : pedido.startsWith('pt') ? 'pt' : 'auto';
+        const r = await tempoDasPalavras.pedir(id, blobPath(id), idioma);
+        if ('pronto' in r) {
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'Cache-Control': 'private, max-age=86400',
+          });
+          res.end(JSON.stringify(r.pronto));
+          return;
+        }
+        res.writeHead(r.status === 'falhou' ? 422 : 202, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Retry-After': '15',
+        });
+        res.end(JSON.stringify(r));
         return;
       }
 

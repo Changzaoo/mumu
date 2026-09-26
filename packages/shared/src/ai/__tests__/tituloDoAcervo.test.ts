@@ -117,4 +117,60 @@ describe('lerTituloDoAcervo', () => {
       'DON JUAN, BOLADIN 211, DJ KAIOKEN E DJ FELIPE MAIA',
     );
   });
+
+  // Casos reais do acervo (2026-09-26), incluindo o que estava tocando.
+  it.each([
+    [
+      'MC Ryan SP, Neguinho do Kaxeta, Vitinho Avassalador e MC PP da VS (DJ Marquinhos SB)',
+      ['"Liberdade"'],
+      'Liberdade',
+      'MC Ryan SP',
+    ],
+    ['Luiz Melodia', ['"Pérola Negra"'], 'Pérola Negra', 'Luiz Melodia'],
+    ['Stray Kids "Chk Chk Boom" Performance Video', ['Stray Kids'], 'Chk Chk Boom', 'Stray Kids'],
+    ['Stray Kids "극과 극(N/S)" Video (Street Ver.)', ['Stray Kids'], '극과 극(N/S)', 'Stray Kids'],
+    ['Lee Know "Youth"', ['Stray Kids'], 'Youth', 'Lee Know'],
+    ['Caio Luccas "Mano De Gang" ft. TZ, Anezzi', ['Caio Luccas'], 'Mano De Gang', 'Anezzi'],
+  ])('aspas decidem a música: %s', (titulo, artistas, esperado, artistaEsperado) => {
+    const r = lerTituloDoAcervo(titulo, artistas);
+    expect(r?.title).toBe(esperado);
+    expect(r?.artists).toContain(artistaEsperado);
+  });
+
+  it('frase com número fora das aspas não vira artista', () => {
+    expect(lerTituloDoAcervo('Saca da Twin 2 "O Poderoso Chatão"', ['MC Lele JP'])).toBeNull();
+  });
+});
+
+describe('lerTituloDoAcervo — prévia de 2026-09-26', () => {
+  it('título só com créditos de MC/DJ: a música estava no artista', () => {
+    const r = lerTituloDoAcervo('MC 2Jhow (DJ Serpinha)', ['ESPIRRA O LANÇA']);
+    expect(r?.title).toBe('ESPIRRA O LANÇA');
+    expect(r?.artists).toEqual(expect.arrayContaining(['MC 2Jhow', 'DJ Serpinha']));
+    expect(lerTituloDoAcervo('MC Kekel e MC Rita (KondZilla)', ['Amor de Verdade'])?.title).toBe(
+      'Amor de Verdade',
+    );
+  });
+
+  it('não parte "Tyler, The Creator" em dois', () => {
+    const r = lerTituloDoAcervo('Ignant Shit', ['Tyler, The Creator']);
+    expect(r === null || r.artists.includes('Tyler, The Creator')).toBe(true);
+  });
+});
+
+describe('lerTituloDoAcervo — destroca não confunde música nem produtora', () => {
+  it('"DJ Got Us Fallin\' in Love" é música, não crédito', () => {
+    const r = lerTituloDoAcervo("DJ Got Us Fallin' in Love (feat. Pitbull)", ['USHER']);
+    expect(r?.title).not.toBe('USHER');
+  });
+  it('produtora no artista não vira título', () => {
+    const r = lerTituloDoAcervo('Alok, DJ Victor, MC Hariel, MC Marks', ['GR6 EXPLODE']);
+    expect(r?.title).not.toBe('GR6 EXPLODE');
+  });
+  it('limpa sobra de divulgação nos nomes', () => {
+    const r = lerTituloDoAcervo('MC GP e MC MENO K ( DJ TC e FEPACHE ) VIDEO', ['SENTA SENTA']);
+    expect(r?.title).toBe('SENTA SENTA');
+    expect(r?.artists).toEqual(expect.arrayContaining(['MC GP', 'MC MENO K']));
+    expect(r?.artists.join(' ')).not.toMatch(/VIDEO/);
+  });
 });

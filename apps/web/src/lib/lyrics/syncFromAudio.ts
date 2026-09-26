@@ -39,7 +39,7 @@ import { blobFor as localLibraryBlob } from '@/lib/local/localLibrary';
  * devolve tempo por LINHA. A detecção é grosseira DE PROPÓSITO: só precisa
  * separar "inglês" do resto (o acervo do dono é majoritariamente brasileiro).
  */
-function dicaDeIdioma(texto: string): string {
+export function dicaDeIdioma(texto: string): string {
   const t = texto.toLowerCase();
   // Acento é a marca mais forte de português (e de vários outros): não é inglês.
   if (/[ãõáâàéêíóôúüçñ]/.test(t)) return 'multi';

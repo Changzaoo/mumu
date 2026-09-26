@@ -635,7 +635,8 @@ export function lerTituloDoAcervo(
   // Artista gravado como lista ("Purple Disco Machine, Kungs") vira nomes.
   const conhecidos = deduplicarNomes(
     artistasAtuais
-      .flatMap((a) => a.split(/\s*,\s*/))
+      // Respeita banda com vírgula no nome ("Tyler, The Creator").
+      .flatMap((a) => quebrarListaDeNomes(a))
       .map((a) => a.trim())
       .filter(Boolean),
   );
@@ -661,12 +662,27 @@ export function lerTituloDoAcervo(
     unicoArtista &&
     !/^desconhecido$/i.test(unicoArtista) &&
     // Artista entre aspas ("“Panamera”") é a música com certeza — basta a lista.
+    // Um nome só no título basta ("Luiz Melodia" / "“Pérola Negra”"), desde que
+    // o título não tenha aspas próprias nem pareça frase.
     (/^["“”].+["“”]$/.test(unicoArtista)
-      ? nomesNoTitulo.length >= 2
-      : nomesNoTitulo.length >= 3 && nomesNoTitulo.filter(ehCredito).length >= 2) &&
+      ? nomesNoTitulo.length >= 2 ||
+        (nomesNoTitulo.length === 1 &&
+          !/["“”]/.test(original) &&
+          semParentesesDoTitulo.split(/\s+/).length <= 5)
+      : (nomesNoTitulo.length >= 3 && nomesNoTitulo.filter(ehCredito).length >= 2) ||
+        // Título feito SÓ de créditos ("MC 2Jhow (DJ Serpinha)", "MC Kekel e
+        // MC Rita") e o artista sem MC/DJ: a música está no campo do artista.
+        (nomesNoTitulo.length >= 1 &&
+          nomesNoTitulo.every(ehCredito) &&
+          // Nome de MC/DJ é curto; "DJ Got Us Fallin' in Love" é música.
+          nomesNoTitulo.every((n) => n.split(/\s+/).length <= 4) &&
+          !/\b(?:feat|ft)\b/i.test(original) &&
+          !/["“”]/.test(original))) &&
     !ehCredito(unicoArtista) &&
     !/,/.test(unicoArtista) &&
-    !ehGravadora(unicoArtista)
+    !ehGravadora(unicoArtista) &&
+    // Produtora/canal no campo do artista não é a música ("GR6 EXPLODE").
+    !/\b(?:gr6|kondzilla|love funk|explode|records|filmes|playlist)\b/i.test(unicoArtista)
   ) {
     const musica = unicoArtista.replace(/^["“”](.+)["“”]$/, '$1').trim();
     const djs: string[] = [];
@@ -675,7 +691,19 @@ export function lerTituloDoAcervo(
       else if (ehGravadora(dentro)) label ??= dentro.trim();
       return todo;
     });
-    const artistas = deduplicarNomes([...nomesNoTitulo, ...djs]);
+    // Sobra de divulgação grudada nos nomes ("MC MENO K   VIDEO",
+    // "LANÇAMENTO 2025") e créditos colados por espaço duplo ou " - ".
+    const artistas = deduplicarNomes(
+      [...nomesNoTitulo, ...djs]
+        .map((n) =>
+          n
+            .replace(/\b(?:v[ií]deo|clipe|[áa]udio oficial|lan[çc]amento(?:\s+\d{4})?)\b/gi, ' ')
+            .replace(/\bprod\.?\s+/gi, '  '),
+        )
+        .flatMap((n) => n.split(/\s{2,}|\s+-\s+/))
+        .map((n) => n.trim())
+        .filter((n) => n.length >= 2),
+    );
     if (musica.length >= 2) return { title: musica, artists: artistas, label };
   }
 
@@ -741,14 +769,42 @@ export function lerTituloDoAcervo(
   // 3b) Música entre aspas: `Stray Kids "RUN IT" M/V`, `"Ainda Bem" Marisa Monte`.
   //     Só vale quando o que sobra fora das aspas é quem canta ou ruído.
   const citado = trechoEntreAspas(texto);
-  if (citado) {
-    const fora = chave(texto.replace(ASPAS_TODAS, ' ').replace(/\bm\s*\/\s*v\b/gi, ' '));
+  // Duas músicas entre aspas ("A" & "B" Double Feature) não têm UM título.
+  const aspasNoTexto = (texto.match(/["“”]/g) ?? []).length;
+  if (citado && aspasNoTexto <= 2) {
+    // O que está FORA das aspas, sem o ruído de vídeo ("Performance Video",
+    // "M/V", "(Street Ver.)") e com os convidados ("ft. TZ, Anezzi") à parte.
+    let foraBruto = texto
+      .replace(ASPAS_TODAS, ' ')
+      .replace(/[([][^)\]]*\b(?:ver|version|vers[aã]o|performance|live)\b[^)\]]*[)\]]/gi, ' ')
+      .replace(/\bm\s*\/\s*v\b/gi, ' ')
+      .replace(
+        /\b(?:performance|live|lyric|official|oficial|music|v[ií]deos?|videoclipe?|clipe|clip|[áa]udio|visualizer|mv|hd)\b/gi,
+        ' ',
+      );
+    const convidadosFora = /\b(?:ft|feat|featuring|part|com)\.?\s+(.+)$/i.exec(foraBruto);
+    if (convidadosFora) {
+      foraBruto = foraBruto.slice(0, convidadosFora.index);
+    }
+    foraBruto = foraBruto
+      .replace(/[-–—|:]+/g, ' ')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    const fora = chave(foraBruto);
     const sobra = fora
       .split(' ')
       .filter((palavra) => palavra && !chaves.some((c) => c.split(' ').includes(palavra)))
       .join(' ');
-    if (!sobra || SO_RUIDO.test(sobra) || /^(?:mv|video|oficial|official)$/.test(sobra)) {
+    const nomesFora = sobra ? separarNomes(foraBruto) : [];
+    // Nome de gente, não frase: sem número e poucas palavras por nome.
+    const parecemNomes =
+      nomesFora.length > 0 &&
+      nomesFora.length <= 4 &&
+      nomesFora.every((n) => !/\d/.test(n) && n.split(/\s+/).length <= 4);
+    if (!sobra || SO_RUIDO.test(sobra) || parecemNomes) {
       texto = citado;
+      if (sobra && parecemNomes) extras.push(...nomesFora);
+      if (convidadosFora) extras.push(convidadosFora[1]!.trim());
     }
   }
 

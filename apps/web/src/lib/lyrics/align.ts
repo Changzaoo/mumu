@@ -48,6 +48,8 @@ export interface AlignedLine {
    * destaque anda junto com a voz, que é o que "sincronizada" quer dizer.
    */
   words?: TimedWord[];
+  /** O verso teve palavra reconhecida no áudio (tempo real, não interpolado). */
+  ancorada?: boolean;
 }
 
 /**
@@ -255,7 +257,7 @@ export function alignLyrics(
   for (let i = 0; i < lines.length; i++) {
     const known = lineStart.get(i);
     if (known !== undefined) {
-      out.push({ timeMs: known, text: lines[i] ?? '' });
+      out.push({ timeMs: known, text: lines[i] ?? '', ancorada: true });
       continue;
     }
     let prevIndex = i - 1;
