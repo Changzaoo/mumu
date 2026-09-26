@@ -16,6 +16,13 @@
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="radinho.online" />
+    <!-- O primeiro play pede o detalhe da faixa à API e os bytes ao cofre: abrir
+         as duas conexões já no boot tira o aperto TLS (~0,2 s no cabo, bem mais
+         no 4G) do caminho entre o toque e o som. `crossorigin` porque o player
+         (crossOrigin=anonymous) e a API usam CORS — sem ele a conexão aquecida
+         não é reaproveitada. -->
+    <link rel="preconnect" href="https://aurial-api.nexusholding.xyz" crossorigin />
+    <link rel="preconnect" href="https://importer.nexusholding.xyz" crossorigin />
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
     <link rel="icon" type="image/png" href="/icons/favicon.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />

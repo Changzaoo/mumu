@@ -128,6 +128,21 @@ describe('a varredura de envio não desiste no meio', () => {
     expect(tentadas).toEqual(['local:normal']);
   });
 
+  it('não reenvia faixa do acervo, que chega magra mas o cofre já tem', async () => {
+    // A listagem do acervo não traz `remoteUrl`. Sem a trava, o aparelho que
+    // tinha a faixa baixada a reenviava a cada abertura — medido: uma faixa
+    // subiu 80 vezes para o cofre.
+    const lib = await montar([
+      entrada('local:do-acervo', { origem: 'catalogo', tocavel: true }),
+      entrada('local:minha'),
+    ]);
+
+    await lib.backfillRemote();
+
+    const tentadas = uploadTrackBlob.mock.calls.map(([id]) => id);
+    expect(tentadas).toEqual(['local:minha']);
+  });
+
   it('grava o remoteUrl de quem subiu', async () => {
     const lib = await montar([entrada('local:x')]);
 

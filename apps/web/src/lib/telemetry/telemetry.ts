@@ -645,7 +645,16 @@ export function initTelemetry(): void {
   // que vai junto; o aparelho é o mesmo antes e depois, e é assim que se enxerga
   // que o visitante de ontem virou usuário hoje.
   start(null);
+  // A PRIMEIRA NOTIFICAÇÃO REPETE O QUE JÁ SE SABE. O `subscribeAuth` avisa na
+  // hora com o estado atual — para o visitante, o mesmo `null` de cima. Reagir
+  // a ela era stop()+start(): três PUTs idênticos no boot e, pior, DUAS sessões
+  // contadas por abertura do app (cada `start` soma uma e abre outra entrada
+  // no log de sessões). Só uma troca real de conta reinicia a sessão.
   subscribeAuth((user) => {
+    if ((user?.uid ?? null) === (currentUser?.uid ?? null)) {
+      currentUser = user; // mesmo dono; pode ser um objeto mais novo
+      return;
+    }
     stop();
     start(user);
   });

@@ -2949,7 +2949,12 @@ export async function backfillRemote(): Promise<void> {
   // A LISTA É TIRADA UMA VEZ, no começo. `read()` devolve o array vivo do
   // cache, e cada upload o substitui (patchEntry) — iterar direto sobre ele
   // era percorrer uma lista trocada por baixo dos pés, pulando faixas.
-  const pendentes = read().filter((e) => !e.remoteUrl);
+  // FAIXA DO ACERVO NÃO SE REENVIA. A listagem chega magra, sem `remoteUrl`,
+  // então toda faixa do acervo parecia "pendente" — e o aparelho que a tinha
+  // baixada subia a mesma cópia a cada abertura. O cofre já a tem (é por isso
+  // que ela está no acervo); o reenvio só gastava dados do celular e, antes de
+  // o importador passar a manter o token, quebrava o link de todo mundo.
+  const pendentes = read().filter((e) => !e.remoteUrl && e.origem !== 'catalogo');
   for (const entry of pendentes) {
     // UMA FAIXA RUIM NÃO PODE MATAR A VARREDURA. Sem esta trava, um erro em
     // qualquer faixa (áudio corrompido no cache, escrita recusada, cofre

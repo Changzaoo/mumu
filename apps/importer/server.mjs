@@ -2349,12 +2349,57 @@ async function main() {
           res.end(JSON.stringify({ error: 'Sem espaço em disco no cofre.' }));
           return;
         }
-        const token = crypto.randomBytes(16).toString('hex');
+        // REENVIO NÃO TROCA O TOKEN.
+        //
+        // O token é o link de capacidade gravado no acervo (`remoteUrl`) e em
+        // todo aparelho que já sincronizou a faixa. Sorteá-lo de novo a cada
+        // envio invalidava todas essas cópias de uma vez: o próximo play tomava
+        // 403, que o app trata como PROVA DE MORTE — apaga o link e reenvia, o
+        // que sorteava outro token e quebrava o link do aparelho seguinte.
+        // Medido em 2026-09-26: 1.515 envios para 395 faixas (uma delas 80
+        // vezes) e 115 faixas do acervo apontando para um token que o cofre já
+        // recusava. Pior: aparelho de usuário comum reenvia mas não republica o
+        // acervo, então o link quebrava para TODO MUNDO sem ninguém consertar.
+        let anterior = null;
+        try {
+          anterior = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
+        } catch {
+          anterior = null;
+        }
+        const tokenAnterior =
+          anterior && typeof anterior.token === 'string' && /^[0-9a-f]{32}$/.test(anterior.token)
+            ? anterior.token
+            : null;
+        const token = tokenAnterior ?? crypto.randomBytes(16).toString('hex');
         const contentType = req.headers['content-type'] || 'audio/mpeg';
         // DE ONDE ESTE ÁUDIO VEIO — é o que permite reconstruí-lo quando a poda
         // levar os bytes embora. Sem isso, a faixa descartada vira 404 eterno.
-        // Ver o `GET /blob/` e `sweepBlobStore`.
-        const sourceUrl = req.headers['x-aurial-source'];
+        // Ver o `GET /blob/` e `sweepBlobStore`. Um reenvio sem origem não apaga
+        // a que já estava guardada.
+        const sourceHeader = req.headers['x-aurial-source'];
+        const sourceUrl =
+          typeof sourceHeader === 'string' && sourceHeader
+            ? sourceHeader
+            : typeof anterior?.sourceUrl === 'string'
+              ? anterior.sourceUrl
+              : undefined;
+        // MESMOS BYTES, NADA A GRAVAR. Reenvio idêntico (a varredura de um
+        // aparelho que não sabia que a cópia já existia) só confirma o link.
+        if (tokenAnterior && anterior.size === buf.length) {
+          const atual = await readFile(blobPath(id)).catch(() => null);
+          if (atual && atual.length === buf.length && atual.equals(buf)) {
+            if (sourceUrl && sourceUrl !== anterior.sourceUrl) {
+              await writeFile(blobMetaPath(id), JSON.stringify({ ...anterior, sourceUrl })).catch(
+                () => undefined,
+              );
+            }
+            ultimaRecusaDeUpload = null;
+            log('blob já guardado (mesmos bytes):', id);
+            res.writeHead(200, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ id, token }));
+            return;
+          }
+        }
         // GRAVAÇÃO EM DOIS TEMPOS. Os bytes vão para um arquivo parcial e só
         // viram `.bin` por rename, que é atômico: nenhum pedido nunca enxerga
         // meio arquivo. A ORDEM também importa — a meta é gravada ANTES do
@@ -2370,7 +2415,7 @@ async function main() {
               token,
               contentType,
               size: buf.length,
-              ...(typeof sourceUrl === 'string' && sourceUrl ? { sourceUrl } : {}),
+              ...(sourceUrl ? { sourceUrl } : {}),
             }),
           );
           await rename(parcial, blobPath(id));
@@ -2446,7 +2491,13 @@ async function main() {
          */
         const abrir = async () => {
           const fh = await open(caminho, 'r');
-          const st = await fh.stat();
+          let st;
+          try {
+            st = await fh.stat();
+          } catch (err) {
+            await fh.close().catch(() => undefined);
+            throw err;
+          }
           // ARQUIVO CORTADO. Gravação interrompida no meio (disco cheio, cofre
           // desmontado) deixa bytes pela metade, e servir isso é entregar a
           // música truncada anunciada como inteira — o pedido seguinte nem
@@ -2514,6 +2565,14 @@ async function main() {
         }
 
         const { fh, st } = aberto;
+        // QUEM PEDIU JÁ FOI EMBORA. Pular faixa cancela o pedido enquanto o
+        // arquivo ainda abria; o `close` da resposta já disparou e não dispara
+        // de novo, então o descritor ficava órfão até o coletor de lixo — é o
+        // "Closing a FileHandle object on garbage collection" do log.
+        if (res.destroyed || req.destroyed) {
+          await fh.close().catch(() => undefined);
+          return;
+        }
         const total = st.size;
         const faixa = faixaPedida(req.headers.range, total);
         if (faixa === 'invalida') {
