@@ -932,6 +932,46 @@ function toqueNoBlob(p, mtimeMs) {
 }
 
 /**
+ * Onde começa o ÁUDIO para quem vai tocar — pulando a tag ID3v2 do começo.
+ *
+ * Metade do cofre traz a capa embutida na tag (média de 349 KB, até ~500 KB),
+ * e o `<audio>` precisa baixar tudo isso antes do primeiro quadro. Medido pela
+ * internet, no mesmo caminho do app (2026-09-26): 1.029 ms até
+ * `loadedmetadata` com a tag grande, 245 ms com a tag pequena — quase um
+ * segundo a mais no primeiro play de metade das faixas. O player não usa nada
+ * da tag: título, artista e capa vêm do acervo.
+ *
+ * Só para o elemento de mídia (`Sec-Fetch-Dest: audio|video`). O download para
+ * offline é um `fetch` e continua recebendo o arquivo inteiro, com a capa, que
+ * é a que aparece sem rede. Navegador que não manda o cabeçalho recebe o
+ * arquivo inteiro, como sempre recebeu.
+ *
+ * Devolve quantos bytes pular (0 = servir inteiro). Só pula quando o que vem
+ * depois da tag é comprovadamente um quadro MPEG — na dúvida, arquivo inteiro.
+ */
+async function inicioDoAudioParaPlayer(req, fh, tamanho, contentType) {
+  const destino = req.headers['sec-fetch-dest'];
+  if (destino !== 'audio' && destino !== 'video') return 0;
+  if (contentType && !/mpeg|mp3/i.test(contentType)) return 0;
+  try {
+    const cab = Buffer.alloc(10);
+    const { bytesRead } = await fh.read(cab, 0, 10, 0);
+    if (bytesRead < 10 || cab.toString('latin1', 0, 3) !== 'ID3') return 0;
+    // Tamanho "synchsafe": 7 bits por byte; o bit alto de cada um é sempre 0.
+    if ((cab[6] | cab[7] | cab[8] | cab[9]) & 0x80) return 0;
+    const corpo = (cab[6] << 21) | (cab[7] << 14) | (cab[8] << 7) | cab[9];
+    const rodape = cab[5] & 0x10 ? 10 : 0;
+    const pulo = 10 + corpo + rodape;
+    if (pulo >= tamanho - 1024) return 0;
+    const sync = Buffer.alloc(2);
+    await fh.read(sync, 0, 2, pulo);
+    return sync[0] === 0xff && (sync[1] & 0xe0) === 0xe0 ? pulo : 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Interpreta `Range` para um recurso de `total` bytes.
  *
  * Devolve `null` (sem faixa / pedido malformado → resposta 200 inteira),
@@ -2573,7 +2613,9 @@ async function main() {
           await fh.close().catch(() => undefined);
           return;
         }
-        const total = st.size;
+        // O PLAYER NÃO RECEBE A CAPA EMBUTIDA. Ver `inicioDoAudioParaPlayer`.
+        const pulo = await inicioDoAudioParaPlayer(req, fh, st.size, meta.contentType);
+        const total = st.size - pulo;
         const faixa = faixaPedida(req.headers.range, total);
         if (faixa === 'invalida') {
           await fh.close().catch(() => undefined);
@@ -2583,11 +2625,16 @@ async function main() {
         }
         const start = faixa ? faixa.start : 0;
         const end = faixa ? faixa.end : total - 1;
+        const varyAtual = res.getHeader('Vary');
         const headers = {
           'Content-Type': meta.contentType || 'audio/mpeg',
           'Content-Length': String(end - start + 1),
           'Accept-Ranges': 'bytes',
           'Cache-Control': 'private, max-age=31536000',
+          // A mesma URL tem duas formas (com e sem a tag): o cache do navegador
+          // precisa separá-las, senão o download para offline poderia receber
+          // a versão sem capa que o player guardou.
+          Vary: varyAtual ? `${varyAtual}, Sec-Fetch-Dest` : 'Sec-Fetch-Dest',
         };
         if (faixa) headers['Content-Range'] = `bytes ${start}-${end}/${total}`;
         // Tocar conta como uso: é isto que transforma a poda por mtime em LRU
@@ -2608,7 +2655,7 @@ async function main() {
           soltarServindo(caminho);
           void fh.close().catch(() => undefined);
         };
-        const rs = fh.createReadStream({ start, end, autoClose: false });
+        const rs = fh.createReadStream({ start: start + pulo, end: end + pulo, autoClose: false });
         rs.on('error', () => {
           soltar();
           if (!res.writableEnded) res.destroy();
