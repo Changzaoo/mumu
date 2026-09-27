@@ -183,7 +183,10 @@ async function estadoDoAudio(page: Page): Promise<{
       .map((h: any) => h?._sounds?.[0]?._node)
       .filter((n: unknown): n is HTMLAudioElement => Boolean(n));
     /* eslint-enable @typescript-eslint/no-explicit-any */
-    const ativo = nos.find((n) => !n.paused && n.currentTime > 0) ?? nos[0];
+    // Com a próxima faixa pré-carregada há DOIS elementos: o que está tocando
+    // é o que não está pausado (mesmo no instante em que ainda marca 0 s).
+    const ativo =
+      nos.find((n) => !n.paused && n.currentTime > 0) ?? nos.find((n) => !n.paused) ?? nos[0];
     if (!ativo) return null;
     return {
       tocando: !ativo.paused,
@@ -206,8 +209,12 @@ test.describe('reprodução de ponta a ponta', () => {
       .poll(async () => (await estadoDoAudio(page))?.duracao ?? 0, { timeout: 15_000 })
       .toBeGreaterThan(1);
 
+    // Sai som: um elemento de verdade tocando (a próxima faixa pré-carregada
+    // também tem duração, então a duração sozinha não prova nada).
+    await expect
+      .poll(async () => (await estadoDoAudio(page))?.tocando ?? false, { timeout: 10_000 })
+      .toBe(true);
     const estado = await estadoDoAudio(page);
-    expect(estado?.tocando).toBe(true);
     expect(Number.isFinite(estado?.duracao)).toBe(true);
     // Toca do cofre local: alça de blob, não a rede.
     expect(estado?.src).toMatch(/^blob:/);
