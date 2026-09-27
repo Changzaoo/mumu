@@ -25,14 +25,37 @@ export function initPwaUpdater(): void {
     // recarregar ali seria um refresh à toa logo na abertura.
     const tinhaControle = Boolean(navigator.serviceWorker.controller);
     let recarregando = false;
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (recarregando || !tinhaControle) return;
+    const recarregar = (): void => {
+      if (recarregando) return;
       recarregando = true;
-      // A música volta de onde estava — inclusive com a tela apagada.
+      // A música volta de onde estava.
       if (usePlayerStore.getState().isPlaying) prepararRetomadaTocando();
       // E a tela volta como estava: expandida, com a letra aberta.
       guardarTelaParaRecarregar();
       window.location.reload();
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recarregando || !tinhaControle) return;
+      // NUNCA COM A TELA APAGADA E A MÚSICA TOCANDO. Recarregar ali matava a
+      // música: a página nova sobe sem gesto nenhum da pessoa, e o navegador
+      // (Android e iPhone) não deixa ela voltar a tocar em segundo plano. O
+      // bundle antigo continua funcionando perfeitamente; a versão nova entra
+      // quando a tela acender ou quando a música parar — o que vier primeiro.
+      const tocandoNoEscuro = (): boolean => document.hidden && usePlayerStore.getState().isPlaying;
+      if (!tocandoNoEscuro()) {
+        recarregar();
+        return;
+      }
+      const tentar = (): void => {
+        if (tocandoNoEscuro()) return;
+        document.removeEventListener('visibilitychange', tentar);
+        pararDeOuvir();
+        recarregar();
+      };
+      const pararDeOuvir = usePlayerStore.subscribe((s, antes) => {
+        if (s.isPlaying !== antes.isPlaying) tentar();
+      });
+      document.addEventListener('visibilitychange', tentar);
     });
   }
 
