@@ -25,6 +25,8 @@ import { usePlayerStore } from '@/stores/playerStore';
 
 /** Sem antecipação artificial: evita letra "adiantada" perceptivelmente. */
 const LEAD_MS = 0;
+/** Clicar numa palavra entra este tanto antes dela (o ataque da sílaba). */
+const INICIO_DA_PALAVRA_MS = 60;
 
 /**
  * Escala, opacidade e desfoque por DISTÂNCIA da linha cantada. Transform e
@@ -216,8 +218,11 @@ export function LyricsView({ track, className }: LyricsViewProps) {
             : Math.abs(index - activeIndex)
           : null;
         const profundidade = distancia === null ? null : estiloDeProfundidade(distancia);
-        const palavras = active ? (palavrasPorLinha[index] ?? []) : [];
-        const deFundo = active ? palavrasDeFundo(palavras) : [];
+        // TODAS as linhas sincronizadas vêm palavra a palavra — cada palavra é
+        // um ponto de entrada na música (clicar leva ao instante dela), não só
+        // a linha que está sendo cantada.
+        const palavras = synced ? (palavrasPorLinha[index] ?? []) : [];
+        const deFundo = palavras.length > 0 ? palavrasDeFundo(palavras) : [];
         return (
           <button
             key={`${line.timeMs}-${index}`}
@@ -237,27 +242,38 @@ export function LyricsView({ track, className }: LyricsViewProps) {
               distancia === null ? 'text-fg-muted/80' : active ? 'text-fg' : 'text-fg-muted',
             )}
           >
-            {active && palavras.length > 0 ? (
+            {palavras.length > 0 ? (
               <span>
                 {palavras.map((palavra, i) => {
-                  const cantada = i < ativa.palavra;
-                  const agora = i === ativa.palavra;
+                  const cantada = active && i < ativa.palavra;
+                  const agora = active && i === ativa.palavra;
                   const fundo = deFundo[i];
                   return (
                     <span key={`${palavra.timeMs}-${i}`}>
                       <span
+                        // CLICAR NA PALAVRA LEVA À PALAVRA — não ao começo da
+                        // frase. Um fio antes do início dela (INICIO_DA_PALAVRA_MS)
+                        // para o ataque da sílaba não ser cortado pelo seek.
+                        onClick={(e) => {
+                          e.stopPropagation();
+                          const alvo = Math.max(line.timeMs, palavra.timeMs - INICIO_DA_PALAVRA_MS);
+                          seek(alvo / 1000);
+                        }}
                         className={cn(
+                          'cursor-pointer rounded-sm hover:underline hover:decoration-2 hover:underline-offset-4',
                           // Ênfase por ELEVAÇÃO e brilho, não por escala: crescer a palavra a
                           // fazia invadir o espaço da vizinha ("Ascachorra").
                           'inline-block transition-transform duration-150 ease-out motion-reduce:transition-none',
-                          agora
-                            ? 'letra-palavra-agora -translate-y-0.5 text-fg'
-                            : cantada
-                              ? 'text-fg'
-                              : 'text-fg-muted/70',
+                          !active
+                            ? null
+                            : agora
+                              ? 'letra-palavra-agora -translate-y-0.5 text-fg'
+                              : cantada
+                                ? 'text-fg'
+                                : 'text-fg-muted/70',
                           // Voz de fundo (entre parênteses): a cor vem da classe.
                           fundo && 'letra-fundo',
-                          fundo && !agora && !cantada && 'letra-fundo-depois',
+                          fundo && active && !agora && !cantada && 'letra-fundo-depois',
                         )}
                       >
                         {palavra.text}

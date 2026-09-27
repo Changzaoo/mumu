@@ -1091,13 +1091,25 @@ function saveResume(force = false, limparMarca = false): void {
  * de uso único: o primeiro boot que a lê já a apaga, para uma reabertura comum
  * depois não sair tocando sem o usuário pedir.
  */
+function posicaoExata(daStore: number): number {
+  const doMotor =
+    audioEngine.currentTrack?.id === usePlayerStore.getState().currentTrack?.id
+      ? audioEngine.getPosition()
+      : 0;
+  const pos = doMotor > 0 ? doMotor : daStore;
+  return Math.round(pos * 10) / 10;
+}
+
 export function prepararRetomadaTocando(): void {
   const s = usePlayerStore.getState();
   if (!s.currentTrack) return;
   try {
     window.localStorage.setItem(
       RESUME_KEY,
-      JSON.stringify({ track: s.currentTrack, progress: Math.floor(s.progress), tocando: true }),
+      // A posição do MOTOR, com décimos: a da store chega atrasada (~200 ms,
+      // estrangulada) e era arredondada para baixo — a música voltava até um
+      // segundo antes, e a letra junto, na palavra errada.
+      JSON.stringify({ track: s.currentTrack, progress: posicaoExata(s.progress), tocando: true }),
     );
   } catch {
     /* quota */

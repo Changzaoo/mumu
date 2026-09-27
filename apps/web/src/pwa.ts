@@ -16,6 +16,7 @@
  */
 import { registerSW } from 'virtual:pwa-register';
 import { prepararRetomadaTocando, usePlayerStore } from '@/stores/playerStore';
+import { guardarTelaParaRecarregar } from '@/stores/uiStore';
 
 export function initPwaUpdater(): void {
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -29,6 +30,8 @@ export function initPwaUpdater(): void {
       recarregando = true;
       // A música volta de onde estava — inclusive com a tela apagada.
       if (usePlayerStore.getState().isPlaying) prepararRetomadaTocando();
+      // E a tela volta como estava: expandida, com a letra aberta.
+      guardarTelaParaRecarregar();
       window.location.reload();
     });
   }

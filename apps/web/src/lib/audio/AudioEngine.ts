@@ -506,6 +506,13 @@ export class AudioEngine {
   getPosition(): number {
     const slot = this.active;
     if (slot.source?.kind === 'howl') {
+      // O ELEMENTO É A VERDADE. `howl.seek()` devolve o próprio Howl (não um
+      // número) enquanto o Howler está com o play "travado" — exatamente o
+      // estado da retomada depois de uma atualização com o autoplay recusado e
+      // destravado por um toque. A posição virava 0, e a letra ficava parada no
+      // começo com a música tocando no meio.
+      const no = (slot.source.howl as unknown as HowlInternals)._sounds[0]?._node;
+      if (no && Number.isFinite(no.currentTime)) return no.currentTime;
       const pos = slot.source.howl.seek();
       return typeof pos === 'number' ? pos : 0;
     }
