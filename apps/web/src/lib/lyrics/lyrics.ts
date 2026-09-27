@@ -84,11 +84,13 @@ function parseLrc(lrc: string): LyricLine[] {
 }
 
 export interface LrclibRow {
+  id?: number | null;
   syncedLyrics?: string | null;
   plainLyrics?: string | null;
   trackName?: string | null;
   artistName?: string | null;
   duration?: number | null;
+  instrumental?: boolean | null;
 }
 
 /**
@@ -185,7 +187,7 @@ export function rowMatches(
  * publicado. Tirar aquele rótulo não removeria uma fonte, removeria uma
  * ressalva.
  */
-function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
+export function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
   if (!row) return null;
   if (typeof row.syncedLyrics === 'string' && row.syncedLyrics.trim()) {
     const lines = parseLrc(row.syncedLyrics);
@@ -421,6 +423,47 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
   plainFallback ??= soltos.plain;
 
   return plainFallback;
+}
+
+/**
+ * TODAS AS LETRAS COM ESTE TÍTULO, de qualquer artista e qualquer duração.
+ *
+ * Solto de propósito: é o material para `confirmarPelaVoz`, que só aceita uma
+ * delas depois de comparar o texto com o que o importador OUVIU no áudio. Sem
+ * essa prova, título igual não vale nada ("Lembrei de Você" ≠ "Lembrei de Tu").
+ * Existe porque a mesma música aparece no LRCLIB com o artista escrito de outro
+ * jeito ("Men0" em vez de "MC Meno K") e em versões de outra duração, e o
+ * casamento estrito de `rowMatches` descarta todas — a faixa ficava sem letra
+ * e a tela mostrava a transcrição, que erra com autotune.
+ */
+export async function letrasComOMesmoTitulo(track: TrackDto): Promise<LrclibRow[]> {
+  const rawTitle = track.title.trim();
+  if (!rawTitle) return [];
+  const titulos = Array.from(new Set([cleanTitleForLyrics(rawTitle) || rawTitle, rawTitle]));
+  const vistos = new Set<number | string>();
+  const saida: LrclibRow[] = [];
+  const respostas = await Promise.all(
+    titulos.map(async (titulo) => {
+      const url = new URL('https://lrclib.net/api/search');
+      url.searchParams.set('track_name', titulo);
+      const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } }).catch(
+        () => null,
+      );
+      if (!res?.ok) return [];
+      const rows = (await res.json().catch(() => [])) as unknown;
+      return Array.isArray(rows) ? (rows as LrclibRow[]) : [];
+    }),
+  );
+  const qt = titulos.map(normLoose).filter(Boolean);
+  for (const row of respostas.flat()) {
+    const rt = normLoose(row.trackName ?? '');
+    if (!rt || !qt.some((t) => rt === t || rt.includes(t) || t.includes(rt))) continue;
+    const chave = row.id ?? `${row.artistName}|${row.trackName}|${row.duration}`;
+    if (vistos.has(chave)) continue;
+    vistos.add(chave);
+    saida.push(row);
+  }
+  return saida;
 }
 
 /**

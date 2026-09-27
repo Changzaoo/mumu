@@ -580,24 +580,16 @@
   }
 }
 
-/* A AURA DO BOTÃO PLAY — halo em volta, movido quadro a quadro por
-   `AuraDoPlay.tsx` (derivas sorteadas, sem keyframe: keyframe tem ciclo).
-   Aqui só o que é fixo: a camada, o desfoque (rasterizado uma vez — o que
-   muda por quadro é só `transform`/`opacity`) e a versão leve. */
-.aura-play-camada {
-  position: absolute;
-  inset: 0;
-  border-radius: 9999px;
-  filter: blur(10px);
-  will-change: transform, opacity;
+/* A AURA DO BOTÃO PLAY — névoa desenhada quadro a quadro por `AuraDoPlay.tsx`
+   (ruído 3D com domínio distorcido, sem ciclo). Aqui só o que é fixo. */
+.aura-play-nevoa {
+  /* O campo é pequeno e ampliado: o desfoque apaga os pixels e amacia os
+     fiapos — névoa não tem borda. */
+  filter: blur(3.5px);
+  image-rendering: auto;
 }
-/* Aparelho fraco: sem desfoque (o gradiente já é macio) e um lóbulo a menos. */
-:root[data-perf='baixo'] .aura-play-camada {
-  filter: none;
-  will-change: auto;
-}
-:root[data-perf='baixo'] .aura-play-lobulo-extra {
-  display: none;
+:root[data-perf='baixo'] .aura-play-nevoa {
+  filter: blur(3px);
 }
 
 /* O DISCO GIRANDO no lugar do play enquanto a música é trazida. Uma volta a

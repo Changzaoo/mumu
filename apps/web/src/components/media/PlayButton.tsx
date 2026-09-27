@@ -21,19 +21,14 @@ const sizes = {
 } as const;
 
 /**
- * A AURA — halo em volta, não fumaça subindo.
+ * A AURA — neblina em volta do botão, se movendo em formas que não se repetem.
  *
- * Um anel e dois lóbulos da cor de destaque atrás do círculo, se mexendo por
- * derivas sorteadas que nunca fecham um ciclo (ver `AuraDoPlay`). Tudo fica
- * atrás do círculo opaco do botão — só aparece o que extravasa.
+ * Névoa procedural (ruído 3D com domínio distorcido, semente sorteada) recortada
+ * num anel colado ao botão, escorrendo para fora — ver `AuraDoPlay`. Fica atrás
+ * do círculo opaco: só aparece o que extravasa.
  *
- * A fumaça que subia do botão (`FumacaDoPlay`) saiu: era demais, tomava o
- * espaço acima do play e disputava atenção com a capa. A aura fica colada ao
- * botão, ao redor dele.
- *
- * PAUSAR NÃO CORTA: a aura desacelera e esmaece até assentar parada onde
- * estava. Sem movimento pedido, ela continua lá, só sem se mexer — sumir com
- * tudo deixava o botão "sem aura nenhuma" para quem desligou as animações.
+ * PAUSAR NÃO CORTA: a névoa desacelera e esmaece até assentar parada onde
+ * estava. Sem movimento pedido, ela continua lá, só sem se mexer.
  */
 function Aura({ playing }: { playing: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');

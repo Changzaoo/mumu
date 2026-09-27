@@ -6,7 +6,12 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
-import { pedirCalibracao, TRANSCRICAO_ANTIGA, type LetraAlinhada } from '@/lib/lyrics/calibragem';
+import {
+  ehTranscricao,
+  pedirCalibracao,
+  TRANSCRICAO_ANTIGA,
+  type LetraAlinhada,
+} from '@/lib/lyrics/calibragem';
 import { LetraSendoFeita, useLetraAoVivo } from '@/components/media/LetraSendoFeita';
 import {
   linhaAtiva,
@@ -73,10 +78,13 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   });
   // A "Transcrição do áudio" do caminho antigo era texto inventado pelo
   // reconhecimento livre — não é letra, não aparece.
-  const lyrics = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;
+  const publicada = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;
+  const vivo = useLetraAoVivo(track.id);
+  // A letra de verdade que a voz acabou de confirmar aparece JÁ, enquanto é
+  // alinhada ao áudio — no lugar do vazio ou da transcrição.
+  const lyrics = vivo?.letra && (!publicada || ehTranscricao(publicada)) ? vivo.letra : publicada;
 
   const terminouBusca = !isLoading;
-  const vivo = useLetraAoVivo(track.id);
   // O CAMINHO ANTIGO FOI DESLIGADO: transcrever pelo aparelho (reconhecimento
   // livre, modelo pequeno) inventava letra com sotaque e autotune, e a gravava
   // no cache como se fosse a letra. Hoje a letra publicada é ALINHADA ao áudio
@@ -102,9 +110,12 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     let cancelado = false;
     void pedirCalibracao(track).then((pronta) => {
       if (cancelado || !pronta) return;
-      const jaTinha = (
-        queryClient.getQueryData<Lyrics | null>(['lyrics', track.id]) as LetraAlinhada | null
-      )?.alinhada;
+      const naTela = queryClient.getQueryData<Lyrics | null>([
+        'lyrics',
+        track.id,
+      ]) as LetraAlinhada | null;
+      // Transcrição na tela perde para a letra de verdade que a voz confirmou.
+      const jaTinha = naTela?.alinhada && !(ehTranscricao(naTela) && !ehTranscricao(pronta));
       if (!jaTinha) queryClient.setQueryData(['lyrics', track.id], pronta);
     });
     return () => {

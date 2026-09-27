@@ -33,6 +33,7 @@ import {
   urlDoTempo,
 } from '@/lib/lyrics/recalibrar';
 import { remoteUrlFor } from '@/lib/local/localLibrary';
+import { letraConfirmadaPelaVoz, palavrasOuvidas } from '@/lib/lyrics/confirmarPelaVoz';
 
 /**
  * Espaço entre perguntas ao importador e o número de tentativas.
@@ -47,8 +48,21 @@ const INTERVALO_MS = 15_000;
 const TENTATIVAS_MAX = 20;
 /** Rótulo da transcrição do caminho antigo (texto inventado, não é letra). */
 export const TRANSCRICAO_ANTIGA = 'Transcrição do áudio';
+/** Rótulo da transcrição de hoje: o que o modelo ouviu, na falta da letra. */
+export const TRANSCRICAO_AUTOMATICA = 'Transcrição automática';
+
+/** Transcrição (de qualquer época) não é letra publicada. */
+export function ehTranscricao(letra: Lyrics | null | undefined): boolean {
+  return letra?.source === TRANSCRICAO_ANTIGA || letra?.source === TRANSCRICAO_AUTOMATICA;
+}
 /** Enquanto a transcrição roda, a tela mostra as palavras chegando. */
 const AO_VIVO_MS = 3_000;
+/**
+ * Com quantas palavras ouvidas já dá para procurar a letra de verdade e
+ * confirmá-la pela voz (ver lib/lyrics/confirmarPelaVoz.ts) — o bastante para
+ * a prova valer, cedo o bastante para a letra certa chegar em segundos.
+ */
+const OUVIDAS_PARA_CONFIRMAR = 40;
 
 /**
  * A LETRA SENDO FEITA, AO VIVO — o que a tela mostra enquanto o importador
@@ -59,6 +73,8 @@ const AO_VIVO_MS = 3_000;
 export interface LetraAoVivo {
   fase: 'na-fila' | 'transcrevendo' | 'alinhando';
   parcial?: TranscricaoParcial;
+  /** A letra de verdade, já achada, enquanto é alinhada ao áudio. */
+  letra?: Lyrics;
 }
 const aoVivo = new Map<string, LetraAoVivo>();
 const ouvintesAoVivo = new Set<() => void>();
@@ -79,7 +95,11 @@ function publicar(trackId: string, estado: LetraAoVivo | null): void {
 }
 
 /** Letra já passada pelo motor atual (alinhamento / transcrição filtrada). */
-export type LetraAlinhada = Lyrics & { alinhada?: boolean };
+export type LetraAlinhada = Lyrics & {
+  alinhada?: boolean;
+  /** Transcrição que já procurou a letra de verdade (e não achou). */
+  procuradaPelaVoz?: boolean;
+};
 
 /** Uma entrada por faixa em voo — o que impede o pedido duplicado. */
 const emVoo = new Map<string, Promise<Lyrics | null>>();
@@ -89,37 +109,85 @@ export function calibracaoEmVoo(trackId: string): boolean {
   return emVoo.has(trackId);
 }
 
+function letraPublicada(letra: Lyrics | null | undefined): Lyrics | null {
+  return letra && !ehTranscricao(letra) ? letra : null;
+}
+
 function idiomaPara(letra: Lyrics | null): string {
   if (!letra) return 'auto'; // sem letra em cache: deixa o importador detectar
   const texto = letra.lines.map((l) => l.text).join(' ');
   return dicaDeIdioma(texto) === 'en' ? 'en' : 'pt';
 }
 
-async function perguntarAteChegar(
+/**
+ * A letra de verdade apareceu (confirmada pela voz): guarda, mostra na hora e
+ * alinha ao áudio — a mesma estrada de quem já tinha letra publicada.
+ */
+async function usarLetraConfirmada(
   trackId: string,
+  remota: string,
+  letra: Lyrics,
+  manterVivo: () => boolean,
+): Promise<Lyrics | null> {
+  writeLyrics(trackId, letra);
+  publicar(trackId, { fase: 'alinhando', letra });
+  const url = urlDoAlinhamento(remota, idiomaPara(letra));
+  const alinhada = url ? await alinharAteChegar(trackId, url, letra, manterVivo) : null;
+  return alinhada ?? letra;
+}
+
+async function perguntarAteChegar(
+  track: TrackDto,
+  remota: string,
   url: string,
   manterVivo: () => boolean,
 ): Promise<Lyrics | null> {
+  const trackId = track.id;
   let tentativas = 0;
+  let procurouCedo = false;
   const limite = Date.now() + 10 * 60_000;
   while (manterVivo()) {
     const r = await buscarTempo(url);
     if (r.tipo === 'pronto') {
-      const atual = cachedLyrics(trackId);
+      // Antes de a transcrição virar letra: a letra de verdade existe em algum
+      // lugar com outro artista/duração? A voz decide.
+      if (!letraPublicada(cachedLyrics(trackId))) {
+        const confirmada = await letraConfirmadaPelaVoz(track, r.words);
+        if (confirmada) return usarLetraConfirmada(trackId, remota, confirmada, manterVivo);
+      }
+      const atual = letraPublicada(cachedLyrics(trackId));
       // Letra em cache: reancora nela. Sem letra nenhuma: a transcrição vira
       // a própria letra (rotulada — ver palavrasEmLinhas/recalibrar.ts).
       const ouvidas = atual ? null : transcricaoConfiavel(r.words);
       const nova: Lyrics | null = atual
         ? recalibrarLetra(atual, r.words)
         : ouvidas
-          ? { synced: true, lines: palavrasEmLinhas(ouvidas), source: 'Transcrição automática' }
+          ? { synced: true, lines: palavrasEmLinhas(ouvidas), source: TRANSCRICAO_AUTOMATICA }
           : null;
       if (!nova || nova.lines.length === 0) return null;
-      const pronta: LetraAlinhada = { ...nova, calibrada: true, alinhada: true };
+      const pronta: LetraAlinhada = {
+        ...nova,
+        calibrada: true,
+        alinhada: true,
+        procuradaPelaVoz: true,
+      };
       writeLyrics(trackId, pronta);
       return pronta;
     }
     if (r.tipo !== 'esperar') return null;
+    // CEDO: com o começo da música já ouvido, procura a letra de verdade — se a
+    // voz a confirmar, ela chega em segundos em vez de ao fim da transcrição.
+    if (
+      !procurouCedo &&
+      r.parcial &&
+      palavrasOuvidas(r.parcial.words).length >= OUVIDAS_PARA_CONFIRMAR
+    ) {
+      procurouCedo = true;
+      const confirmada = await letraConfirmadaPelaVoz(track, r.parcial.words);
+      if (confirmada && manterVivo()) {
+        return usarLetraConfirmada(trackId, remota, confirmada, manterVivo);
+      }
+    }
     // Transcrevendo: a tela mostra as palavras chegando — pergunta a cada 3 s e
     // não gasta o orçamento de tentativas (a música inteira leva minutos).
     publicar(trackId, {
@@ -181,10 +249,12 @@ export function pedirCalibracao(
   // `alinhada`, e não só `calibrada`: a calibração antiga (reconhecimento livre
   // com o modelo `base`) errava com sotaque e autotune e deixava a letra no
   // lugar errado — ela é refeita UMA vez pelo alinhamento.
+  // Transcrição guardada antes da busca pela voz existir: passa por ela uma vez.
   if (
     emCache?.calibrada &&
     (emCache as LetraAlinhada).alinhada &&
-    emCache.source !== TRANSCRICAO_ANTIGA
+    emCache.source !== TRANSCRICAO_ANTIGA &&
+    !(emCache.source === TRANSCRICAO_AUTOMATICA && !(emCache as LetraAlinhada).procuradaPelaVoz)
   ) {
     return Promise.resolve(emCache);
   }
@@ -203,7 +273,7 @@ export function pedirCalibracao(
     // A "Transcrição do áudio" do caminho antigo NÃO é letra: é texto que o
     // reconhecimento livre inventou. Tratá-la como publicada seria alinhar a
     // invenção. Vale como "sem letra".
-    const letra = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;
+    const letra = letraPublicada(achada);
     // O LINK DO COFRE também pode não existir ainda: a entrada do acervo chega
     // magra e ganha `remoteUrl` no detalhe, buscado no caminho do play.
     if (!remoteUrlFor(track.id) && !track.streamUrl) {
@@ -219,7 +289,7 @@ export function pedirCalibracao(
       return url ? alinharAteChegar(track.id, url, letra, manterVivo) : null;
     }
     const url = urlDoTempo(remota, idiomaPara(null));
-    return url ? perguntarAteChegar(track.id, url, manterVivo) : null;
+    return url ? perguntarAteChegar(track, remota, url, manterVivo) : null;
   })()
     .catch(() => null)
     .finally(() => {
