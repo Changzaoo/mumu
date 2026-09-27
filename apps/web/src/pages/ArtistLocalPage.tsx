@@ -55,6 +55,18 @@ export default function ArtistLocalPage() {
     tracks.length > 0
       ? playQueue(tracks, index, { source: 'artist', sourceId: artist })
       : undefined;
+  // UMA MÚSICA DE UM ÁLBUM TOCA O ÁLBUM, na ordem do disco, a partir dela.
+  // O botão grande (`play`) continua tocando o artista; a faixa avulsa também.
+  const tocarFaixa = (index: number): void => {
+    const faixa = tracks[index];
+    const album = faixa ? localLibrary.faixasDoAlbumDe(faixa) : null;
+    if (!faixa || !album) {
+      play(index);
+      return;
+    }
+    const posicao = album.tracks.findIndex((t) => t.id === faixa.id);
+    playQueue(album.tracks, Math.max(0, posicao), { source: 'album', sourceId: album.key });
+  };
 
   if (tracks.length === 0) {
     return (
@@ -135,7 +147,7 @@ export default function ArtistLocalPage() {
               playing={track.id === currentTrack?.id && isPlaying}
               liked={likes.isLiked(track)}
               onToggleLike={(liked) => likes.toggle(track, liked)}
-              onPlay={() => play(index)}
+              onPlay={() => tocarFaixa(index)}
             />
           ))}
         </TrackList>
@@ -251,7 +263,7 @@ export default function ArtistLocalPage() {
                 playing={track.id === currentTrack?.id && isPlaying}
                 liked={likes.isLiked(track)}
                 onToggleLike={(liked) => likes.toggle(track, liked)}
-                onPlay={() => play(index)}
+                onPlay={() => tocarFaixa(index)}
               />
             )}
           />

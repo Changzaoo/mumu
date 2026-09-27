@@ -1971,11 +1971,35 @@ function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlb
     album.tracks.push(t);
     if (!album.coverUrl && t.coverUrl) album.coverUrl = t.coverUrl;
   }
-  return [...byKey.values()].filter((a) => {
+  const albuns = [...byKey.values()].filter((a) => {
     if (MARCA_DE_SINGLE.test(a.title)) return false;
     if (a.tracks.length >= 2) return true;
     return (a.tracks[0]?.trackNumber ?? 0) >= 2;
   });
+  // NA ORDEM DO DISCO, não na ordem em que as faixas entraram na biblioteca —
+  // ouvir o álbum é ouvir na sequência que o artista escolheu. Faixa sem número
+  // vai para o fim, mantendo a ordem relativa (sort estável).
+  const posicao = (t: TrackDto): number =>
+    t.trackNumber && t.trackNumber > 0
+      ? (t.discNumber && t.discNumber > 0 ? t.discNumber : 1) * 1000 + t.trackNumber
+      : Number.MAX_SAFE_INTEGER;
+  for (const album of albuns) album.tracks.sort((a, b) => posicao(a) - posicao(b));
+  return albuns;
+}
+
+/**
+ * O ÁLBUM DE UMA FAIXA, na ordem do disco — ou `null` quando ela é avulsa.
+ *
+ * É o que faz "escolher uma música do álbum" tocar o álbum: quem abre a página
+ * do artista e toca uma faixa de um disco quer ouvir o disco a partir dali, não
+ * a lista de populares do artista embaralhando discos diferentes.
+ */
+export function faixasDoAlbumDe(track: TrackDto): LocalAlbum | null {
+  const key = albumKeyForTrack(track);
+  if (!key) return null;
+  const album = albumGroups().find((a) => a.key === key);
+  if (!album || album.tracks.length < 2) return null;
+  return album;
 }
 
 /** Memo dos derivados — recalcula UMA vez por mudança da biblioteca. */
@@ -2339,8 +2363,14 @@ export function tituloDuracaoKey(track: TrackDto): string | null {
 
 /** Which duplicate to keep: local audio > uploaded copy > has cover > older. */
 function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
+  // A duração conta: com as cópias de duração desconhecida agora entrando no
+  // mesmo grupo, a vencedora não pode ser a que mostra "0:00". E a entrada
+  // magra do acervo não traz `remoteUrl` — o bit `tocavel` diz o mesmo.
   const score = (e: LibraryEntry): number =>
-    (hasLocalAudio(e.track.id) ? 4 : 0) + (e.remoteUrl ? 2 : 0) + (e.track.coverUrl ? 1 : 0);
+    (hasLocalAudio(e.track.id) ? 8 : 0) +
+    (e.remoteUrl || e.tocavel ? 4 : 0) +
+    ((e.track.durationMs || 0) > 0 ? 2 : 0) +
+    (e.track.coverUrl ? 1 : 0);
   const sa = score(a);
   const sb = score(b);
   if (sa !== sb) return sa > sb ? a : b;
@@ -2403,6 +2433,39 @@ function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
     if (artistaEhDesconhecido(outra.track) === artistaEhDesconhecido(e.track)) continue;
     porChave.set(outraChave, fundirParaExibir(outra, e));
     porChave.delete(key);
+  }
+
+  // 3ª passada: MESMO TÍTULO E MESMO ARTISTA, duração que não bate.
+  //
+  // O balde de duração separava justamente as duplicatas mais comuns do
+  // acervo: a cópia com duração DESCONHECIDA (0 s) cai num balde só dela e
+  // nunca encontra a irmã; e o mesmo áudio vindo do clipe (introdução, vinheta)
+  // e do álbum difere por 10–40 s. Medido em 2026-09-26: "You Can Do It" do Ice
+  // Cube aparecia 7 vezes, "ESTRESSE" do Alee 6. Versões de verdade — remix,
+  // ao vivo, acústico — trazem a marca no TÍTULO, então nem chegam aqui com a
+  // mesma base. Uma diferença acima de 60 s ainda separa (é outra gravação).
+  const TOLERANCIA_MS = 60_000;
+  const porBase = new Map<string, string[]>();
+  for (const key of ordem) {
+    const e = porChave.get(key);
+    if (!e) continue;
+    const p = dedupeParts(e.track);
+    if (!p) continue;
+    const irmas = porBase.get(p.base) ?? [];
+    const dur = e.track.durationMs || 0;
+    const alvo = irmas.find((k) => {
+      const outra = porChave.get(k);
+      if (!outra) return false;
+      const d2 = outra.track.durationMs || 0;
+      return dur <= 0 || d2 <= 0 || Math.abs(dur - d2) <= TOLERANCIA_MS;
+    });
+    if (alvo) {
+      porChave.set(alvo, fundirParaExibir(porChave.get(alvo) as LibraryEntry, e));
+      porChave.delete(key);
+      continue;
+    }
+    irmas.push(key);
+    porBase.set(p.base, irmas);
   }
 
   return ordem.filter((k) => porChave.has(k)).map((k) => porChave.get(k) as LibraryEntry);
