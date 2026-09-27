@@ -67,6 +67,7 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     setEq: vi.fn(),
     setNormalizeVolume: vi.fn(),
     setLocalSourceResolver: vi.fn(),
+    iniciarEm: vi.fn(),
     getPosition: vi.fn(() => posicaoAtual()),
     getDuration: vi.fn(() => engineState.duration),
     getBufferedEnd: vi.fn(() => 1),

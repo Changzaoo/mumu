@@ -18,6 +18,17 @@ export const usersService = {
   },
 
   async updateMe(userId: string, input: UpdateMeInput): Promise<MeDto> {
+    // AJUSTES SE SOMAM, NÃO SE SUBSTITUEM: o app manda só o que mudou (ligar o
+    // agente pesquisador não pode apagar o tema escolhido em outro aparelho).
+    let settings: Record<string, unknown> | undefined;
+    if (input.settings !== undefined) {
+      const atual = await usersRepository.findById(userId);
+      const antes =
+        atual?.settings && typeof atual.settings === 'object' && !Array.isArray(atual.settings)
+          ? (atual.settings as Record<string, unknown>)
+          : {};
+      settings = { ...antes, ...input.settings };
+    }
     const data: Prisma.UserUpdateInput = {
       ...(input.displayName !== undefined ? { displayName: input.displayName } : {}),
       ...(input.handle !== undefined ? { handle: input.handle } : {}),
@@ -27,9 +38,7 @@ export const usersService = {
       ...(input.socialLinks !== undefined ? { socialLinks: input.socialLinks } : {}),
       // Validated by updateMeSchema; cast because typed partials with optional
       // keys don't structurally satisfy Prisma.InputJsonObject.
-      ...(input.settings !== undefined
-        ? { settings: input.settings as Prisma.InputJsonValue }
-        : {}),
+      ...(settings !== undefined ? { settings: settings as Prisma.InputJsonValue } : {}),
     };
     try {
       return toMeDto(await usersRepository.update(userId, data));

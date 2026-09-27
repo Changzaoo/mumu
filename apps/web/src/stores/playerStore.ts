@@ -1750,9 +1750,19 @@ export const usePlayerStore = create<PlayerState>()(
           // ainda não a carregou — carrega agora e retoma NA POSIÇÃO salva.
           if (audioEngine.currentTrack?.id !== currentTrack.id) {
             const resumeAt = progress > 1 ? progress : null;
+            // Começa JÁ no ponto — nunca tocar o início antes de pular.
+            audioEngine.iniciarEm(resumeAt);
             loadIndex(Math.max(0, queueIndex), true);
             pendingResumeSeek = resumeAt; // depois do loadIndex (que zera)
             return;
+          }
+          // O motor já tem a faixa (carregada pausada) e há uma retomada
+          // pendente: posiciona ANTES do play. Buscar só depois, no 'loaded',
+          // deixava sair o começo da música antes do salto.
+          if (pendingResumeSeek !== null) {
+            audioEngine.seek(pendingResumeSeek);
+            set({ progress: pendingResumeSeek });
+            pendingResumeSeek = null;
           }
           audioEngine.play();
           // O toque que chega aqui — no convite ou no botão normal — É o gesto
@@ -2534,7 +2544,9 @@ export function initPlayerEngine(): void {
     if (pendingResumeSeek !== null) {
       const at = Math.min(pendingResumeSeek, Math.max(0, (duration || Infinity) - 1));
       pendingResumeSeek = null;
-      audioEngine.seek(at);
+      // Rede de segurança: a carga já nasce no ponto (`iniciarEm`); só busca
+      // se, por algum motivo, não nasceu — buscar de novo daria um soluço.
+      if (Math.abs(audioEngine.getPosition() - at) > 1.5) audioEngine.seek(at);
       store.setState({ progress: at });
     }
     rearmTimers();

@@ -47,6 +47,7 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     setEq: vi.fn(),
     setNormalizeVolume: vi.fn(),
     setLocalSourceResolver: vi.fn(),
+    iniciarEm: vi.fn(),
     getPosition: vi.fn(() => posicaoDoPlayhead),
     getDuration: vi.fn(() => 180),
     // Zero é a assinatura da faixa que ESTAGNOU: nenhum byte chegou, e é isso

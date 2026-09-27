@@ -104,18 +104,6 @@ async function semear(page: Page): Promise<void> {
   );
 }
 
-async function marcarRetomadaTocando(page: Page, progress: number): Promise<void> {
-  await page.evaluate(
-    ({ track, progress }) => {
-      window.localStorage.setItem(
-        'aurial:resume',
-        JSON.stringify({ track, progress, tocando: true }),
-      );
-    },
-    { track: trackDto(), progress },
-  );
-}
-
 async function estadoDoAudio(page: Page): Promise<{ tocando: boolean; tempo: number } | null> {
   return page.evaluate(() => {
     /* eslint-disable @typescript-eslint/no-explicit-any */
@@ -211,4 +199,64 @@ test('clicar numa palavra leva a música ao instante DELA', async ({ page }) => 
   const tempo = (await estadoDoAudio(page))?.tempo ?? 0;
   expect(tempo).toBeGreaterThan(17.3);
   expect(tempo).toBeLessThan(18.2);
+});
+
+test('recarregar à mão com a letra aberta: volta expandida, na letra', async ({ page }) => {
+  await page.goto('/robots.txt');
+  await semear(page);
+  await page.evaluate((track) => {
+    window.localStorage.setItem('aurial:resume', JSON.stringify({ track, progress: 3 }));
+  }, trackDto());
+  await page.goto('/library');
+  // Abre a letra pelo botão da barra (abre a reprodução expandida junto).
+  await page.getByRole('contentinfo').getByRole('button', { name: 'Letra' }).click();
+  await expect(page.locator('[aria-label="Letra da música"]')).toBeVisible({ timeout: 20_000 });
+
+  await page.reload();
+  await expect(page.locator('[aria-label="Letra da música"]')).toBeVisible({ timeout: 20_000 });
+});
+
+test('a retomada nunca toca o começo antes de pular: o primeiro som já sai no ponto', async ({
+  page,
+}) => {
+  await page.addInitScript(() => {
+    (window as unknown as { __primeiroSom: number | null }).__primeiroSom = null;
+    // Os elementos do Howler não ficam no DOM — o evento 'playing' não passa
+    // pelo document. Mede-se no próprio play(): o ponto em que o som sai.
+    const original = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function play(this: HTMLMediaElement) {
+      const p = original.call(this);
+      const el: HTMLMediaElement = this as HTMLMediaElement;
+      void p.then(
+        () => {
+          const w = window as unknown as { __primeiroSom: number | null };
+          if (w.__primeiroSom === null && el.src.startsWith('blob:'))
+            w.__primeiroSom = el.currentTime;
+        },
+        () => undefined,
+      );
+      return p;
+    };
+  });
+  await page.goto('/robots.txt');
+  await semear(page);
+  await page.evaluate((track) => {
+    window.localStorage.setItem(
+      'aurial:resume',
+      JSON.stringify({ track, progress: 12.4, tocando: true }),
+    );
+  }, trackDto());
+  await page.goto('/library');
+  await page.mouse.click(5, 5);
+  const primeiro = await page
+    .waitForFunction(
+      () => {
+        const v = (window as unknown as { __primeiroSom: number | null }).__primeiroSom;
+        return v === null ? false : { v };
+      },
+      null,
+      { timeout: 15_000 },
+    )
+    .then(async (h) => ((await h.jsonValue()) as { v: number }).v);
+  expect(primeiro).toBeGreaterThan(11.9);
 });

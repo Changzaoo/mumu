@@ -45,14 +45,19 @@ describe('AudioEngine format hint', () => {
     engine.destroy();
   });
 
-  it('não força MP3 quando a URL não tem extensão', () => {
+  // Sem extensão (blob: do aparelho, link assinado do cofre), o Howler recusa
+  // a carga ("No codec support") se não receber um `format` — e a faixa só
+  // tocava caindo numa segunda fonte, perdendo a posição de retomada. O
+  // `format` só abre o portão do Howler; quem decodifica é o navegador, pelo
+  // conteúdo: o e2e letraAoRecarregar toca um WAV com este portão 'mp3'.
+  it('dá o portão de formato quando a URL não tem extensão', () => {
     engine.load(makeTrack('t1', { streamUrl: 'https://cdn.example/stream?id=1' }), {
       autoplay: false,
     });
 
     const options = howlCtor.mock.calls[0]?.[0] as Record<string, unknown>;
     expect(options).toBeTruthy();
-    expect(options).not.toHaveProperty('format');
+    expect(options.format).toEqual(['mp3']);
   });
 
   it('mantém hint de formato quando a extensão existe', () => {

@@ -5,8 +5,15 @@ import { cn } from '@/lib/utils';
 
 /** Folga de rolagem de cada lado do repouso (px) — um arremesso forte. */
 const FOLGA_PX = 4000;
+/**
+ * ORÇAMENTO DE CÓPIAS — medido num moto g34 (4 GB) travando: com prateleiras de
+ * 40 capas e 3 a 9 cópias sempre montadas, a página inicial foi de ~950 para
+ * ~20.500 elementos, a memória a 340 MB e tarefas de até 1,7 s. Agora a
+ * prateleira nasce SEM cópias; ganha as 3 só quando a pessoa rola até perto de
+ * uma ponta (é aí que a volta infinita importa).
+ */
 /** Teto de cópias (prateleira de 2-3 capas não vira centenas de cards). */
-const COPIAS_MAX = 9;
+const COPIAS_MAX = 3;
 
 export interface SectionCarouselProps extends ComponentProps<'section'> {
   title: string;
@@ -48,6 +55,10 @@ export function SectionCarousel({
   //
   // Só quando há fila para dar a volta (mais de uma tela e meia de cards).
   const [looping, setLooping] = useState(false);
+  /** A fila é longa o bastante para dar a volta (mas só dá quando pedida). */
+  const podeDarAVolta = useRef(false);
+  /** Onde a rolagem estava quando a volta ligou — para ligar sem salto. */
+  const posicaoAoLigar = useRef(0);
   // Quantas cópias: o bastante para sobrar ~4000 px de folga de cada lado do
   // meio (um arremesso forte no celular). Fila longa → 3; prateleira curta de
   // 8 capas → mais cópias, senão o dedo bateria na borda.
@@ -55,7 +66,6 @@ export function SectionCarousel({
   const meio = Math.floor(copias / 2);
   const tocando = useRef(false);
   const parouTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const capasCedo = useRef(false);
 
   /** Largura exata de uma cópia (cards + vãos), medida entre os primeiros cards. */
   const unidadeDe = (el: HTMLDivElement): number => {
@@ -69,7 +79,8 @@ export function SectionCarousel({
     if (!el) return;
     const unidade = looping ? unidadeDe(el) : el.scrollWidth;
     const deveria = loop && unidade > el.clientWidth * 1.5;
-    if (deveria !== looping) setLooping(deveria);
+    podeDarAVolta.current = deveria;
+    if (!deveria && looping) setLooping(false);
     if (unidade > 0) {
       const lado = Math.ceil(FOLGA_PX / unidade);
       const n = Math.min(COPIAS_MAX, Math.max(3, 2 * lado + 1));
@@ -120,25 +131,23 @@ export function SectionCarousel({
     if (el.scrollLeft < el.clientWidth || el.scrollLeft > max - el.clientWidth) recentrar(true);
   };
 
-  const quandoParar = (): void => {
-    if (parouTimer.current) clearTimeout(parouTimer.current);
-    parouTimer.current = setTimeout(() => recentrar(), 180);
+  /** Parou perto de uma ponta: agora sim monta as cópias (sem salto). */
+  const ligarVoltaSePerto = (): void => {
+    const el = scrollerRef.current;
+    if (!el || looping || !podeDarAVolta.current || tocando.current) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if (el.scrollLeft < el.clientWidth || el.scrollLeft > max - el.clientWidth * 1.5) {
+      posicaoAoLigar.current = el.scrollLeft;
+      setLooping(true);
+    }
   };
 
-  /**
-   * As capas das cópias vêm com `loading="lazy"`: rolando rápido, cada uma
-   * entrava vazia e "piscava" ao carregar. Na primeira vez que a pessoa mexe
-   * NESTA prateleira, todas passam a carregar já — são as mesmas URLs, então é
-   * uma ida à rede por capa, não três.
-   */
-  const carregarCapas = (): void => {
-    if (capasCedo.current) return;
-    capasCedo.current = true;
-    scrollerRef.current
-      ?.querySelectorAll<HTMLImageElement>('img[loading="lazy"]')
-      .forEach((img) => {
-        img.loading = 'eager';
-      });
+  const quandoParar = (): void => {
+    if (parouTimer.current) clearTimeout(parouTimer.current);
+    parouTimer.current = setTimeout(() => {
+      ligarVoltaSePerto();
+      recentrar();
+    }, 180);
   };
 
   useEffect(() => {
@@ -155,7 +164,8 @@ export function SectionCarousel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medir, children]);
 
-  // Ao ligar a volta, o repouso passa a ser o começo da cópia do meio.
+  // Ao ligar a volta, a MESMA vista passa para a cópia do meio: nada se mexe
+  // na tela, só ganha fila dos dois lados.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el || !looping) return;
@@ -164,9 +174,8 @@ export function SectionCarousel({
     if (!doMeio || !inicio) return;
     const antes = el.style.scrollBehavior;
     el.style.scrollBehavior = 'auto';
-    el.scrollLeft = doMeio.offsetLeft - inicio.offsetLeft;
+    el.scrollLeft = doMeio.offsetLeft - inicio.offsetLeft + posicaoAoLigar.current;
     el.style.scrollBehavior = antes;
-    capasCedo.current = false;
     updateArrows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [looping, copias]);
@@ -223,10 +232,8 @@ export function SectionCarousel({
           pertoDaBorda();
           quandoParar();
         }}
-        onPointerDown={carregarCapas}
         onTouchStart={() => {
           tocando.current = true;
-          carregarCapas();
         }}
         onTouchEnd={() => {
           tocando.current = false;
@@ -236,7 +243,7 @@ export function SectionCarousel({
           tocando.current = false;
           quandoParar();
         }}
-        className="no-scrollbar relative -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto scroll-smooth px-1 pb-1"
+        className="carrossel-trilho no-scrollbar relative -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto scroll-smooth px-1 pb-1"
       >
         {looping ? (
           Array.from({ length: copias }, (_, i) => (

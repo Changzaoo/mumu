@@ -447,7 +447,7 @@ export default function SettingsPage() {
       <SettingsCard icon={Search} title="Agente pesquisador">
         <Row
           label="Buscar música dos artistas que você ouve"
-          hint="Procura faixas novas desses artistas e põe na fila de download. Usa internet e espaço."
+          hint="Nosso servidor procura, 24 horas por dia, músicas novas dos artistas que você ouve, baixa para o acervo com a letra e põe na sua biblioteca. Vale para todos os seus aparelhos."
           htmlFor="st-pesquisador"
         >
           <Switch

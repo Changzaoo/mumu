@@ -580,6 +580,15 @@
   }
 }
 
+/* CARDS FORA DA TELA NÃO SÃO DESENHADOS. Uma prateleira tem dezenas de capas
+   e só umas 3 aparecem no celular: o navegador pula layout e pintura das
+   outras até chegarem perto (moto g34 travava com a home inteira desenhada).
+   A largura do card é fixa (w-40/w-44); a altura é lembrada depois da 1ª vez. */
+.carrossel-trilho > [data-copia] > * {
+  content-visibility: auto;
+  contain-intrinsic-size: auto 11rem auto 15rem;
+}
+
 /* A AURA DO BOTÃO PLAY — névoa desenhada quadro a quadro por `AuraDoPlay.tsx`
    (ruído 3D com domínio distorcido, sem ciclo). Aqui só o que é fixo. */
 .aura-play-nevoa {

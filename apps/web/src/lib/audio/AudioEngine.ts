@@ -79,6 +79,11 @@ interface Slot {
   cleanup: Array<() => void>;
   /** Monotonic sequence guarding stale async callbacks after resets. */
   seq: number;
+  /**
+   * Posição de partida esperando o Howler carregar (ver `iniciarEm`). Com ela
+   * pendente, o play também espera: sai só depois de posicionado.
+   */
+  inicioAoCarregar?: number | null;
 }
 
 type SlotIndex = 0 | 1;
@@ -324,6 +329,8 @@ export class AudioEngine {
    * deve agir.
    */
   private desejaTocar = false;
+  /** Posição de partida da próxima carga (ver `iniciarEm`). */
+  private inicioPedido: number | null = null;
   private volume = 1;
   private muted = false;
   private rate = 1;
@@ -402,9 +409,53 @@ export class AudioEngine {
   }
 
   /** Load a track into the engine, optionally crossfading from the current one. */
+  /**
+   * ONDE A PRÓXIMA CARGA COMEÇA — antes do primeiro som, não depois.
+   *
+   * A retomada (recarregar a página, atualização, trazer a música de outro
+   * aparelho) carregava a faixa do zero e só no 'loaded' buscava a posição
+   * salva: dava para ouvir o COMEÇO da música antes do salto. Agora quem
+   * retoma avisa aqui, e o próximo `load()` posiciona o áudio antes de tocar.
+   * Uso único: a carga seguinte já nasce sem ele.
+   */
+  iniciarEm(segundos: number | null): void {
+    this.inicioPedido = segundos !== null && segundos > 0 ? segundos : null;
+  }
+
+  /**
+   * Posiciona a faixa antes do primeiro som. Devolve `true` quando o play tem
+   * que ESPERAR o carregamento (e sair de lá, já posicionado).
+   *
+   * O Howler não posiciona o que ainda não carregou: com a faixa "unloaded",
+   * `seek(x)` desiste em silêncio (nem entra na fila dele), e o evento 'load'
+   * dele chega DEPOIS de a fila rodar o play — o play saía em 0 e o salto
+   * vinha depois, com o começo da música tocando no meio. Então, sem carregar,
+   * o motor segura o play e o dá no próprio 'load', depois do seek.
+   */
+  private posicionarAntesDeTocar(slot: Slot, segundos: number): boolean {
+    const fonte = slot.source;
+    if (!fonte) return false;
+    if (fonte.kind === 'howl') {
+      if (fonte.howl.state() === 'loaded') {
+        fonte.howl.seek(segundos);
+        return false;
+      }
+      slot.inicioAoCarregar = segundos;
+      // O Howler só começa a carregar quando alguém pede play — e o play está
+      // sendo segurado. Sem pedir o carregamento aqui, o 'load' nunca chegaria.
+      if (fonte.howl.state() === 'unloaded') fonte.howl.load();
+      return true;
+    }
+    // Elemento sem metadados ainda: o `currentTime` vira a posição inicial.
+    fonte.el.currentTime = segundos;
+    return false;
+  }
+
   load(track: TrackDto, options: LoadOptions = {}): void {
     if (this.destroyed) return;
     const { autoplay = true, crossfadeSeconds = 0 } = options;
+    const inicio = this.inicioPedido;
+    this.inicioPedido = null;
     const wasPlaying = this.playing;
     const source = this.sourceFor(track);
     if (!source) {
@@ -432,6 +483,7 @@ export class AudioEngine {
     // nunca recebeu 'loaded'/'buffering:false' para ele. Sem re-emitir aqui, o
     // isBuffering fica true para sempre: o player parece TRAVADO no spinner.
     const promotedLoaded = preloaded && to.loaded;
+    const esperarCarregar = inicio !== null && this.posicionarAntesDeTocar(to, inicio);
 
     const canCrossfade =
       crossfadeSeconds > 0 && this.ctx !== null && this.playing && from.track !== null;
@@ -456,7 +508,8 @@ export class AudioEngine {
       this.desejaTocar = true;
     } else {
       this.setFade(to, 1);
-      if (autoplay) this.startSlot(to);
+      // Posição pendente: o play sai no 'load' do slot, já no ponto.
+      if (autoplay && !esperarCarregar) this.startSlot(to);
       this.playing = autoplay;
       this.desejaTocar = autoplay;
       // Depois de começar a nova, nunca antes — ver `retireSlot`.
@@ -466,7 +519,7 @@ export class AudioEngine {
     this.applyRate(to);
     this.applyTrim(to);
     this.syncTicker();
-    this.emit('timeupdate', { position: 0, duration: this.getDuration() });
+    this.emit('timeupdate', { position: inicio ?? 0, duration: this.getDuration() });
     if (promotedLoaded) {
       this.emit('loaded', { track, duration: this.getDuration() });
       this.emit('buffering', { buffering: false });
@@ -475,7 +528,9 @@ export class AudioEngine {
 
   play(): void {
     if (this.destroyed || !this.active.source) return;
-    this.startSlot(this.active);
+    // Posição esperando o carregamento: o play sai de lá, já no ponto (ver
+    // `posicionarAntesDeTocar`) — nunca o começo da música antes do salto.
+    if (this.active.inicioAoCarregar == null) this.startSlot(this.active);
     this.playing = true;
     this.desejaTocar = true;
     this.syncTicker();
@@ -498,8 +553,15 @@ export class AudioEngine {
   seek(seconds: number): void {
     const slot = this.active;
     const target = Math.max(0, seconds);
-    if (slot.source?.kind === 'howl') slot.source.howl.seek(target);
-    else if (slot.source) slot.source.el.currentTime = target;
+    if (slot.source?.kind === 'howl') {
+      // Sem carregar, o Howler ignora o seek em silêncio: guarda para o 'load'.
+      const howl = slot.source.howl;
+      if (howl.state() === 'loaded') howl.seek(target);
+      else {
+        slot.inicioAoCarregar = target;
+        if (howl.state() === 'unloaded') howl.load();
+      }
+    } else if (slot.source) slot.source.el.currentTime = target;
     this.emit('timeupdate', { position: target, duration: this.getDuration() });
   }
 
@@ -735,7 +797,14 @@ export class AudioEngine {
       volume: this.ctx ? 1 : this.effectiveVolume(),
       // URL assinada sem extensao nao garante MP3: sem esse cuidado,
       // algumas faixas (AAC/Opus/FLAC) quebram enquanto outras tocam.
-      ...(extension ? { format: [extension] } : {}),
+      //
+      // SEM EXTENSÃO (blob: do aparelho, link do cofre): o Howler recusava a
+      // carga — "No codec support" —, e a faixa só tocava porque o player caía
+      // numa segunda fonte; na troca, a posição de retomada se perdia e a
+      // música saía do COMEÇO. O `format` aqui só abre o portão do Howler (ele
+      // confere o codec pelo nome); quem decodifica é o navegador, pelo
+      // conteúdo real. 'mp3' passa no portão de todo navegador.
+      format: [extension ?? 'mp3'],
     });
     slot.source = { kind: 'howl', howl };
 
@@ -760,6 +829,13 @@ export class AudioEngine {
       }
       this.applyRate(slot);
       this.applyTrim(slot);
+      // A retomada que esperava o carregamento: posiciona e SÓ ENTÃO toca.
+      const inicio = slot.inicioAoCarregar;
+      if (inicio !== null && inicio !== undefined) {
+        slot.inicioAoCarregar = null;
+        howl.seek(inicio);
+        if (slot === this.active && this.desejaTocar) this.startSlot(slot);
+      }
       if (slot === this.active) {
         // `getDuration()` já é a cascata inteira (medida → seekable → registro),
         // e sempre finita. O `howl.duration()` cru estava aqui antes e deixava
@@ -1096,6 +1172,7 @@ export class AudioEngine {
     slot.el = null;
     slot.track = null;
     slot.loaded = false;
+    slot.inicioAoCarregar = null;
     if (slot.fade && this.ctx) {
       slot.fade.gain.cancelScheduledValues(this.ctx.currentTime);
       slot.fade.gain.value = 1;

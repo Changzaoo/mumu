@@ -36,6 +36,9 @@ export const meSchema = userSchema.extend({
       explicitContent: z.boolean().default(true),
       privateSession: z.boolean().default(false),
       notifications: z.boolean().default(true),
+      /** Agente pesquisador: busca e baixa sozinho música do gosto da pessoa
+       *  (roda no servidor, 24/7). Vale para a CONTA, em todos os aparelhos. */
+      pesquisadorAtivo: z.boolean().default(false),
     })
     .partial()
     .nullable(),

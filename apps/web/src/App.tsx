@@ -78,7 +78,7 @@ export default function App() {
         telemetria,
         presenca,
         genero,
-        pesquisador,
+        ajustesDaConta,
         reparador,
         detalhe,
         guardiao,
@@ -91,7 +91,7 @@ export default function App() {
         import('@/lib/telemetry/telemetry'),
         import('@/lib/devices/presence'),
         import('@/lib/local/genreAgent'),
-        import('@/lib/local/pesquisador'),
+        import('@/lib/sync/ajustesDaConta'),
         import('@/lib/local/reparador'),
         import('@/lib/local/detalheDaFaixa'),
         import('@/lib/offline/guardiaoOffline'),
@@ -135,11 +135,10 @@ export default function App() {
       await medirEtapa('continuidade.initContinuidadeOffline', () =>
         continuidade.initContinuidadeOffline(),
       );
-      // Agente pesquisador: DESLIGADO por padrão. Ele confere o interruptor a
-      // cada rodada, então desligar nas configurações para o agente na hora.
-      pararPesquisador = pesquisador.iniciarPesquisador(
-        () => useSettingsStore.getState().pesquisadorAtivo,
-      );
+      // Agente pesquisador: roda no SERVIDOR, 24/7 (apps/api/src/workers/
+      // pesquisador.worker.ts) — aqui só a escolha da pessoa, que mora na
+      // CONTA para valer em todos os aparelhos e com o app fechado.
+      pararPesquisador = ajustesDaConta.initAjustesDaConta();
       // Reparador: LIGADO, e a diferença para o pesquisador é o consentimento.
       // O pesquisador sai atrás de música que ninguém pediu; este só rebaixa de
       // novo faixa que a pessoa mandou tocar e que falhou na cara dela. Poucas

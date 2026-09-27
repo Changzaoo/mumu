@@ -44,14 +44,18 @@ export interface UiState {
 export type DirecaoDaTroca = 1 | -1 | 0;
 
 /**
- * A TELA SOBREVIVE À ATUALIZAÇÃO.
+ * A TELA SOBREVIVE À RECARGA.
  *
  * Quando sai versão nova, o app se recarrega sozinho (ver pwa.ts) e a música
  * volta tocando de onde estava — mas a tela voltava fechada: quem estava com a
  * reprodução expandida aberta, lendo a letra, caía na página inicial com o
- * player minimizado. Antes de recarregar, o atualizador guarda o que estava
- * aberto; o boot seguinte abre de novo. De uso único e só nesta aba
- * (sessionStorage): uma abertura comum do app continua começando fechada.
+ * player minimizado. O mesmo numa recarga feita à mão.
+ *
+ * O que está aberto é gravado A CADA MUDANÇA (não só na hora de recarregar:
+ * a primeira atualização depois de um deploy ainda roda o código antigo, que
+ * não gravaria nada), no sessionStorage — só desta aba. Recarregar a aba
+ * volta como estava; abrir o app de novo (aba nova, app fechado e reaberto)
+ * continua começando fechado.
  */
 const TELA_KEY = 'aurial:tela-ao-recarregar';
 type TelaSalva = Pick<UiState, 'nowPlayingOpen' | 'lyricsOpen' | 'queueOpen'>;
@@ -72,7 +76,6 @@ function lerTelaSalva(): Partial<TelaSalva> {
   try {
     const bruto = window.sessionStorage.getItem(TELA_KEY);
     if (!bruto) return {};
-    window.sessionStorage.removeItem(TELA_KEY); // uso único
     const t = JSON.parse(bruto) as Partial<TelaSalva>;
     return {
       nowPlayingOpen: t.nowPlayingOpen === true,
@@ -116,3 +119,16 @@ export const useUiStore = create<UiState>()(
     },
   ),
 );
+
+// Grava a tela a cada mudança do que está aberto (ver "A TELA SOBREVIVE").
+if (typeof window !== 'undefined') {
+  useUiStore.subscribe((s, antes) => {
+    if (
+      s.nowPlayingOpen !== antes.nowPlayingOpen ||
+      s.lyricsOpen !== antes.lyricsOpen ||
+      s.queueOpen !== antes.queueOpen
+    ) {
+      guardarTelaParaRecarregar();
+    }
+  });
+}
