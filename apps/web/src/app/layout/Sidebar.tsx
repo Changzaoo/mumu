@@ -321,7 +321,7 @@ export function Sidebar() {
                       to={`/playlist/${playlist.id}`}
                       title={playlist.title}
                       subtitle={`Playlist • ${playlist.trackIds.length} faixas`}
-                      imageUrl={playlistCover(playlist.trackIds)}
+                      imageUrl={playlist.coverUrl ?? playlistCover(playlist.trackIds)}
                       icon={IoMusicalNotesOutline}
                     />
                   ))}

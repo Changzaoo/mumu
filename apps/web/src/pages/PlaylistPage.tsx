@@ -58,6 +58,7 @@ import {
 } from '@/components/ui/dropdown-menu';
 import { Input } from '@/components/ui/input';
 import { Label } from '@/components/ui/label';
+import { cn } from '@/lib/utils';
 import { Textarea } from '@/components/ui/textarea';
 import {
   useAddTracks,
@@ -149,6 +150,7 @@ function EditLocalPlaylistDialog({
   id,
   title,
   coverUrl,
+  capasDasFaixas,
   open,
   onOpenChange,
   onSaved,
@@ -156,6 +158,8 @@ function EditLocalPlaylistDialog({
   id: string;
   title: string;
   coverUrl: string | null;
+  /** Capas das músicas da lista — escolher uma delas é o atalho mais comum. */
+  capasDasFaixas: string[];
   open: boolean;
   onOpenChange: (open: boolean) => void;
   onSaved: () => void;
@@ -249,6 +253,32 @@ function EditLocalPlaylistDialog({
               )}
             </div>
           </div>
+          {capasDasFaixas.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-fg-muted">Ou use a capa de uma das músicas</p>
+              <div className="grid grid-cols-6 gap-2">
+                {capasDasFaixas.map((url) => (
+                  <button
+                    key={url}
+                    type="button"
+                    aria-label="Usar esta capa"
+                    aria-pressed={capa === url}
+                    onClick={() => {
+                      localPlaylists.setCover(id, url);
+                      setCapa(url);
+                      onSaved();
+                    }}
+                    className={cn(
+                      'aspect-square overflow-hidden rounded-md border-2 transition-transform hover:scale-105',
+                      capa === url ? 'border-fg' : 'border-transparent',
+                    )}
+                  >
+                    <img src={url} alt="" className="size-full object-cover" loading="lazy" />
+                  </button>
+                ))}
+              </div>
+            </div>
+          )}
           <input
             ref={capaRef}
             type="file"
@@ -533,6 +563,7 @@ export default function PlaylistPage() {
         title={data.title}
         imageUrl={data.coverUrl}
         dominantColor={data.dominantColor}
+        onTrocarCapa={isLocal ? () => setEditOpen(true) : undefined}
         meta={
           <>
             <Link
@@ -612,6 +643,13 @@ export default function PlaylistPage() {
           id={id}
           title={data.title}
           coverUrl={localPlaylists.get(id)?.coverUrl ?? null}
+          capasDasFaixas={[
+            ...new Set(
+              data.tracks
+                .map((entry) => entry.track.coverUrl)
+                .filter((c): c is string => Boolean(c)),
+            ),
+          ].slice(0, 12)}
           open={editOpen}
           onOpenChange={setEditOpen}
           onSaved={() => void queryClient.invalidateQueries({ queryKey: ['playlist', id] })}
@@ -700,7 +738,10 @@ export default function PlaylistPage() {
       {isOwner && <AddTracksSection playlist={data} />}
       {isLocal && <LocalAddTracksSection playlist={data} />}
 
-      <EditDialog playlist={data} open={editOpen} onOpenChange={setEditOpen} />
+      {/* Só a lista do SERVIDOR usa este diálogo. Renderizado sempre, ele abria
+          junto com o de lista local (os dois leem `editOpen`) e ficava POR CIMA
+          — sem campo de capa: trocar a capa de uma lista sua era impossível. */}
+      {isOwner && <EditDialog playlist={data} open={editOpen} onOpenChange={setEditOpen} />}
 
       <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
         <DialogContent>

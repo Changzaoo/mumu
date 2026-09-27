@@ -1,5 +1,5 @@
 import type { ComponentProps, ReactNode } from 'react';
-import { Music } from 'lucide-react';
+import { ImagePlus, Music } from 'lucide-react';
 import { useDominantColor } from '@/hooks/useDominantColor';
 import { cn } from '@/lib/utils';
 
@@ -16,6 +16,12 @@ export interface HeroHeaderProps extends ComponentProps<'header'> {
   meta?: ReactNode;
   /** Actions row (PlayButton, follow, menu…). */
   actions?: ReactNode;
+  /**
+   * A capa vira um botão ("Trocar capa") — para quem pode editar. Trocar a capa
+   * pela própria capa é o gesto que a pessoa tenta primeiro; escondido num menu
+   * de três pontinhos, quase ninguém achava.
+   */
+  onTrocarCapa?: () => void;
 }
 
 /**
@@ -31,6 +37,7 @@ export function HeroHeader({
   dominantColor,
   meta,
   actions,
+  onTrocarCapa,
   className,
   children,
   ...props
@@ -48,20 +55,34 @@ export function HeroHeader({
       />
 
       <div className="relative flex flex-col items-center gap-6 pb-2 pt-4 md:flex-row md:items-end">
-        <div
-          className={cn(
-            'size-44 shrink-0 overflow-hidden bg-fg/6 shadow-xl md:size-[232px]',
-            round ? 'rounded-full' : 'rounded-xl',
-          )}
-        >
-          {imageUrl ? (
+        {(() => {
+          const arte = imageUrl ? (
             <img src={imageUrl} alt="" className="size-full object-cover" />
           ) : (
             <div className="grid size-full place-items-center text-fg-subtle">
               <Music className="size-12" />
             </div>
-          )}
-        </div>
+          );
+          const moldura = cn(
+            'size-44 shrink-0 overflow-hidden bg-fg/6 shadow-xl md:size-[232px]',
+            round ? 'rounded-full' : 'rounded-xl',
+          );
+          if (!onTrocarCapa) return <div className={moldura}>{arte}</div>;
+          return (
+            <button
+              type="button"
+              onClick={onTrocarCapa}
+              aria-label="Trocar capa"
+              className={cn(moldura, 'group relative')}
+            >
+              {arte}
+              {/* No toque não há "passar o mouse": o selo fica sempre à vista. */}
+              <span className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-1.5 bg-black/55 py-2 text-xs font-medium text-white transition-opacity md:inset-0 md:bg-black/50 md:py-0 md:opacity-0 md:group-hover:opacity-100 md:group-focus-visible:opacity-100">
+                <ImagePlus className="size-4" /> Trocar capa
+              </span>
+            </button>
+          );
+        })()}
 
         <div className="flex min-w-0 flex-col items-center gap-3 text-center md:items-start md:text-left">
           <span className="text-xs font-medium uppercase tracking-[0.18em] text-fg-muted">

@@ -17,6 +17,7 @@ import { isCatalogId, isCatalogTrack } from '@/lib/catalog/isCatalogTrack';
 import { serverCollection } from '@/lib/sync/serverCollection';
 import { gravarLocal } from '@/lib/local/cofreLocal';
 import { deleteCover, getCoverBlob, putCover } from '@/lib/offline/audioCache';
+import { uploadTrackBlob } from '@/lib/local/importerHelper';
 
 const PLAYLISTS_KEY = 'aurial:local-playlists';
 const TRACKS_KEY = 'aurial:local-playlist-tracks';
@@ -246,7 +247,20 @@ export async function definirCapaDeArquivo(id: string, arquivo: Blob): Promise<s
   );
   if (!blob || blob.size === 0 || blob.size > TETO_DA_CAPA) return null;
 
-  // O cofre de capas é IndexedDB — cabe imagem, ao contrário do localStorage.
+  // A CAPA VIAJA PARA OS OUTROS APARELHOS. Uma URL `blob:` só vale nesta aba e
+  // é descartada na sincronia (ver `docToPlaylist`) — quem trocava a capa no
+  // celular nunca a via no computador. Subida ao cofre, vira uma URL de verdade
+  // que sincroniza como qualquer capa de faixa. Id novo a cada troca: o cofre
+  // manda o navegador guardar a imagem por um ano, e a mesma URL mostraria a
+  // capa antiga.
+  const remota = await uploadTrackBlob(`capa:${id}:${Date.now()}`, blob).catch(() => null);
+  if (remota) {
+    setCover(id, remota);
+    return remota;
+  }
+
+  // Sem login ou sem rede: fica só neste aparelho, no cofre de capas
+  // (IndexedDB — cabe imagem, ao contrário do localStorage).
   await putCover(`playlist:${id}`, blob);
   const url = URL.createObjectURL(blob);
   setCover(id, url);

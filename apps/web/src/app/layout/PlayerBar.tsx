@@ -14,7 +14,9 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  ListPlus,
 } from 'lucide-react';
+import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import { Fragment } from 'react';
 import { LikeButton } from '@/components/media/LikeButton';
 import { DevicePickerButton, RemoteDeviceChip } from '@/components/media/DevicePicker';
@@ -81,6 +83,8 @@ export function PlayerBar() {
   const setVolume = remoto.setVolume;
 
   const track = np;
+  // A faixa DESTE aparelho (o `np` pode ser a de outro, no controle remoto).
+  const faixaAtual = usePlayerStore((s) => s.currentTrack);
   const isPlaying = np?.isPlaying ?? false;
   const toggle = np?.toggle ?? (() => undefined);
   // O lado da troca é carimbado antes de pedir a faixa (ver `TrocaDeFaixa`).
@@ -254,6 +258,15 @@ export function PlayerBar() {
 
           {/* Right — utilities */}
           <div className="flex items-center justify-end gap-1">
+            {faixaAtual && (
+              <IconButton
+                aria-label="Adicionar à playlist"
+                size="sm"
+                onClick={() => abrirAdicionarAPlaylist(faixaAtual)}
+              >
+                <ListPlus />
+              </IconButton>
+            )}
             <IconButton
               aria-label="Letra"
               size="sm"

@@ -1314,6 +1314,9 @@ async function sweepBlobStore({ liberar = 0 } = {}) {
     let total = 0;
     for (const name of names) {
       if (!name.endsWith('.bin')) continue;
+      // CAPA DE PLAYLIST NÃO ENTRA NA PODA: ao contrário do áudio, ela não tem
+      // origem de onde ser refeita — podada, some para sempre. E são ~40 KB.
+      if (name.startsWith(`${encodeURIComponent('capa:')}`)) continue;
       const p = path.join(BLOB_DIR, name);
       const st = await stat(p).catch(() => null);
       if (!st) continue;

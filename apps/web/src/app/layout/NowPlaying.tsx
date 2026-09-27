@@ -20,7 +20,9 @@ import {
   Volume1,
   Volume2,
   VolumeX,
+  ListPlus,
 } from 'lucide-react';
+import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
@@ -530,6 +532,15 @@ export function NowPlaying() {
                   </div>
                 ) : (
                   <>
+                    {faixaLocal && (
+                      <IconButton
+                        aria-label="Adicionar à playlist"
+                        size="sm"
+                        onClick={() => abrirAdicionarAPlaylist(faixaLocal)}
+                      >
+                        <ListPlus />
+                      </IconButton>
+                    )}
                     <IconButton
                       aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
                       size="sm"

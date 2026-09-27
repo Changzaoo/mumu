@@ -3,6 +3,7 @@ import { Navigate, Outlet, useLocation } from 'react-router';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
 import { ShareDialogHost } from '@/components/media/ShareDialog';
+import { AdicionarAPlaylistHost } from '@/components/media/AdicionarAPlaylist';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import * as gostoInicial from '@/lib/local/gostoInicial';
@@ -197,6 +198,7 @@ export function AppShell() {
         <NowPlaying />
         <EqualizerPanel />
         <ShareDialogHost />
+        <AdicionarAPlaylistHost />
         <ResumeElsewhereBanner />
         <TrackAnnouncer />
       </div>

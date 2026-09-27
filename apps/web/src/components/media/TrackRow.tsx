@@ -1,3 +1,4 @@
+import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import { Fragment, type ComponentProps, type KeyboardEvent } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
@@ -312,11 +313,16 @@ export function TrackRow({
             >
               <ListPlus /> Tocar em seguida
             </DropdownMenuItem>
-            {onAddToPlaylist && (
-              <DropdownMenuItem onSelect={() => onAddToPlaylist(track)}>
-                <ListPlus /> Adicionar à playlist
-              </DropdownMenuItem>
-            )}
+            {/* Sempre disponível: sem `onAddToPlaylist` da tela, abre o seletor
+                global (antes o item só existia quando a tela o passava — e
+                nenhuma passava). */}
+            <DropdownMenuItem
+              onSelect={() =>
+                onAddToPlaylist ? onAddToPlaylist(track) : abrirAdicionarAPlaylist(track)
+              }
+            >
+              <ListPlus /> Adicionar à playlist
+            </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
               onSelect={() =>
