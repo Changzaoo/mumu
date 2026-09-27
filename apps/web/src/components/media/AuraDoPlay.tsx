@@ -117,6 +117,8 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     const raioDe = new Float32Array(N * N);
     const xs = new Float32Array(N * N);
     const ys = new Float32Array(N * N);
+    const cosDe = new Float32Array(N * N);
+    const senDe = new Float32Array(N * N);
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const x = ((i + 0.5) / N) * 2 - 1;
@@ -125,6 +127,11 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         xs[k] = x;
         ys[k] = y;
         raioDe[k] = Math.hypot(x, y);
+        const raio = raioDe[k]! || 1e-3;
+        // Direção de cada pixel a partir do centro: a névoa é amostrada num
+        // CÍRCULO do espaço do ruído (sem emenda em volta do botão).
+        cosDe[k] = x / raio;
+        senDe[k] = y / raio;
       }
     }
     // O botão ocupa ~54% do raio da caixa (inset -42%/-48%).
@@ -155,7 +162,11 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     let tv = sorteio(0, 100);
     /** Ângulo do giro (rad), acumulado — nunca volta a zero, nunca salta. */
     let angulo = sorteio(0, Math.PI * 2);
-    const sentido = Math.random() < 0.5 ? -1 : 1;
+    // SENTIDO HORÁRIO, como o disco girando (na tela, com y para baixo, o
+    // ângulo crescendo é o horário).
+    const sentido = 1;
+    /** Relógio da CHAMA: quanto a névoa já escorreu para fora do botão. */
+    let fluxo = sorteio(0, 50);
     /** Para onde o vento já levou a névoa (acumulado, vai e volta). */
     let ventoX = 0;
     let ventoY = 0;
@@ -184,6 +195,8 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
       // A forma muda o tempo todo: depressa tocando, devagar parada — e a
       // rajada a remexe um pouco mais.
       t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada);
+      // Tocando, as línguas saem do botão com força; parada, quase param.
+      fluxo += dt * (0.95 * viva + (0.06 + 0.1 * rajada) * parada);
       // Tocando brilha mais; parada fica mais tênue, mas não some.
       const presenca = 0.62 + 0.38 * viva;
       const cosA = Math.cos(angulo);
@@ -201,17 +214,29 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         }
         const x = xs[k]!;
         const y = ys[k]!;
-        // Gira o desenho inteiro em volta do centro e o leva com o vento.
-        const sx = (x * cosA - y * senA) * 2.9 + ox - ventoX;
-        const sy = (x * senA + y * cosA) * 2.9 + oy - ventoY;
-        // Distorção de domínio: é o que enrola a névoa em volutas.
-        const wx = fbm(ruido, sx * 0.9, sy * 0.9, t * 0.6);
-        const wy = fbm(ruido, sx * 0.9 + 5.2, sy * 0.9 + 1.3, t * 0.6 + 3.1);
-        const d = fbm(ruido, sx + 2.6 * wx, sy + 2.6 * wy, t);
+        // CHAMA EM VOLTA DO BOTÃO. A amostra é polar: o ângulo (girado pelo
+        // relógio do giro, no sentido horário) percorre um círculo do ruído, e a
+        // distância à borda vira a terceira coordenada, deslocada pelo `fluxo`
+        // — o desenho escorre PARA FORA, como línguas de fogo saindo do
+        // círculo, enquanto o conjunto gira.
+        const c = cosDe[k]!;
+        const sn = senDe[k]!;
+        const ca = c * cosA + sn * senA; // cos(θ − giro)
+        const sa = sn * cosA - c * senA; // sen(θ − giro)
+        const sx = ca * 2.3 + ox - ventoX;
+        const sy = sa * 2.3 + oy - ventoY;
+        const fora = raio - borda;
+        const sz = fora * 4.4 - fluxo;
+        // Distorção de domínio: é o que enrola e rasga as línguas.
+        const wx = fbm(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
+        const wy = fbm(ruido, sx * 0.8 + 5.2, sy * 0.8 + 1.3, sz * 0.5 + t * 0.6 + 3.1);
+        const d = fbm(ruido, sx + 1.9 * wx, sy + 1.9 * wy, sz + t);
         // Parada, a névoa se inclina para o lado para onde o vento sopra.
         const inclina = 1 + (x * vx + y * vy) * 0.55;
-        // Contraste: vazios de verdade entre os fiapos.
-        const densidade = Math.max(0, Math.min(1, (d - 0.4) * 3 * inclina)) * janela;
+        // As línguas afinam conforme se afastam (a ponta da chama), mais
+        // compridas tocando; o contraste abre vazios de verdade entre elas.
+        const afina = fora * (0.95 - 0.55 * viva);
+        const densidade = Math.max(0, Math.min(1, (d - 0.33 - afina) * 3.8 * inclina)) * janela;
         px[o] = r;
         px[o + 1] = g;
         px[o + 2] = b;
