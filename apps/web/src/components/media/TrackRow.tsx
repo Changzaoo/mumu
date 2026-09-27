@@ -1,5 +1,19 @@
 import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
-import { Fragment, type ComponentProps, type KeyboardEvent } from 'react';
+import {
+  ContextMenu,
+  ContextMenuContent,
+  ContextMenuItem,
+  ContextMenuSeparator,
+  ContextMenuTrigger,
+} from '@/components/ui/context-menu';
+import {
+  Fragment,
+  useRef,
+  type ComponentProps,
+  type ComponentType,
+  type KeyboardEvent,
+  type ReactNode,
+} from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
   Clock3,
@@ -71,6 +85,137 @@ export interface TrackRowProps extends Omit<ComponentProps<'div'>, 'onPlay'> {
   showArt?: boolean;
 }
 
+type ItemDeMenu = ComponentType<{ onSelect?: (event: Event) => void; children?: ReactNode }>;
+type SeparadorDeMenu = ComponentType<Record<string, never>>;
+
+/**
+ * OS ITENS DO MENU DE UMA FAIXA — os mesmos no botão "…" e no menu de contexto
+ * (botão direito no computador, segurar o dedo no celular). Devolve uma função
+ * que monta a lista com os componentes de quem pede: uma lista só, vários
+ * gatilhos.
+ */
+function useItensDaFaixa(
+  track: TrackDto,
+  onAddToPlaylist?: (track: TrackDto) => void,
+): (Item: ItemDeMenu, Separator: SeparadorDeMenu) => ReactNode {
+  const navigate = useNavigate();
+  const addToQueue = usePlayerStore((s) => s.addToQueue);
+  const playNextInQueue = usePlayerStore((s) => s.playNext);
+
+  return (Item, Separator) => (
+    <>
+      <Item
+        onSelect={() => {
+          addToQueue(track);
+          toast('Adicionada à fila');
+        }}
+      >
+        <ListEnd /> Adicionar à fila
+      </Item>
+      <Item
+        onSelect={() => {
+          playNextInQueue(track);
+          toast('Tocará em seguida');
+        }}
+      >
+        <ListPlus /> Tocar em seguida
+      </Item>
+      {/* Sempre disponível: sem `onAddToPlaylist` da tela, abre o seletor
+          global (antes o item só existia quando a tela o passava — e
+          nenhuma passava). */}
+      <Item
+        onSelect={() => (onAddToPlaylist ? onAddToPlaylist(track) : abrirAdicionarAPlaylist(track))}
+      >
+        <ListPlus /> Adicionar à playlist
+      </Item>
+      <Separator />
+      <Item
+        onSelect={() =>
+          openShare({
+            type: 'música',
+            title: track.title,
+            subtitle: trackArtistNames(track),
+            coverUrl: track.coverUrl,
+            tracks: [
+              {
+                title: track.title,
+                artist: trackArtistNames(track),
+                coverUrl: track.coverUrl,
+                durationMs: track.durationMs,
+                sourceUrl: sourceUrlFor(track.id),
+              },
+            ],
+          })
+        }
+      >
+        <Share2 /> Compartilhar
+      </Item>
+      {track.album && hrefDoAlbum(track) && (
+        <Item onSelect={() => void navigate(hrefDoAlbum(track)!)}>
+          <Disc3 /> Ir para o álbum
+        </Item>
+      )}
+      {track.artists[0] && (
+        <Item
+          onSelect={() => {
+            const href = artistHref(track.id, track.artists[0]!);
+            if (href) void navigate(href);
+          }}
+        >
+          <MicVocal /> Ir para o artista
+        </Item>
+      )}
+    </>
+  );
+}
+
+/**
+ * MENU DE CONTEXTO DE UMA FAIXA em volta de qualquer coisa que a mostre (linha,
+ * cartão): botão direito no computador, segurar o dedo no celular. O filho
+ * precisa repassar props/ref ao elemento raiz (o Radix injeta os eventos).
+ *
+ * `onAberto`: quem trata toque como "tocar" usa isto para ignorar o toque que
+ * abriu o menu — soltar o dedo não pode virar play.
+ */
+export function ContextoDaFaixa({
+  track,
+  onAddToPlaylist,
+  onAberto,
+  children,
+}: {
+  track: TrackDto;
+  onAddToPlaylist?: (track: TrackDto) => void;
+  onAberto?: () => void;
+  children: ReactNode;
+}) {
+  const itens = useItensDaFaixa(track, onAddToPlaylist);
+  const abertoEm = useRef(0);
+  return (
+    <ContextMenu
+      onOpenChange={(aberto) => {
+        if (!aberto) return;
+        abertoEm.current = Date.now();
+        onAberto?.();
+      }}
+    >
+      <ContextMenuTrigger
+        asChild
+        // Cartão que toca ao ser tocado: o dedo que segurou para abrir o menu,
+        // ao soltar, dispararia o play. Na captura, o clique para aqui.
+        onClickCapture={(event) => {
+          if (Date.now() - abertoEm.current < 1_000) {
+            event.preventDefault();
+            event.stopPropagation();
+          }
+        }}
+      >
+        {children}
+      </ContextMenuTrigger>
+      <ContextMenuContent>{itens(ContextMenuItem, ContextMenuSeparator)}</ContextMenuContent>
+    </ContextMenu>
+  );
+}
+
 /**
  * 56px track row (DESIGN §8): index↔play swap on hover, 40px art, artist/album
  * links, mono duration, like + menu revealed on hover. Roving focus friendly —
@@ -90,13 +235,12 @@ export function TrackRow({
   className,
   ...props
 }: TrackRowProps) {
-  const navigate = useNavigate();
+  /** Quando o menu de contexto abriu — o toque que o abriu não toca a faixa. */
+  const menuAbertoEm = useRef(0);
   // A capa vem daqui, e não de `track.coverUrl` direto: numa biblioteca grande
   // a alça da capa pode ter sido despejada pelo orçamento de memória, e este
   // gancho a reabre quando a linha volta à tela. Ver `useLocalCover`.
   const coverUrl = useLocalCover(track);
-  const addToQueue = usePlayerStore((s) => s.addToQueue);
-  const playNextInQueue = usePlayerStore((s) => s.playNext);
   const toggle = usePlayerStore((s) => s.toggle);
 
   const handlePlay = (): void => {
@@ -112,258 +256,211 @@ export function TrackRow({
     }
   };
 
+  const itensDoMenu = useItensDaFaixa(track, onAddToPlaylist);
+
   return (
-    <div
-      role="listitem"
-      data-giro="item"
-      data-track-row
-      tabIndex={-1}
-      aria-label={`${track.title} — ${trackArtistNames(track)}`}
-      onDoubleClick={handlePlay}
-      onClick={(event) => {
-        // TOQUE: um tap na linha toca (no celular não existe hover para o
-        // botão de play — sem isto era preciso tocar duas vezes). Desktop
-        // mantém o duplo clique. Taps em botões/links internos não contam.
-        if (!window.matchMedia('(pointer: coarse)').matches) return;
-        if ((event.target as HTMLElement).closest('button, a, [role="button"]')) return;
-        handlePlay();
+    <ContextMenu
+      onOpenChange={(aberto) => {
+        if (aberto) menuAbertoEm.current = Date.now();
       }}
-      onKeyDown={handleKeyDown}
-      className={cn(
-        'group grid h-14 select-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200',
-        showAlbum && 'md:grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_auto]',
-        'hover:bg-fg/5 focus-visible:bg-fg/5',
-        // Listas grandes (500+ faixas) matavam celulares modestos: com
-        // content-visibility o navegador só renderiza as linhas VISÍVEIS —
-        // o resto vira um placeholder de 56px até entrar na tela.
-        '[content-visibility:auto] [contain-intrinsic-size:auto_3.5rem]',
-        className,
-      )}
-      {...props}
     >
-      {/* index ↔ play swap */}
-      <span className="grid size-8 place-items-center justify-self-center">
-        <span
+      <ContextMenuTrigger asChild>
+        <div
+          role="listitem"
+          data-giro="item"
+          data-track-row
+          tabIndex={-1}
+          aria-label={`${track.title} — ${trackArtistNames(track)}`}
+          onDoubleClick={handlePlay}
+          onClick={(event) => {
+            // TOQUE: um tap na linha toca (no celular não existe hover para o
+            // botão de play — sem isto era preciso tocar duas vezes). Desktop
+            // mantém o duplo clique. Taps em botões/links internos não contam.
+            if (!window.matchMedia('(pointer: coarse)').matches) return;
+            if ((event.target as HTMLElement).closest('button, a, [role="button"]')) return;
+            // Segurar o dedo abre o menu de contexto; SOLTAR não pode virar play.
+            if (Date.now() - menuAbertoEm.current < 1_000) return;
+            handlePlay();
+          }}
+          onKeyDown={handleKeyDown}
           className={cn(
-            'font-mono text-[13px] tabular-nums text-fg-muted group-hover:hidden group-focus-within:hidden',
-            active && 'hidden',
+            'group grid h-14 select-none grid-cols-[2rem_minmax(0,1fr)_auto] items-center gap-3 rounded-lg px-2 transition-colors duration-200',
+            showAlbum && 'md:grid-cols-[2rem_minmax(0,4fr)_minmax(0,3fr)_auto]',
+            'hover:bg-fg/5 focus-visible:bg-fg/5',
+            // Listas grandes (500+ faixas) matavam celulares modestos: com
+            // content-visibility o navegador só renderiza as linhas VISÍVEIS —
+            // o resto vira um placeholder de 56px até entrar na tela.
+            '[content-visibility:auto] [contain-intrinsic-size:auto_3.5rem]',
+            className,
           )}
+          {...props}
         >
-          {index + 1}
-        </span>
-        {active && !playing ? null : active ? (
-          <span className="group-hover:hidden group-focus-within:hidden">
-            <EqBars playing={playing} />
-          </span>
-        ) : null}
-        <button
-          type="button"
-          aria-label={active && playing ? `Pausar ${track.title}` : `Reproduzir ${track.title}`}
-          onClick={handlePlay}
-          className={cn(
-            'hidden size-8 place-items-center rounded-full text-fg transition-colors hover:text-accent',
-            'group-hover:grid group-focus-within:grid',
-            active && !playing && 'grid',
-          )}
-        >
-          {active && playing ? (
-            <Pause className="size-4 fill-current" />
-          ) : (
-            <Play className="ml-0.5 size-4 fill-current" />
-          )}
-        </button>
-      </span>
-
-      {/* title + artists */}
-      <div className="flex min-w-0 items-center gap-3">
-        {showArt && (
-          <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
-            {coverUrl ? (
-              <img
-                src={capaNoTamanho(coverUrl, 'linha') ?? undefined}
-                alt=""
-                loading="lazy"
-                decoding="async"
-                className="size-full object-cover"
-              />
-            ) : (
-              <span className="grid size-full place-items-center text-fg-subtle">
-                <Music className="size-4" />
-              </span>
-            )}
-          </span>
-        )}
-        <div className="min-w-0">
-          <button
-            type="button"
-            onClick={(event) => {
-              event.stopPropagation();
-              handlePlay();
-            }}
-            className={cn(
-              'line-clamp-1 text-left text-sm font-medium hover:underline',
-              active ? 'text-accent' : 'text-fg',
-            )}
-          >
-            {track.title}
-            {track.explicit && (
-              <span
-                aria-label="Conteúdo explícito"
-                className="ml-1.5 inline-grid size-4 -translate-y-px place-items-center rounded-[4px] bg-fg/10 align-middle text-[9px] font-bold text-fg-muted"
-              >
-                E
-              </span>
-            )}
-            {track.previewOnly && (
-              <span
-                aria-label="Prévia de 30 segundos"
-                title="Prévia de 30 segundos"
-                className="ml-1.5 inline-block -translate-y-px rounded-full bg-fg/10 px-1.5 align-middle text-[10px] font-medium text-fg-muted"
-              >
-                30s
-              </span>
-            )}
-          </button>
-          <p className="line-clamp-1 text-[13px] text-fg-muted">
-            {track.artists.map((artist, i) => {
-              // Artista do catálogo sem id não tem página: vira texto, não um
-              // link que leva a lugar nenhum.
-              const href = artistHref(track.id, artist);
-              return (
-                <Fragment key={artist.id}>
-                  {i > 0 && ', '}
-                  {href ? (
-                    <Link
-                      to={href}
-                      className="hover:text-fg hover:underline"
-                      onClick={(e) => e.stopPropagation()}
-                    >
-                      {artist.name}
-                    </Link>
-                  ) : (
-                    <span>{artist.name}</span>
-                  )}
-                </Fragment>
-              );
-            })}
-          </p>
-        </div>
-      </div>
-
-      {/* album (hidden on small screens) */}
-      {showAlbum && (
-        <span className="hidden min-w-0 md:block">
-          {track.album &&
-            (hrefDoAlbum(track) ? (
-              <Link
-                to={hrefDoAlbum(track)!}
-                className="line-clamp-1 text-[13px] text-fg-muted hover:text-fg hover:underline"
-                onClick={(e) => e.stopPropagation()}
-              >
-                {track.album.title}
-              </Link>
-            ) : (
-              <span className="line-clamp-1 text-[13px] text-fg-muted">{track.album.title}</span>
-            ))}
-        </span>
-      )}
-
-      {/* like + duration + menu */}
-      <div className="flex items-center gap-1">
-        <LikeButton
-          liked={liked}
-          onToggle={onToggleLike}
-          className={cn(
-            // Desktop: aparece no hover. TOQUE: sempre visível — sem hover no
-            // celular o botão praticamente não existia.
-            'opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100',
-            liked && 'opacity-100',
-          )}
-        />
-        <span className="w-12 text-right font-mono text-[13px] tabular-nums text-fg-muted">
-          {formatDuration(track.durationMs)}
-        </span>
-        <DropdownMenu>
-          <DropdownMenuTrigger asChild>
-            <button
-              type="button"
-              aria-label={`Mais opções para ${track.title}`}
+          {/* index ↔ play swap */}
+          <span className="grid size-8 place-items-center justify-self-center">
+            <span
               className={cn(
-                'grid size-8 place-items-center rounded-full text-fg-muted opacity-0 transition-[opacity,color] duration-200',
-                'hover:text-fg group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100',
+                'font-mono text-[13px] tabular-nums text-fg-muted group-hover:hidden group-focus-within:hidden',
+                active && 'hidden',
               )}
             >
-              <MoreHorizontal className="size-4" />
+              {index + 1}
+            </span>
+            {active && !playing ? null : active ? (
+              <span className="group-hover:hidden group-focus-within:hidden">
+                <EqBars playing={playing} />
+              </span>
+            ) : null}
+            <button
+              type="button"
+              aria-label={active && playing ? `Pausar ${track.title}` : `Reproduzir ${track.title}`}
+              onClick={handlePlay}
+              className={cn(
+                'hidden size-8 place-items-center rounded-full text-fg transition-colors hover:text-accent',
+                'group-hover:grid group-focus-within:grid',
+                active && !playing && 'grid',
+              )}
+            >
+              {active && playing ? (
+                <Pause className="size-4 fill-current" />
+              ) : (
+                <Play className="ml-0.5 size-4 fill-current" />
+              )}
             </button>
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem
-              onSelect={() => {
-                addToQueue(track);
-                toast('Adicionada à fila');
-              }}
-            >
-              <ListEnd /> Adicionar à fila
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onSelect={() => {
-                playNextInQueue(track);
-                toast('Tocará em seguida');
-              }}
-            >
-              <ListPlus /> Tocar em seguida
-            </DropdownMenuItem>
-            {/* Sempre disponível: sem `onAddToPlaylist` da tela, abre o seletor
-                global (antes o item só existia quando a tela o passava — e
-                nenhuma passava). */}
-            <DropdownMenuItem
-              onSelect={() =>
-                onAddToPlaylist ? onAddToPlaylist(track) : abrirAdicionarAPlaylist(track)
-              }
-            >
-              <ListPlus /> Adicionar à playlist
-            </DropdownMenuItem>
-            <DropdownMenuSeparator />
-            <DropdownMenuItem
-              onSelect={() =>
-                openShare({
-                  type: 'música',
-                  title: track.title,
-                  subtitle: trackArtistNames(track),
-                  coverUrl: track.coverUrl,
-                  tracks: [
-                    {
-                      title: track.title,
-                      artist: trackArtistNames(track),
-                      coverUrl: track.coverUrl,
-                      durationMs: track.durationMs,
-                      sourceUrl: sourceUrlFor(track.id),
-                    },
-                  ],
-                })
-              }
-            >
-              <Share2 /> Compartilhar
-            </DropdownMenuItem>
-            {track.album && hrefDoAlbum(track) && (
-              <DropdownMenuItem onSelect={() => void navigate(hrefDoAlbum(track)!)}>
-                <Disc3 /> Ir para o álbum
-              </DropdownMenuItem>
+          </span>
+
+          {/* title + artists */}
+          <div className="flex min-w-0 items-center gap-3">
+            {showArt && (
+              <span className="relative size-10 shrink-0 overflow-hidden rounded-sm bg-fg/6">
+                {coverUrl ? (
+                  <img
+                    src={capaNoTamanho(coverUrl, 'linha') ?? undefined}
+                    alt=""
+                    loading="lazy"
+                    decoding="async"
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <span className="grid size-full place-items-center text-fg-subtle">
+                    <Music className="size-4" />
+                  </span>
+                )}
+              </span>
             )}
-            {track.artists[0] && (
-              <DropdownMenuItem
-                onSelect={() => {
-                  const href = artistHref(track.id, track.artists[0]!);
-                  if (href) void navigate(href);
+            <div className="min-w-0">
+              <button
+                type="button"
+                onClick={(event) => {
+                  event.stopPropagation();
+                  handlePlay();
                 }}
+                className={cn(
+                  'line-clamp-1 text-left text-sm font-medium hover:underline',
+                  active ? 'text-accent' : 'text-fg',
+                )}
               >
-                <MicVocal /> Ir para o artista
-              </DropdownMenuItem>
-            )}
-          </DropdownMenuContent>
-        </DropdownMenu>
-      </div>
-    </div>
+                {track.title}
+                {track.explicit && (
+                  <span
+                    aria-label="Conteúdo explícito"
+                    className="ml-1.5 inline-grid size-4 -translate-y-px place-items-center rounded-[4px] bg-fg/10 align-middle text-[9px] font-bold text-fg-muted"
+                  >
+                    E
+                  </span>
+                )}
+                {track.previewOnly && (
+                  <span
+                    aria-label="Prévia de 30 segundos"
+                    title="Prévia de 30 segundos"
+                    className="ml-1.5 inline-block -translate-y-px rounded-full bg-fg/10 px-1.5 align-middle text-[10px] font-medium text-fg-muted"
+                  >
+                    30s
+                  </span>
+                )}
+              </button>
+              <p className="line-clamp-1 text-[13px] text-fg-muted">
+                {track.artists.map((artist, i) => {
+                  // Artista do catálogo sem id não tem página: vira texto, não um
+                  // link que leva a lugar nenhum.
+                  const href = artistHref(track.id, artist);
+                  return (
+                    <Fragment key={artist.id}>
+                      {i > 0 && ', '}
+                      {href ? (
+                        <Link
+                          to={href}
+                          className="hover:text-fg hover:underline"
+                          onClick={(e) => e.stopPropagation()}
+                        >
+                          {artist.name}
+                        </Link>
+                      ) : (
+                        <span>{artist.name}</span>
+                      )}
+                    </Fragment>
+                  );
+                })}
+              </p>
+            </div>
+          </div>
+
+          {/* album (hidden on small screens) */}
+          {showAlbum && (
+            <span className="hidden min-w-0 md:block">
+              {track.album &&
+                (hrefDoAlbum(track) ? (
+                  <Link
+                    to={hrefDoAlbum(track)!}
+                    className="line-clamp-1 text-[13px] text-fg-muted hover:text-fg hover:underline"
+                    onClick={(e) => e.stopPropagation()}
+                  >
+                    {track.album.title}
+                  </Link>
+                ) : (
+                  <span className="line-clamp-1 text-[13px] text-fg-muted">
+                    {track.album.title}
+                  </span>
+                ))}
+            </span>
+          )}
+
+          {/* like + duration + menu */}
+          <div className="flex items-center gap-1">
+            <LikeButton
+              liked={liked}
+              onToggle={onToggleLike}
+              className={cn(
+                // Desktop: aparece no hover. TOQUE: sempre visível — sem hover no
+                // celular o botão praticamente não existia.
+                'opacity-0 transition-opacity duration-200 group-hover:opacity-100 group-focus-within:opacity-100 pointer-coarse:opacity-100',
+                liked && 'opacity-100',
+              )}
+            />
+            <span className="w-12 text-right font-mono text-[13px] tabular-nums text-fg-muted">
+              {formatDuration(track.durationMs)}
+            </span>
+            <DropdownMenu>
+              <DropdownMenuTrigger asChild>
+                <button
+                  type="button"
+                  aria-label={`Mais opções para ${track.title}`}
+                  className={cn(
+                    'grid size-8 place-items-center rounded-full text-fg-muted opacity-0 transition-[opacity,color] duration-200',
+                    'hover:text-fg group-hover:opacity-100 group-focus-within:opacity-100 data-[state=open]:opacity-100',
+                  )}
+                >
+                  <MoreHorizontal className="size-4" />
+                </button>
+              </DropdownMenuTrigger>
+              <DropdownMenuContent align="end">
+                {itensDoMenu(DropdownMenuItem, DropdownMenuSeparator)}
+              </DropdownMenuContent>
+            </DropdownMenu>
+          </div>
+        </div>
+      </ContextMenuTrigger>
+      <ContextMenuContent>{itensDoMenu(ContextMenuItem, ContextMenuSeparator)}</ContextMenuContent>
+    </ContextMenu>
   );
 }
 

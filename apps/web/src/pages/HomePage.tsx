@@ -14,6 +14,7 @@ import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
+import { CartaoDeFaixa } from '@/components/media/CartaoDeFaixa';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import * as localHistory from '@/lib/local/localHistory';
@@ -361,8 +362,9 @@ export default function HomePage() {
           href={`/genero/${encodeURIComponent(generoTronco.genre)}`}
         >
           {generoTronco.tracks.map((track, index) => (
-            <MediaCard
+            <CartaoDeFaixa
               key={track.id}
+              track={track}
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
@@ -383,8 +385,9 @@ export default function HomePage() {
       {ramos.map((ramo) => (
         <SectionCarousel key={ramo.key} title={ramo.titulo} subtitle={ramo.explicacao}>
           {ramo.tracks.map((track, index) => (
-            <MediaCard
+            <CartaoDeFaixa
               key={track.id}
+              track={track}
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
@@ -401,8 +404,9 @@ export default function HomePage() {
       {recentTracks.length > 0 && (
         <SectionCarousel title="Tocadas recentemente" href="/history">
           {recentTracks.map((track, index) => (
-            <MediaCard
+            <CartaoDeFaixa
               key={track.id}
+              track={track}
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
@@ -417,8 +421,9 @@ export default function HomePage() {
       {daSemente.length > 0 && (
         <SectionCarousel title="Dos seus artistas" subtitle="Escolhidos por você ao entrar">
           {daSemente.map((track, index) => (
-            <MediaCard
+            <CartaoDeFaixa
               key={track.id}
+              track={track}
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
@@ -539,8 +544,9 @@ export default function HomePage() {
           href={`/genero/${encodeURIComponent(g.genre)}`}
         >
           {g.tracks.map((track, index) => (
-            <MediaCard
+            <CartaoDeFaixa
               key={track.id}
+              track={track}
               title={track.title}
               subtitle={trackArtistNames(track)}
               imageUrl={track.coverUrl}
