@@ -263,6 +263,16 @@ export interface PlayerState {
   isBuffering: boolean;
   /** O que o player está fazendo enquanto a música não sai (ver `estadoDeCarga`). */
   carga: EstadoDeCarga | null;
+  /**
+   * O RETOMAR AUTOMÁTICO FOI RECUSADO PELO NAVEGADOR (autoplay sem gesto).
+   *
+   * A faixa já está carregada NO PONTO CERTO — só falta um toque. `true` pede
+   * à interface um convite discreto ("Continuar de onde parou"); nunca um erro.
+   * Some sozinho assim que o som volta a sair, de qualquer jeito que isso
+   * aconteça (o toque no convite, ou o primeiro toque em QUALQUER lugar da
+   * página — ver o evento `unlocked` do motor).
+   */
+  resumeInvite: boolean;
   context: PlayContext | null;
 
   playTrack: (track: TrackDto, context?: PlayContext) => void;
@@ -590,7 +600,12 @@ const STALL_CHECK_MS = 10_000;
 /** Só faixa local passa pela reextração de 20-25s do cofre — dá o teto de
  *  60s só a ela. Qualquer outra fonte usa o teto curto. */
 function initialWatchdogMs(trackId: string): number {
-  return trackId.startsWith('local:') ? LOAD_WATCHDOG_MS : CATALOG_LOAD_WATCHDOG_MS;
+  // `youtube:` (resultado da busca tocado sem importar) vem SEMPRE pelo
+  // `/stream` ao vivo, cuja primeira extração leva 11-17 s medidos — os 18 s do
+  // teto curto matariam a faixa bem no instante em que o som ia sair.
+  return trackId.startsWith('local:') || trackId.startsWith('youtube:')
+    ? LOAD_WATCHDOG_MS
+    : CATALOG_LOAD_WATCHDOG_MS;
 }
 let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
 let lastWatchdogPos = -1;
@@ -1000,6 +1015,23 @@ let lastResumeSave = 0;
 let pendingResumeSeek: number | null = null;
 
 /**
+ * O `play()` EM CURSO É O DO BOOT retomando sozinho (sem gesto nenhum)? Só
+ * enquanto isto for `true` um bloqueio de autoplay vira convite discreto em
+ * vez de erro — um play() pedido pela PESSOA (botão, tecla de mídia) que seja
+ * recusado continua mostrando o aviso de sempre, porque aí faltou mesmo algo
+ * a explicar. Consumido no primeiro uso (ver o ouvinte de `error` abaixo);
+ * a rede de segurança do timeout cobre o caso raro de o navegador nunca
+ * responder (nem sucesso nem rejeição chegam a tempo).
+ */
+let retomandoAoAbrir = false;
+function armarRetomandoAoAbrir(): void {
+  retomandoAoAbrir = true;
+  setTimeout(() => {
+    retomandoAoAbrir = false;
+  }, 4_000);
+}
+
+/**
  * "Quando esta faixa terminar de carregar, comece nesta posição."
  *
  * Precisa ser assim, e não um `seek()` logo depois do `playTrack()`: enquanto o
@@ -1011,16 +1043,41 @@ export function resumeAt(seconds: number): void {
   pendingResumeSeek = seconds > 0 ? seconds : null;
 }
 
-function saveResume(force = false): void {
+function saveResume(force = false, limparMarca = false): void {
   const s = usePlayerStore.getState();
   if (!s.currentTrack || s.progress <= 0) return;
   const now = Date.now();
   if (!force && now - lastResumeSave < 5_000) return; // no máx. 1 escrita / 5s
   lastResumeSave = now;
+  // A MARCA "ESTAVA TOCANDO" SOBREVIVE À GRAVAÇÃO DE SAÍDA.
+  //
+  // `prepararRetomadaTocando` grava a marca e o atualizador recarrega a página
+  // logo em seguida — e a recarga dispara `pagehide`/`visibilitychange`, que
+  // gravam a posição DE NOVO. Sem esta preservação, essa gravação de saída
+  // apagava a marca que acabara de ser posta: o app voltava sempre PAUSADO
+  // depois de atualizar (reproduzido no e2e resumoAoRecarregar: a marca chegava
+  // ao boot com `tocando: false`). Só quem decide que a música NÃO deve voltar
+  // tocando apaga a marca: o boot (que a consome) e o pause de verdade.
+  let tocando = false;
+  if (!limparMarca) {
+    try {
+      const anterior = JSON.parse(window.localStorage.getItem(RESUME_KEY) ?? 'null') as {
+        track?: { id?: string };
+        tocando?: boolean;
+      } | null;
+      tocando = anterior?.tocando === true && anterior.track?.id === s.currentTrack.id;
+    } catch {
+      tocando = false;
+    }
+  }
   try {
     window.localStorage.setItem(
       RESUME_KEY,
-      JSON.stringify({ track: s.currentTrack, progress: Math.floor(s.progress) }),
+      JSON.stringify({
+        track: s.currentTrack,
+        progress: Math.floor(s.progress),
+        ...(tocando ? { tocando: true } : {}),
+      }),
     );
   } catch {
     /* quota */
@@ -1346,6 +1403,7 @@ export const usePlayerStore = create<PlayerState>()(
           buffered: 0,
           duration: segundosConhecidos(track),
           carga: { fase: 'preparando', desde: Date.now() },
+          resumeInvite: false, // nova carga: qualquer convite da faixa anterior não vale mais
         });
 
         // O GUARDIÃO DO OFFLINE PRECISA SABER O QUE VEM A SEGUIR.
@@ -1519,7 +1577,9 @@ export const usePlayerStore = create<PlayerState>()(
            * tocava, hoje não toca" das faixas favoritas.
            */
           if (!track.id.startsWith('local:')) {
-            marcarCarga('carregando');
+            // Resultado do YouTube tocado sem importar também é extração ao
+            // vivo: a espera longa merece o mesmo aviso da faixa local.
+            marcarCarga(ehExtracaoAoVivo(track.streamUrl) ? 'buscandoOrigem' : 'carregando');
             audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
             applyEngineSettings();
             reconciliarIntencao(geracao);
@@ -1575,6 +1635,7 @@ export const usePlayerStore = create<PlayerState>()(
         playbackRate: 1,
         isBuffering: false,
         carga: null,
+        resumeInvite: false,
         context: null,
 
         playTrack: (track, context) => {
@@ -1682,7 +1743,10 @@ export const usePlayerStore = create<PlayerState>()(
             return;
           }
           audioEngine.play();
-          set({ isPlaying: true });
+          // O toque que chega aqui — no convite ou no botão normal — É o gesto
+          // que faltava: mesmo que este `play()` venha a ser recusado de novo
+          // (raro, mas possível), o convite velho não deve continuar na tela.
+          set({ isPlaying: true, resumeInvite: false });
           // Voltou a tocar → volta a vigiar travamento (o watchdog se desarma
           // sozinho quando a faixa é pausada).
           armLoadWatchdog(currentTrack.id, STALL_CHECK_MS);
@@ -1696,7 +1760,7 @@ export const usePlayerStore = create<PlayerState>()(
           querTocar = false;
           audioEngine.pause();
           set({ isPlaying: false });
-          saveResume(true);
+          saveResume(true, true); // pausou de verdade: não volta tocando
         },
 
         seek: (seconds) => {
@@ -1925,11 +1989,14 @@ export function initPlayerEngine(): void {
     // Recarregou por causa de uma versão nova COM a música tocando: volta
     // tocando de onde estava. Apaga a marca primeiro — é de uso único, para uma
     // reabertura comum depois não começar a tocar sozinha. Se o navegador
-    // recusar o autoplay (aba nova sem histórico de mídia), a faixa fica pronta
-    // e pausada, e o play da tela ou do controle de mídia retoma.
+    // recusar o autoplay (aba nova sem histórico de mídia, Media Engagement
+    // baixo, iOS), `armarRetomandoAoAbrir` faz o bloqueio virar convite
+    // discreto (ver o ouvinte de 'error' mais abaixo) em vez de um toast de
+    // erro — a faixa já fica pronta e no ponto certo de qualquer jeito.
     if (resume.tocando) {
-      saveResume(true); // reescreve sem a marca `tocando`
+      saveResume(true, true); // consome a marca: uso único
       resumeAt(resume.progress);
+      armarRetomandoAoAbrir();
       void store.getState().play();
     }
     void restaurarFila(resume.track.id);
@@ -2490,9 +2557,33 @@ export function initPlayerEngine(): void {
       return;
     }
     querTocar = false;
+    // O RETOMAR SOZINHO DO BOOT SENDO RECUSADO NÃO É UM ERRO PARA A PESSOA —
+    // ela nem pediu nada ainda. A faixa já está no ponto certo (ver `loaded`
+    // logo acima, que busca a posição salva independente de o play ter
+    // funcionado); só falta o toque que o navegador exige. Um convite
+    // silencioso substitui o toast vermelho SÓ desta vez.
+    if (kind === 'play' && retomandoAoAbrir) {
+      retomandoAoAbrir = false;
+      store.setState({ isPlaying: false, isBuffering: false, carga: null, resumeInvite: true });
+      return;
+    }
     store.setState({ isPlaying: false, isBuffering: false, carga: null });
     // Toast lazily to avoid a hard dependency for unit tests.
     void import('sonner').then(({ toast }) => toast.error(message));
+  });
+
+  /**
+   * UM `play()` BLOQUEADO ACABOU DE PEGAR — sem que a pessoa tivesse tocado no
+   * convite: qualquer toque na página serve para o motor (ver `startSlot`).
+   * Sem este ouvinte a store nunca saberia, e ficaria presa dizendo "pausado"
+   * com som saindo — o mesmo defeito do spinner eterno, espelhado no play.
+   */
+  audioEngine.on('unlocked', ({ track }) => {
+    const s = store.getState();
+    if (!track || s.currentTrack?.id !== track.id) return;
+    querTocar = true;
+    store.setState({ isPlaying: true, isBuffering: false, resumeInvite: false });
+    armLoadWatchdog(track.id, STALL_CHECK_MS);
   });
 
   /**
@@ -2514,7 +2605,7 @@ export function initPlayerEngine(): void {
     // encerrar.
     querTocar = false;
     store.setState({ isPlaying: false, isBuffering: false });
-    saveResume(true);
+    saveResume(true, true); // outro app tomou o som: não é para voltar tocando
   });
 
   audioEngine.on('ended', () => {

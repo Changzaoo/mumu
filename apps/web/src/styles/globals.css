@@ -565,7 +565,7 @@
    O Tailwind v4 só emite um @keyframes declarado dentro de `@theme` quando
    alguma variável `--animate-*` o usa. Estas são chamadas por `style={{
    animation }}`, que o Tailwind não enxerga — lá dentro elas eram descartadas
-   no build, em silêncio: a fumaça do play nunca se mexeu e a capa da tela
+   no build, em silêncio: a aura do play nunca se mexeu e a capa da tela
    cheia nunca "respirou". Aqui, no nível de cima, keyframe é CSS comum e sai
    sempre. */
 
@@ -580,33 +580,25 @@
   }
 }
 
-/* A AURA DO BOTÃO PLAY — a base: névoa que gira e respira em volta.
-   Só `transform` e `opacity`: a composição roda fora da thread principal. */
-@keyframes aura-drift-a {
-  0%,
-  100% {
-    transform: rotate(0deg) scale(1);
-    opacity: 0.55;
-  }
-  50% {
-    transform: rotate(180deg) scale(1.2);
-    opacity: 0.85;
-  }
+/* A AURA DO BOTÃO PLAY — halo em volta, movido quadro a quadro por
+   `AuraDoPlay.tsx` (derivas sorteadas, sem keyframe: keyframe tem ciclo).
+   Aqui só o que é fixo: a camada, o desfoque (rasterizado uma vez — o que
+   muda por quadro é só `transform`/`opacity`) e a versão leve. */
+.aura-play-camada {
+  position: absolute;
+  inset: 0;
+  border-radius: 9999px;
+  filter: blur(10px);
+  will-change: transform, opacity;
 }
-@keyframes aura-drift-b {
-  0%,
-  100% {
-    transform: rotate(0deg) scale(1.12);
-    opacity: 0.8;
-  }
-  50% {
-    transform: rotate(-180deg) scale(0.94);
-    opacity: 0.45;
-  }
+/* Aparelho fraco: sem desfoque (o gradiente já é macio) e um lóbulo a menos. */
+:root[data-perf='baixo'] .aura-play-camada {
+  filter: none;
+  will-change: auto;
 }
-
-/* A FUMAÇA SUBINDO não mora mais aqui: keyframe fixo é ciclo que o olho acha.
-   Ela é desenhada na hora, sorteada, num canvas — ver `FumacaDoPlay.tsx`. */
+:root[data-perf='baixo'] .aura-play-lobulo-extra {
+  display: none;
+}
 
 /* O DISCO GIRANDO no lugar do play enquanto a música é trazida. Uma volta a
    cada 1,8s — 33⅓ rotações por minuto, a de um LP. Só `transform`. */

@@ -29,7 +29,7 @@ import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
 import { useTrackLikes } from '@/features/library/api';
 import { SeekSlider } from '@/components/media/SeekSlider';
-import { PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { ConviteDeRetomada, PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
 import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
 import { SpectrumVisualizer } from '@/components/media/SpectrumVisualizer';
 import { WaveformSeeker } from '@/components/media/WaveformSeeker';
@@ -449,6 +449,7 @@ export function NowPlaying() {
                   <NowPlayingSeek trackId={faixaLocal?.id} onSeek={seek} />
                 )}
                 {!remoto && <StatusDeCarga className="mt-2 text-center" />}
+                {!remoto && <ConviteDeRetomada className="mt-2 text-center" />}
               </div>
 
               {/* Transport */}

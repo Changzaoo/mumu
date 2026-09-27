@@ -261,6 +261,10 @@ describe('fallback de fonte morta', () => {
 
     await vi.waitFor(() => expect(usePlayerStore.getState().isPlaying).toBe(false));
     expect(vi.mocked(audioEngine.load).mock.calls.length).toBe(loads);
+    // Este bloqueio é de um play PEDIDO PELA PESSOA (`playTrack`), não do boot
+    // retomando sozinho — continua sendo o erro de sempre, não um convite (ver
+    // `resumirAoAbrir.test.ts`, onde o mesmo evento vira convite).
+    expect(usePlayerStore.getState().resumeInvite).toBe(false);
   });
 });
 

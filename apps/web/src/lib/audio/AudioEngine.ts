@@ -49,6 +49,13 @@ export interface AudioEngineEventMap {
    * a tocar. Quem ouve isto acerta o estado e fica quieto.
    */
   interrupted: { track: TrackDto | null };
+  /**
+   * Um `play()` que tinha sido bloqueado (autoplay) finalmente pegou, no
+   * primeiro gesto do usuário depois do bloqueio — ver o `resume` em
+   * `startSlot`. É a contraparte de `error{kind:'play'}`: aquele avisa que
+   * parou; este avisa que, sem mais nada ter sido pedido, voltou sozinho.
+   */
+  unlocked: { track: TrackDto | null };
 }
 
 export interface LoadOptions {
@@ -308,6 +315,15 @@ export class AudioEngine {
   /** Resolves an offline/local source URL for a track, if one is cached. */
   private localResolver: ((track: TrackDto) => string | null) | null = null;
   private playing = false;
+  /**
+   * A INTENÇÃO, separada da CONFIRMAÇÃO — `playing` (acima) vira `false` assim
+   * que um `play()` bloqueado prova que não saiu som (ver `startSlot`), mas
+   * isso não quer dizer que a pessoa (ou o boot) desistiu de tocar. Este campo
+   * é só isso: continua `true` até um `pause()` de verdade, e é ele — não
+   * `playing` — que decide se o ouvinte de "retoma no primeiro gesto" ainda
+   * deve agir.
+   */
+  private desejaTocar = false;
   private volume = 1;
   private muted = false;
   private rate = 1;
@@ -330,6 +346,7 @@ export class AudioEngine {
     error: new Set(),
     interrupted: new Set(),
     buffering: new Set(),
+    unlocked: new Set(),
   };
 
   /** AnalyserNode for spectrum visualizers — null until first playback / if Web Audio failed. */
@@ -436,10 +453,12 @@ export class AudioEngine {
       );
       this.fadeTimers.add(timer);
       this.playing = true;
+      this.desejaTocar = true;
     } else {
       this.setFade(to, 1);
       if (autoplay) this.startSlot(to);
       this.playing = autoplay;
+      this.desejaTocar = autoplay;
       // Depois de começar a nova, nunca antes — ver `retireSlot`.
       this.retireSlot(from, to, wasPlaying && autoplay);
     }
@@ -458,6 +477,7 @@ export class AudioEngine {
     if (this.destroyed || !this.active.source) return;
     this.startSlot(this.active);
     this.playing = true;
+    this.desejaTocar = true;
     this.syncTicker();
   }
 
@@ -466,6 +486,7 @@ export class AudioEngine {
     if (slot.source?.kind === 'howl') slot.source.howl.pause();
     else slot.source?.el.pause();
     this.playing = false;
+    this.desejaTocar = false; // pausa DE VERDADE — o próximo gesto não deve reviver isto
     this.syncTicker();
   }
 
@@ -906,12 +927,38 @@ export class AudioEngine {
         // navegador, não uma falha. Ver `ehAbortoDeTroca` (RF1).
         if (ehAbortoDeTroca(erro)) return;
         if (!daVez()) return;
+        // O PLAY FALHOU DE VERDADE — `this.playing` não pode continuar `true`.
+        //
+        // `load()`/`play()` marcam `this.playing` ANTES de saber se `el.play()`
+        // vai vingar (é o que deixa a troca de faixa otimista e responsiva).
+        // Sem desfazer isto aqui, o motor passava a acreditar que tocava com o
+        // alto-falante mudo — e um `toggle()` seguinte, lendo o estado errado
+        // por fora, podia interpretar o próximo toque como "pausar" em vez de
+        // "tocar". `isPlaying` (getter) espelha isto direto; a store confia
+        // nele em mais de um lugar (`play()`, o watchdog de travamento).
+        this.playing = false;
         // Autoplay bloqueado: em vez de só reclamar, retoma sozinho no PRIMEIRO
         // gesto do usuário (igual ao 'unlock' do Howler) — senão a faixa fica
         // parada mesmo depois de o usuário interagir com a página.
         const resume = (): void => {
           detach();
-          if (daVez() && this.playing) void el.play().catch(() => undefined);
+          // A INTENÇÃO, não a confirmação: `playing` acabou de virar `false`
+          // aqui em cima (o play falhou) e continuaria assim para sempre.
+          if (!daVez() || !this.desejaTocar) return;
+          // AVISA QUANDO PEGA — sem isto o som volta a sair, mas a store nunca
+          // fica sabendo: `isPlaying` continuava `false` para sempre com áudio
+          // audível no alto-falante (o "estado preso" ao contrário). Quem ouve
+          // este evento sincroniza `isPlaying` e apaga qualquer convite de
+          // retomada que estivesse na tela — o toque, seja onde for, já resolveu.
+          void el
+            .play()
+            .then(() => {
+              if (!daVez()) return;
+              this.playing = true; // pegou: o motor volta a se saber tocando
+              this.syncTicker();
+              this.emit('unlocked', { track: slot.track });
+            })
+            .catch(() => undefined);
         };
         const detach = (): void => {
           document.removeEventListener('pointerdown', resume);

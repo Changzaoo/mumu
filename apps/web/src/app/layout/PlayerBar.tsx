@@ -26,7 +26,7 @@ import { Slider } from '@/components/ui/slider';
 import { cn } from '@/lib/utils';
 import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { artistHref } from '@/lib/linksDeFaixa';
-import { PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
+import { ConviteDeRetomada, PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
 import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
 import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
@@ -191,9 +191,14 @@ export function PlayerBar() {
                 </p>
               </TrocaDeFaixa>
               {/* O que o player está fazendo enquanto a música não sai. Só da
-                  faixa DAQUI — espelhando outro aparelho não há carga local. */}
+                  faixa DAQUI — espelhando outro aparelho não há carga local.
+                  Os dois nunca aparecem juntos: um é carga em curso, o outro é
+                  o autoplay do boot recusado (ver `resumeInvite`). */}
               {track.source === 'local' && (
-                <StatusDeCarga className="mt-0.5 line-clamp-1 text-[11px]" />
+                <>
+                  <StatusDeCarga className="mt-0.5 line-clamp-1 text-[11px]" />
+                  <ConviteDeRetomada className="mt-0.5 line-clamp-1 text-[11px]" />
+                </>
               )}
               {/* Onde está tocando — pequeno, clicável ("Tocar neste dispositivo"). */}
               {track.source === 'remote' && track.deviceName && track.deviceId && (

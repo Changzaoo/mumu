@@ -32,6 +32,22 @@ export function useTextoDeCarga(): string | null {
   return tocando ? textoDeCarga(carga, agora) : null;
 }
 
+/**
+ * A FAIXA JÁ ESTÁ PRONTA, NO PONTO CERTO — só falta o toque que o navegador
+ * exige. Acontece ao reabrir o app depois de uma atualização: a página tenta
+ * retomar sozinha de onde a música estava, e a política de autoplay recusa
+ * sem gesto do usuário (ver `resumeInvite` em `playerStore.ts`).
+ *
+ * DELIBERADAMENTE FORA de `useTextoDeCarga`: aquele texto alimenta o disco
+ * girando do play (`PlayDoPlayer`), e este convite é o oposto — o botão
+ * continua parado, mostrando claramente "aperte para tocar". Confundir os
+ * dois faria o play girar sem nenhuma carga em curso.
+ */
+export function useConviteDeRetomada(): string | null {
+  const resumeInvite = usePlayerStore((s) => s.resumeInvite);
+  return resumeInvite ? 'Toque em play para continuar de onde parou' : null;
+}
+
 export function StatusDeCarga({ className }: { className?: string }) {
   const texto = useTextoDeCarga();
   if (!texto) return null;
@@ -47,6 +63,27 @@ export function StatusDeCarga({ className }: { className?: string }) {
         aria-hidden
         className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-accent align-middle"
       />
+      {texto}
+    </p>
+  );
+}
+
+/**
+ * O convite: mesma linha que `StatusDeCarga` ocuparia, sem o ponto pulsante
+ * (não há nada "em andamento" — é a pessoa que decide o próximo passo) e sem
+ * animação, para não competir com o play logo ao lado, que é quem já resolve.
+ */
+export function ConviteDeRetomada({ className }: { className?: string }) {
+  const texto = useConviteDeRetomada();
+  if (!texto) return null;
+
+  return (
+    <p
+      role="status"
+      aria-live="polite"
+      title={texto}
+      className={cn('line-clamp-2 text-[12px] leading-snug text-accent', className)}
+    >
       {texto}
     </p>
   );

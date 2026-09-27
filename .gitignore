@@ -58,3 +58,6 @@ apps/importer/blobs/
 # Estado local do deploy (infra/scripts/deploy-api.sh)
 .deploy/
 backups/
+
+# cache local das outras fontes de letra (outrasFontesDeLetra.mjs)
+apps/importer/.cache-letras-externas.json

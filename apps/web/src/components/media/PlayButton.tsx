@@ -1,6 +1,6 @@
 import type { ComponentProps } from 'react';
 import { Disc3, Pause, Play } from 'lucide-react';
-import { FumacaDoPlay } from '@/components/media/FumacaDoPlay';
+import { AuraDoPlay } from '@/components/media/AuraDoPlay';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useSemMovimento } from '@/hooks/useSemMovimento';
 import { cn } from '@/lib/utils';
@@ -8,7 +8,7 @@ import { cn } from '@/lib/utils';
 export interface PlayButtonProps extends Omit<ComponentProps<'button'>, 'children'> {
   playing?: boolean;
   size?: 'sm' | 'md' | 'lg';
-  /** Fumaça viva atrás do botão (tela cheia, barra do player). */
+  /** Aura viva em volta do botão (tela cheia, barra do player). */
   aura?: boolean;
   /** A música está sendo trazida: o botão vira o disco girando. */
   carregando?: boolean;
@@ -21,73 +21,23 @@ const sizes = {
 } as const;
 
 /**
- * A AURA — fumaça subindo, não sombra.
+ * A AURA — halo em volta, não fumaça subindo.
  *
- * Embaixo, dois véus da cor de destaque giram em sentidos opostos e respiram
- * (13s e 9s; no toque, o dobro da pressa): a névoa que envolve o botão. Por
- * cima, a FUMAÇA de verdade sobe do círculo — desenhada na hora, sorteada
- * baforada a baforada, sem ciclo que o olho reconheça (ver `FumacaDoPlay`).
- * Tudo fica atrás do círculo opaco do botão — só aparece o que extravasa.
+ * Um anel e dois lóbulos da cor de destaque atrás do círculo, se mexendo por
+ * derivas sorteadas que nunca fecham um ciclo (ver `AuraDoPlay`). Tudo fica
+ * atrás do círculo opaco do botão — só aparece o que extravasa.
  *
- * O PORQUÊ DE ELA NUNCA TER SE MEXIDO: os @keyframes moravam dentro do
- * `@theme` do Tailwind v4, que descarta no build todo keyframe não usado por
- * uma variável `--animate-*`. Como estes são chamados por estilo inline, o
- * Tailwind não os via e o CSS final saía sem nenhum. Agora vivem no nível de
- * cima de `globals.css`.
+ * A fumaça que subia do botão (`FumacaDoPlay`) saiu: era demais, tomava o
+ * espaço acima do play e disputava atenção com a capa. A aura fica colada ao
+ * botão, ao redor dele.
  *
- * PAUSAR NÃO CORTA. Antes a pausa arrancava a animação dos véus (que pulavam de
- * volta à posição zero) e desmontava os fios de fumaça no meio do ar. Agora os
- * véus só CONGELAM onde estão (`animation-play-state`) e escurecem devagar, e a
- * fumaça para de nascer mas a que já subiu termina o caminho e se desfaz. Um
- * botão que fumega sem som saindo promete o que não está acontecendo — mas a
- * fumaça que já estava no ar não some por decreto.
- *
- * Sob `prefers-reduced-motion` (ou o ajuste do app) a névoa continua lá, só sem
- * movimento, e não sobe fumaça: sumir com tudo deixava o botão "sem aura
- * nenhuma" para quem desligou as animações do Windows, e movimento não é a
- * única coisa que ela entrega.
+ * PAUSAR NÃO CORTA: a aura desacelera e esmaece até assentar parada onde
+ * estava. Sem movimento pedido, ela continua lá, só sem se mexer — sumir com
+ * tudo deixava o botão "sem aura nenhuma" para quem desligou as animações.
  */
 function Aura({ playing }: { playing: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');
-  const semMovimento = useSemMovimento();
-  const estado = playing ? 'running' : 'paused';
-  return (
-    <>
-      <span
-        aria-hidden
-        className={cn(
-          'pointer-events-none absolute transition-opacity duration-[1200ms]',
-          toque ? 'inset-[-65%]' : 'inset-[-55%]',
-          !playing && 'opacity-45',
-        )}
-      >
-        <span
-          className="absolute inset-0 rounded-full blur-xl motion-reduce:!animate-none"
-          style={{
-            background:
-              'radial-gradient(closest-side, hsl(var(--accent) / 0.8) 0%, hsl(var(--accent) / 0.22) 55%, transparent 78%)',
-            animation: semMovimento
-              ? undefined
-              : `aura-drift-a ${toque ? '6s' : '13s'} ease-in-out infinite`,
-            animationPlayState: estado,
-          }}
-        />
-        <span
-          className="absolute inset-[12%] rounded-full blur-lg motion-reduce:!animate-none"
-          style={{
-            background:
-              'radial-gradient(closest-side at 62% 38%, hsl(var(--accent) / 0.6) 0%, transparent 70%)',
-            animation: semMovimento
-              ? undefined
-              : `aura-drift-b ${toque ? '4.5s' : '9s'} ease-in-out infinite`,
-            animationPlayState: estado,
-          }}
-        />
-      </span>
-      {/* Fumaça parada no ar não é fumaça, é mancha: sem movimento, nada sobe. */}
-      {!semMovimento && <FumacaDoPlay emitindo={playing} toque={toque} />}
-    </>
-  );
+  return <AuraDoPlay playing={playing} toque={toque} />;
 }
 
 /**

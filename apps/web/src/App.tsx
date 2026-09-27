@@ -83,6 +83,7 @@ export default function App() {
         detalhe,
         guardiao,
         biblioteca,
+        continuidade,
       ] = await Promise.all([
         import('@/lib/sync/syncManager'),
         import('@/lib/sync/catalogoBoot'),
@@ -95,6 +96,7 @@ export default function App() {
         import('@/lib/local/detalheDaFaixa'),
         import('@/lib/offline/guardiaoOffline'),
         import('@/lib/local/localLibrary'),
+        import('@/lib/offline/continuidadeOffline'),
       ]);
       if (cancelado) return;
       // O ACERVO SAI NA FRENTE, EM PARALELO COM A HIDRATAÇÃO.
@@ -127,6 +129,12 @@ export default function App() {
       // precisar deles, para o servidor fora do ar deixar de virar faixa que
       // aparece e não toca. Ver lib/offline/guardiaoOffline.ts.
       await medirEtapa('guardiao.initGuardiaoOffline', () => guardiao.initGuardiaoOffline());
+      // Sem internet, a fila continua com o que já está no aparelho — parecido
+      // com o que estava tocando (artista, gênero, favoritismo). Ver
+      // lib/offline/continuidadeOffline.ts.
+      await medirEtapa('continuidade.initContinuidadeOffline', () =>
+        continuidade.initContinuidadeOffline(),
+      );
       // Agente pesquisador: DESLIGADO por padrão. Ele confere o interruptor a
       // cada rodada, então desligar nas configurações para o agente na hora.
       pararPesquisador = pesquisador.iniciarPesquisador(

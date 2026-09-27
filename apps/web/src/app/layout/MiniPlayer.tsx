@@ -1,7 +1,11 @@
 import { AnimatePresence, motion } from 'framer-motion';
 import { MonitorSpeaker, Music, SkipBack, SkipForward } from 'lucide-react';
 import { LikeButton } from '@/components/media/LikeButton';
-import { PlayDoPlayer, useTextoDeCarga } from '@/components/media/StatusDeCarga';
+import {
+  PlayDoPlayer,
+  useConviteDeRetomada,
+  useTextoDeCarga,
+} from '@/components/media/StatusDeCarga';
 import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
 import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useTrackLikes } from '@/features/library/api';
@@ -59,9 +63,13 @@ export function MiniPlayer() {
   const chaveDaFaixa = np ? `${np.source}:${np.trackId ?? np.title}` : '';
   const direcao = useDirecaoDaTroca(chaveDaFaixa);
   const artistas = np?.artists.map((a) => a.name).join(', ') ?? '';
-  // A carga é a DAQUI: espelhando outro aparelho, não há o que contar.
+  // A carga é a DAQUI: espelhando outro aparelho, não há o que contar. O
+  // convite de retomada vem por trás dela — os dois nunca coexistem (ver
+  // `ConviteDeRetomada` no arquivo irmão) — para virar a MESMA linha que hoje
+  // já troca o nome do artista pelo status.
   const textoDeCarga = useTextoDeCarga();
-  const statusDeCarga = np?.source === 'local' ? textoDeCarga : null;
+  const conviteDeRetomada = useConviteDeRetomada();
+  const statusDeCarga = np?.source === 'local' ? (textoDeCarga ?? conviteDeRetomada) : null;
 
   return (
     <AnimatePresence>
