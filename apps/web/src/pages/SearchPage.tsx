@@ -9,14 +9,11 @@ import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { Mic, MicVocal, Music, Quote, Search, SearchX, X } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
-import { ErrorState } from '@/components/media/ErrorState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
-import { Skeleton } from '@/components/ui/skeleton';
-import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useTrackLikes } from '@/features/library/api';
 import { useRecentSearches } from '@/features/search/api';
 import { MaisMusicas } from '@/features/search/MaisMusicas';
@@ -36,15 +33,12 @@ const TABS: Array<{ value: Tab; label: string }> = [
   { value: 'album', label: 'Álbuns' },
 ];
 
-const artistPath = (id: string): string => `/catalogo/artista/${id.replace(/^audius-user:/, '')}`;
-
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
 function norm(value: string): string {
   return value.toLowerCase().normalize('NFD').replace(DIACRITICS, '').trim();
 }
 
 const EMPTY_ENTRIES: localLibrary.LibraryEntry[] = [];
-const SEM_FAIXAS: TrackDto[] = [];
 
 // ── Voice search (webkitSpeechRecognition; hidden when unsupported) ──
 
@@ -111,16 +105,6 @@ function VoiceButton({ onResult }: { onResult: (text: string) => void }) {
   );
 }
 
-function ResultsSkeleton() {
-  return (
-    <div className="space-y-2" aria-busy>
-      {Array.from({ length: 6 }, (_, i) => (
-        <Skeleton key={i} className="h-14 rounded-lg" />
-      ))}
-    </div>
-  );
-}
-
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim();
@@ -138,8 +122,6 @@ export default function SearchPage() {
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const likes = useTrackLikes();
 
-  const tracksQuery = useCatalogSearch(query);
-  const artistsQuery = useCatalogSearchArtists(query);
   const hasQuery = query.length > 0;
 
   // Record a search once the user commits to a result set (small delay).
@@ -203,8 +185,9 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por visita
   }, []);
 
-  const freeTracks = tracksQuery.data ?? SEM_FAIXAS;
-  const artists = artistsQuery.data ?? [];
+  // O "catálogo grátis" (Audius) SAIU DA BUSCA: trazia faixas de qualquer um,
+  // sem nada a ver com o que se procurava. A busca é o acervo + "Mais músicas"
+  // (a música achada por baixo, que vem para o acervo ao tocar).
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
   const showAlbums = tab === 'all' || tab === 'album';
@@ -259,29 +242,18 @@ export default function SearchPage() {
     return bestScore >= 40 ? result : null;
   }, [query, local]);
 
-  const isLoading =
-    hasQuery && local.tracks.length === 0 && (tracksQuery.isLoading || artistsQuery.isLoading);
-  const isError = hasQuery && tracksQuery.isError && artistsQuery.isError;
   const isEmpty =
     hasQuery &&
-    !isLoading &&
-    !isError &&
-    freeTracks.length === 0 &&
-    artists.length === 0 &&
     local.tracks.length === 0 &&
     local.artists.length === 0 &&
     local.albums.length === 0 &&
     lyricMatches.length === 0;
 
-  const jaNaTela = useMemo(() => [...local.tracks, ...freeTracks], [local.tracks, freeTracks]);
+  const jaNaTela = local.tracks;
 
   const playLocal = (index: number): void => {
     addRecent(query);
     playQueue(local.tracks, index, { source: 'search', sourceId: query });
-  };
-  const playFree = (index: number): void => {
-    addRecent(query);
-    playQueue(freeTracks, index, { source: 'search', sourceId: query });
   };
 
   return (
@@ -367,25 +339,8 @@ export default function SearchPage() {
       )}
 
       {/* Results */}
-      {isLoading && <ResultsSkeleton />}
-      {isError && (
-        <div className="py-8">
-          <ErrorState
-            onRetry={() => {
-              void tracksQuery.refetch();
-              void artistsQuery.refetch();
-            }}
-          />
-        </div>
-      )}
-
-      {hasQuery && !isLoading && !isError && (
-        <div
-          className={cn(
-            'space-y-8 transition-opacity',
-            (tracksQuery.isFetching || artistsQuery.isFetching) && 'opacity-70',
-          )}
-        >
+      {hasQuery && (
+        <div className="space-y-8">
           {/* Sem nada no acervo, quem responde é "Mais músicas" logo abaixo
               (que procura por baixo); o vazio só aparece aqui sem faixas. */}
           {isEmpty && showTracks ? null : isEmpty ? (
@@ -600,44 +555,6 @@ export default function SearchPage() {
                           sourceId: `album:${album.key}`,
                         })
                       }
-                    />
-                  ))}
-                </SectionCarousel>
-              )}
-
-              {showTracks && freeTracks.length > 0 && (
-                <section aria-label="No catálogo grátis" className="min-w-0">
-                  <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">
-                    No catálogo grátis
-                  </h2>
-                  <TrackList>
-                    {freeTracks.map((track, index) => (
-                      <TrackRow
-                        key={`${track.id}:${index}`}
-                        track={track}
-                        index={index}
-                        showAlbum={false}
-                        active={track.id === currentTrack?.id}
-                        playing={track.id === currentTrack?.id && isPlaying}
-                        liked={likes.isLiked(track)}
-                        onToggleLike={(liked) => likes.toggle(track, liked)}
-                        onPlay={() => playFree(index)}
-                      />
-                    ))}
-                  </TrackList>
-                </section>
-              )}
-
-              {showArtists && artists.length > 0 && (
-                <SectionCarousel title="Artistas no catálogo">
-                  {artists.map((artist) => (
-                    <MediaCard
-                      key={artist.id}
-                      title={artist.name}
-                      subtitle="Artista"
-                      shape="round"
-                      imageUrl={artist.imageUrl}
-                      to={artistPath(artist.id)}
                     />
                   ))}
                 </SectionCarousel>

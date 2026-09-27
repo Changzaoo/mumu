@@ -69,7 +69,7 @@ import {
   useUpdatePlaylist,
 } from '@/features/playlists/api';
 import { useTrackLikes } from '@/features/library/api';
-import { useCatalogSearch } from '@/features/catalog/api';
+import * as localLibrary from '@/lib/local/localLibrary';
 import { useSearch } from '@/features/search/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import { useAuthUser } from '@/hooks/useAuthUser';
@@ -394,12 +394,31 @@ function AddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
   );
 }
 
-/** Add-tracks search for LOCAL playlists — full-length Audius catalog, stored on
- *  device with the full track so it renders and plays without a backend. */
+const DIACRITICOS_BUSCA = new RegExp('[\u0300-\u036f]', 'g');
+const normBusca = (s: string): string =>
+  s.normalize('NFD').replace(DIACRITICOS_BUSCA, '').toLowerCase().trim();
+
+/**
+ * Busca para adicionar faixas numa playlist — NO ACERVO. Antes era o
+ * "catálogo grátis" (Audius): músicas de qualquer um, e que a própria lista
+ * recusava ao adicionar ("Essa é do catálogo"). Tirado da busca de vez.
+ */
 function LocalAddTracksSection({ playlist }: { playlist: PlaylistWithTracksDto }) {
   const [term, setTerm] = useState('');
   const debounced = useDebounce(term, 300);
-  const { data: results, isFetching } = useCatalogSearch(debounced);
+  const isFetching = false;
+  const results = useMemo(() => {
+    const q = normBusca(debounced);
+    if (!q) return [];
+    return localLibrary
+      .list()
+      .map((e) => e.track)
+      .filter(
+        (t) =>
+          normBusca(t.title).includes(q) || t.artists.some((a) => normBusca(a.name).includes(q)),
+      )
+      .slice(0, 8);
+  }, [debounced]);
   const queryClient = useQueryClient();
   const existing = useMemo(
     () => new Set(playlist.tracks.map((entry) => entry.track.id)),
