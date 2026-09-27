@@ -597,6 +597,32 @@
   filter: blur(3.5px);
   image-rendering: auto;
 }
+/* A BORDA-CD do play: o brilho furta-cor de um CD (reflexos em cunha, cores
+   do arco-íris fracas) num anel só na borda, e sulcos finos concêntricos. Quem
+   gira é o AuraDoPlay (transform); aqui só o desenho. Sobre o botão branco do
+   tema escuro vira um furta-cor pastel; sobre o preto do claro, brilha. */
+.aura-play-cd {
+  background:
+    repeating-radial-gradient(circle, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    conic-gradient(
+      from 0deg,
+      transparent 0deg,
+      hsl(190 90% 65% / 0.55) 18deg,
+      hsl(280 85% 70% / 0.45) 34deg,
+      transparent 56deg,
+      transparent 150deg,
+      hsl(50 95% 65% / 0.5) 168deg,
+      hsl(330 85% 70% / 0.45) 186deg,
+      transparent 208deg,
+      transparent 300deg,
+      rgb(255 255 255 / 0.55) 318deg,
+      transparent 336deg
+    );
+  -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 63% 97%, transparent 100%);
+  mask: radial-gradient(circle, transparent 0 60%, #000 63% 97%, transparent 100%);
+  will-change: transform;
+}
+
 :root[data-perf='baixo'] .aura-play-nevoa {
   filter: blur(3px);
 }

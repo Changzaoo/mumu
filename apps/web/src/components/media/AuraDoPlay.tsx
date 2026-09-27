@@ -88,10 +88,19 @@ const smooth = (a: number, b: number, x: number) => {
 /** Quanto tempo (s) a vivacidade leva para andar ~63% do caminho. */
 const INERCIA_PAUSA = 0.9;
 const INERCIA_PLAY = 0.45;
+/** O CD pega o giro em ~0,35 s; a névoa, puxada, em ~1,4 s. */
+const INERCIA_CD = 0.35;
+const INERCIA_NEVOA = 1.4;
+/** Uma volta do CD a cada 1,8 s (33⅓ rpm, a do disco); a névoa, ~7 s. */
+const VEL_CD = (Math.PI * 2) / 1.8;
+const VEL_NEVOA = 0.9;
+/** Atraso da névoa de fora em relação à de dentro, com o giro no máximo. */
+const ARRASTO = 2.4;
 
 export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolean }) {
   const semMovimento = useSemMovimento();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const cdRef = useRef<HTMLSpanElement>(null);
   const tocandoRef = useRef(playing);
   const acordarRef = useRef<() => void>(() => undefined);
 
@@ -165,6 +174,14 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     // SENTIDO HORÁRIO, como o disco girando (na tela, com y para baixo, o
     // ângulo crescendo é o horário).
     const sentido = 1;
+    // O CD E O PUXÃO. A borda do botão é um CD girando (uma volta a cada
+    // 1,8 s, a do disco). Ele acelera depressa; a névoa acelera DEPOIS, puxada
+    // por ele (inércia maior), e a parte colada ao botão gira mais que a de
+    // fora — a espiral arrastada de algo sendo puxado pelo giro. Pausando, o
+    // CD freia primeiro e a névoa ainda roda um pouco no embalo.
+    let anguloCd = sorteio(0, Math.PI * 2);
+    let velCd = tocandoRef.current && !semMovimento ? 1 : 0;
+    let velNevoa = velCd;
     /** Relógio da CHAMA: quanto a névoa já escorreu para fora do botão. */
     let fluxo = sorteio(0, 50);
     /** Para onde o vento já levou a névoa (acumulado, vai e volta). */
@@ -189,9 +206,18 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
       const vy = Math.sin(dirVento) * forca;
       ventoX += vx * dt * 0.35;
       ventoY += vy * dt * 0.35;
-      // TOCANDO: gira em volta do botão, uma volta a cada ~9 s. A velocidade
-      // acompanha a vivacidade, então o giro acelera e freia sem tranco.
-      angulo += dt * sentido * 0.7 * viva;
+      // O CD segue o play/pause com pouca inércia; a névoa segue o CD com
+      // muita — é o atraso que faz parecer que ele a puxa.
+      const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
+      velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
+      velNevoa += (velCd - velNevoa) * (1 - Math.exp(-dt / INERCIA_NEVOA));
+      anguloCd += dt * sentido * velCd * VEL_CD;
+      angulo += dt * sentido * velNevoa * VEL_NEVOA;
+      const cd = cdRef.current;
+      if (cd) cd.style.transform = `rotate(${anguloCd.toFixed(4)}rad)`;
+      // Quanto a névoa de fora fica para trás da de dentro (rad por unidade
+      // de distância à borda): só existe com o giro — parada, é névoa solta.
+      const arrasto = velNevoa * ARRASTO;
       // A forma muda o tempo todo: depressa tocando, devagar parada — e a
       // rajada a remexe um pouco mais.
       t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada);
@@ -221,11 +247,21 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         // círculo, enquanto o conjunto gira.
         const c = cosDe[k]!;
         const sn = senDe[k]!;
-        const ca = c * cosA + sn * senA; // cos(θ − giro)
-        const sa = sn * cosA - c * senA; // sen(θ − giro)
+        const fora = raio - borda;
+        // O giro de ESTE raio: o de dentro acompanha o CD, o de fora atrasa.
+        let cg = cosA;
+        let sg = senA;
+        if (arrasto > 0.001) {
+          const atraso = arrasto * Math.max(0, fora);
+          const ct = Math.cos(atraso);
+          const st = Math.sin(atraso);
+          cg = cosA * ct + senA * st; // cos(giro − atraso)
+          sg = senA * ct - cosA * st; // sen(giro − atraso)
+        }
+        const ca = c * cg + sn * sg; // cos(θ − giro)
+        const sa = sn * cg - c * sg; // sen(θ − giro)
         const sx = ca * 2.3 + ox - ventoX;
         const sy = sa * 2.3 + oy - ventoY;
-        const fora = raio - borda;
         const sz = fora * 4.4 - fluxo;
         // Distorção de domínio: é o que enrola e rasga as línguas.
         const wx = fbm(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
@@ -308,13 +344,22 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
   }, [semMovimento, toque]);
 
   return (
-    <canvas
-      ref={canvasRef}
-      aria-hidden
-      className={cn(
-        'aura-play-nevoa pointer-events-none absolute',
-        toque ? 'inset-[-48%] size-[196%]' : 'inset-[-42%] size-[184%]',
-      )}
-    />
+    <>
+      <canvas
+        ref={canvasRef}
+        aria-hidden
+        className={cn(
+          'aura-play-nevoa pointer-events-none absolute',
+          toque ? 'inset-[-48%] size-[196%]' : 'inset-[-42%] size-[184%]',
+        )}
+      />
+      {/* A borda-CD: por CIMA do botão (z-10), só o anel de fora — o ícone no
+          meio fica limpo. Gira pelo mesmo laço da névoa (ver "O CD E O PUXÃO"). */}
+      <span
+        ref={cdRef}
+        aria-hidden
+        className="aura-play-cd pointer-events-none absolute inset-0 z-10 rounded-full"
+      />
+    </>
   );
 }
