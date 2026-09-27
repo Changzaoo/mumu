@@ -211,6 +211,26 @@ const envSchema = z
       .min(0)
       .default(2 * 1024 * 1024 * 1024),
 
+    /**
+     * AGENTE PESQUISADOR 24/7 (worker `pesquisador`): traz sozinho música nova
+     * dos artistas de quem ligou o agente na conta. LIGADO por padrão — quem
+     * decide é cada pessoa, pelo interruptor (`User.settings.pesquisadorAtivo`);
+     * isto é só o disjuntor geral.
+     */
+    PESQUISADOR_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('true')
+      .transform((v) => v === 'true'),
+    /** De quantos em quantos minutos ele procura. */
+    PESQUISADOR_BATIDA_MIN: z.coerce.number().int().min(5).default(30),
+    /** Faixas novas por batida (somando todas as pessoas). */
+    PESQUISADOR_POR_BATIDA: z.coerce.number().int().min(1).default(4),
+    /** Teto por dia — o YouTube recua quando vê rajada. */
+    PESQUISADOR_MAX_POR_DIA: z.coerce.number().int().min(1).default(60),
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {

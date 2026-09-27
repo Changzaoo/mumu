@@ -131,7 +131,7 @@ export function folgaReal(estado: EstadoDoCofre): number | null {
   return candidatos.length === 0 ? null : Math.min(...candidatos);
 }
 
-function baseInterna(): string {
+export function baseInterna(): string {
   return (env.IMPORTER_URL ?? '').replace(/\/$/, '');
 }
 
@@ -139,7 +139,7 @@ function basePublica(): string {
   return (env.IMPORTER_PUBLIC_URL ?? env.IMPORTER_URL ?? '').replace(/\/$/, '');
 }
 
-function cabecalhos(): Record<string, string> {
+export function cabecalhos(): Record<string, string> {
   // O crachá vai no Authorization como qualquer token; o importador reconhece
   // o valor de serviço ANTES do portão do Firebase (ver `ehTokenDeServico`).
   return { Authorization: `Bearer ${env.IMPORT_SERVICE_TOKEN ?? ''}` };
@@ -152,7 +152,7 @@ export function dentroDaJanela(hora: number, inicio: number, fim: number): boole
   return inicio < fim ? hora >= inicio && hora < fim : hora >= inicio || hora < fim;
 }
 
-async function folgaDoCofre(): Promise<number | null> {
+export async function folgaDoCofre(): Promise<number | null> {
   try {
     const res = await fetch(`${baseInterna()}/cofre/estado`, { headers: cabecalhos() });
     if (!res.ok) return null;
@@ -195,7 +195,7 @@ interface ResultadoDoDownload {
 }
 
 /** Baixa a faixa pelo importador. `null` = falhou; `permanent` = nunca mais. */
-async function baixar(
+export async function baixar(
   sourceUrl: string,
 ): Promise<{ ok: ResultadoDoDownload | null; permanente: boolean }> {
   const inicio = await fetch(`${baseInterna()}/import/start`, {
@@ -236,7 +236,7 @@ async function baixar(
 }
 
 /** Guarda os bytes no cofre e devolve a URL pública da cópia. */
-async function guardarNoCofre(
+export async function guardarNoCofre(
   blobId: string,
   arquivo: ResultadoDoDownload,
   sourceUrl: string,

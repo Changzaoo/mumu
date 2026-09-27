@@ -13,6 +13,7 @@ import { startCurationWorker } from './curation.worker.js';
 import { startArmazenamentoWorker } from './armazenamento.worker.js';
 import { startAcervoFielWorker } from './acervoFiel.worker.js';
 import { startVarreduraNoturnaWorker } from './varreduraNoturna.worker.js';
+import { startPesquisadorWorker } from './pesquisador.worker.js';
 import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
 
 const connection = createBullConnection();
@@ -56,6 +57,9 @@ const stopAcervoFiel = startAcervoFielWorker();
 // quando o importador e o crachá de máquina estão configurados, e só trabalha
 // com folga no cofre — ver varreduraNoturna.worker.
 const stopVarredura = startVarreduraNoturnaWorker();
+// Agente pesquisador 24/7: música nova do gosto de quem o ligou na conta, já
+// no cofre, na biblioteca e com a letra encaminhada. Ver pesquisador.worker.
+const stopPesquisador = startPesquisadorWorker();
 
 // O acervo afirmava `explicit: false` para milhares de faixas que ninguém
 // nunca olhou. Este agente lê a letra e grava um veredito de verdade — com
@@ -87,6 +91,7 @@ async function shutdown(signal: string): Promise<void> {
   stopArmazenamento();
   stopAcervoFiel();
   stopVarredura();
+  stopPesquisador();
   stopConteudo();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
