@@ -771,12 +771,28 @@ export class AudioEngine {
     });
     howl.on('playerror', () => {
       if (slot.seq !== seq || slot !== this.active) return;
+      // O PLAY FOI RECUSADO — e ninguém ficava sabendo. O motor seguia com
+      // `playing = true` e a store mostrava "Pausar" com a música muda (o boot
+      // retomando depois de uma atualização, com o autoplay bloqueado). Agora
+      // é o mesmo desfecho do caminho do elemento: o motor se sabe parado e
+      // avisa; a store troca o botão (ou mostra o convite discreto da retomada).
+      this.playing = false;
+      this.syncTicker();
+      this.emit('error', {
+        message: 'Reprodução bloqueada pelo navegador — toque na página e tente novamente.',
+        track,
+        kind: 'play',
+      });
       // Retry once after the browser unlocks audio (autoplay policy).
       // `slot === this.active` também no retorno, e não só o `seq`: um slot
       // PRÉ-CARREGADO continua com o mesmo `seq` enquanto espera a vez, e
       // religá-lo aqui poria duas faixas no ar ao mesmo tempo (RNF5).
+      // A INTENÇÃO (`desejaTocar`), não `playing`: é ela que diz se a pessoa
+      // ainda quer ouvir quando o destravamento chegar.
       howl.once('unlock', () => {
-        if (slot.seq === seq && slot === this.active && this.playing) howl.play();
+        if (slot.seq === seq && slot === this.active && this.desejaTocar && !howl.playing()) {
+          howl.play();
+        }
       });
     });
     slot.cleanup.push(() => howl.unload());
@@ -887,6 +903,33 @@ export class AudioEngine {
     };
     el.addEventListener('pause', onPause);
     slot.cleanup.push(() => el.removeEventListener('pause', onPause));
+
+    // O SOM SAIU — a verdade vem do elemento, não de quem pediu o play.
+    //
+    // Há caminhos em que o áudio começa sem passar pelo `.then` de um `play()`
+    // nosso: o Howler, quando o navegador recusa o autoplay (a retomada depois
+    // de uma atualização), guarda o play e o dispara SOZINHO no primeiro toque
+    // na página. O som saía e a store seguia em "pausado" — o botão de play
+    // mostrando o estado errado com a música tocando. Agora, todo 'playing' da
+    // faixa ativa avisa (`unlocked`), e a store se acerta com o que se ouve.
+    //
+    // Se o som saiu contra a vontade (a pessoa pausou enquanto o play estava
+    // na fila do navegador), quem manda é a intenção: pausa de volta.
+    const onPlaying = (): void => {
+      if (slot.seq !== seq || slot !== this.active || el.paused) return;
+      if (!this.desejaTocar) {
+        if (slot.source?.kind === 'howl') slot.source.howl.pause();
+        else el.pause();
+        return;
+      }
+      if (!this.playing) {
+        this.playing = true;
+        this.syncTicker();
+      }
+      this.emit('unlocked', { track: slot.track });
+    };
+    el.addEventListener('playing', onPlaying);
+    slot.cleanup.push(() => el.removeEventListener('playing', onPlaying));
   }
 
   private attachBufferingEvents(slot: Slot, el: HTMLAudioElement, seq: number): void {

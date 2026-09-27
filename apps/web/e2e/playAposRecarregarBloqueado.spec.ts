@@ -8,6 +8,32 @@ import { expect, test, type Page } from '@playwright/test';
 
 const DURACAO_S = 30;
 
+/**
+ * A POLÍTICA ESTRITA (a do iPhone): `play()` recusado até o primeiro gesto da
+ * pessoa na página. O Chromium de teste às vezes deixa o autoplay passar
+ * (depende de o elemento já estar no grafo Web Audio), e aí o cenário que
+ * estes testes existem para cobrir nem acontecia.
+ */
+test.beforeEach(async ({ page }) => {
+  await page.addInitScript(() => {
+    // `navigator.userActivation` não serve: o `page.evaluate` do Playwright
+    // conta como gesto. O sinal é um toque/tecla de verdade na página.
+    let gesto = false;
+    const marcar = (e: Event): void => {
+      if (e.isTrusted) gesto = true;
+    };
+    window.addEventListener('pointerdown', marcar, true);
+    window.addEventListener('keydown', marcar, true);
+    const original = HTMLMediaElement.prototype.play;
+    HTMLMediaElement.prototype.play = function play(this: HTMLMediaElement) {
+      if (!gesto) {
+        return Promise.reject(new DOMException('bloqueado', 'NotAllowedError'));
+      }
+      return original.call(this);
+    };
+  });
+});
+
 function trackDto() {
   return {
     id: 'local:repro-play-tocando',
@@ -165,4 +191,24 @@ test('repro (mobile — MiniPlayer): autoplay recusado no boot, depois clicar em
   await expect
     .poll(async () => (await estadoDoAudio(page))?.tocando ?? false, { timeout: 10_000 })
     .toBe(true);
+});
+
+test('autoplay recusado no boot; tocar em QUALQUER lugar destrava o som e o botão acompanha', async ({
+  page,
+}) => {
+  await page.goto('/robots.txt');
+  await semear(page);
+  await marcarRetomadaTocando(page, 5);
+  await page.goto('/library');
+  await expect(botao(page, 'Reproduzir')).toBeVisible({ timeout: 20_000 });
+
+  // Um toque fora do player (o título da página) — é o gesto que o navegador
+  // exige; o motor retoma sozinho com ele.
+  await page.locator('main h1, main h2').first().click();
+
+  await expect
+    .poll(async () => (await estadoDoAudio(page))?.tocando ?? false, { timeout: 10_000 })
+    .toBe(true);
+  // O SOM SAIU: o botão tem que dizer "Pausar", não "Reproduzir".
+  await expect(botao(page, 'Pausar')).toBeVisible({ timeout: 5_000 });
 });
