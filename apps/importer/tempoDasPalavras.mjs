@@ -70,10 +70,14 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     return new Promise((resolve, reject) => {
       const saida = path.join(os.tmpdir(), `tempo-${process.pid}-${Date.now()}.json`);
       saidaAtual = saida;
-      const proc = spawn(PYTHON, [path.join(HERE, 'palavras.py'), args[0], args[1], saida, ...args.slice(2)], {
-        windowsHide: true,
-        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
-      });
+      const proc = spawn(
+        PYTHON,
+        [path.join(HERE, 'palavras.py'), args[0], args[1], saida, ...args.slice(2)],
+        {
+          windowsHide: true,
+          env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+        },
+      );
       // Abaixo do normal: o /stream e o /blob não podem esperar pela CPU daqui.
       try {
         os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
@@ -132,7 +136,9 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     await writeFile(parcial, JSON.stringify({ ...r, em: new Date().toISOString() }));
     await rename(parcial, destino);
     const quanto = r.linhas ? `${r.linhas.length} linhas` : `${r.words?.length ?? 0} palavras`;
-    log(`${tarefa.tipo}: ${tarefa.id} (${r.motor}, ${quanto}, ${Math.round((Date.now() - inicio) / 1000)}s)`);
+    log(
+      `${tarefa.tipo}: ${tarefa.id} (${r.motor}, ${quanto}, ${Math.round((Date.now() - inicio) / 1000)}s)`,
+    );
   }
 
   async function drenar() {

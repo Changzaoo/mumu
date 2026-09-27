@@ -3176,7 +3176,9 @@ async function main() {
           /* token que não é JWT (token de serviço/compartilhado) — vai pelo IP */
         }
         if (!quem) {
-          const encaminhado = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+          const encaminhado = String(req.headers['x-forwarded-for'] ?? '')
+            .split(',')[0]
+            .trim();
           quem = `ip:${encaminhado || req.socket.remoteAddress || '?'}`;
         }
         try {

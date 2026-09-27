@@ -1024,7 +1024,9 @@ export async function faixaDoYoutube(r: ResultadoYoutube): Promise<TrackDto | nu
     dominantColor: null,
     loudnessLufs: null,
     album: null,
-    artists: r.canal ? [{ id: `youtube-canal:${r.canal}`, name: r.canal, slug: '', imageUrl: null }] : [],
+    artists: r.canal
+      ? [{ id: `youtube-canal:${r.canal}`, name: r.canal, slug: '', imageUrl: null }]
+      : [],
     streamUrl,
     downloadUrl: null,
     sourceUrl: r.url,

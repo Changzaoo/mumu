@@ -58,7 +58,10 @@ export function LetraSendoFeita({
 
   let indice = 0;
   return (
-    <div className={cn('no-scrollbar h-full overflow-y-auto px-3 py-8', className)} aria-live="polite">
+    <div
+      className={cn('no-scrollbar h-full overflow-y-auto px-3 py-8', className)}
+      aria-live="polite"
+    >
       <div className="mb-6 flex items-start gap-3">
         <AudioLines className="mt-0.5 size-5 shrink-0 animate-pulse text-fg" aria-hidden />
         <div>
@@ -72,7 +75,10 @@ export function LetraSendoFeita({
       </div>
       <div className="space-y-2">
         {linhas.map((linha, i) => (
-          <p key={`${linha.timeMs}-${i}`} className="text-xl font-bold tracking-tight text-fg-muted sm:text-2xl">
+          <p
+            key={`${linha.timeMs}-${i}`}
+            className="text-xl font-bold tracking-tight text-fg-muted sm:text-2xl"
+          >
             {(linha.words ?? []).map((w, k) => {
               const n = indice++;
               const nova = n >= anteriores;
@@ -88,7 +94,10 @@ export function LetraSendoFeita({
             })}
           </p>
         ))}
-        <span className="inline-block h-6 w-1.5 animate-pulse rounded-full bg-fg/60 align-middle" aria-hidden />
+        <span
+          className="inline-block h-6 w-1.5 animate-pulse rounded-full bg-fg/60 align-middle"
+          aria-hidden
+        />
       </div>
     </div>
   );

@@ -181,7 +181,11 @@ export function pedirCalibracao(
   // `alinhada`, e não só `calibrada`: a calibração antiga (reconhecimento livre
   // com o modelo `base`) errava com sotaque e autotune e deixava a letra no
   // lugar errado — ela é refeita UMA vez pelo alinhamento.
-  if (emCache?.calibrada && (emCache as LetraAlinhada).alinhada && emCache.source !== TRANSCRICAO_ANTIGA) {
+  if (
+    emCache?.calibrada &&
+    (emCache as LetraAlinhada).alinhada &&
+    emCache.source !== TRANSCRICAO_ANTIGA
+  ) {
     return Promise.resolve(emCache);
   }
 

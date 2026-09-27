@@ -648,9 +648,7 @@ export default function SearchPage() {
 
       {/* Fora do bloco acima de propósito: o YouTube continua valendo quando o
           catálogo grátis está fora do ar (isError) ou não achou nada. */}
-      {hasQuery && showTracks && (
-        <DoYoutube termo={query} automatico={local.tracks.length < 3} />
-      )}
+      {hasQuery && showTracks && <DoYoutube termo={query} automatico={local.tracks.length < 3} />}
     </div>
   );
 }
