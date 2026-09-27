@@ -88,14 +88,15 @@ const smooth = (a: number, b: number, x: number) => {
 /** Quanto tempo (s) a vivacidade leva para andar ~63% do caminho. */
 const INERCIA_PAUSA = 0.9;
 const INERCIA_PLAY = 0.45;
-/** O CD pega o giro em ~0,35 s; a névoa, puxada, em ~1,4 s. */
+/** O CD (e a névoa com ele) pega o giro em ~0,35 s. */
 const INERCIA_CD = 0.35;
-const INERCIA_NEVOA = 1.4;
-/** Uma volta do CD a cada 1,8 s (33⅓ rpm, a do disco); a névoa, ~7 s. */
+/** Uma volta a cada 1,8 s (33⅓ rpm, a do disco). */
 const VEL_CD = (Math.PI * 2) / 1.8;
-const VEL_NEVOA = 0.9;
-/** Atraso da névoa de fora em relação à de dentro, com o giro no máximo. */
-const ARRASTO = 2.4;
+const DOIS_PI = Math.PI * 2;
+/** O braço do tornado: quanto se enrola por unidade de raio (rad). */
+const ESPIRAL = 7;
+/** Comprimento da cauda atrás do braço (rad): a névoa rarefaz depois disso. */
+const CAUDA = 2.2;
 
 export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolean }) {
   const semMovimento = useSemMovimento();
@@ -128,6 +129,7 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     const ys = new Float32Array(N * N);
     const cosDe = new Float32Array(N * N);
     const senDe = new Float32Array(N * N);
+    const thetaDe = new Float32Array(N * N);
     for (let j = 0; j < N; j++) {
       for (let i = 0; i < N; i++) {
         const x = ((i + 0.5) / N) * 2 - 1;
@@ -141,6 +143,7 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         // CÍRCULO do espaço do ruído (sem emenda em volta do botão).
         cosDe[k] = x / raio;
         senDe[k] = y / raio;
+        thetaDe[k] = Math.atan2(y, x);
       }
     }
     // O botão ocupa ~54% do raio da caixa (inset -42%/-48%).
@@ -181,7 +184,6 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     // CD freia primeiro e a névoa ainda roda um pouco no embalo.
     let anguloCd = sorteio(0, Math.PI * 2);
     let velCd = tocandoRef.current && !semMovimento ? 1 : 0;
-    let velNevoa = velCd;
     /** Relógio da CHAMA: quanto a névoa já escorreu para fora do botão. */
     let fluxo = sorteio(0, 50);
     /** Para onde o vento já levou a névoa (acumulado, vai e volta). */
@@ -206,18 +208,20 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
       const vy = Math.sin(dirVento) * forca;
       ventoX += vx * dt * 0.35;
       ventoY += vy * dt * 0.35;
-      // O CD segue o play/pause com pouca inércia; a névoa segue o CD com
-      // muita — é o atraso que faz parecer que ele a puxa.
+      // UM GIRO SÓ: o rastro do CD e a névoa andam no MESMO ângulo — a névoa
+      // sai do rastro e o segue, sincronizada (antes eram dois giros, e o
+      // rastro não guiava nada).
       const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
       velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
-      velNevoa += (velCd - velNevoa) * (1 - Math.exp(-dt / INERCIA_NEVOA));
       anguloCd += dt * sentido * velCd * VEL_CD;
-      angulo += dt * sentido * velNevoa * VEL_NEVOA;
+      angulo = anguloCd;
       const cd = cdRef.current;
       if (cd) cd.style.transform = `rotate(${anguloCd.toFixed(4)}rad)`;
-      // Quanto a névoa de fora fica para trás da de dentro (rad por unidade
-      // de distância à borda): só existe com o giro — parada, é névoa solta.
-      const arrasto = velNevoa * ARRASTO;
+      // A CABEÇA DO RASTRO na tela: o anel começa com ela no topo (12 h),
+      // que no canvas (y para baixo) é o ângulo −π/2.
+      const cabeca = anguloCd - Math.PI / 2;
+      // O braço do tornado se firma com o giro; parado, a névoa se espalha.
+      const forcaDoBraco = 0.35 + 0.65 * velCd;
       // A forma muda o tempo todo: depressa tocando, devagar parada — e a
       // rajada a remexe um pouco mais.
       t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada);
@@ -248,18 +252,9 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         const c = cosDe[k]!;
         const sn = senDe[k]!;
         const fora = raio - borda;
-        // O giro de ESTE raio: o de dentro acompanha o CD, o de fora atrasa.
-        let cg = cosA;
-        let sg = senA;
-        if (arrasto > 0.001) {
-          const atraso = arrasto * Math.max(0, fora);
-          const ct = Math.cos(atraso);
-          const st = Math.sin(atraso);
-          cg = cosA * ct + senA * st; // cos(giro − atraso)
-          sg = senA * ct - cosA * st; // sen(giro − atraso)
-        }
-        const ca = c * cg + sn * sg; // cos(θ − giro)
-        const sa = sn * cg - c * sg; // sen(θ − giro)
+        // A textura gira presa ao rastro (mesmo ângulo do CD).
+        const ca = c * cosA + sn * senA; // cos(θ − giro)
+        const sa = sn * cosA - c * senA; // sen(θ − giro)
         const sx = ca * 2.3 + ox - ventoX;
         const sy = sa * 2.3 + oy - ventoY;
         const sz = fora * 4.4 - fluxo;
@@ -272,7 +267,20 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         // As línguas afinam conforme se afastam (a ponta da chama), mais
         // compridas tocando; o contraste abre vazios de verdade entre elas.
         const afina = fora * (0.95 - 0.55 * viva);
-        const densidade = Math.max(0, Math.min(1, (d - 0.33 - afina) * 3.8 * inclina)) * janela;
+        // O TORNADO: a névoa nasce na cabeça do rastro e se enrola para fora
+        // numa espiral — quanto mais longe da borda, mais atrás (ESPIRAL rad
+        // por unidade de raio). `atras` é o quanto este pixel está atrás do
+        // braço, no sentido do giro; a cauda se desfaz com a distância.
+        const atras =
+          (((cabeca - ESPIRAL * Math.max(0, fora) - thetaDe[k]!) % DOIS_PI) + DOIS_PI) % DOIS_PI;
+        const braco = Math.exp(-atras / CAUDA);
+        const guia = 1 - forcaDoBraco + forcaDoBraco * braco;
+        // Ao longo do braço a névoa é mais cheia (limiar mais baixo); fora dele,
+        // rala — é o que desenha o tornado.
+        const densidade =
+          Math.max(0, Math.min(1, (d - 0.36 - afina + 0.24 * braco * forcaDoBraco) * 4 * inclina)) *
+          janela *
+          guia;
         px[o] = r;
         px[o + 1] = g;
         px[o + 2] = b;
