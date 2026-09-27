@@ -1520,6 +1520,18 @@ export function setTrackDuration(id: string, durationMs: number): void {
   queueLyricsSync(track);
 }
 
+/**
+ * Troca a ORIGEM de uma faixa — quando a antiga morreu (vídeo removido) ou
+ * nunca existiu, e a mesma música foi achada de novo pela busca (ver
+ * lib/local/acharPelaBusca.ts). A partir daí o reparo, a varredura do servidor
+ * e o cofre usam o link novo.
+ */
+export function setTrackSource(id: string, sourceUrl: string): void {
+  const cur = read().find((e) => e.track.id === id);
+  if (!cur || cur.sourceUrl === sourceUrl) return;
+  patchEntry(id, { ...cur, sourceUrl });
+}
+
 /** Enrich a list of ids one at a time (gentle on the iTunes endpoint). */
 async function enrichSequentially(ids: string[]): Promise<void> {
   for (const id of ids) {

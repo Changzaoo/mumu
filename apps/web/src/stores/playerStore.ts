@@ -223,17 +223,42 @@ async function resolveNextSource(track: TrackDto, tried: Set<string>): Promise<T
   const remote = remoteUrlFor(track.id);
   if (remote && !tried.has(remote)) return { ...track, streamUrl: remote };
   const sourceUrl = sourceUrlFor(track.id);
-  if (!sourceUrl) return null;
-  try {
-    const host = new URL(sourceUrl).hostname;
-    if (importerHostLabel(host)) {
-      const streamUrl = await buildStreamUrl(sourceUrl); // token sempre fresco
-      return streamUrl && !tried.has(streamUrl) ? { ...track, streamUrl } : null;
+  if (sourceUrl) {
+    try {
+      const host = new URL(sourceUrl).hostname;
+      if (importerHostLabel(host)) {
+        const streamUrl = await buildStreamUrl(sourceUrl); // token sempre fresco
+        if (streamUrl && !tried.has(streamUrl)) return { ...track, streamUrl };
+      } else if (!tried.has(sourceUrl)) {
+        return { ...track, streamUrl: sourceUrl };
+      }
+    } catch {
+      /* origem ilegível: segue para o último recurso */
     }
-    return tried.has(sourceUrl) ? null : { ...track, streamUrl: sourceUrl };
-  } catch {
-    return null;
   }
+  return acharDeNovo(track, tried);
+}
+
+/**
+ * ACABARAM AS FONTES — nada de "indisponível": a mesma música é procurada de
+ * novo pelo nome e artista (lib/local/acharPelaBusca.ts) e toca na hora. O link
+ * achado vira a origem da faixa, e o cofre baixa a cópia (`rebaixarAoFalhar`,
+ * no chamador). Uma vez por faixa por sessão de fallback (`tried`).
+ */
+async function acharDeNovo(track: TrackDto, tried: Set<string>): Promise<TrackDto | null> {
+  const marca = `busca:${track.id}`;
+  if (tried.has(marca)) return null;
+  tried.add(marca);
+  const origemMorta = sourceUrlFor(track.id);
+  const evitar = new Set<string>(origemMorta ? [origemMorta] : []);
+  const { acharPelaBusca } = await import('@/lib/local/acharPelaBusca');
+  const achada = await acharPelaBusca(track, evitar).catch(() => null);
+  if (!achada?.streamUrl || tried.has(achada.streamUrl)) return null;
+  if (achada.sourceUrl && track.id.startsWith('local:')) {
+    const { setTrackSource } = await import('@/lib/local/localLibrary');
+    setTrackSource(track.id, achada.sourceUrl);
+  }
+  return achada;
 }
 
 export interface PlayContext {
