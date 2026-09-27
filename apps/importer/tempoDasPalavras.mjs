@@ -1,25 +1,30 @@
 /**
- * TEMPO DAS PALAVRAS DE CADA FAIXA DO COFRE — o relógio que as letras usam.
+ * O RELÓGIO DAS LETRAS — quando cada verso e cada palavra são cantados, tirado
+ * do próprio áudio do cofre.
  *
- * Medido em 2026-09-26 contra o áudio real: a letra publicada de "Bad and
- * Boujee" estava 520 a 1.200 ms adiantada (e a diferença CRESCIA ao longo da
- * música — é a letra que "acaba antes da música"), e "DE VOLTA" só tinha letra
- * sem tempo. O player segue a letra ao milissegundo; o erro está no DADO. A
- * saída é tirar o relógio do próprio áudio: o instante em que cada palavra é
- * cantada. O app reancora a letra publicada nesses instantes.
+ * O player segue a letra ao milissegundo; o erro está no DADO. A letra
+ * publicada muitas vezes foi cronometrada para outra gravação: "Bad and Boujee"
+ * vinha 520 a 1.200 ms adiantada com deriva; "Mantém" (Matuê) começava ~11,6 s
+ * antes da voz (a versão do YouTube tem introdução mais longa); "DE VOLTA" nem
+ * tinha tempo. Dois trabalhos, uma fila:
  *
- * Dois motores:
- *   - inglês → Riva parakeet-tdt na nuvem (~5 s, tempo por palavra);
- *   - o resto → faster-whisper `base` NESTA máquina (~50 s por música de 4 min
- *     num i5-4590). Nenhum serviço na nuvem que usamos dá tempo por palavra em
- *     português. O `small` acerta mais texto (66% contra 43% das palavras da
- *     letra), mas leva 4x mais; para ANCORAR uma letra cujo texto já sabemos,
- *     43% bate de sobra o limiar do alinhador (35%).
+ *  - ALINHAR (o principal): o texto da letra publicada é conhecido; o modelo só
+ *    diz QUANDO cada linha é cantada. Nunca inventa palavra, e sotaque/autotune
+ *    atrapalham pouco, porque não é preciso reconhecer o que foi dito — só achar
+ *    onde. Whisper `small` via stable-ts, ~45–80 s por música.
  *
- * Uma faixa por vez, com prioridade baixa de CPU: quem está ouvindo música não
- * pode sentir isto. O resultado fica em disco e nunca é refeito.
+ *  - TRANSCREVER (último recurso, quando não existe letra publicada): inglês
+ *    vai ao Riva na nuvem (~5 s); o resto, ao faster-whisper `small` local. Cada
+ *    palavra sai com a confiança do modelo, para o app descartar o que ele não
+ *    ouviu direito em vez de mostrar letra inventada. O `base` que usávamos
+ *    devolveu lixo para trap com autotune ("proprietary Passe Passe…").
+ *
+ * Uma tarefa por vez, prioridade baixa de CPU (quem está ouvindo não pode
+ * sentir isto), a pedida mais recentemente primeiro. Resultado em disco, nunca
+ * refeito.
  */
 import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -27,10 +32,12 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
-const MODELO = process.env.WHISPER_MODELO || 'base';
+const MODELO = process.env.WHISPER_MODELO || 'small';
 const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 15 * 60_000);
 /** Fila curta: o que interessa é a faixa tocando agora, não um acúmulo. */
 const FILA_MAX = 20;
+/** Versão do formato em disco — mudou o modelo/saída, muda a chave. */
+const VERSAO = 'v2';
 
 /**
  * @param {{
@@ -40,32 +47,30 @@ const FILA_MAX = 20;
  * }} opcoes
  */
 export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
-  /** id → { arquivo, idioma } esperando vez. Map preserva ordem de chegada. */
+  /** chave → tarefa esperando vez. Map preserva ordem de chegada. */
   const fila = new Map();
-  /** id em processamento agora. */
+  /** chave em processamento agora. */
   let atual = null;
   /** Falhas recentes: não refaz em laço uma faixa que o motor não consegue. */
   const falhou = new Map();
 
-  const caminho = (id, idioma) =>
-    path.join(dir, `${encodeURIComponent(id)}.${idioma === 'en' ? 'en' : 'xx'}.json`);
+  const arquivoDe = (chave) => path.join(dir, `${encodeURIComponent(chave)}.json`);
 
-  async function lerPronto(id, idioma) {
+  async function lerPronto(chave) {
     try {
-      return JSON.parse(await readFile(caminho(id, idioma), 'utf8'));
+      return JSON.parse(await readFile(arquivoDe(chave), 'utf8'));
     } catch {
       return null;
     }
   }
 
-  function whisper(arquivo, idioma) {
+  function python(args) {
     return new Promise((resolve, reject) => {
       const saida = path.join(os.tmpdir(), `tempo-${process.pid}-${Date.now()}.json`);
-      const proc = spawn(
-        PYTHON,
-        [path.join(HERE, 'palavras.py'), arquivo, saida, idioma === 'auto' ? '' : idioma, MODELO],
-        { windowsHide: true },
-      );
+      const proc = spawn(PYTHON, [path.join(HERE, 'palavras.py'), args[0], args[1], saida, ...args.slice(2)], {
+        windowsHide: true,
+        env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
+      });
       // Abaixo do normal: o /stream e o /blob não podem esperar pela CPU daqui.
       try {
         os.setPriority(proc.pid, os.constants.priority.PRIORITY_BELOW_NORMAL);
@@ -81,9 +86,8 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
       proc.on('close', async (codigo) => {
         clearTimeout(teto);
         try {
-          if (codigo !== 0) throw new Error(`whisper saiu com ${codigo}: ${erro.slice(-300)}`);
-          const r = JSON.parse(await readFile(saida, 'utf8'));
-          resolve(r);
+          if (codigo !== 0) throw new Error(`palavras.py saiu com ${codigo}: ${erro.slice(-300)}`);
+          resolve(JSON.parse(await readFile(saida, 'utf8')));
         } catch (e) {
           reject(e);
         } finally {
@@ -93,46 +97,51 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     });
   }
 
-  async function processar(id, { arquivo, idioma }) {
-    const inicio = Date.now();
-    let words = null;
-    let motor = 'whisper';
+  async function transcrever({ arquivo, idioma }) {
     if (idioma === 'en' && rivaPalavras) {
-      words = await rivaPalavras(arquivo).catch(() => null);
-      if (words && words.length > 0) motor = 'riva';
-      else words = null;
+      const words = await rivaPalavras(arquivo).catch(() => null);
+      if (words && words.length > 0) return { words, motor: 'riva', language: 'en' };
     }
-    let lingua = idioma;
-    if (!words) {
-      const r = await whisper(arquivo, idioma === 'en' ? 'en' : idioma === 'auto' ? 'auto' : 'pt');
-      words = r.words;
-      lingua = r.language ?? idioma;
+    const lingua = idioma === 'en' ? 'en' : idioma === 'auto' ? '' : 'pt';
+    const r = await python(['transcrever', arquivo, lingua, MODELO]);
+    return { words: r.words, motor: `whisper-${MODELO}`, language: r.language ?? idioma };
+  }
+
+  async function alinhar({ arquivo, idioma, linhas }) {
+    const texto = path.join(os.tmpdir(), `letra-${process.pid}-${Date.now()}.txt`);
+    await writeFile(texto, linhas.join('\n'), 'utf8');
+    try {
+      const r = await python(['alinhar', arquivo, idioma === 'en' ? 'en' : 'pt', MODELO, texto]);
+      return { linhas: r.linhas, esperadas: r.esperadas, motor: `alinhamento-${MODELO}` };
+    } finally {
+      await rm(texto, { force: true }).catch(() => undefined);
     }
+  }
+
+  async function processar(chave, tarefa) {
+    const inicio = Date.now();
+    const r = tarefa.tipo === 'alinhar' ? await alinhar(tarefa) : await transcrever(tarefa);
     await mkdir(dir, { recursive: true });
-    const destino = caminho(id, idioma);
+    const destino = arquivoDe(chave);
     const parcial = `${destino}.parcial`;
-    await writeFile(
-      parcial,
-      JSON.stringify({ words, motor, language: lingua, em: new Date().toISOString() }),
-    );
+    await writeFile(parcial, JSON.stringify({ ...r, em: new Date().toISOString() }));
     await rename(parcial, destino);
-    log(
-      `tempo das palavras: ${id} (${motor}, ${words.length} palavras, ${Math.round((Date.now() - inicio) / 1000)}s)`,
-    );
+    const quanto = r.linhas ? `${r.linhas.length} linhas` : `${r.words?.length ?? 0} palavras`;
+    log(`${tarefa.tipo}: ${tarefa.id} (${r.motor}, ${quanto}, ${Math.round((Date.now() - inicio) / 1000)}s)`);
   }
 
   async function drenar() {
     if (atual) return;
     while (fila.size > 0) {
       // A MAIS RECENTE primeiro: é a que alguém está ouvindo agora.
-      const [id, pedido] = [...fila.entries()].at(-1);
-      fila.delete(id);
-      atual = id;
+      const [chave, tarefa] = [...fila.entries()].at(-1);
+      fila.delete(chave);
+      atual = chave;
       try {
-        await processar(id, pedido);
+        await processar(chave, tarefa);
       } catch (e) {
-        falhou.set(`${id}|${pedido.idioma}`, Date.now());
-        log('tempo das palavras falhou:', id, e instanceof Error ? e.message : e);
+        falhou.set(chave, Date.now());
+        log(`${tarefa.tipo} falhou:`, tarefa.id, e instanceof Error ? e.message : e);
       } finally {
         atual = null;
       }
@@ -140,23 +149,35 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
   }
 
   /**
-   * Devolve o tempo pronto, ou enfileira e diz em que pé está.
+   * Devolve o pronto, ou enfileira e diz em que pé está.
    * @returns {Promise<{ pronto: object } | { status: 'processando' | 'na-fila' | 'falhou', posicao?: number }>}
    */
-  async function pedir(id, arquivo, idioma) {
-    const pronto = await lerPronto(id, idioma);
+  async function pedirPorChave(chave, tarefa) {
+    const pronto = await lerPronto(chave);
     if (pronto) return { pronto };
-    const chaveFalha = `${id}|${idioma}`;
-    const quando = falhou.get(chaveFalha);
+    const quando = falhou.get(chave);
     if (quando && Date.now() - quando < 6 * 3600_000) return { status: 'falhou' };
-    if (atual === id) return { status: 'processando' };
+    if (atual === chave) return { status: 'processando' };
     // Pedir de novo PROMOVE: vai para o fim do Map, que é quem sai primeiro.
-    fila.delete(id);
-    fila.set(id, { arquivo, idioma });
+    fila.delete(chave);
+    fila.set(chave, tarefa);
     while (fila.size > FILA_MAX) fila.delete(fila.keys().next().value);
     void drenar();
-    return { status: atual === id ? 'processando' : 'na-fila', posicao: fila.size };
+    return { status: atual === chave ? 'processando' : 'na-fila', posicao: fila.size };
   }
 
-  return { pedir };
+  /** Transcrição (sem letra publicada): palavras com tempo e confiança. */
+  function pedir(id, arquivo, idioma) {
+    const chave = `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO}`;
+    return pedirPorChave(chave, { tipo: 'transcrever', id, arquivo, idioma });
+  }
+
+  /** Alinhamento de uma letra conhecida: tempo de cada linha e palavra. */
+  function pedirAlinhamento(id, arquivo, idioma, linhas) {
+    const hash = createHash('sha1').update(linhas.join('\n')).digest('hex').slice(0, 12);
+    const chave = `${id}.al-${hash}.${VERSAO}`;
+    return pedirPorChave(chave, { tipo: 'alinhar', id, arquivo, idioma, linhas });
+  }
+
+  return { pedir, pedirAlinhamento };
 }

@@ -1,19 +1,26 @@
 /**
- * O AQUECIMENTO PRECISA ESTAR PRONTO ANTES DE ALGUÉM ABRIR A LETRA.
+ * O RELÓGIO DA LETRA PRECISA ESTAR PRONTO ANTES DE ALGUÉM ABRIR A TELA.
  *
- * `pedirCalibracao` é o único ponto que fala com `GET /blob/:id/tempo` — o
- * playerStore chama por baixo dos panos assim que o som sai (letra fechada,
- * `aquecerCalibracao`), e a `LyricsView` chama de novo quando a pessoa abre a
- * tela. As duas chamadas para a MESMA faixa não podem virar dois pedidos ao
- * importador: é exatamente esse dobro que este arquivo tranca.
+ * `pedirCalibracao` é o único ponto que fala com o importador: o playerStore
+ * chama assim que o som sai (letra fechada, `aquecerCalibracao`), e a
+ * `LyricsView` chama de novo quando a pessoa abre a tela. As duas chamadas para
+ * a MESMA faixa não podem virar dois pedidos.
+ *
+ * E o motor mudou: com letra publicada, ALINHAMENTO (o texto nunca muda, só
+ * ganha relógio); sem letra, transcrição — e só com o que o modelo ouviu com
+ * confiança. O reconhecimento livre com o modelo pequeno inventava texto com
+ * sotaque e autotune ("proprietary Passe Passe…" em "Mantém", do Matuê).
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import type { TrackDto } from '@radinho/shared';
 import type { Lyrics } from '@/lib/lyrics/lyrics';
-import type { AsrWord } from '@/lib/lyrics/align';
 import type * as Recalibrar from '@/lib/lyrics/recalibrar';
 import type * as SyncFromAudio from '@/lib/lyrics/syncFromAudio';
-import type { RespostaDoTempo } from '@/lib/lyrics/recalibrar';
+import type {
+  LinhaAlinhada,
+  RespostaDoAlinhamento,
+  RespostaDoTempo,
+} from '@/lib/lyrics/recalibrar';
 
 const cachedLyrics = vi.fn<(id: string) => Lyrics | null>();
 const writeLyrics = vi.fn();
@@ -25,18 +32,20 @@ const garantirDetalhe = vi.fn(async () => true);
 vi.mock('@/lib/local/detalheDaFaixa', () => ({ garantirDetalhe }));
 
 const buscarTempo = vi.fn<(url: string) => Promise<RespostaDoTempo>>();
-const recalibrarLetra = vi.fn<(letra: Lyrics, palavras: AsrWord[]) => Lyrics | null>();
+const buscarAlinhamento =
+  vi.fn<(url: string, linhas: string[]) => Promise<RespostaDoAlinhamento>>();
+const aplicarAlinhamento =
+  vi.fn<(letra: Lyrics, indices: number[], linhas: LinhaAlinhada[]) => Lyrics | null>();
 vi.mock('@/lib/lyrics/recalibrar', async () => {
   const real = await vi.importActual<typeof Recalibrar>('@/lib/lyrics/recalibrar');
-  return { ...real, buscarTempo, recalibrarLetra };
+  return { ...real, buscarTempo, buscarAlinhamento, aplicarAlinhamento };
 });
 
 const remoteUrlFor = vi.fn<(id: string) => string | null>();
 vi.mock('@/lib/local/localLibrary', () => ({ remoteUrlFor }));
 
 // `recalibrar.ts` reexporta `palavrasEmLinhas` DAQUI — mockar o módulo
-// inteiro sem preservar essa função quebraria o caminho "sem letra nenhuma"
-// silenciosamente (o erro cairia no `catch` de `pedirCalibracao`).
+// inteiro sem preservar essa função quebraria o caminho "sem letra nenhuma".
 vi.mock('@/lib/lyrics/syncFromAudio', async () => {
   const real = await vi.importActual<typeof SyncFromAudio>('@/lib/lyrics/syncFromAudio');
   return { ...real, dicaDeIdioma: vi.fn(() => 'multi') };
@@ -45,19 +54,30 @@ vi.mock('@/lib/lyrics/syncFromAudio', async () => {
 const faixa = (over: Partial<TrackDto> = {}): TrackDto =>
   ({
     id: 't1',
-    title: 'Bad and Boujee',
-    durationMs: 335_000,
-    artists: [{ id: 'a1', name: 'Migos', slug: 'migos', imageUrl: null }],
+    title: 'Mantém',
+    durationMs: 206_000,
+    artists: [{ id: 'a1', name: 'Matuê', slug: 'matue', imageUrl: null }],
     album: null,
     streamUrl: null,
     ...over,
   }) as TrackDto;
 
-const letraPlana: Lyrics = {
-  synced: false,
+const letra: Lyrics = {
+  synced: true,
   source: null,
-  lines: [{ timeMs: 0, text: 'raindrop drop top' }],
+  lines: [
+    { timeMs: 17_020, text: 'Mantém, mantém' },
+    { timeMs: 24_240, text: 'Vem mais, mais vem' },
+  ],
 };
+const alinhadas: LinhaAlinhada[] = [
+  { startMs: 28_600, endMs: 30_000, words: [] },
+  { startMs: 35_800, endMs: 37_000, words: [] },
+];
+
+/** N palavras "ouvidas" com a confiança dada. */
+const ouvidas = (n: number, prob: number) =>
+  Array.from({ length: n }, (_, i) => ({ text: `p${i}`, startMs: i * 400, prob }));
 
 describe('pedirCalibracao / aquecerCalibracao', () => {
   let online: ReturnType<typeof vi.spyOn>;
@@ -81,6 +101,7 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     remoteUrlFor.mockReturnValue(null);
     await expect(pedirCalibracao(faixa())).resolves.toBeNull();
     expect(buscarTempo).not.toHaveBeenCalled();
+    expect(buscarAlinhamento).not.toHaveBeenCalled();
   });
 
   it('entrada magra: busca o detalhe e aí usa o link do cofre que chegou', async () => {
@@ -101,129 +122,151 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
     online.mockReturnValue(false);
     await expect(pedirCalibracao(faixa())).resolves.toBeNull();
-    expect(buscarTempo).not.toHaveBeenCalled();
+    expect(buscarAlinhamento).not.toHaveBeenCalled();
   });
 
   it('prévia de 30s (Apple): não casa com o tempo da música inteira', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
     await expect(pedirCalibracao(faixa({ previewOnly: true }))).resolves.toBeNull();
-    expect(buscarTempo).not.toHaveBeenCalled();
+    expect(buscarAlinhamento).not.toHaveBeenCalled();
   });
 
-  it('já calibrada em cache: devolve na hora, sem rede', async () => {
+  it('já ALINHADA em cache: devolve na hora, sem rede', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    const pronta: Lyrics = { ...letraPlana, synced: true, calibrada: true };
+    const pronta = { ...letra, calibrada: true, alinhada: true };
     cachedLyrics.mockReturnValue(pronta);
     await expect(pedirCalibracao(faixa())).resolves.toBe(pronta);
+    expect(buscarAlinhamento).not.toHaveBeenCalled();
+  });
+
+  it('calibrada pelo motor ANTIGO: é refeita uma vez pelo alinhamento', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue({ ...letra, calibrada: true });
+    buscarAlinhamento.mockResolvedValue({ tipo: 'desistir' });
+    await pedirCalibracao(faixa());
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
+  });
+
+  it('com letra: ALINHA o texto dela, sem pedir transcrição', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'pronto', linhas: alinhadas });
+    const reancorada: Lyrics = { ...letra, lines: [] };
+    aplicarAlinhamento.mockReturnValue(reancorada);
+
+    const resultado = await pedirCalibracao(faixa());
+
+    expect(buscarAlinhamento).toHaveBeenCalledWith(expect.stringContaining('/blob/t1/alinhar'), [
+      'Mantém, mantém',
+      'Vem mais, mais vem',
+    ]);
     expect(buscarTempo).not.toHaveBeenCalled();
-  });
-
-  it('resposta pronta: reancora a letra em cache e grava calibrada', async () => {
-    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    const palavras: AsrWord[] = [{ text: 'raindrop', startMs: 500 }];
-    cachedLyrics.mockReturnValue(letraPlana);
-    buscarTempo.mockResolvedValue({ tipo: 'pronto', words: palavras });
-    const reancorada: Lyrics = { ...letraPlana, synced: true };
-    recalibrarLetra.mockReturnValue(reancorada);
-
-    const resultado = await pedirCalibracao(faixa());
-
-    expect(recalibrarLetra).toHaveBeenCalledWith(letraPlana, palavras);
-    expect(writeLyrics).toHaveBeenCalledWith('t1', { ...reancorada, calibrada: true });
-    expect(resultado).toEqual({ ...reancorada, calibrada: true });
-  });
-
-  it('sem letra nenhuma em cache: a transcrição vira a própria letra', async () => {
-    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(null);
-    buscarTempo.mockResolvedValue({
-      tipo: 'pronto',
-      words: [{ text: 'oi', startMs: 0 }],
+    expect(aplicarAlinhamento).toHaveBeenCalledWith(letra, [0, 1], alinhadas);
+    expect(writeLyrics).toHaveBeenCalledWith('t1', {
+      ...reancorada,
+      calibrada: true,
+      alinhada: true,
     });
+    expect(resultado).toEqual({ ...reancorada, calibrada: true, alinhada: true });
+  });
 
+  it('alinhamento fraco: a letra fica como estava, e não se pergunta de novo', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(null);
     const resultado = await pedirCalibracao(faixa());
+    expect(resultado?.lines).toEqual(letra.lines);
+    expect(resultado).toMatchObject({ alinhada: true });
+  });
 
-    expect(recalibrarLetra).not.toHaveBeenCalled();
-    expect(resultado?.calibrada).toBe(true);
-    expect(resultado?.source).toBe('Transcrição do áudio');
-    expect(resultado?.lines[0]?.text).toBe('oi');
+  it('sem letra: a transcrição CONFIÁVEL vira a letra, rotulada', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    buscarTempo.mockResolvedValue({ tipo: 'pronto', words: ouvidas(30, 0.9) });
+    const resultado = await pedirCalibracao(faixa());
+    expect(resultado?.source).toBe('Transcrição automática');
+    expect(resultado?.lines.length).toBeGreaterThan(0);
+  });
+
+  it('sem letra e transcrição DUVIDOSA: não inventa — fica sem letra', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    buscarTempo.mockResolvedValue({ tipo: 'pronto', words: ouvidas(30, 0.2) });
+    await expect(pedirCalibracao(faixa())).resolves.toBeNull();
+    expect(writeLyrics).not.toHaveBeenCalled();
   });
 
   it('duas chamadas em voo para a mesma faixa: UM só pedido, não dois', async () => {
     const { pedirCalibracao, calibracaoEmVoo } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(letraPlana);
-    let resolver: (r: RespostaDoTempo) => void = () => undefined;
-    buscarTempo.mockReturnValue(
+    cachedLyrics.mockReturnValue(letra);
+    let resolver: (r: RespostaDoAlinhamento) => void = () => undefined;
+    buscarAlinhamento.mockReturnValue(
       new Promise((resolve) => {
         resolver = resolve;
       }),
     );
 
     const a = pedirCalibracao(faixa());
-    const b = pedirCalibracao(faixa()); // LyricsView abrindo enquanto o aquecimento ainda espera
-    expect(a).toBe(b); // mesma promessa: nenhum segundo laço foi aberto
+    const b = pedirCalibracao(faixa()); // LyricsView abrindo enquanto o aquecimento espera
+    expect(a).toBe(b);
     expect(calibracaoEmVoo('t1')).toBe(true);
-    expect(buscarTempo).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(0);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
 
-    recalibrarLetra.mockReturnValue({ ...letraPlana, synced: true });
-    resolver({ tipo: 'pronto', words: [{ text: 'oi', startMs: 0 }] });
+    aplicarAlinhamento.mockReturnValue(letra);
+    resolver({ tipo: 'pronto', linhas: alinhadas });
     await a;
     expect(calibracaoEmVoo('t1')).toBe(false);
   });
 
   it('espera com "esperar" e tenta de novo depois do intervalo', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(letraPlana);
-    buscarTempo
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento
       .mockResolvedValueOnce({ tipo: 'esperar' })
       .mockResolvedValueOnce({ tipo: 'esperar' })
-      .mockResolvedValueOnce({ tipo: 'pronto', words: [{ text: 'oi', startMs: 0 }] });
-    recalibrarLetra.mockReturnValue({ ...letraPlana, synced: true });
+      .mockResolvedValueOnce({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(letra);
 
     const promessa = pedirCalibracao(faixa());
     await vi.advanceTimersByTimeAsync(0);
-    expect(buscarTempo).toHaveBeenCalledTimes(1);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(buscarTempo).toHaveBeenCalledTimes(2);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(2);
     await vi.advanceTimersByTimeAsync(15_000);
-    expect(buscarTempo).toHaveBeenCalledTimes(3);
-
-    const resultado = await promessa;
-    expect(resultado?.calibrada).toBe(true);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(3);
+    expect((await promessa)?.calibrada).toBe(true);
   });
 
-  it('manterVivo falso PARA de perguntar sem esgotar o orçamento de tentativas', async () => {
+  it('manterVivo falso PARA de perguntar sem esgotar o orçamento', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(letraPlana);
-    buscarTempo.mockResolvedValue({ tipo: 'esperar' });
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'esperar' });
     let vivo = true;
 
     const promessa = pedirCalibracao(faixa(), () => vivo);
     await vi.advanceTimersByTimeAsync(0);
-    expect(buscarTempo).toHaveBeenCalledTimes(1);
-    vivo = false; // a faixa deixou de ser atual/próxima (a pessoa pulou)
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
+    vivo = false; // a pessoa pulou para outra faixa
     await vi.advanceTimersByTimeAsync(15_000);
 
     expect(await promessa).toBeNull();
-    expect(buscarTempo).toHaveBeenCalledTimes(1); // não gastou mais nenhuma pergunta
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
   });
 
   it('desiste depois do orçamento de tentativas, sem travar para sempre', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(letraPlana);
-    buscarTempo.mockResolvedValue({ tipo: 'esperar' });
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'esperar' });
 
     const promessa = pedirCalibracao(faixa());
-    for (let i = 0; i < 12; i += 1) {
-      await vi.advanceTimersByTimeAsync(15_000);
-    }
+    for (let i = 0; i < 25; i += 1) await vi.advanceTimersByTimeAsync(15_000);
     expect(await promessa).toBeNull();
   });
 
   it('aquecerCalibracao nunca lança, mesmo se algo no meio der errado', async () => {
     const { aquecerCalibracao } = await import('@/lib/lyrics/calibragem');
-    cachedLyrics.mockReturnValue(letraPlana);
-    buscarTempo.mockRejectedValue(new Error('importador fora do ar'));
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockRejectedValue(new Error('importador fora do ar'));
     expect(() => aquecerCalibracao(faixa(), () => true)).not.toThrow();
     await vi.advanceTimersByTimeAsync(0);
   });

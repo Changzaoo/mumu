@@ -6,7 +6,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
-import { pedirCalibracao } from '@/lib/lyrics/calibragem';
+import { pedirCalibracao, type LetraAlinhada } from '@/lib/lyrics/calibragem';
 import { linhaAtiva, palavraAtiva, palavrasDaLinha } from '@/lib/lyrics/karaoke';
 import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
@@ -103,18 +103,25 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   // tiver terminado, `writeLyrics` já deixou a versão calibrada no cache e o
   // guarda acima (`lyrics?.calibrada`) nem deixa este efeito rodar.
   useEffect(() => {
-    if (!terminouBusca || !isCurrent || lyrics?.calibrada) return;
+    if (!terminouBusca || !isCurrent || (lyrics as LetraAlinhada | undefined)?.alinhada) return;
     let cancelado = false;
     void pedirCalibracao(track).then((pronta) => {
       if (cancelado || !pronta) return;
-      const jaTinha = queryClient.getQueryData<Lyrics | null>(['lyrics', track.id])?.calibrada;
+      const jaTinha = (
+        queryClient.getQueryData<Lyrics | null>(['lyrics', track.id]) as LetraAlinhada | null
+      )?.alinhada;
       if (!jaTinha) queryClient.setQueryData(['lyrics', track.id], pronta);
     });
     return () => {
       cancelado = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma calibração por faixa
-  }, [terminouBusca, isCurrent, track.id, Boolean(lyrics?.calibrada)]);
+  }, [
+    terminouBusca,
+    isCurrent,
+    track.id,
+    Boolean((lyrics as LetraAlinhada | undefined)?.alinhada),
+  ]);
 
   // ONDE A VOZ ESTÁ — linha e palavra. A posição REAL do engine é amostrada a
   // cada quadro (a do store é estrangulada a ~5/s e chega ~200 ms atrasada),

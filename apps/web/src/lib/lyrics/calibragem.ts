@@ -21,9 +21,14 @@ import { cachedLyrics, fetchLyrics, writeLyrics, type Lyrics } from '@/lib/lyric
 import { garantirDetalhe } from '@/lib/local/detalheDaFaixa';
 import { dicaDeIdioma } from '@/lib/lyrics/syncFromAudio';
 import {
+  aplicarAlinhamento,
+  buscarAlinhamento,
   buscarTempo,
+  linhasParaAlinhar,
   palavrasEmLinhas,
   recalibrarLetra,
+  transcricaoConfiavel,
+  urlDoAlinhamento,
   urlDoTempo,
 } from '@/lib/lyrics/recalibrar';
 import { remoteUrlFor } from '@/lib/local/localLibrary';
@@ -38,7 +43,10 @@ import { remoteUrlFor } from '@/lib/local/localLibrary';
  * perguntas com uma música que a pessoa já pulou.
  */
 const INTERVALO_MS = 15_000;
-const TENTATIVAS_MAX = 12;
+const TENTATIVAS_MAX = 20;
+
+/** Letra já passada pelo motor atual (alinhamento / transcrição filtrada). */
+export type LetraAlinhada = Lyrics & { alinhada?: boolean };
 
 /** Uma entrada por faixa em voo — o que impede o pedido duplicado. */
 const emVoo = new Map<string, Promise<Lyrics | null>>();
@@ -66,11 +74,14 @@ async function perguntarAteChegar(
       const atual = cachedLyrics(trackId);
       // Letra em cache: reancora nela. Sem letra nenhuma: a transcrição vira
       // a própria letra (rotulada — ver palavrasEmLinhas/recalibrar.ts).
+      const ouvidas = atual ? null : transcricaoConfiavel(r.words);
       const nova: Lyrics | null = atual
         ? recalibrarLetra(atual, r.words)
-        : { synced: true, lines: palavrasEmLinhas(r.words), source: 'Transcrição do áudio' };
+        : ouvidas
+          ? { synced: true, lines: palavrasEmLinhas(ouvidas), source: 'Transcrição automática' }
+          : null;
       if (!nova || nova.lines.length === 0) return null;
-      const pronta: Lyrics = { ...nova, calibrada: true };
+      const pronta: LetraAlinhada = { ...nova, calibrada: true, alinhada: true };
       writeLyrics(trackId, pronta);
       return pronta;
     }
@@ -90,6 +101,32 @@ async function perguntarAteChegar(
  * sem gastar mais uma pergunta — é o que a próxima faixa da fila vira "não
  * vale mais a pena" quando a pessoa pula adiante de novo.
  */
+/** Pede o alinhamento da letra conhecida até ele chegar (ou desistir). */
+async function alinharAteChegar(
+  trackId: string,
+  url: string,
+  letra: Lyrics,
+  manterVivo: () => boolean,
+): Promise<Lyrics | null> {
+  const indices = linhasParaAlinhar(letra);
+  const textos = indices.map((i) => letra.lines[i]?.text ?? '');
+  if (textos.length === 0) return null;
+  let tentativas = 0;
+  while (manterVivo()) {
+    const r = await buscarAlinhamento(url, textos);
+    if (r.tipo === 'pronto') {
+      const nova = aplicarAlinhamento(letra, indices, r.linhas);
+      // Alinhamento fraco: fica a letra como estava (e não se pergunta de novo).
+      const pronta: LetraAlinhada = { ...(nova ?? letra), calibrada: true, alinhada: true };
+      writeLyrics(trackId, pronta);
+      return pronta;
+    }
+    if (r.tipo !== 'esperar' || ++tentativas >= TENTATIVAS_MAX) return null;
+    await new Promise((resolve) => setTimeout(resolve, INTERVALO_MS));
+  }
+  return null;
+}
+
 export function pedirCalibracao(
   track: TrackDto,
   manterVivo: () => boolean = () => true,
@@ -98,7 +135,10 @@ export function pedirCalibracao(
   if (emAndamento) return emAndamento;
 
   const emCache = cachedLyrics(track.id);
-  if (emCache?.calibrada) return Promise.resolve(emCache);
+  // `alinhada`, e não só `calibrada`: a calibração antiga (reconhecimento livre
+  // com o modelo `base`) errava com sotaque e autotune e deixava a letra no
+  // lugar errado — ela é refeita UMA vez pelo alinhamento.
+  if (emCache?.calibrada && (emCache as LetraAlinhada).alinhada) return Promise.resolve(emCache);
 
   // Preview de 30s (Apple) nunca casa com o tempo da música inteira.
   if (track.previewOnly) return Promise.resolve(null);
@@ -117,9 +157,16 @@ export function pedirCalibracao(
       await garantirDetalhe(track.id).catch(() => false);
     }
     const remota = remoteUrlFor(track.id) ?? track.streamUrl ?? null;
-    const url = remota ? urlDoTempo(remota, idiomaPara(letra)) : null;
-    if (!url || !manterVivo()) return null;
-    return perguntarAteChegar(track.id, url, manterVivo);
+    if (!remota || !manterVivo()) return null;
+    // COM LETRA PUBLICADA: alinhamento forçado — o texto é o da letra, só o
+    // relógio vem do áudio. Nunca inventa palavra. SEM LETRA: transcrição, e
+    // só com o que o modelo ouviu com confiança (ver `transcricaoConfiavel`).
+    if (letra && letra.lines.length > 0) {
+      const url = urlDoAlinhamento(remota, idiomaPara(letra));
+      return url ? alinharAteChegar(track.id, url, letra, manterVivo) : null;
+    }
+    const url = urlDoTempo(remota, idiomaPara(null));
+    return url ? perguntarAteChegar(track.id, url, manterVivo) : null;
   })()
     .catch(() => null)
     .finally(() => {
