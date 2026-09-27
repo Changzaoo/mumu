@@ -107,8 +107,17 @@ export function urlDoTempo(remoteUrl: string, idioma: string): string | null {
   }
 }
 
+/** O que a transcrição já ouviu enquanto ainda trabalha (ver palavras.py). */
+export interface TranscricaoParcial {
+  words: Array<AsrWord & { prob?: number }>;
+  /** Até onde da música o modelo já ouviu. */
+  ouvidoMs: number;
+}
+
 export type RespostaDoTempo =
-  { tipo: 'pronto'; words: AsrWord[] } | { tipo: 'esperar' } | { tipo: 'desistir' };
+  | { tipo: 'pronto'; words: AsrWord[] }
+  | { tipo: 'esperar'; processando?: boolean; parcial?: TranscricaoParcial }
+  | { tipo: 'desistir' };
 
 /** Pergunta ao importador. Nunca lança. */
 export async function buscarTempo(url: string): Promise<RespostaDoTempo> {
@@ -120,7 +129,18 @@ export async function buscarTempo(url: string): Promise<RespostaDoTempo> {
         ? { tipo: 'pronto', words: corpo.words }
         : { tipo: 'desistir' };
     }
-    if (res.status === 202 || res.status === 503) return { tipo: 'esperar' };
+    if (res.status === 202) {
+      const corpo = (await res.json().catch(() => ({}))) as {
+        status?: string;
+        parcial?: TranscricaoParcial;
+      };
+      return {
+        tipo: 'esperar',
+        processando: corpo.status === 'processando',
+        ...(corpo.parcial ? { parcial: corpo.parcial } : {}),
+      };
+    }
+    if (res.status === 503) return { tipo: 'esperar' };
     return { tipo: 'desistir' };
   } catch {
     return { tipo: 'esperar' };

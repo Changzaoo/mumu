@@ -9,6 +9,7 @@
 import type { TrackDto } from '@radinho/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
+import { fetchOutraFonteDeLetra } from '@/lib/local/importerHelper';
 import { lerPalavrasMarcadas } from './karaoke';
 
 export interface LyricLine {
@@ -432,8 +433,50 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
 const VALIDADE_DO_VAZIO_MS = 7 * 24 * 3600_000;
 
 /**
- * Resolve lyrics for a track: cache → LRCLIB. Never throws; returns null when
- * nothing is found. Successful results are cached for offline reuse.
+ * PLANO B quando o LRCLIB não tem versão COM TEMPO — pergunta ao importador
+ * por outras fontes (NetEase, lyrics.ovh; ver apps/importer/outrasFontesDeLetra.mjs).
+ * O navegador não alcança essas fontes sozinho (exigem `Referer`/driblam CORS),
+ * então quem busca é o importador; aqui só convertemos a resposta para o
+ * mesmo formato de `Lyrics` que o resto do app já entende.
+ *
+ * Preview de 30s (Apple) fica de fora: os únicos timestamps que essas fontes
+ * têm são da música INTEIRA, e aplicá-los a um clipe de 30s é desincronia
+ * garantida — o mesmo motivo que já faz `lrclibGet` zerar a duração aqui.
+ */
+async function outrasFontesDeLetra(track: TrackDto): Promise<Lyrics | null> {
+  if (track.previewOnly) return null;
+  const rawTitle = track.title.trim();
+  if (!rawTitle) return null;
+  const title = cleanTitleForLyrics(rawTitle) || rawTitle;
+  const artist = track.artists.find((a) => a.name && a.name !== 'Desconhecido')?.name;
+  const durationSec = Math.round((track.durationMs || 0) / 1000);
+  const achado = await fetchOutraFonteDeLetra(title, artist, durationSec).catch(() => null);
+  if (!achado) return null;
+  if (achado.synced && achado.lrc) {
+    const lines = parseLrc(achado.lrc);
+    return lines.length > 0 ? { synced: true, lines, source: null } : null;
+  }
+  if (!achado.synced && achado.plain) {
+    const lines = achado.plain
+      .split(/\r?\n/)
+      .map((text) => ({ timeMs: 0, text: text.trim() }))
+      .filter((l) => l.text);
+    return lines.length > 0 ? { synced: false, lines, source: null } : null;
+  }
+  return null;
+}
+
+/**
+ * Resolve lyrics for a track: cache → LRCLIB → outras fontes. Never throws;
+ * returns null when nothing is found. Successful results are cached for
+ * offline reuse.
+ *
+ * ORDEM DE PREFERÊNCIA (a mais confiável primeiro): LRCLIB com tempo > outra
+ * fonte com tempo > LRCLIB texto puro > outra fonte texto puro. O LRCLIB é
+ * curado e já passou pela checagem estrita de `rowMatches`; as outras fontes
+ * só entram quando o LRCLIB não deu uma versão com tempo, e mesmo assim nunca
+ * derrubam um texto puro que o LRCLIB já tinha — texto puro por texto puro, o
+ * mais verificado fica.
  */
 export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
   const fingerprint = trackFingerprint(track);
@@ -474,6 +517,15 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
             : track.artists,
         });
       }
+    }
+    // LRCLIB não devolveu versão COM TEMPO (nada, ou só texto puro): tenta o
+    // plano B antes de aceitar o que tem. Uma fonte com tempo troca um texto
+    // puro OU um vazio; uma fonte de texto puro só entra quando não havia
+    // NADA do LRCLIB — ver a ordem de preferência acima.
+    if (!lyrics || !lyrics.synced) {
+      const outra = await outrasFontesDeLetra(track);
+      if (outra?.synced) lyrics = outra;
+      else if (!lyrics) lyrics = outra;
     }
     writeCache({
       ...readCache(),

@@ -28,6 +28,7 @@ import {
   palavrasEmLinhas,
   recalibrarLetra,
   transcricaoConfiavel,
+  type TranscricaoParcial,
   urlDoAlinhamento,
   urlDoTempo,
 } from '@/lib/lyrics/recalibrar';
@@ -44,6 +45,38 @@ import { remoteUrlFor } from '@/lib/local/localLibrary';
  */
 const INTERVALO_MS = 15_000;
 const TENTATIVAS_MAX = 20;
+/** Rótulo da transcrição do caminho antigo (texto inventado, não é letra). */
+export const TRANSCRICAO_ANTIGA = 'Transcrição do áudio';
+/** Enquanto a transcrição roda, a tela mostra as palavras chegando. */
+const AO_VIVO_MS = 3_000;
+
+/**
+ * A LETRA SENDO FEITA, AO VIVO — o que a tela mostra enquanto o importador
+ * trabalha: "nosso time está transcrevendo a letra agora", com as palavras
+ * aparecendo conforme o modelo ouve a música. Um registro por faixa, que a
+ * `LyricsView` assina.
+ */
+export interface LetraAoVivo {
+  fase: 'na-fila' | 'transcrevendo' | 'alinhando';
+  parcial?: TranscricaoParcial;
+}
+const aoVivo = new Map<string, LetraAoVivo>();
+const ouvintesAoVivo = new Set<() => void>();
+
+export function assinarLetraAoVivo(ouvinte: () => void): () => void {
+  ouvintesAoVivo.add(ouvinte);
+  return () => ouvintesAoVivo.delete(ouvinte);
+}
+
+export function letraAoVivo(trackId: string): LetraAoVivo | null {
+  return aoVivo.get(trackId) ?? null;
+}
+
+function publicar(trackId: string, estado: LetraAoVivo | null): void {
+  if (estado) aoVivo.set(trackId, estado);
+  else if (!aoVivo.delete(trackId)) return;
+  for (const o of ouvintesAoVivo) o();
+}
 
 /** Letra já passada pelo motor atual (alinhamento / transcrição filtrada). */
 export type LetraAlinhada = Lyrics & { alinhada?: boolean };
@@ -68,6 +101,7 @@ async function perguntarAteChegar(
   manterVivo: () => boolean,
 ): Promise<Lyrics | null> {
   let tentativas = 0;
+  const limite = Date.now() + 10 * 60_000;
   while (manterVivo()) {
     const r = await buscarTempo(url);
     if (r.tipo === 'pronto') {
@@ -85,8 +119,16 @@ async function perguntarAteChegar(
       writeLyrics(trackId, pronta);
       return pronta;
     }
-    if (r.tipo !== 'esperar' || ++tentativas >= TENTATIVAS_MAX) return null;
-    await new Promise((resolve) => setTimeout(resolve, INTERVALO_MS));
+    if (r.tipo !== 'esperar') return null;
+    // Transcrevendo: a tela mostra as palavras chegando — pergunta a cada 3 s e
+    // não gasta o orçamento de tentativas (a música inteira leva minutos).
+    publicar(trackId, {
+      fase: r.processando ? 'transcrevendo' : 'na-fila',
+      ...(r.parcial ? { parcial: r.parcial } : {}),
+    });
+    if (!r.processando && ++tentativas >= TENTATIVAS_MAX) return null;
+    if (Date.now() > limite) return null;
+    await new Promise((resolve) => setTimeout(resolve, r.processando ? AO_VIVO_MS : INTERVALO_MS));
   }
   return null;
 }
@@ -122,6 +164,7 @@ async function alinharAteChegar(
       return pronta;
     }
     if (r.tipo !== 'esperar' || ++tentativas >= TENTATIVAS_MAX) return null;
+    publicar(trackId, { fase: 'alinhando' });
     await new Promise((resolve) => setTimeout(resolve, INTERVALO_MS));
   }
   return null;
@@ -138,7 +181,9 @@ export function pedirCalibracao(
   // `alinhada`, e não só `calibrada`: a calibração antiga (reconhecimento livre
   // com o modelo `base`) errava com sotaque e autotune e deixava a letra no
   // lugar errado — ela é refeita UMA vez pelo alinhamento.
-  if (emCache?.calibrada && (emCache as LetraAlinhada).alinhada) return Promise.resolve(emCache);
+  if (emCache?.calibrada && (emCache as LetraAlinhada).alinhada && emCache.source !== TRANSCRICAO_ANTIGA) {
+    return Promise.resolve(emCache);
+  }
 
   // Preview de 30s (Apple) nunca casa com o tempo da música inteira.
   if (track.previewOnly) return Promise.resolve(null);
@@ -150,7 +195,11 @@ export function pedirCalibracao(
     // inglês para o whisper local (~50 s) em vez do Riva (~5 s) — e para um
     // cache diferente do que a tela de letra pede. A busca é a mesma do
     // prefetch: já em cache ou em voo, custa quase nada.
-    const letra = emCache ?? (await fetchLyrics(track).catch(() => null));
+    const achada = emCache ?? (await fetchLyrics(track).catch(() => null));
+    // A "Transcrição do áudio" do caminho antigo NÃO é letra: é texto que o
+    // reconhecimento livre inventou. Tratá-la como publicada seria alinhar a
+    // invenção. Vale como "sem letra".
+    const letra = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;
     // O LINK DO COFRE também pode não existir ainda: a entrada do acervo chega
     // magra e ganha `remoteUrl` no detalhe, buscado no caminho do play.
     if (!remoteUrlFor(track.id) && !track.streamUrl) {
@@ -171,6 +220,7 @@ export function pedirCalibracao(
     .catch(() => null)
     .finally(() => {
       emVoo.delete(track.id);
+      publicar(track.id, null);
     });
   emVoo.set(track.id, promessa);
   return promessa;

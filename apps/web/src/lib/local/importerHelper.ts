@@ -12,6 +12,7 @@
  */
 import { getIdToken } from '@/lib/firebase';
 import type { CatalogTrack } from '@/lib/local/catalogMatch';
+import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 /**
@@ -745,6 +746,56 @@ export async function measureNetworkSpeed(): Promise<NetworkSpeed> {
   return result;
 }
 
+export interface OutraFonteDeLetra {
+  synced: boolean;
+  lrc?: string;
+  plain?: string;
+  fonte: 'netease' | 'lyrics.ovh';
+}
+
+/**
+ * Pergunta ao importador por uma letra fora do LRCLIB (NetEase, lyrics.ovh) —
+ * fontes que exigem `Referer`/driblam CORS, então o navegador não alcança
+ * sozinho. Chamado só quando o LRCLIB não devolveu versão COM TEMPO (ver
+ * ordem de preferência em lyrics.ts).
+ *
+ * SEM TOKEN de propósito: é a mesma decisão de `/cover`/`/credits` quanto a
+ * dado — texto público —, mas aqui nem o portão do Firebase existe, porque
+ * exigir login para LER uma letra pública não protegeria nada; o freio contra
+ * abuso é o limite de taxa por IP do lado do servidor.
+ */
+export async function fetchOutraFonteDeLetra(
+  titulo: string,
+  artista: string | undefined,
+  duracaoSeg: number,
+): Promise<OutraFonteDeLetra | null> {
+  try {
+    const params = new URLSearchParams({ titulo });
+    if (artista) params.set('artista', artista);
+    if (duracaoSeg > 0) params.set('duracaoSeg', String(duracaoSeg));
+    const res = await fetch(`${helperUrl()}/letra/outras-fontes?${params.toString()}`);
+    if (!res.ok) return null; // 404 (nenhuma fonte tinha) e 429 (taxa) caem aqui igual
+    const data = (await res.json()) as Partial<OutraFonteDeLetra>;
+    if (data.synced === true && typeof data.lrc === 'string' && data.lrc.trim()) {
+      return {
+        synced: true,
+        lrc: data.lrc,
+        fonte: data.fonte === 'lyrics.ovh' ? 'lyrics.ovh' : 'netease',
+      };
+    }
+    if (data.synced === false && typeof data.plain === 'string' && data.plain.trim()) {
+      return {
+        synced: false,
+        plain: data.plain,
+        fonte: data.fonte === 'lyrics.ovh' ? 'lyrics.ovh' : 'netease',
+      };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
 /** Fetch a real artist photo (Deezer, via the importer to dodge CORS). */
 export async function fetchArtistImage(name: string): Promise<string | null> {
   try {
@@ -860,6 +911,125 @@ export async function aiSearchYouTube(query: string, limit = 10): Promise<Playli
   } catch {
     return null;
   }
+}
+
+/** Um candidato do YouTube para a tela de busca (ver `GET /buscar-youtube`). */
+export interface ResultadoYoutube {
+  url: string;
+  titulo: string;
+  canal: string;
+  duracaoSeg: number;
+  capa: string | null;
+}
+
+/**
+ * O que a tela precisa saber da busca no YouTube. `login` e `limite` são
+ * estados distintos de `falha` porque pedem mensagens diferentes: quem está
+ * deslogado precisa ENTRAR, quem buscou demais precisa ESPERAR, e nenhum dos
+ * dois é "o YouTube caiu".
+ */
+export type BuscaYoutube =
+  | { ok: true; resultados: ResultadoYoutube[] }
+  | { ok: false; motivo: 'login' | 'limite' | 'falha' };
+
+const ID_VIDEO_YOUTUBE = /^[A-Za-z0-9_-]{11}$/;
+
+/** Id de 11 caracteres de um link do YouTube (watch, youtu.be, shorts). */
+export function videoIdDoYoutube(url: string): string | null {
+  try {
+    const u = new URL(url);
+    const candidato = /(^|\.)youtu\.be$/i.test(u.hostname)
+      ? u.pathname.slice(1).split('/')[0]
+      : (u.searchParams.get('v') ?? u.pathname.match(/^\/(?:shorts|embed)\/([^/]+)/)?.[1]);
+    return candidato && ID_VIDEO_YOUTUBE.test(candidato) ? candidato : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Resposta do importador → lista confiável. O servidor já filtra, mas um
+ * importador de outra versão (ou um proxy devolvendo HTML) não pode derrubar a
+ * tela: item sem link do YouTube válido ou sem título simplesmente some.
+ */
+export function parseResultadosYoutube(data: unknown): ResultadoYoutube[] {
+  const lista = (data as { resultados?: unknown } | null)?.resultados;
+  if (!Array.isArray(lista)) return [];
+  const vistos = new Set<string>();
+  const saida: ResultadoYoutube[] = [];
+  for (const bruto of lista) {
+    const r = bruto as Partial<Record<keyof ResultadoYoutube, unknown>> | null;
+    if (!r || typeof r.url !== 'string' || typeof r.titulo !== 'string') continue;
+    const id = videoIdDoYoutube(r.url);
+    const titulo = r.titulo.trim();
+    if (!id || !titulo || vistos.has(id)) continue;
+    vistos.add(id);
+    const duracao = Number(r.duracaoSeg);
+    saida.push({
+      url: `https://www.youtube.com/watch?v=${id}`,
+      titulo,
+      canal: typeof r.canal === 'string' ? r.canal.trim() : '',
+      duracaoSeg: Number.isFinite(duracao) && duracao > 0 ? Math.round(duracao) : 0,
+      capa: typeof r.capa === 'string' && /^https:\/\//.test(r.capa) ? r.capa : null,
+    });
+  }
+  return saida;
+}
+
+/**
+ * Busca no YouTube pelo importador — para quando a música não está no acervo.
+ * Só candidatos; tocar é o `/stream` e guardar é a fila de import. Nunca lança.
+ */
+export async function buscarNoYoutube(termo: string, signal?: AbortSignal): Promise<BuscaYoutube> {
+  const headers = await baseHeaders();
+  // Sem crachá o importador responderia 403 de qualquer jeito — e o pedido
+  // ainda apareceria em vermelho no console de quem só estava olhando.
+  if (!headers.Authorization) return { ok: false, motivo: 'login' };
+  try {
+    const res = await fetch(`${helperUrl()}/buscar-youtube?q=${encodeURIComponent(termo)}`, {
+      headers,
+      signal,
+    });
+    if (res.status === 401 || res.status === 403) return { ok: false, motivo: 'login' };
+    if (res.status === 429) return { ok: false, motivo: 'limite' };
+    if (!res.ok) return { ok: false, motivo: 'falha' };
+    return { ok: true, resultados: parseResultadosYoutube(await res.json()) };
+  } catch {
+    return { ok: false, motivo: 'falha' };
+  }
+}
+
+/**
+ * Faixa TEMPORÁRIA para tocar um resultado do YouTube na hora, sem importar.
+ *
+ * O id `youtube:<videoId>` é de propósito NÃO-`local:`: o player carrega a
+ * `streamUrl` que vier, sem procurar cópia no acervo nem no cofre (que não
+ * existem para ela). `sourceUrl` vai junto para quem quiser guardá-la depois.
+ * Devolve null deslogado — o `/stream` exige o token na URL.
+ */
+export async function faixaDoYoutube(r: ResultadoYoutube): Promise<TrackDto | null> {
+  const id = videoIdDoYoutube(r.url);
+  if (!id) return null;
+  const streamUrl = await buildStreamUrl(r.url);
+  if (!streamUrl) return null;
+  return {
+    id: `youtube:${id}`,
+    title: r.titulo,
+    durationMs: r.duracaoSeg * 1000,
+    trackNumber: null,
+    discNumber: null,
+    explicit: false,
+    playsCount: 0,
+    coverUrl: r.capa,
+    dominantColor: null,
+    loudnessLufs: null,
+    album: null,
+    artists: r.canal ? [{ id: `youtube-canal:${r.canal}`, name: r.canal, slug: '', imageUrl: null }] : [],
+    streamUrl,
+    downloadUrl: null,
+    sourceUrl: r.url,
+    uploadedByUserId: null,
+  };
 }
 
 export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult> {

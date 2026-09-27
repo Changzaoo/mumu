@@ -320,7 +320,18 @@ async function drain(): Promise<void> {
  * fica disponível no aparelho (download concluído ou import). Não bloqueia
  * quem chamou e nunca lança.
  */
+/** Ver o comentário dentro de `queueLyricsSync`. */
+const FILA_DESLIGADA = true;
+
 export function queueLyricsSync(track: TrackDto, opts: { agora?: boolean } = {}): void {
+  // DESLIGADA. Esta fila transcrevia pelo aparelho quando não havia letra
+  // publicada — reconhecimento livre que inventava texto com sotaque e
+  // autotune, gravado no cache como se fosse a letra. O relógio (e a
+  // transcrição filtrada por confiança) agora vem do importador: ver
+  // lib/lyrics/calibragem.ts. Mantida a assinatura para quem ainda chama.
+  void track;
+  void opts;
+  if (FILA_DESLIGADA) return;
   if (typeof window === 'undefined') return;
   if (track.previewOnly) return; // prévia de 30s não casa com a letra inteira
   if (inFlight.has(track.id) || failed.has(track.id)) return;

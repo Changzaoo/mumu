@@ -19,6 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useTrackLikes } from '@/features/library/api';
 import { useRecentSearches } from '@/features/search/api';
+import { DoYoutube } from '@/features/search/DoYoutube';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSearch';
 import { useSyncExternalStore } from 'react';
@@ -385,8 +386,12 @@ export default function SearchPage() {
           {isEmpty ? (
             <EmptyState
               icon={SearchX}
-              title={`Nada encontrado para "${query}"`}
-              description="Confira a grafia ou tente termos mais gerais."
+              title={`Nada no acervo para "${query}"`}
+              description={
+                showTracks
+                  ? 'Tente logo abaixo, no YouTube — ou confira a grafia.'
+                  : 'Confira a grafia ou tente termos mais gerais.'
+              }
             />
           ) : (
             <>
@@ -639,6 +644,12 @@ export default function SearchPage() {
             </>
           )}
         </div>
+      )}
+
+      {/* Fora do bloco acima de propósito: o YouTube continua valendo quando o
+          catálogo grátis está fora do ar (isError) ou não achou nada. */}
+      {hasQuery && showTracks && (
+        <DoYoutube termo={query} automatico={local.tracks.length < 3} />
       )}
     </div>
   );

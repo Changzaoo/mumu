@@ -6,9 +6,9 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
-import { pedirCalibracao, type LetraAlinhada } from '@/lib/lyrics/calibragem';
+import { pedirCalibracao, TRANSCRICAO_ANTIGA, type LetraAlinhada } from '@/lib/lyrics/calibragem';
+import { LetraSendoFeita, useLetraAoVivo } from '@/components/media/LetraSendoFeita';
 import { linhaAtiva, palavraAtiva, palavrasDaLinha } from '@/lib/lyrics/karaoke';
-import { syncLyricsFromAudio, transcribeToLyrics } from '@/lib/lyrics/syncFromAudio';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -57,7 +57,7 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   // de sincronizar pelo áudio (decodificar a faixa inteira) ou transcrever — a
   // letra já estava em mãos e a tela seguia no esqueleto por segundos. Agora a
   // consulta devolve a letra encontrada e o upgrade vem depois, trocando-a.
-  const { data: lyrics, isLoading } = useQuery({
+  const { data: achada, isLoading } = useQuery({
     queryKey: ['lyrics', track.id],
     queryFn: () => fetchLyrics(track),
     // Já buscada quando a faixa começou (playerStore): aparece no primeiro quadro.
@@ -65,28 +65,17 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     staleTime: Infinity,
     retry: false,
   });
+  // A "Transcrição do áudio" do caminho antigo era texto inventado pelo
+  // reconhecimento livre — não é letra, não aparece.
+  const lyrics = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;
 
-  const encontrada = lyrics;
   const terminouBusca = !isLoading;
-  useEffect(() => {
-    if (!terminouBusca || encontrada?.synced) return;
-    let cancelado = false;
-    void (async () => {
-      // Letra sem tempo: tenta ganhar sincronia pelo áudio do aparelho.
-      // Nenhuma letra publicada: transcreve, rotulado como transcrição.
-      const melhor = encontrada
-        ? await syncLyricsFromAudio(track).catch(() => null)
-        : await transcribeToLyrics(track).catch(() => null);
-      // A calibrada pelo cofre é melhor que esta: se chegou antes, fica.
-      const jaCalibrada = queryClient.getQueryData<Lyrics | null>(['lyrics', track.id])?.calibrada;
-      if (!cancelado && melhor && !jaCalibrada)
-        queryClient.setQueryData(['lyrics', track.id], melhor);
-    })();
-    return () => {
-      cancelado = true;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- uma tentativa por faixa
-  }, [terminouBusca, Boolean(encontrada), track.id]);
+  const vivo = useLetraAoVivo(track.id);
+  // O CAMINHO ANTIGO FOI DESLIGADO: transcrever pelo aparelho (reconhecimento
+  // livre, modelo pequeno) inventava letra com sotaque e autotune, e a gravava
+  // no cache como se fosse a letra. Hoje a letra publicada é ALINHADA ao áudio
+  // no importador e, sem letra nenhuma, a transcrição de lá só mostra o que o
+  // modelo ouviu com confiança — ver lib/lyrics/calibragem.ts.
 
   // A LETRA NO RELÓGIO DO ÁUDIO. A letra publicada costuma ter sido
   // cronometrada para outra gravação (adiantada, ou acabando antes da música),
@@ -175,6 +164,9 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   }
 
   if (!lyrics || lyrics.lines.length === 0) {
+    if (vivo && vivo.fase !== 'alinhando') {
+      return <LetraSendoFeita vivo={vivo} duracaoMs={track.durationMs} className={className} />;
+    }
     return (
       <EmptyState
         icon={MicVocal}
@@ -190,6 +182,12 @@ export function LyricsView({ track, className }: LyricsViewProps) {
       className={cn('no-scrollbar h-full space-y-1 overflow-y-auto py-8', className)}
       aria-label="Letra da música"
     >
+      {vivo?.fase === 'alinhando' && (
+        <p className="px-3 pb-2 text-xs text-fg-muted" aria-live="polite">
+          <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-fg/70 align-middle" />
+          Sincronizando a letra com a voz…
+        </p>
+      )}
       {lyrics.lines.map((line, index) => {
         const active = index === activeIndex;
         // PROFUNDIDADE: quanto mais longe da linha cantada, menor, mais

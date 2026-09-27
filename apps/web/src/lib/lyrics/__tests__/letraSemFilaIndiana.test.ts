@@ -30,6 +30,13 @@ vi.mock('@/lib/local/cofreLocal', () => ({
 vi.mock('@/lib/ai/ai', () => ({
   aiCleanSongTitle: vi.fn().mockResolvedValue(null),
 }));
+// O plano B (outras fontes, via importador) não é o que este arquivo testa —
+// sem isto, a busca pelo LRCLIB (mockada abaixo via `fetch`) ganharia uma
+// terceira "rodada" que os testes de concorrência não esperam e nunca
+// respondem, travando `fetchLyrics` para sempre.
+vi.mock('@/lib/local/importerHelper', () => ({
+  fetchOutraFonteDeLetra: vi.fn().mockResolvedValue(null),
+}));
 
 const faixa = (over: Partial<TrackDto> = {}): TrackDto =>
   ({

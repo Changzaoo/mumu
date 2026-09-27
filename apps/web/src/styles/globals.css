@@ -632,3 +632,27 @@
 :root[data-perf='baixo'] .letra-desfoque {
   filter: none !important;
 }
+
+/* Palavra da transcrição ao vivo surgindo (LetraSendoFeita). O atraso de cada
+   uma vem do componente: as novas aparecem em sequência, como digitadas. */
+@keyframes letra-surgindo {
+  from {
+    opacity: 0;
+    filter: blur(4px);
+    transform: translateY(4px);
+  }
+  to {
+    opacity: 1;
+    filter: none;
+    transform: none;
+  }
+}
+.letra-surgindo {
+  display: inline-block;
+  animation: letra-surgindo 320ms ease-out both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .letra-surgindo {
+    animation: none;
+  }
+}

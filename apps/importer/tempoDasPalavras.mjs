@@ -51,6 +51,8 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
   const fila = new Map();
   /** chave em processamento agora. */
   let atual = null;
+  /** Onde o trabalho em curso grava a saída (o `.parcial` ao lado é o ao vivo). */
+  let saidaAtual = null;
   /** Falhas recentes: não refaz em laço uma faixa que o motor não consegue. */
   const falhou = new Map();
 
@@ -67,6 +69,7 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
   function python(args) {
     return new Promise((resolve, reject) => {
       const saida = path.join(os.tmpdir(), `tempo-${process.pid}-${Date.now()}.json`);
+      saidaAtual = saida;
       const proc = spawn(PYTHON, [path.join(HERE, 'palavras.py'), args[0], args[1], saida, ...args.slice(2)], {
         windowsHide: true,
         env: { ...process.env, PYTHONIOENCODING: 'utf-8' },
@@ -92,6 +95,8 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
           reject(e);
         } finally {
           await rm(saida, { force: true }).catch(() => undefined);
+          await rm(`${saida}.parcial`, { force: true }).catch(() => undefined);
+          if (saidaAtual === saida) saidaAtual = null;
         }
       });
     });
@@ -157,7 +162,15 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     if (pronto) return { pronto };
     const quando = falhou.get(chave);
     if (quando && Date.now() - quando < 6 * 3600_000) return { status: 'falhou' };
-    if (atual === chave) return { status: 'processando' };
+    if (atual === chave) {
+      // AO VIVO: o que a transcrição já ouviu até aqui (ver palavras.py).
+      const parcial = saidaAtual
+        ? await readFile(`${saidaAtual}.parcial`, 'utf8')
+            .then((t) => JSON.parse(t))
+            .catch(() => null)
+        : null;
+      return { status: 'processando', ...(parcial ? { parcial } : {}) };
+    }
     // Pedir de novo PROMOVE: vai para o fim do Map, que é quem sai primeiro.
     fila.delete(chave);
     fila.set(chave, tarefa);

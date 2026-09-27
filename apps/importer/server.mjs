@@ -51,6 +51,8 @@ import {
   transcribeWords,
 } from './riva.mjs';
 import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
+import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
+import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
@@ -1894,10 +1896,25 @@ async function musicbrainzCredits(title, artist) {
   return { label, catalogNumber, composer, coverUrl };
 }
 
+/** IP de quem pediu — Cloudflare Tunnel repassa o cliente real em
+ *  `X-Forwarded-For`; sem ele, cai no socket direto (uso local/LAN). Usado só
+ *  para o limite de taxa de `/letra/outras-fontes` (rota sem login). */
+function ipDoPedido(req) {
+  const fwd = req.headers['x-forwarded-for'];
+  if (typeof fwd === 'string' && fwd.trim()) return fwd.split(',')[0].trim();
+  return req.socket?.remoteAddress || 'desconhecido';
+}
+
 async function main() {
   const ytdlp = await resolveYtdlp();
   ytdlpBin = ytdlp; // publica para os import-jobs (rodam fora deste escopo)
   log(`yt-dlp: ${ytdlp}`);
+  // Ver buscaYoutube.mjs. Cookies em função: são conferidos a cada busca, como
+  // no resto do importador.
+  const buscaYoutube = criarBuscaYoutube({
+    binario: () => ytdlp,
+    argsExtras: () => [...cookieArgs(), ...extractorArgs()],
+  });
   // Diretório local padrão pode ser criado; o EXTERNO nunca (mkdir num
   // mountpoint desmontado criaria a pasta no disco raiz).
   if (!BLOB_DIR_EXTERNAL) await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
@@ -1929,7 +1946,7 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
             // must NOT run against an old importer that lacks these fields.
-            caps: ['uploader', 'album', 'quality', 'jobs', 'cover', 'credits'],
+            caps: ['uploader', 'album', 'quality', 'jobs', 'cover', 'credits', 'letra-externa'],
           }),
         );
         return;
@@ -2304,6 +2321,44 @@ async function main() {
         return;
       }
 
+      // ── Letra em outras fontes (NetEase, lyrics.ovh) ─────────────────────
+      // Só entra em jogo quando o LRCLIB não tem versão sincronizada (o
+      // cliente decide isso — ver lyrics.ts). É texto público, então SEM
+      // LOGIN; o freio contra abuso é o limite de taxa por IP logo abaixo, não
+      // o portão do Firebase. A checagem de identidade da faixa mora em
+      // outrasFontesDeLetra.mjs (`casaCandidato`) — melhor devolver 404 que
+      // devolver letra de outra música.
+      if (req.method === 'GET' && pathname === '/letra/outras-fontes') {
+        if (!permitirRequisicaoDeLetra(ipDoPedido(req))) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Muitos pedidos — tente novamente em instantes.' }));
+          return;
+        }
+        const sp = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const titulo = (sp.get('titulo') || '').trim();
+        const artista = (sp.get('artista') || '').trim();
+        const duracaoSeg = Number(sp.get('duracaoSeg') || '0') || 0;
+        let achado = null;
+        if (titulo) {
+          try {
+            achado = await buscarOutraFonteDeLetra({ titulo, artista, duracaoSeg });
+          } catch (err) {
+            log(`letra externa falhou para "${titulo}": ${err?.message ?? err}`);
+          }
+        }
+        if (!achado) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Sem letra nessas fontes.' }));
+          return;
+        }
+        res.writeHead(200, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'max-age=86400',
+        });
+        res.end(JSON.stringify(achado));
+        return;
+      }
+
       // ── Network speed probe (admin telemetry) ────────────────────────────
       // GET  /speed?bytes=N → N random bytes (timed by the client = download).
       // POST /speed         → swallow the body, ack its size (= upload).
@@ -2491,6 +2546,62 @@ async function main() {
         void sweepBlobStore(); // mantém o cofre dentro do teto (LRU)
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ id, token }));
+        return;
+      }
+
+      // ── ALINHAR A LETRA CONHECIDA ao áudio de uma faixa do cofre ─────────────
+      // Corpo: { linhas: string[] } — o texto da letra PUBLICADA. Devolve o tempo
+      // de cada linha e palavra (200), 202 enquanto calcula, 422 se falhou. Mesmo
+      // token de capacidade do áudio. O texto nunca muda: só ganha relógio.
+      if (req.method === 'POST' && /^\/blob\/[^/]+\/alinhar$/.test(pathname)) {
+        const id = decodeURIComponent(pathname.slice('/blob/'.length, -'/alinhar'.length));
+        const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        let meta = null;
+        try {
+          meta = safeBlobId(id) ? JSON.parse(await readFile(blobMetaPath(id), 'utf8')) : null;
+        } catch {
+          meta = null;
+        }
+        if (!meta || params.get('k') !== meta.token) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        let linhas = null;
+        try {
+          const corpo = JSON.parse((await readBody(req)) || '{}');
+          linhas = Array.isArray(corpo.linhas)
+            ? corpo.linhas
+                .filter((l) => typeof l === 'string')
+                .map((l) => l.trim().slice(0, 300))
+                .filter(Boolean)
+            : null;
+        } catch {
+          linhas = null;
+        }
+        if (!linhas || linhas.length === 0 || linhas.length > 600) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'linhas inválidas.' }));
+          return;
+        }
+        if (!existsSync(blobPath(id))) {
+          res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '30' });
+          res.end(JSON.stringify({ status: 'sem-audio' }));
+          return;
+        }
+        const idioma = (params.get('lang') ?? 'pt').toLowerCase().startsWith('en') ? 'en' : 'pt';
+        const r = await tempoDasPalavras.pedirAlinhamento(id, blobPath(id), idioma, linhas);
+        if ('pronto' in r) {
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify(r.pronto));
+          return;
+        }
+        res.writeHead(r.status === 'falhou' ? 422 : 202, {
+          'Content-Type': 'application/json',
+          'Cache-Control': 'no-store',
+          'Retry-After': '15',
+        });
+        res.end(JSON.stringify(r));
         return;
       }
 
@@ -3033,6 +3144,57 @@ async function main() {
           const message = err instanceof Error ? err.message : 'Falha na busca.';
           log('search error:', message);
           res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: message }));
+        }
+        return;
+      }
+
+      // ── Busca no YouTube para a tela de busca (a música não está no acervo) ──
+      // Candidatos já filtrados (sem live, sem short, sem compilação) para a
+      // pessoa tocar na hora via /stream ou mandar para a fila de import. A
+      // lógica, o cache e o limite moram em buscaYoutube.mjs.
+      if (req.method === 'GET' && pathname === '/buscar-youtube') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Entre na sua conta para buscar no YouTube.' }));
+          return;
+        }
+        const termo = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('q');
+        if (!termo || !termo.trim()) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Busca vazia.' }));
+          return;
+        }
+        // Limite POR USUÁRIO: o `sub` do token (já verificado pelo authorize,
+        // então só ler basta). Sem token — modo aberto/self-host — cai no IP.
+        let quem = '';
+        try {
+          const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+          const partes = bearer.split('.');
+          if (partes.length === 3) quem = String(b64urlJson(partes[1]).sub ?? '');
+        } catch {
+          /* token que não é JWT (token de serviço/compartilhado) — vai pelo IP */
+        }
+        if (!quem) {
+          const encaminhado = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+          quem = `ip:${encaminhado || req.socket.remoteAddress || '?'}`;
+        }
+        try {
+          const resultados = await buscaYoutube.buscar(termo, quem);
+          res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ resultados }));
+        } catch (err) {
+          if (err instanceof LimiteDeBusca) {
+            res.writeHead(429, {
+              'Content-Type': 'application/json',
+              'Retry-After': String(err.esperarSeg),
+            });
+            res.end(JSON.stringify({ error: err.message }));
+            return;
+          }
+          const message = err instanceof Error ? err.message : 'Falha na busca.';
+          log('buscar-youtube error:', message);
+          res.writeHead(502, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: message }));
         }
         return;

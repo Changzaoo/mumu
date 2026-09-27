@@ -46,6 +46,10 @@ def transcrever(audio, saida, idioma, modelo):
         beam_size=5,
     )
     palavras = []
+    parcial = saida + ".parcial"
+    # AO VIVO: o modelo decodifica a música em trechos, e cada trecho pronto é
+    # gravado na hora — o app mostra as palavras aparecendo enquanto o resto
+    # ainda está sendo ouvido, em vez de uma tela vazia por minutos.
     for seg in segmentos:
         for w in seg.words or []:
             texto = w.word.strip()
@@ -58,6 +62,14 @@ def transcrever(audio, saida, idioma, modelo):
                         "prob": round(float(w.probability or 0), 3),
                     }
                 )
+        try:
+            with open(parcial + ".tmp", "w", encoding="utf-8") as f:
+                json.dump({"words": palavras, "ouvidoMs": ms(seg.end)}, f, ensure_ascii=False)
+            import os
+
+            os.replace(parcial + ".tmp", parcial)
+        except OSError:
+            pass
     return {"language": info.language, "words": palavras}
 
 
