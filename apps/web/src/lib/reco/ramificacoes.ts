@@ -56,7 +56,7 @@ export interface Ramificacao {
 /** Abaixo disto o ramo não vira prateleira — vira buraco na página. */
 const MINIMO_POR_RAMO = 5;
 /** Teto de faixas por prateleira: ninguém rola cem cartões na horizontal. */
-const POR_RAMO = 14;
+const POR_RAMO = 40;
 /** Teto por artista dentro de um ramo, para a vitrine ter caras diferentes. */
 const MAX_POR_ARTISTA = 3;
 /** "De volta": sem tocar há pelo menos isto. */

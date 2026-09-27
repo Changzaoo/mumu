@@ -186,7 +186,7 @@ function montarHome(
     if (seen.has(h.track.id)) continue;
     seen.add(h.track.id);
     recentTracks.push(h.track);
-    if (recentTracks.length >= 12) break;
+    if (recentTracks.length >= 40) break;
   }
 
   // Artistas DELA para a grade de atalhos — não os maiores do acervo
@@ -519,7 +519,7 @@ export default function HomePage() {
       {/* Real albums in the library (capped — o resto vive em "Mostrar tudo"). */}
       {albums.length > 0 && (
         <SectionCarousel title="Seus álbuns" href="/library">
-          {albums.slice(0, 20).map((album) => (
+          {albums.slice(0, 60).map((album) => (
             <MediaCard
               key={album.key}
               title={album.title}
@@ -562,7 +562,7 @@ export default function HomePage() {
       {/* Your artists (capped — a página /artistas tem todos). */}
       {artistasDoAcervo.length > 0 && (
         <SectionCarousel title="Seus artistas" href="/artistas">
-          {artistasDoAcervo.slice(0, 20).map((artist) => (
+          {artistasDoAcervo.slice(0, 60).map((artist) => (
             <LocalArtistCard
               key={artist.name}
               name={artist.name}

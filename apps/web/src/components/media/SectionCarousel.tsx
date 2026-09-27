@@ -1,7 +1,12 @@
-import { Fragment, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
+import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+
+/** Folga de rolagem de cada lado do repouso (px) — um arremesso forte. */
+const FOLGA_PX = 4000;
+/** Teto de cópias (prateleira de 2-3 capas não vira centenas de cards). */
+const COPIAS_MAX = 9;
 
 export interface SectionCarouselProps extends ComponentProps<'section'> {
   title: string;
@@ -29,28 +34,48 @@ export function SectionCarousel({
   const [canScroll, setCanScroll] = useState({ left: false, right: false });
   // A PRATELEIRA QUE NÃO ACABA.
   //
-  // A fila termina numa parede: o dedo empurra, os cards acabam e fica um vão.
-  // O truque é o de sempre — duas cópias da mesma fila, e quando a rolagem
-  // passa do limite ela volta UMA CÓPIA inteira para trás, sem animação. Como
-  // as duas cópias são idênticas pixel a pixel, o salto é invisível: quem rola
-  // vê os cards seguirem em frente para sempre, nos dois sentidos.
+  // TRÊS cópias da mesma fila, e o repouso é o começo da do MEIO: sobra uma
+  // fila inteira de folga para cada lado. Quando a rolagem PARA longe do meio,
+  // ela volta exatamente uma cópia, sem animação — como as cópias são
+  // idênticas pixel a pixel, o salto é invisível e a fila segue para sempre,
+  // nos dois sentidos.
   //
-  // Só quando há fila para dar a volta (mais de uma tela e meia de cards):
-  // com quatro cards que já cabem na tela, a segunda cópia seria só um eco
-  // esquisito ao lado do original.
+  // O salto só acontece com a rolagem PARADA. Antes ele acontecia no meio do
+  // arremesso do dedo: no iPhone, mexer em `scrollLeft` durante o embalo corta
+  // o embalo e redesenha a fila — as capas piscavam e a prateleira parecia
+  // acabar logo. Com uma fila inteira de folga, nenhum arremesso chega à borda
+  // antes de parar.
+  //
+  // Só quando há fila para dar a volta (mais de uma tela e meia de cards).
   const [looping, setLooping] = useState(false);
-  // Um ajuste de `scrollLeft` feito por nós dispara `onScroll` de volta; a
-  // marca evita que a volta se avalie a si mesma no mesmo quadro.
-  const ajustando = useRef(false);
+  // Quantas cópias: o bastante para sobrar ~4000 px de folga de cada lado do
+  // meio (um arremesso forte no celular). Fila longa → 3; prateleira curta de
+  // 8 capas → mais cópias, senão o dedo bateria na borda.
+  const [copias, setCopias] = useState(3);
+  const meio = Math.floor(copias / 2);
+  const tocando = useRef(false);
+  const parouTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const capasCedo = useRef(false);
+
+  /** Largura exata de uma cópia (cards + vãos), medida entre os primeiros cards. */
+  const unidadeDe = (el: HTMLDivElement): number => {
+    const a = el.querySelector<HTMLElement>('[data-copia="0"] > *');
+    const b = el.querySelector<HTMLElement>('[data-copia="1"] > *');
+    return a && b ? b.offsetLeft - a.offsetLeft : 0;
+  };
 
   const medir = useCallback((): void => {
     const el = scrollerRef.current;
     if (!el) return;
-    // Com duas cópias no ar, a fila de verdade é metade do que se mede.
-    const unidade = looping ? el.scrollWidth / 2 : el.scrollWidth;
+    const unidade = looping ? unidadeDe(el) : el.scrollWidth;
     const deveria = loop && unidade > el.clientWidth * 1.5;
     if (deveria !== looping) setLooping(deveria);
-  }, [loop, looping]);
+    if (unidade > 0) {
+      const lado = Math.ceil(FOLGA_PX / unidade);
+      const n = Math.min(COPIAS_MAX, Math.max(3, 2 * lado + 1));
+      if (n !== copias) setCopias(n);
+    }
+  }, [loop, looping, copias]);
 
   const updateArrows = (): void => {
     const el = scrollerRef.current;
@@ -66,29 +91,54 @@ export function SectionCarousel({
     });
   };
 
-  // A VOLTA. O ponto de repouso é o começo da segunda cópia, então sobra meia
-  // fila de folga para cada lado; passando disso, anda (ou volta) uma cópia.
-  const darAVolta = (): void => {
+  /** Volta para a cópia do meio — só com a rolagem parada e o dedo fora. */
+  const recentrar = (forcar = false): void => {
     const el = scrollerRef.current;
-    if (!el || !looping || ajustando.current) return;
-    const unidade = el.scrollWidth / 2;
+    if (!el || !looping || (tocando.current && !forcar)) return;
+    const unidade = unidadeDe(el);
     if (unidade < 1) return;
-    const alvo =
-      el.scrollLeft >= unidade * 1.5
-        ? el.scrollLeft - unidade
-        : el.scrollLeft <= unidade * 0.5
-          ? el.scrollLeft + unidade
-          : null;
-    if (alvo === null) return;
-    ajustando.current = true;
+    // Repouso = `meio` cópias inteiras de rolagem (o começo da do meio). Anda
+    // um número INTEIRO de cópias até cair a menos de meia cópia dele.
+    const desvio = Math.round((el.scrollLeft - unidade * meio) / unidade);
+    if (desvio === 0) return;
+    const alvo = el.scrollLeft - desvio * unidade;
     // `scroll-smooth` animaria o salto — e aí ele deixaria de ser invisível.
     const antes = el.style.scrollBehavior;
     el.style.scrollBehavior = 'auto';
     el.scrollLeft = alvo;
     el.style.scrollBehavior = antes;
-    requestAnimationFrame(() => {
-      ajustando.current = false;
-    });
+  };
+
+  /**
+   * Trava de segurança: se, mesmo com a folga, a rolagem chegar a uma tela da
+   * borda, volta já — cortar o embalo é melhor que o dedo bater numa parede.
+   */
+  const pertoDaBorda = (): void => {
+    const el = scrollerRef.current;
+    if (!el || !looping) return;
+    const max = el.scrollWidth - el.clientWidth;
+    if (el.scrollLeft < el.clientWidth || el.scrollLeft > max - el.clientWidth) recentrar(true);
+  };
+
+  const quandoParar = (): void => {
+    if (parouTimer.current) clearTimeout(parouTimer.current);
+    parouTimer.current = setTimeout(() => recentrar(), 180);
+  };
+
+  /**
+   * As capas das cópias vêm com `loading="lazy"`: rolando rápido, cada uma
+   * entrava vazia e "piscava" ao carregar. Na primeira vez que a pessoa mexe
+   * NESTA prateleira, todas passam a carregar já — são as mesmas URLs, então é
+   * uma ida à rede por capa, não três.
+   */
+  const carregarCapas = (): void => {
+    if (capasCedo.current) return;
+    capasCedo.current = true;
+    scrollerRef.current
+      ?.querySelectorAll<HTMLImageElement>('img[loading="lazy"]')
+      .forEach((img) => {
+        img.loading = 'eager';
+      });
   };
 
   useEffect(() => {
@@ -105,17 +155,28 @@ export function SectionCarousel({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medir, children]);
 
-  // Ao ligar a volta, o repouso passa a ser o começo da segunda cópia.
+  // Ao ligar a volta, o repouso passa a ser o começo da cópia do meio.
   useEffect(() => {
     const el = scrollerRef.current;
     if (!el || !looping) return;
+    const doMeio = el.querySelector<HTMLElement>(`[data-copia="${meio}"] > *`);
+    const inicio = el.querySelector<HTMLElement>('[data-copia="0"] > *');
+    if (!doMeio || !inicio) return;
     const antes = el.style.scrollBehavior;
     el.style.scrollBehavior = 'auto';
-    el.scrollLeft = el.scrollWidth / 2;
+    el.scrollLeft = doMeio.offsetLeft - inicio.offsetLeft;
     el.style.scrollBehavior = antes;
+    capasCedo.current = false;
     updateArrows();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [looping]);
+  }, [looping, copias]);
+
+  useEffect(
+    () => () => {
+      if (parouTimer.current) clearTimeout(parouTimer.current);
+    },
+    [],
+  );
 
   const scrollBy = (direction: 1 | -1): void => {
     const el = scrollerRef.current;
@@ -158,20 +219,36 @@ export function SectionCarousel({
       <div
         ref={scrollerRef}
         onScroll={() => {
-          darAVolta();
           updateArrows();
+          pertoDaBorda();
+          quandoParar();
         }}
-        className="no-scrollbar -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto scroll-smooth px-1 pb-1"
+        onPointerDown={carregarCapas}
+        onTouchStart={() => {
+          tocando.current = true;
+          carregarCapas();
+        }}
+        onTouchEnd={() => {
+          tocando.current = false;
+          quandoParar();
+        }}
+        onTouchCancel={() => {
+          tocando.current = false;
+          quandoParar();
+        }}
+        className="no-scrollbar relative -mx-1 flex snap-x snap-mandatory gap-1 overflow-x-auto scroll-smooth px-1 pb-1"
       >
-        {/* A segunda cópia é decorativa: para quem usa leitor de tela a fila já
-            foi lida uma vez, e ouvir tudo em dobro seria ruído. */}
-        {children}
-        {looping && (
-          <Fragment key="volta">
-            <div aria-hidden className="contents">
+        {looping ? (
+          Array.from({ length: copias }, (_, i) => (
+            // Só a do meio é lida por leitor de tela: as outras são eco.
+            <div key={i} data-copia={i} aria-hidden={i !== meio || undefined} className="contents">
               {children}
             </div>
-          </Fragment>
+          ))
+        ) : (
+          <div data-copia={0} className="contents">
+            {children}
+          </div>
         )}
       </div>
 

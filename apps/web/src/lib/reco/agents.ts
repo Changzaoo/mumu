@@ -37,7 +37,7 @@ export interface Prateleira {
 }
 
 /** Quantas faixas uma prateleira mostra. */
-const TAMANHO = 20;
+const TAMANHO = 40;
 /** Abaixo disto o recorte não tem sinal — melhor não inventar prateleira. */
 const MIN_PLAYS = 6;
 

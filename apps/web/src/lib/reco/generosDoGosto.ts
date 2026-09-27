@@ -72,7 +72,7 @@ export function generosDoGosto(
   } = {},
 ): PrateleiraDeGenero[] {
   const maxGeneros = opts.maxGeneros ?? 8;
-  const porGenero = opts.porGenero ?? 14;
+  const porGenero = opts.porGenero ?? 40;
   const maxPorArtista = opts.maxPorArtista ?? 3;
 
   // Fallback de gênero: faixa do histórico/curtida sem `genre` próprio herda o

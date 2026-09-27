@@ -4,32 +4,30 @@ import { modoLeve } from '@/lib/perf/dispositivo';
 import { cn } from '@/lib/utils';
 
 /**
- * A AURA DO PLAY — uma NEBLINA em volta do botão, que nunca passa duas vezes
- * pelo mesmo desenho.
+ * A AURA DO PLAY — neblina em volta do botão, que nunca passa duas vezes pelo
+ * mesmo desenho.
  *
- * Histórico: fumaça subindo (chamava atenção demais), depois três manchas
- * redondas da cor de destaque passeando em volta — que liam como "halo", não
- * como névoa: borda redonda, sempre a mesma forma. A pessoa pediu neblina se
- * movendo de formas inéditas.
+ * O campo de densidade é RUÍDO 3D (x, y e tempo) com o domínio distorcido por
+ * outro ruído — é isso que enrola a névoa em volutas que rasgam e se juntam —,
+ * recortado num anel em volta do botão (denso na borda, esgarçando para fora).
+ * Semente sorteada a cada montagem; os relógios só andam para a frente: nenhum
+ * quadro se repete.
  *
- * Agora é névoa de verdade: um campo de densidade calculado por RUÍDO 3D
- * (x, y e tempo) com o domínio distorcido por outro ruído — é isso que faz as
- * volutas se enrolarem, rasgarem e se juntarem, em vez de manchas que só
- * andam. O campo é recortado num anel em volta do botão (denso colado à
- * borda, esgarçando para fora) e gira devagar em volta dele enquanto muda de
- * forma. A semente é sorteada a cada montagem e o tempo só anda para a
- * frente, sem período: nenhum quadro se repete.
+ * DOIS ESTADOS, UMA ANIMAÇÃO SÓ:
+ *  • TOCANDO — a névoa GIRA em volta do botão (uma volta a cada ~9 s) enquanto
+ *    muda de forma.
+ *  • PARADA — o giro freia até parar e fica o VENTO: a névoa quase parada,
+ *    levada devagar numa direção que muda aos poucos, com rajadas que a
+ *    remexem e a inclinam para um lado — como neblina de verdade numa brisa.
+ * A passagem de um para o outro é pela "vivacidade", que sobe e desce com
+ * inércia: velocidade do giro, ritmo da forma e peso do vento são todos
+ * contínuos nela, e ângulo, forma e deriva do vento são ACUMULADOS — nada
+ * recomeça, nada salta, nunca quebra.
  *
- * PAUSAR NÃO CORTA. A "vivacidade" desce devagar até zero: o relógio da névoa
- * anda cada vez mais devagar e ela esmaece junto, até assentar parada onde
- * estava. Só então o laço de quadros para. Voltar a tocar retoma do mesmo
- * ponto, sem salto.
- *
- * Custo: o campo é pequeno (56×56; 36×36 em aparelho fraco, a 30 quadros/s)
- * e o navegador o amplia com suavização — neblina não tem detalhe fino, e o
- * desfoque do CSS esconde os pixels. O laço só roda com a aura visível, a aba
- * à vista e algo se mexendo. Sem movimento pedido, a névoa fica parada — ela
- * também é contorno, não só animação.
+ * Custo: campo pequeno (56×56; 36×36 em aparelho fraco) ampliado com
+ * suavização — névoa não tem detalhe fino, e o desfoque do CSS esconde os
+ * pixels. Parada (e em aparelho fraco) roda a 30 quadros/s. O laço só roda com
+ * a aura visível e a aba à vista. Sem movimento pedido, fica um quadro parado.
  */
 
 const sorteio = (min: number, max: number) => min + Math.random() * (max - min);
@@ -151,8 +149,16 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     // Deslocamentos sorteados: duas montagens nunca começam no mesmo desenho.
     const ox = sorteio(0, 200);
     const oy = sorteio(0, 200);
+    /** Relógio da FORMA da névoa (só anda para a frente). */
     let t = sorteio(0, 100);
-    const giro = (Math.random() < 0.5 ? -1 : 1) * sorteio(0.25, 0.5);
+    /** Relógio do VENTO (tempo real; nunca desacelera). */
+    let tv = sorteio(0, 100);
+    /** Ângulo do giro (rad), acumulado — nunca volta a zero, nunca salta. */
+    let angulo = sorteio(0, Math.PI * 2);
+    const sentido = Math.random() < 0.5 ? -1 : 1;
+    /** Para onde o vento já levou a névoa (acumulado, vai e volta). */
+    let ventoX = 0;
+    let ventoY = 0;
     let viva = tocandoRef.current && !semMovimento ? 1 : 0;
     let raf = 0;
     let ultimo = 0;
@@ -160,11 +166,28 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
 
     const pintar = (dt: number, agora: number) => {
       lerCor(agora);
-      // O relógio da névoa anda na velocidade da vivacidade: pausando, ela
-      // desacelera até parar em vez de congelar num quadro.
-      t += dt * viva * 0.22;
-      // Esmaece junto, mas não some: a névoa pausada ainda contorna o botão.
-      const presenca = 0.5 + 0.5 * viva;
+      const parada = 1 - viva;
+      tv += dt;
+      // O VENTO: direção e força variam devagar (ruído no tempo real), com
+      // rajadas por cima — como névoa num dia de brisa. Pesa só na pausa;
+      // tocando, quem manda é o giro.
+      const dirVento = (ruido(tv * 0.07, 11.3, 2.7) - 0.5) * Math.PI * 2.4;
+      const rajada = ruido(tv * 0.45, 4.1, 9.9);
+      const forca = (0.35 + 0.65 * rajada * rajada) * parada;
+      const vx = Math.cos(dirVento) * forca;
+      const vy = Math.sin(dirVento) * forca;
+      ventoX += vx * dt * 0.35;
+      ventoY += vy * dt * 0.35;
+      // TOCANDO: gira em volta do botão, uma volta a cada ~9 s. A velocidade
+      // acompanha a vivacidade, então o giro acelera e freia sem tranco.
+      angulo += dt * sentido * 0.7 * viva;
+      // A forma muda o tempo todo: depressa tocando, devagar parada — e a
+      // rajada a remexe um pouco mais.
+      t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada);
+      // Tocando brilha mais; parada fica mais tênue, mas não some.
+      const presenca = 0.62 + 0.38 * viva;
+      const cosA = Math.cos(angulo);
+      const senA = Math.sin(angulo);
       const [r, g, b] = cor;
       for (let k = 0; k < N * N; k++) {
         const raio = raioDe[k]!;
@@ -178,19 +201,17 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         }
         const x = xs[k]!;
         const y = ys[k]!;
-        // Deriva: a névoa gira devagar em volta do botão (o sentido e a
-        // velocidade vêm do sorteio) enquanto o tempo muda a forma — girar
-        // sozinho teria ciclo; junto com a forma que muda, não tem.
-        const cosA = Math.cos(t * giro);
-        const senA = Math.sin(t * giro);
-        const sx = (x * cosA - y * senA) * 2.9 + ox;
-        const sy = (x * senA + y * cosA) * 2.9 + oy;
+        // Gira o desenho inteiro em volta do centro e o leva com o vento.
+        const sx = (x * cosA - y * senA) * 2.9 + ox - ventoX;
+        const sy = (x * senA + y * cosA) * 2.9 + oy - ventoY;
         // Distorção de domínio: é o que enrola a névoa em volutas.
         const wx = fbm(ruido, sx * 0.9, sy * 0.9, t * 0.6);
         const wy = fbm(ruido, sx * 0.9 + 5.2, sy * 0.9 + 1.3, t * 0.6 + 3.1);
         const d = fbm(ruido, sx + 2.6 * wx, sy + 2.6 * wy, t);
+        // Parada, a névoa se inclina para o lado para onde o vento sopra.
+        const inclina = 1 + (x * vx + y * vy) * 0.55;
         // Contraste: vazios de verdade entre os fiapos.
-        const densidade = Math.max(0, Math.min(1, (d - 0.4) * 3)) * janela;
+        const densidade = Math.max(0, Math.min(1, (d - 0.4) * 3 * inclina)) * janela;
         px[o] = r;
         px[o + 1] = g;
         px[o + 2] = b;
@@ -202,7 +223,9 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
     const quadro = (agora: number) => {
       raf = 0;
       if (!visivel || document.hidden) return;
-      if (leve && agora - ultimo < 32) {
+      // Parada, o vento é lento: 30 quadros bastam (e poupam bateria).
+      const intervalo = leve || viva < 0.05 ? 32 : 0;
+      if (intervalo && agora - ultimo < intervalo) {
         raf = requestAnimationFrame(quadro);
         return;
       }
@@ -212,11 +235,11 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
       const alvo = tocandoRef.current ? 1 : 0;
       const inercia = alvo > viva ? INERCIA_PLAY : INERCIA_PAUSA;
       viva += (alvo - viva) * (1 - Math.exp(-dt / inercia));
-      if (alvo === 0 && viva < 0.004) viva = 0;
-      if (alvo === 1 && viva > 0.996) viva = 1;
+      if (alvo === 0 && viva < 0.001) viva = 0;
+      if (alvo === 1 && viva > 0.999) viva = 1;
       pintar(dt, agora);
-      // Assentou (pausada e parada): o laço dorme até o próximo play.
-      if (viva > 0 || alvo > 0) raf = requestAnimationFrame(quadro);
+      // Nunca dorme enquanto visível: parada, ela continua ao vento.
+      raf = requestAnimationFrame(quadro);
     };
 
     const acordar = () => {
@@ -226,7 +249,6 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
         return;
       }
       if (raf || !visivel || document.hidden) return;
-      if (!tocandoRef.current && viva === 0) return;
       ultimo = performance.now();
       raf = requestAnimationFrame(quadro);
     };
