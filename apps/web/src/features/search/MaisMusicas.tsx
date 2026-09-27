@@ -54,15 +54,26 @@ function chaveDaMusica(t: TrackDto): string {
   return `${norm(trackArtistNames(t))}|${norm(t.title)}`;
 }
 
+/**
+ * Versão mexida por terceiros (acelerada, "8D", karaokê, reação…): quem busca
+ * "Mantém" quer a música, não o "speed up + grave" de um canal qualquer. Só
+ * aparece se a própria busca pedir por ela.
+ */
+const VERSAO_ALTERADA =
+  /\b(?:speed ?up|sped ?up|slowed|reverb|8d|nightcore|bass ?boost(?:ed)?|karaok[eê]|instrumental|cover|reac(?:t|tion|ting)|reagindo|react|tutorial|aula|remix)\b/i;
+
 /** Busca por baixo e monta faixas prontas para tocar; nunca lança. */
 async function buscarFaixas(termo: string, signal: AbortSignal): Promise<TrackDto[] | null> {
   const busca = await buscarNoYoutube(termo, signal);
   if (!busca.ok) return null;
+  const pedeAlterada = VERSAO_ALTERADA.test(termo);
   const faixas = await Promise.all(
-    busca.resultados.map(
-      // Já está no acervo deste aparelho: a faixa é a cópia, não o stream.
-      (r) => localLibrary.findBySource(r.url) ?? faixaDoYoutube(r),
-    ),
+    busca.resultados
+      .filter((r) => pedeAlterada || !VERSAO_ALTERADA.test(`${r.titulo} ${r.canal}`))
+      .map(
+        // Já está no acervo deste aparelho: a faixa é a cópia, não o stream.
+        (r) => localLibrary.findBySource(r.url) ?? faixaDoYoutube(r),
+      ),
   );
   return faixas.filter((f): f is TrackDto => f !== null);
 }

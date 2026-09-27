@@ -72,6 +72,14 @@ const RESULTADOS = [
     capa: null,
   },
   {
+    // Versão mexida de terceiro: some, a menos que a busca peça.
+    url: 'https://www.youtube.com/watch?v=JYB3UNbpTik',
+    titulo: 'Wiu e Matuê - Mantém (speed up + grave)',
+    canal: 'Lcducaos7 speed up + grave',
+    duracaoSeg: 150,
+    capa: null,
+  },
+  {
     url: 'https://www.youtube.com/watch?v=dQw4w9WgXcQ',
     titulo: 'Matuê - Kenny G',
     canal: 'MatueVEVO',
