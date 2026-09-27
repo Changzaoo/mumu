@@ -19,7 +19,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { useCatalogSearch, useCatalogSearchArtists } from '@/features/catalog/api';
 import { useTrackLikes } from '@/features/library/api';
 import { useRecentSearches } from '@/features/search/api';
-import { DoYoutube } from '@/features/search/DoYoutube';
+import { MaisMusicas } from '@/features/search/MaisMusicas';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSearch';
 import { useSyncExternalStore } from 'react';
@@ -44,6 +44,7 @@ function norm(value: string): string {
 }
 
 const EMPTY_ENTRIES: localLibrary.LibraryEntry[] = [];
+const SEM_FAIXAS: TrackDto[] = [];
 
 // ── Voice search (webkitSpeechRecognition; hidden when unsupported) ──
 
@@ -202,7 +203,7 @@ export default function SearchPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por visita
   }, []);
 
-  const freeTracks = tracksQuery.data ?? [];
+  const freeTracks = tracksQuery.data ?? SEM_FAIXAS;
   const artists = artistsQuery.data ?? [];
   const showTracks = tab === 'all' || tab === 'track';
   const showArtists = tab === 'all' || tab === 'artist';
@@ -271,6 +272,8 @@ export default function SearchPage() {
     local.artists.length === 0 &&
     local.albums.length === 0 &&
     lyricMatches.length === 0;
+
+  const jaNaTela = useMemo(() => [...local.tracks, ...freeTracks], [local.tracks, freeTracks]);
 
   const playLocal = (index: number): void => {
     addRecent(query);
@@ -383,15 +386,13 @@ export default function SearchPage() {
             (tracksQuery.isFetching || artistsQuery.isFetching) && 'opacity-70',
           )}
         >
-          {isEmpty ? (
+          {/* Sem nada no acervo, quem responde é "Mais músicas" logo abaixo
+              (que procura por baixo); o vazio só aparece aqui sem faixas. */}
+          {isEmpty && showTracks ? null : isEmpty ? (
             <EmptyState
               icon={SearchX}
               title={`Nada no acervo para "${query}"`}
-              description={
-                showTracks
-                  ? 'Tente logo abaixo, no YouTube — ou confira a grafia.'
-                  : 'Confira a grafia ou tente termos mais gerais.'
-              }
+              description="Confira a grafia ou tente termos mais gerais."
             />
           ) : (
             <>
@@ -646,9 +647,11 @@ export default function SearchPage() {
         </div>
       )}
 
-      {/* Fora do bloco acima de propósito: o YouTube continua valendo quando o
-          catálogo grátis está fora do ar (isError) ou não achou nada. */}
-      {hasQuery && showTracks && <DoYoutube termo={query} automatico={local.tracks.length < 3} />}
+      {/* Fora do bloco acima de propósito: continua valendo quando o catálogo
+          grátis está fora do ar (isError) ou não achou nada. */}
+      {hasQuery && showTracks && (
+        <MaisMusicas termo={query} jaNaTela={jaNaTela} semNadaNoAcervo={isEmpty} />
+      )}
     </div>
   );
 }

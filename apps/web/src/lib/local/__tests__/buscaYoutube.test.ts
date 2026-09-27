@@ -273,12 +273,23 @@ describe('cliente: parse e faixa temporária', () => {
       id: 'youtube:fgysUhl98As',
       title: 'Eu sou 157',
       durationMs: 532_000,
-      artists: [{ name: 'Racionais TV' }],
+      artists: [{ name: 'Racionais' }],
       sourceUrl: 'https://www.youtube.com/watch?v=fgysUhl98As',
     });
     expect(faixa?.streamUrl).toMatch(
       /\/stream\?url=https%3A%2F%2Fwww\.youtube\.com%2Fwatch%3Fv%3DfgysUhl98As&token=tok-123&quality=high$/,
     );
+  });
+
+  it('aparece como música, não como vídeo: título e artista limpos', async () => {
+    const faixa = await faixaDoYoutube({
+      url: 'https://www.youtube.com/watch?v=fgysUhl98As',
+      titulo: 'Matuê - Mantém (Clipe Oficial)',
+      canal: 'MatueVEVO',
+      duracaoSeg: 200,
+      capa: null,
+    });
+    expect(faixa).toMatchObject({ title: 'Mantém', artists: [{ name: 'Matuê', id: '' }] });
   });
 
   it('deslogado não monta faixa (o /stream recusaria)', async () => {

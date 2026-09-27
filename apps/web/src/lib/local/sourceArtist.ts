@@ -18,9 +18,11 @@
  * devolve o dado, em vez de nos fazer inferir. É CORS-aberto, então funciona
  * mesmo com o importador caseiro desligado.
  */
+import { lerTituloDoAcervo } from '@radinho/shared';
 
 /** Sufixos de canal que não fazem parte do nome do artista. */
-const CHANNEL_NOISE = /\s*(?:-\s*topic|vevo|official|oficial|music|records?)\s*$/gi;
+const CHANNEL_NOISE =
+  /\s*(?:-\s*topic|vevo|official|oficial|music|records?|tv|channel|canal)\s*$/gi;
 
 /** Ruído que vem grudado no título do vídeo. */
 const TITLE_NOISE =
@@ -121,4 +123,33 @@ export async function artistFromSource(sourceUrl: string): Promise<string | null
   } finally {
     clearTimeout(timer);
   }
+}
+
+/**
+ * Título e artista DE MÚSICA a partir de um vídeo — para um resultado de busca
+ * aparecer como faixa, e não como vídeo: "Matuê - Mantém (Clipe Oficial)" do
+ * canal "MatueVEVO" vira "Mantém", de Matuê.
+ *
+ * O artista sai de `artistFromVideo`; o título, do mesmo leitor que arruma os
+ * títulos do acervo (`lerTituloDoAcervo`), e só na falta dele do corte simples
+ * depois do travessão, sem o ruído de vídeo.
+ */
+export function faixaDoVideo(
+  videoTitle: string,
+  channel: string,
+): { title: string; artists: string[] } {
+  const bruto = (videoTitle ?? '').trim();
+  const artista = artistFromVideo(bruto, channel);
+  const lido = artista ? lerTituloDoAcervo(bruto, [artista]) : null;
+  if (lido?.title) return { title: lido.title, artists: lido.artists };
+
+  let titulo = bruto
+    .replace(TITLE_NOISE, ' ')
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+  const corte = titulo.split(/\s[-–—|]\s/);
+  if (corte.length >= 2 && artista && corte[0]!.toLowerCase().includes(artista.toLowerCase())) {
+    titulo = corte.slice(1).join(' - ').trim();
+  }
+  return { title: titulo || bruto, artists: artista ? [artista] : [] };
 }

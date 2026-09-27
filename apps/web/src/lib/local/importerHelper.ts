@@ -12,6 +12,7 @@
  */
 import { getIdToken } from '@/lib/firebase';
 import type { CatalogTrack } from '@/lib/local/catalogMatch';
+import { faixaDoVideo } from '@/lib/local/sourceArtist';
 import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -1012,9 +1013,12 @@ export async function faixaDoYoutube(r: ResultadoYoutube): Promise<TrackDto | nu
   if (!id) return null;
   const streamUrl = await buildStreamUrl(r.url);
   if (!streamUrl) return null;
+  // Aparece como MÚSICA, não como vídeo: título e artista limpos do nome do
+  // vídeo e do canal ("Matuê - Mantém (Clipe Oficial)" de "MatueVEVO").
+  const { title, artists } = faixaDoVideo(r.titulo, r.canal);
   return {
     id: `youtube:${id}`,
-    title: r.titulo,
+    title,
     durationMs: r.duracaoSeg * 1000,
     trackNumber: null,
     discNumber: null,
@@ -1024,9 +1028,8 @@ export async function faixaDoYoutube(r: ResultadoYoutube): Promise<TrackDto | nu
     dominantColor: null,
     loudnessLufs: null,
     album: null,
-    artists: r.canal
-      ? [{ id: `youtube-canal:${r.canal}`, name: r.canal, slug: '', imageUrl: null }]
-      : [],
+    // Sem id: não há página de artista do catálogo para um canal de vídeo.
+    artists: artists.map((name) => ({ id: '', name, slug: '', imageUrl: null })),
     streamUrl,
     downloadUrl: null,
     sourceUrl: r.url,

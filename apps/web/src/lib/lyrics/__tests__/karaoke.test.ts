@@ -1,5 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import {
+  palavrasDeFundo,
+  trechosDaLinha,
   lerPalavrasMarcadas,
   linhaAtiva,
   palavraAtiva,
@@ -79,5 +81,38 @@ describe('karaokê: onde a voz está', () => {
 
   it('linha comum passa intacta', () => {
     expect(lerPalavrasMarcadas('  só texto  ', 0)).toEqual({ text: 'só texto' });
+  });
+});
+
+describe('voz de fundo (parênteses)', () => {
+  it('corta a linha em voz principal e de fundo', () => {
+    expect(trechosDaLinha('Tô aqui (tô aqui) de novo')).toEqual([
+      { texto: 'Tô aqui ', fundo: false },
+      { texto: '(tô aqui)', fundo: true },
+      { texto: ' de novo', fundo: false },
+    ]);
+    expect(trechosDaLinha('(Yeah) vai')).toEqual([
+      { texto: '(Yeah)', fundo: true },
+      { texto: ' vai', fundo: false },
+    ]);
+    expect(trechosDaLinha('sem fecha (ooh ooh')).toEqual([
+      { texto: 'sem fecha ', fundo: false },
+      { texto: '(ooh ooh', fundo: true },
+    ]);
+    expect(trechosDaLinha('nada')).toEqual([{ texto: 'nada', fundo: false }]);
+  });
+
+  it('marca palavra a palavra o que está dentro dos parênteses', () => {
+    const p = (s: string) => s.split(' ').map((text) => ({ text }));
+    expect(palavrasDeFundo(p('Tô aqui (tô aqui) de novo'))).toEqual([
+      false,
+      false,
+      true,
+      true,
+      false,
+      false,
+    ]);
+    expect(palavrasDeFundo(p('vai (yeah) (ooh yeah)'))).toEqual([false, true, true, true]);
+    expect(palavrasDeFundo(p('fim (ooh ooh'))).toEqual([false, true, true]);
   });
 });

@@ -118,3 +118,45 @@ export function lerPalavrasMarcadas(
   const text = bruto.replace(TAG_DE_PALAVRA, '').replace(/\s+/g, ' ').trim();
   return words.length > 0 ? { text, words } : { text };
 }
+
+/**
+ * VOZ DE FUNDO — o que a letra põe entre parênteses ("tô aqui (tô aqui)") é o
+ * coro, o eco, o ad-lib: outra voz, por cima da principal. Aparece diferente
+ * para quem acompanha saber que não é a voz que lidera.
+ *
+ * `trechosDaLinha` corta o texto em pedaços de voz principal e de fundo (os
+ * parênteses ficam no pedaço de fundo); `palavrasDeFundo` diz, palavra a
+ * palavra, quais estão dentro dos parênteses — um parêntese aberto numa
+ * palavra vale até a palavra que o fecha. Parêntese que nunca fecha vale até o
+ * fim da linha, que é como a letra costuma ser escrita.
+ */
+export function trechosDaLinha(texto: string): Array<{ texto: string; fundo: boolean }> {
+  const trechos: Array<{ texto: string; fundo: boolean }> = [];
+  let resto = texto;
+  while (resto) {
+    const abre = resto.indexOf('(');
+    if (abre < 0) {
+      trechos.push({ texto: resto, fundo: false });
+      break;
+    }
+    if (abre > 0) trechos.push({ texto: resto.slice(0, abre), fundo: false });
+    const fecha = resto.indexOf(')', abre);
+    const fim = fecha < 0 ? resto.length : fecha + 1;
+    trechos.push({ texto: resto.slice(abre, fim), fundo: true });
+    resto = resto.slice(fim);
+  }
+  return trechos;
+}
+
+export function palavrasDeFundo(palavras: readonly { text: string }[]): boolean[] {
+  let dentro = false;
+  return palavras.map(({ text }) => {
+    const abre = text.lastIndexOf('(');
+    const fecha = text.lastIndexOf(')');
+    const comeca = abre >= 0;
+    const fundo = dentro || comeca;
+    if (comeca && fecha < abre) dentro = true;
+    else if (fecha >= 0) dentro = false;
+    return fundo;
+  });
+}

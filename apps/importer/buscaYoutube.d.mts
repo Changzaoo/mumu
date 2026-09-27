@@ -25,4 +25,5 @@ export function criarBuscaYoutube(opcoes?: {
   rodar?: (termo: string, quantos: number) => Promise<string>;
   agora?: () => number;
   quantos?: number;
+  conferirCapa?: ((url: string) => Promise<boolean>) | null;
 }): { buscar: (termo: string, chaveUsuario?: string) => Promise<ResultadoBusca[]> };

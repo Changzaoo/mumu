@@ -150,6 +150,37 @@ function rodarYtdlpPadrao({ binario, argsExtras }) {
     });
 }
 
+/**
+ * A CAPA QUE A PESSOA VÊ. A `hqdefault` é 4:3 com faixas pretas em cima e
+ * embaixo (o vídeo é 16:9) — recortada em quadrado, a faixa preta aparece. A
+ * `hq720` é 16:9 sem faixa e em alta, mas só existe para vídeo HD; a
+ * `mqdefault` é 16:9 sem faixa e existe sempre, só que pequena. Então: pergunta
+ * pela `hq720` e, sem ela, fica a `mqdefault`. Um HEAD por resultado, em
+ * paralelo, e o resultado vai para o cache junto com a busca.
+ */
+const CAPA_TIMEOUT_MS = 1_500;
+
+async function conferirCapaPadrao(url) {
+  try {
+    const res = await fetch(url, { method: 'HEAD', signal: AbortSignal.timeout(CAPA_TIMEOUT_MS) });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+async function capasSemFaixaPreta(resultados, conferir) {
+  await Promise.all(
+    resultados.map(async (r) => {
+      const id = String(r.url).split('v=')[1];
+      if (!id || !ID_VIDEO.test(id)) return;
+      const alta = `https://i.ytimg.com/vi/${id}/hq720.jpg`;
+      r.capa = (await conferir(alta)) ? alta : `https://i.ytimg.com/vi/${id}/mqdefault.jpg`;
+    }),
+  );
+  return resultados;
+}
+
 export class LimiteDeBusca extends Error {
   constructor(esperarSeg) {
     super('Muitas buscas seguidas. Espere um pouco.');
@@ -170,6 +201,8 @@ export function criarBuscaYoutube({
   rodar,
   agora = () => Date.now(),
   quantos = 10,
+  // Com `rodar` injetado (testes) não sai pedido de rede para conferir capa.
+  conferirCapa = rodar ? null : conferirCapaPadrao,
 } = {}) {
   const executar = rodar ?? rodarYtdlpPadrao({ binario, argsExtras });
   /** termo normalizado (minúsculo) → { em, resultados } */
@@ -213,7 +246,8 @@ export function criarBuscaYoutube({
     rodando += 1;
     const promessa = (async () => {
       try {
-        const resultados = parseResultados(await executar(termo, quantos));
+        let resultados = parseResultados(await executar(termo, quantos));
+        if (conferirCapa) resultados = await capasSemFaixaPreta(resultados, conferirCapa);
         cache.set(chave, { em: agora(), resultados });
         if (cache.size > CACHE_MAX_TERMOS) cache.delete(cache.keys().next().value);
         return resultados;

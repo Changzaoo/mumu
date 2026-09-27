@@ -619,6 +619,27 @@
     0 0 14px color-mix(in oklab, currentColor 55%, transparent),
     0 0 2px color-mix(in oklab, currentColor 35%, transparent);
 }
+/* VOZ DE FUNDO — o que a letra põe entre parênteses (coro, eco, ad-lib).
+   Itálico, um pouco menor e na cor de destaque: outra voz por cima da
+   principal, e dá para ver de relance. Cantada agora, ganha o mesmo brilho da
+   palavra da voz principal, na cor dela. */
+.letra-fundo {
+  font-style: italic;
+  font-size: 0.84em;
+  font-weight: 650;
+  color: color-mix(in oklab, var(--color-accent) 80%, currentColor);
+}
+.letra-fundo.letra-palavra-agora {
+  color: var(--color-accent);
+  text-shadow:
+    0 0 16px color-mix(in oklab, var(--color-accent) 70%, transparent),
+    0 0 3px color-mix(in oklab, var(--color-accent) 45%, transparent);
+}
+/* Ainda não cantada, na linha atual: a cor de destaque, mais apagada. */
+.letra-fundo.letra-fundo-depois {
+  color: color-mix(in oklab, var(--color-accent) 50%, transparent);
+}
+
 /* Desfoque das linhas distantes custa pintura; aparelho que já provou que
    trava fica só com escala e opacidade, que saem de graça no compositor. */
 :root[data-perf='baixo'] .letra-desfoque {

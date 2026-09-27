@@ -8,7 +8,13 @@ import { audioEngine } from '@/lib/audio/AudioEngine';
 import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
 import { pedirCalibracao, TRANSCRICAO_ANTIGA, type LetraAlinhada } from '@/lib/lyrics/calibragem';
 import { LetraSendoFeita, useLetraAoVivo } from '@/components/media/LetraSendoFeita';
-import { linhaAtiva, palavraAtiva, palavrasDaLinha } from '@/lib/lyrics/karaoke';
+import {
+  linhaAtiva,
+  palavraAtiva,
+  palavrasDaLinha,
+  palavrasDeFundo,
+  trechosDaLinha,
+} from '@/lib/lyrics/karaoke';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -200,6 +206,7 @@ export function LyricsView({ track, className }: LyricsViewProps) {
           : null;
         const profundidade = distancia === null ? null : estiloDeProfundidade(distancia);
         const palavras = active ? (palavrasPorLinha[index] ?? []) : [];
+        const deFundo = active ? palavrasDeFundo(palavras) : [];
         return (
           <button
             key={`${line.timeMs}-${index}`}
@@ -224,6 +231,7 @@ export function LyricsView({ track, className }: LyricsViewProps) {
                 {palavras.map((palavra, i) => {
                   const cantada = i < ativa.palavra;
                   const agora = i === ativa.palavra;
+                  const fundo = deFundo[i];
                   return (
                     <span key={`${palavra.timeMs}-${i}`}>
                       <span
@@ -236,6 +244,9 @@ export function LyricsView({ track, className }: LyricsViewProps) {
                             : cantada
                               ? 'text-fg'
                               : 'text-fg-muted/70',
+                          // Voz de fundo (entre parênteses): a cor vem da classe.
+                          fundo && 'letra-fundo',
+                          fundo && !agora && !cantada && 'letra-fundo-depois',
                         )}
                       >
                         {palavra.text}
@@ -245,8 +256,18 @@ export function LyricsView({ track, className }: LyricsViewProps) {
                   );
                 })}
               </span>
+            ) : line.text ? (
+              trechosDaLinha(line.text).map((trecho, i) =>
+                trecho.fundo ? (
+                  <span key={i} className="letra-fundo">
+                    {trecho.texto}
+                  </span>
+                ) : (
+                  trecho.texto
+                ),
+              )
             ) : (
-              line.text || '♪'
+              '♪'
             )}
           </button>
         );
