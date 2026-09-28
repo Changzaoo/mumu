@@ -54,6 +54,7 @@ import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
 import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
+import { soMusicas } from './ehMusica.mjs';
 import { analisarLinkDeMusica } from './linkDeMusica.mjs';
 import { criarResolvedorDeMusica, NaoAchei } from './resolverDeMusica.mjs';
 import {
@@ -1639,9 +1640,51 @@ async function listPlaylist(ytdlp, url) {
     let u = typeof e.url === 'string' ? e.url : '';
     if (u && !/^https?:\/\//.test(u)) u = ''; // flat url was just an id
     if (!u && e.id && isYouTube) u = `https://www.youtube.com/watch?v=${e.id}`;
-    if (u) entries.push({ url: u, title: typeof e.title === 'string' ? e.title : '' });
+    if (u) {
+      entries.push({
+        url: u,
+        title: typeof e.title === 'string' ? e.title : '',
+        // A duração da lista plana — o classificador de canal precisa dela.
+        ...(Number(e.duration) > 0 ? { duracaoSeg: Math.round(Number(e.duration)) } : {}),
+      });
+    }
   }
   return { title: typeof data.title === 'string' ? data.title : 'Playlist', entries };
+}
+
+/**
+ * Passa os vídeos de um CANAL pelo classificador de "isso é música?"
+ * (ehMusica.mjs). A dúvida vai ao catálogo da Apple (iTunes: existe música com
+ * esse nome e duração?) — com cache e teto de consultas por canal. Devolve só
+ * as músicas em `entries` e o que ficou de fora em `foraDoCanal` (com o
+ * motivo), para a tela contar "N vídeos não eram música".
+ */
+const cacheDoCatalogo = new Map();
+async function buscarNoCatalogoDaApple(termo) {
+  const chave = termo.toLowerCase();
+  if (cacheDoCatalogo.has(chave)) return cacheDoCatalogo.get(chave);
+  const res = await fetch(
+    `https://itunes.apple.com/search?media=music&entity=song&limit=10&country=BR&term=${encodeURIComponent(termo)}`,
+    { signal: AbortSignal.timeout(8000) },
+  );
+  const dados = res.ok ? await res.json() : { results: [] };
+  cacheDoCatalogo.set(chave, dados);
+  if (cacheDoCatalogo.size > 2000) cacheDoCatalogo.delete(cacheDoCatalogo.keys().next().value);
+  return dados;
+}
+
+async function soMusicasDoCanal(lista) {
+  const artista = String(lista.title ?? '')
+    .replace(/\s*-\s*(?:videos|vídeos|home|início)\s*$/i, '')
+    .trim();
+  const entradas = lista.entries.map((e) => ({ titulo: e.title, duracaoSeg: e.duracaoSeg ?? 0, url: e.url }));
+  const { musicas, fora } = await soMusicas(entradas, { buscar: buscarNoCatalogoDaApple, artista });
+  log('canal:', lista.title, `${musicas.length} músicas, ${fora.length} fora`);
+  return {
+    ...lista,
+    entries: musicas.map((m) => ({ url: m.url, title: m.titulo })),
+    foraDoCanal: fora.map((f) => ({ title: f.titulo, motivo: f.motivo })),
+  };
 }
 
 // ── HTTP plumbing ────────────────────────────────────────────────────────────
@@ -3280,9 +3323,12 @@ async function main() {
           // Álbum/playlist de serviço: devolve os links de FAIXA do serviço;
           // cada um resolve para o YouTube no próprio job (ver listar()).
           const ler = listaDeServico ? resolvedorDeMusica.listar(musica) : listPlaylist(ytdlp, url);
-          const result = await ler.finally(() => {
+          let result = await ler.finally(() => {
             if (quem) limiteDeImport.terminou(quem);
           });
+          // CANAL: nem todo vídeo é música (vlog, making of, documentário,
+          // trecho, a mesma faixa em clipe e em áudio). Só as músicas seguem.
+          if (!listaDeServico && limparLinkDeImport(url).canal) result = await soMusicasDoCanal(result);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } catch (err) {

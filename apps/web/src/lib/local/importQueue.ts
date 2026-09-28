@@ -430,11 +430,19 @@ async function process(item: ImportItem): Promise<void> {
     if (item.forcePlaylist || isPlaylistUrl(item.url)) {
       // Expand the playlist into individual queued items so each downloads
       // independently (and a big list doesn't hold a slot the whole time).
-      const { entries } = await fetchPlaylistEntries(item.url);
+      const { entries, foraDoCanal } = await fetchPlaylistEntries(item.url);
       if (gen !== generation) return; // fila cancelada no meio — descarta
       consecutiveFailures = 0; // sucesso fecha o circuito
       enqueue(entries.map((e) => e.url));
-      update(item.id, { status: 'done', title: `Playlist · ${entries.length} faixas` });
+      // Canal: diz quantos vídeos ficaram de fora por não serem música.
+      const fora = foraDoCanal?.length ?? 0;
+      update(item.id, {
+        status: 'done',
+        title:
+          fora > 0
+            ? `Canal · ${entries.length} músicas (${fora} vídeos não eram música)`
+            : `Playlist · ${entries.length} faixas`,
+      });
       naConta.marcar(item.url, 'expandida');
       return;
     }

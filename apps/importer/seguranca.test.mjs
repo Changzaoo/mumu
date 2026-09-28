@@ -48,7 +48,8 @@ test('YouTube: vira o link canônico, sem nada além do id', () => {
 test('YouTube: redirect, canal e id estranho são recusados (SSRF / não é música)', () => {
   nao('https://www.youtube.com/redirect?q=http://192.168.0.1/admin');
   nao('https://www.youtube.com/attribution_link?u=/watch%3Fv%3DdQw4w9WgXcQ');
-  nao('https://www.youtube.com/@matue/videos');
+  nao('https://www.youtube.com/@matue/community');
+  nao('https://www.youtube.com/channel/UCnaoEumIdValido');
   nao('https://www.youtube.com/watch?v=../../etc');
   nao('https://www.youtube.com/playlist?list=RDdQw4w9WgXcQ');
 });
@@ -131,4 +132,17 @@ test('a URL direta só abre CDN de áudio conhecido, nunca a rede de casa', asyn
   assert.equal(ehUrlDiretaSegura('http://rr3.googlevideo.com/x'), false);
   assert.equal(ehUrlDiretaSegura('https://googlevideo.com.evil.net/x'), false);
   assert.equal(ehUrlDiretaSegura('https://localhost/x'), false);
+});
+
+test('canal do YouTube vira a aba de vídeos (e é marcado como canal)', () => {
+  const a = limparLinkDeImport('https://www.youtube.com/@30praum');
+  assert.equal(a.ok, true);
+  assert.equal(a.url, 'https://www.youtube.com/@30praum/videos');
+  assert.equal(a.canal, true);
+  assert.equal(limparLinkDeImport('https://m.youtube.com/@30praum/featured?x=1').url, 'https://www.youtube.com/@30praum/videos');
+  assert.equal(
+    limparLinkDeImport('https://www.youtube.com/channel/UCoHV8LxUFKeIvifJsB3c7Ww/videos').url,
+    'https://www.youtube.com/channel/UCoHV8LxUFKeIvifJsB3c7Ww/videos',
+  );
+  assert.equal(limparLinkDeImport('https://www.youtube.com/c/Fulano').url, 'https://www.youtube.com/c/Fulano/videos');
 });

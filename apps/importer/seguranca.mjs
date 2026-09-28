@@ -40,6 +40,24 @@ function recusa(motivo) {
 }
 
 /**
+ * O caminho de um canal do YouTube → "@nome", "channel/UC…", "c/nome" ou
+ * "user/nome" (sem a aba), ou null. Só o que o YouTube usa para canal.
+ */
+const ABAS_DO_CANAL = new Set(['videos', 'featured', 'music', 'releases']);
+
+function canalDoYoutube(pathname) {
+  const partes = pathname.split('/').filter(Boolean);
+  // Tira a aba do fim (só as que listam vídeos/música).
+  if (partes.length > 1 && ABAS_DO_CANAL.has(partes[partes.length - 1])) partes.pop();
+  const [a, b] = partes;
+  if (partes.length === 1 && /^@[A-Za-z0-9._-]{3,100}$/.test(a ?? '')) return a;
+  if (partes.length !== 2) return null;
+  if (a === 'channel' && /^UC[A-Za-z0-9_-]{22}$/.test(b)) return `channel/${b}`;
+  if ((a === 'c' || a === 'user') && /^[A-Za-z0-9._-]{1,100}$/.test(b)) return `${a}/${b}`;
+  return null;
+}
+
+/**
  * Link colado → link CANÔNICO seguro, ou a recusa com o motivo.
  * `{ ok: true, url, tipo: 'faixa' | 'playlist', site }`.
  */
@@ -83,8 +101,21 @@ export function limparLinkDeImport(bruto) {
         site: 'youtube',
       };
     } else {
-      // redirect, attribution_link, canal, embed de outro site…: não é música.
-      return recusa('link do YouTube que não é vídeo nem playlist');
+      // CANAL: vira a aba de vídeos, e quem chama passa cada vídeo pelo
+      // classificador de "isso é música?" (ehMusica.mjs) — canal de artista
+      // mistura clipe com vlog, bastidores e documentário.
+      const canal = canalDoYoutube(u.pathname);
+      if (canal) {
+        return {
+          ok: true,
+          url: `https://www.youtube.com/${canal}/videos`,
+          tipo: 'playlist',
+          canal: true,
+          site: 'youtube',
+        };
+      }
+      // redirect, attribution_link, embed de outro site…: não é música.
+      return recusa('link do YouTube que não é vídeo, playlist nem canal');
     }
     if (!ID_VIDEO.test(video)) return recusa('vídeo inválido');
     const comLista = lista && ID_LISTA.test(lista) && !LISTA_AUTOMATICA.test(lista);

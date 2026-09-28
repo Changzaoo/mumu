@@ -288,6 +288,8 @@ export interface PlaylistEntry {
 export interface PlaylistResult {
   title: string;
   entries: PlaylistEntry[];
+  /** Canal: vídeos que não eram música (vlog, making of…), com o motivo. */
+  foraDoCanal?: Array<{ title: string; motivo: string }>;
 }
 
 /**
@@ -332,12 +334,25 @@ export function ehRadioAutomatica(listaId: string): boolean {
 }
 
 /** True when the link points at a whole playlist/set (not a single track). */
+/** Caminho de canal do YouTube (com ou sem a aba de vídeos). */
+export function ehCanalDoYoutube(pathname: string): boolean {
+  return (
+    /^\/@[A-Za-z0-9._-]{3,100}(?:\/(?:videos|featured|music|releases))?\/?$/.test(pathname) ||
+    /^\/(?:channel\/UC[A-Za-z0-9_-]{22}|c\/[A-Za-z0-9._-]+|user\/[A-Za-z0-9._-]+)(?:\/(?:videos|featured|music|releases))?\/?$/.test(
+      pathname,
+    )
+  );
+}
+
 export function isPlaylistUrl(url: string): boolean {
   try {
     const u = new URL(url);
     const host = u.hostname.toLowerCase().replace(/^www\./, '');
     if (/(^|\.)youtube\.com$|(^|\.)youtu\.be$|(^|\.)music\.youtube\.com$/.test(host)) {
       if (u.pathname.startsWith('/playlist')) return true;
+      // CANAL (@nome, channel/UC…, c/…, user/…): lista — o importador separa
+      // o que é música do que é vlog/bastidores (ehMusica.mjs).
+      if (ehCanalDoYoutube(u.pathname)) return true;
       // watch?v=…&list=… → a single video in a list; pure list → a playlist.
       return u.searchParams.has('list') && !u.searchParams.has('v');
     }
@@ -1168,7 +1183,12 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
   const entries = Array.isArray(data.entries)
     ? data.entries.filter((e): e is PlaylistEntry => Boolean(e && typeof e.url === 'string'))
     : [];
-  return { title: typeof data.title === 'string' ? data.title : 'Playlist', entries };
+  const fora = Array.isArray(data.foraDoCanal) ? data.foraDoCanal : undefined;
+  return {
+    title: typeof data.title === 'string' ? data.title : 'Playlist',
+    entries,
+    ...(fora ? { foraDoCanal: fora } : {}),
+  };
 }
 
 // Job de import: intervalo do acompanhamento e teto total (playlists têm
