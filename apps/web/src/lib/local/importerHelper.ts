@@ -34,6 +34,9 @@ export class HelperError extends Error {
   }
 }
 
+/** Usado pelas retentativas de sondagem (`helperCaps`) e pelo polling de job. */
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
 /** The user's chosen audio quality — sent to the helper so downloads/streams
  *  are encoded at the matching bitrate (96/160/320 kbps, Spotify-style). */
 function preferredQuality(): string {
@@ -180,11 +183,45 @@ export async function helperSupportsMetaTeam(): Promise<boolean> {
 // custar um /health por faixa. Só memoiza sondagem BEM-SUCEDIDA (importador
 // fora do ar agora não pode virar "sem capacidade" para sempre).
 let cachedCaps: string[] | null = null;
+
+/**
+ * Sonda de novo antes de desistir — um `probeHelper()` isolado tem 1,5s de
+ * teto e a rede de celular pisca nesse intervalo com frequência. Três
+ * tentativas rápidas (com um respiro pequeno entre elas) cobrem o blip sem
+ * atrasar visivelmente o primeiro import da sessão.
+ */
+async function probarComRetentativa(): Promise<HelperHealth | null> {
+  for (let tentativa = 1; tentativa <= 3; tentativa++) {
+    const health = await probeHelper();
+    if (health) return health;
+    if (tentativa < 3) await sleep(250 * tentativa);
+  }
+  return null;
+}
+
+/**
+ * SEM RESPOSTA NÃO É "SEM JOB". Antes, uma sondagem que falhasse (rede
+ * piscando, túnel acordando) devolvia `[]` — e como o único uso desta lista é
+ * `.includes('jobs')`, o import caía direto no POST clássico, que o Cloudflare
+ * mata em ~100s (524) em qualquer faixa que demore para baixar. Ou seja: um
+ * blip de rede transformava silenciosamente o caminho seguro (por job) no
+ * caminho que o 524 existe para matar.
+ *
+ * Com retentativa cobrindo o blip comum, o que sobra sem resposta é um
+ * importador de fato fora do ar ou muito lento — e aí as duas opções são
+ * "assumir que tem job" (fica preso no fluxo por job até o servidor voltar) ou
+ * "assumir que não tem" (cai no POST que morre em downloads longos). A
+ * primeira falha te devolvendo ao ponto de partida; a segunda perde a faixa.
+ * Por isso o desconhecido resolve para 'jobs'.
+ */
 async function helperCaps(): Promise<string[]> {
   if (cachedCaps) return cachedCaps;
-  const health = await probeHelper();
-  if (health) cachedCaps = health.caps;
-  return health?.caps ?? [];
+  const health = await probarComRetentativa();
+  if (health) {
+    cachedCaps = health.caps;
+    return health.caps;
+  }
+  return ['jobs'];
 }
 
 export interface HelperImport {
@@ -1069,7 +1106,6 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
 // faixas longas; 15 min cobre qualquer música real sem segurar slot infinito).
 const JOB_POLL_MS = 2_500;
 const JOB_TIMEOUT_MS = 15 * 60_000;
-const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 interface JobStatus {
   status: 'running' | 'done' | 'error';
