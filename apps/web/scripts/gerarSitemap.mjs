@@ -11,10 +11,17 @@
  * menos DUAS faixas. Artista de uma faixa só é página rala — o buscador pune
  * site que manda muitas páginas finas, e elas puxariam as boas para baixo.
  *
- * Se a API não responder, o build NÃO quebra: sai o sitemap só com as páginas
- * fixas, com um aviso. Um deploy nunca pode depender do servidor estar de pé.
+ * Se a API não responder, o build NÃO quebra e NÃO encolhe o sitemap: fica a
+ * cópia guardada em `public/sitemap.xml` (que o Vite já copiou para o `dist`).
+ * É o caso de TODO build na Vercel — o Cloudflare na frente da API desafia os
+ * servidores dela, o mesmo 403 que derrubou o rewrite `/api`. Medido no
+ * primeiro deploy: o sitemap publicado saiu com 7 URLs em vez de 854.
+ *
+ * Por isso a cópia guardada é o que vale em produção. Atualizar:
+ *   pnpm --filter @radinho/web sitemap
+ * (roda daqui, de uma máquina que alcança a API) e commitar o arquivo.
  */
-import { writeFileSync } from 'node:fs';
+import { existsSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ORIGEM = 'https://radinho.online';
@@ -77,8 +84,15 @@ function url({ caminho, prioridade, freq }, hoje) {
   );
 }
 
+const ATUALIZAR_COPIA = process.argv.includes('--copia');
+const destino = resolve(
+  import.meta.dirname,
+  ATUALIZAR_COPIA ? '../public/sitemap.xml' : '../dist/sitemap.xml',
+);
+
 const hoje = new Date().toISOString().slice(0, 10);
 const entradas = [...FIXAS];
+let completo = false;
 
 try {
   const catalogo = await lerCatalogo();
@@ -106,7 +120,16 @@ try {
   console.log(
     `sitemap: ${FIXAS.length} fixas + ${generos.length} gêneros + ${artistas.length} artistas`,
   );
+  completo = true;
 } catch (erro) {
+  if (!ATUALIZAR_COPIA && existsSync(destino)) {
+    console.warn(`sitemap: catálogo indisponível (${erro.message}) — mantida a cópia guardada`);
+    process.exit(0);
+  }
+  if (ATUALIZAR_COPIA) {
+    console.error(`sitemap: catálogo indisponível (${erro.message}) — cópia NÃO atualizada`);
+    process.exit(1);
+  }
   console.warn(`sitemap: catálogo indisponível (${erro.message}) — só páginas fixas`);
 }
 
@@ -116,4 +139,5 @@ const xml =
   entradas.map((e) => url(e, hoje)).join('\n') +
   '\n</urlset>\n';
 
-writeFileSync(resolve(import.meta.dirname, '../dist/sitemap.xml'), xml);
+writeFileSync(destino, xml);
+if (ATUALIZAR_COPIA && completo) console.log(`sitemap: cópia atualizada em ${destino}`);
