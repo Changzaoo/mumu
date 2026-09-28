@@ -1,3 +1,4 @@
+import { IconeDoPlay } from '@/components/media/IconeDoPlay';
 import { usePodeOuvir } from '@/lib/conteudo/faixaEtaria';
 import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import {
@@ -24,8 +25,6 @@ import {
   MicVocal,
   MoreHorizontal,
   Music,
-  Pause,
-  Play,
   Share2,
 } from 'lucide-react';
 import { toast } from 'sonner';
@@ -325,11 +324,7 @@ export function TrackRow({
                 active && !playing && 'grid',
               )}
             >
-              {active && playing ? (
-                <Pause className="size-4 fill-current" />
-              ) : (
-                <Play className="ml-0.5 size-4 fill-current" />
-              )}
+              <IconeDoPlay estado={active && playing ? 'pausa' : 'play'} className="size-4" />
             </button>
           </span>
 

@@ -20,7 +20,7 @@ import { QueuePanel } from '@/app/layout/QueuePanel';
 import { ScrollContainerContext } from '@/app/layout/scroll-context';
 import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
-import { convidarParaApk } from '@/lib/android/conviteApk';
+import { avisarAtualizacaoDoApp, convidarParaApk } from '@/lib/android/conviteApk';
 
 /**
  * ROTAS QUE NUNCA SAO INTERROMPIDAS PELO ONBOARDING.
@@ -106,7 +106,10 @@ export function AppShell() {
   // Convite para o APK (Android pelo navegador). Espera a abertura assentar:
   // aviso na mesma hora competiria com a primeira música. Ver conviteApk.ts.
   useEffect(() => {
-    const t = window.setTimeout(convidarParaApk, 20_000);
+    const t = window.setTimeout(() => {
+      convidarParaApk();
+      void avisarAtualizacaoDoApp();
+    }, 20_000);
     return () => window.clearTimeout(t);
   }, []);
 

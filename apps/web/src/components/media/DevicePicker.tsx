@@ -15,7 +15,6 @@ import { useEffect, useState, useSyncExternalStore } from 'react';
 import {
   Laptop,
   MonitorSpeaker,
-  Pause,
   Play,
   SkipBack,
   SkipForward,
@@ -30,6 +29,7 @@ import {
   renomearEsteAparelho,
   sendCommand,
   subscribeDevices,
+  tocarEm,
   transferPlaybackHere,
   type DeviceInfo,
 } from '@/lib/devices/presence';
@@ -43,6 +43,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
+import { IconeDoPlay } from '@/components/media/IconeDoPlay';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 
@@ -63,6 +64,7 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
   const devices = useSyncExternalStore(subscribeDevices, currentDevices, () => EMPTY);
   const me = getDeviceId();
   const playingElsewhere = devices.find((d) => !d.isSelf && d.isPlaying && d.online);
+  const temFaixaAqui = usePlayerStore((s) => s.currentTrack !== null);
 
   // Volume do aparelho remoto: espelha o valor recebido, mas enquanto o dedo
   // está no slider mandamos o comando sem esperar a volta pela nuvem.
@@ -115,11 +117,10 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
                 }
                 className="grid size-12 place-items-center rounded-full bg-accent text-accent-fg"
               >
-                {playingElsewhere.isPlaying ? (
-                  <Pause className="size-5 fill-current" />
-                ) : (
-                  <Play className="size-5 fill-current" />
-                )}
+                <IconeDoPlay
+                  estado={playingElsewhere.isPlaying ? 'pausa' : 'play'}
+                  className="size-5"
+                />
               </button>
               <button
                 type="button"
@@ -165,7 +166,7 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
             </li>
           )}
           {devices.map((device) => (
-            <li key={device.id}>
+            <li key={device.id} className="flex items-center gap-1">
               <button
                 type="button"
                 disabled={device.isSelf || !device.online}
@@ -174,7 +175,7 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
                   onOpenChange(false);
                 }}
                 className={cn(
-                  'flex w-full items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
+                  'flex min-w-0 flex-1 items-center gap-3 rounded-lg px-3 py-2.5 text-left transition-colors',
                   device.isSelf || !device.online ? 'opacity-70' : 'hover:bg-fg/6',
                 )}
               >
@@ -202,6 +203,22 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
                   </span>
                 </span>
               </button>
+              {/* TOCAR LÁ: a música daqui vai para aquele aparelho, na mesma
+                  posição. No app instalado toca direto; no navegador, só se
+                  alguém já tocou nele nesta sessão. */}
+              {!device.isSelf && device.online && temFaixaAqui && (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  className="shrink-0"
+                  onClick={() => {
+                    void tocarEm(device.id);
+                    onOpenChange(false);
+                  }}
+                >
+                  Tocar lá
+                </Button>
+              )}
             </li>
           ))}
         </ul>

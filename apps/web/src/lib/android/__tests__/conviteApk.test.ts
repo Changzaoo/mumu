@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { deveConvidar } from '../conviteApk';
+import { deveConvidar, versaoDoApp } from '../conviteApk';
 
 const ANDROID = 'Mozilla/5.0 (Linux; Android 14; SM-A145M) AppleWebKit/537.36 Chrome/128 Mobile';
 const IPHONE = 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) Safari/604.1';
@@ -21,5 +21,12 @@ describe('convite para o APK', () => {
     expect(deveConvidar({ ...base, userAgent: ANDROID, dispensadoEm: base.agora - 15 * dia })).toBe(
       true,
     );
+  });
+});
+
+describe('versão do app instalado', () => {
+  it('lê a versão nativa do user-agent do app', () => {
+    expect(versaoDoApp(`${ANDROID} RadinhoApp/7`)).toBe(7);
+    expect(versaoDoApp(ANDROID)).toBeNull();
   });
 });

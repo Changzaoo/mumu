@@ -1,8 +1,7 @@
 import type { ComponentProps } from 'react';
-import { Disc3, Pause, Play } from 'lucide-react';
 import { AuraDoPlay } from '@/components/media/AuraDoPlay';
+import { IconeDoPlay } from '@/components/media/IconeDoPlay';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
-import { useSemMovimento } from '@/hooks/useSemMovimento';
 import { cn } from '@/lib/utils';
 
 export interface PlayButtonProps extends Omit<ComponentProps<'button'>, 'children'> {
@@ -33,29 +32,6 @@ const sizes = {
 function Aura({ playing, carregando }: { playing: boolean; carregando: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');
   return <AuraDoPlay playing={playing} toque={toque} carregando={carregando} />;
-}
-
-/**
- * O DISCO GIRANDO — o botão enquanto a música está sendo trazida.
- *
- * Enquanto o player conta o que está fazendo ("Preparando a música…",
- * "Buscando a música na fonte original…"), o play vira o mesmo disco que o app
- * usa para álbum (o `Disc3` das páginas de disco e do "Ir para o álbum"),
- * rodando dentro do mesmo círculo — a 33⅓ rotações, 1,8s por volta. Diz "está
- * vindo" sem trocar o botão por um spinner genérico; o círculo, o anel e a aura
- * continuam, e tocar nele continua pausando. Sem movimento pedido, o disco fica
- * parado — ainda diz "carregando" pela forma.
- */
-function DiscoGirando() {
-  // O ajuste do app vence o do sistema (ver `useSemMovimento`) — por isso a
-  // decisão é daqui, e não um `motion-safe:` que só enxerga o sistema.
-  const semMovimento = useSemMovimento();
-  return (
-    <Disc3
-      aria-hidden
-      className={cn('!size-[72%]', !semMovimento && 'animate-[disco-gira_1.8s_linear_infinite]')}
-    />
-  );
 }
 
 /** Accent circle play/pause — transform/opacity-only animations. */
@@ -101,13 +77,8 @@ export function PlayButton({
       )}
       {...props}
     >
-      {carregando ? (
-        <DiscoGirando />
-      ) : playing ? (
-        <Pause className="fill-current" />
-      ) : (
-        <Play className="ml-0.5 fill-current" />
-      )}
+      {/* Um ícone só, que SE TRANSFORMA entre play, pausa e disco — ver IconeDoPlay. */}
+      <IconeDoPlay estado={carregando ? 'carregando' : playing ? 'pausa' : 'play'} />
     </button>
   );
 

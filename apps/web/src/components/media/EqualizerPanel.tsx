@@ -17,19 +17,10 @@ import {
 } from '@/components/ui/select';
 import { Slider } from '@/components/ui/slider';
 import { Switch } from '@/components/ui/switch';
+import { PRESET_LABELS } from '@/lib/audio/eqPresets';
 import { cn } from '@/lib/utils';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { useUiStore } from '@/stores/uiStore';
-
-const PRESET_LABELS: Record<string, string> = {
-  flat: 'Neutro',
-  bass: 'Graves',
-  treble: 'Agudos',
-  vocal: 'Voz',
-  electronic: 'Eletrônica',
-  rock: 'Rock',
-  acoustic: 'Acústico',
-};
 
 function formatBand(hz: number): string {
   return hz >= 1000 ? `${hz / 1000}k` : String(hz);

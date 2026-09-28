@@ -713,3 +713,14 @@
     animation: none;
   }
 }
+
+/* A TROCA DE TEMA COMO TINTA (lib/tema/tinta.ts): sem o esmaecer padrão da
+   View Transition — o tema novo aparece só por dentro da mancha que cresce. */
+:root.tema-tinta::view-transition-old(root),
+:root.tema-tinta::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+:root.tema-tinta::view-transition-new(root) {
+  z-index: 2;
+}

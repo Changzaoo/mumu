@@ -23,6 +23,9 @@ const config: CapacitorConfig = {
   },
   android: {
     backgroundColor: '#000000',
+    // O app se identifica com a versão NATIVA dele (a mesma VERSION_CODE do
+    // build.gradle): é assim que o site sabe avisar que existe APK mais novo.
+    appendUserAgent: `RadinhoApp/${process.env.VERSION_CODE ?? '0'}`,
   },
   plugins: {
     // As barras do sistema são respeitadas no nativo (MainActivity afasta o

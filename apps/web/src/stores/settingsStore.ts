@@ -10,6 +10,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { EQ_BANDS_HZ, EQ_PRESETS, type AudioQuality } from '@radinho/shared';
 import { clamp } from '@/lib/utils';
+import { trocarComTinta } from '@/lib/tema/tinta';
 
 export type ThemeSetting = 'dark' | 'light' | 'system';
 export type ReducedMotionSetting = 'system' | 'on' | 'off';
@@ -138,8 +139,11 @@ export const useSettingsStore = create<SettingsState>()(
       privateSession: false,
 
       setTheme: (theme) => {
-        set({ theme });
-        applyDomSettings(get());
+        // A troca vaza pela tela como tinta a partir do toque (ver lib/tema/tinta).
+        trocarComTinta(() => {
+          set({ theme });
+          applyDomSettings(get());
+        }, get().reducedMotion);
       },
       setLanguage: (language) => set({ language }),
       setPesquisadorAtivo: (pesquisadorAtivo) => set({ pesquisadorAtivo }),

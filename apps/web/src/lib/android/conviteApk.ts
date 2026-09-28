@@ -94,3 +94,48 @@ export function convidarParaApk(): void {
     },
   });
 }
+
+/** Versão NATIVA do app instalado ("RadinhoApp/N" no user-agent), ou null fora do app. */
+export function versaoDoApp(userAgent: string): number | null {
+  const m = /RadinhoApp\/(\d+)/.exec(userAgent);
+  return m ? Number(m[1]) : null;
+}
+
+/**
+ * APP DESATUALIZADO? O site sempre vem novo (o app abre radinho.online), mas o
+ * que é NATIVO — barra de status, downloads, permissões — só muda com APK novo.
+ * `radinho-apk.json` diz a versão do APK publicado; se for maior que a deste
+ * app, avisa uma vez por versão.
+ */
+export async function avisarAtualizacaoDoApp(): Promise<void> {
+  if (typeof window === 'undefined') return;
+  const instalada = versaoDoApp(navigator.userAgent);
+  if (instalada === null) return;
+  let publicada = 0;
+  try {
+    const r = await fetch('/radinho-apk.json', { cache: 'no-store' });
+    if (r.ok) publicada = Number(((await r.json()) as { versionCode?: number }).versionCode) || 0;
+  } catch {
+    return;
+  }
+  if (publicada <= instalada) return;
+  const chave = `aurial:apk-avisado-${publicada}`;
+  if (ler(chave)) return;
+  gravar(chave, '1');
+  pushNotification({
+    type: 'update',
+    title: 'Nova versão do app',
+    body: 'Baixe e instale por cima: nada do que você salvou se perde.',
+  });
+  toast('Nova versão do radinho para Android', {
+    description: 'Instale por cima da atual — suas músicas e ajustes continuam.',
+    duration: Infinity,
+    action: {
+      label: 'Baixar',
+      // O app entrega o download ao navegador do sistema (MainActivity).
+      onClick: () => {
+        window.location.href = new URL(APK_URL, window.location.origin).toString();
+      },
+    },
+  });
+}
