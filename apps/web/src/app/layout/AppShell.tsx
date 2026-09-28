@@ -89,6 +89,12 @@ export function AppShell() {
   const queueOpen = useUiStore((s) => s.queueOpen);
   const hasTrack = usePlayerStore((s) => s.currentTrack !== null);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
+  // O menu lateral só aparece a partir do `md` (ver Sidebar: `hidden md:flex`).
+  // Escondido por CSS ele continuava MONTADO no celular, recalculando artistas
+  // e álbuns da biblioteca inteira a cada mudança do registro para uma coluna
+  // que ninguém vê — medido num Galaxy S8 emulado, o segundo maior custo
+  // recorrente da Home.
+  const temMenuLateral = useMediaQuery('(min-width: 768px)');
 
   // Reset page scroll on navigation (keep player untouched) + telemetry.
   useEffect(() => {
@@ -149,7 +155,7 @@ export function AppShell() {
           <span className="aurora-blob aurora-3" />
         </div>
         <div className="flex min-h-0 flex-1 md:gap-2">
-          <Sidebar />
+          {temMenuLateral && <Sidebar />}
 
           <main
             ref={(node) => {
