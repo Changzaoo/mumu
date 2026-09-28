@@ -1562,6 +1562,39 @@ const STREAMING_HOSTS: ReadonlyArray<{ match: RegExp; label: string }> = [
 
 const AUDIO_EXT = /\.(mp3|m4a|aac|flac|wav|ogg|opus)$/i;
 
+/**
+ * Checagem RÁPIDA e SÍNCRONA de um link colado — sem rede, sem importer.
+ *
+ * `addByUrl`/`addPlaylistByUrl` agora rodam dentro da fila de import
+ * (`importQueue`), que devolve a tela na hora e só resolve o link minutos
+ * depois. Um erro de digitação ou uma plataforma que nunca vamos suportar
+ * (Spotify, Apple Music…) não pode esperar a fila girar para aparecer — a
+ * pessoa quer saber NA HORA que colou algo que não vai funcionar. Isto cobre
+ * só os dois casos que dá para responder sem sair da aba; qualquer outra falha
+ * (host bloqueado, vídeo removido) só se sabe tentando, e por isso segue na
+ * fila normal.
+ */
+export function validateImportUrl(url: string): { ok: true } | { ok: false; message: string } {
+  let parsed: URL;
+  try {
+    parsed = new URL(url.trim());
+  } catch {
+    return { ok: false, message: 'Cole um link válido (que comece com http:// ou https://).' };
+  }
+  if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+    return { ok: false, message: 'Cole um link válido (que comece com http:// ou https://).' };
+  }
+  const host = parsed.hostname.toLowerCase();
+  if (!importerHostLabel(host) && STREAMING_HOSTS.some((s) => s.match.test(host))) {
+    return {
+      ok: false,
+      message:
+        'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
+    };
+  }
+  return { ok: true };
+}
+
 /** Store an audio blob as a local track (shared path for imports + URLs). */
 async function saveBlobAsLocalTrack(
   blob: Blob,

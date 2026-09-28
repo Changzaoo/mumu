@@ -1,6 +1,6 @@
 import { useRef, useState } from 'react';
 import { toast } from 'sonner';
-import { Loader2, Upload } from 'lucide-react';
+import { Upload } from 'lucide-react';
 import {
   Dialog,
   DialogContent,
@@ -12,6 +12,7 @@ import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
 import { ehRadioAutomatica, isPlaylistUrl, listaEmbutida } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
+import * as importQueue from '@/lib/local/importQueue';
 import { useIsAuthorized } from '@/lib/auth/roles';
 
 /**
@@ -19,6 +20,17 @@ import { useIsAuthorized } from '@/lib/auth/roles';
  * playlists) or upload an audio file. Files are magic-byte validated and all
  * derived text/URLs are sanitized in the library layer, so a renamed/booby-
  * trapped file can never do anything but be rejected.
+ *
+ * O LINK VAI PARA A FILA (`importQueue`), não é baixado aqui na hora.
+ *
+ * Antes este diálogo chamava `localLibrary.addByUrl`/`addPlaylistByUrl`
+ * diretamente e FICAVA ESPERANDO o download+conversão inteiros (dezenas de
+ * segundos, minutos numa playlist) para só então soltar o botão. Fechar o
+ * diálogo, trocar de tela ou fechar a aba nesse meio-tempo matava a requisição
+ * — exatamente o "cola o link e esquece" que devia funcionar sempre não
+ * funcionava neste (o principal) ponto de entrada. `importQueue.enqueue` grava
+ * no `localStorage` e devolve a tela na mesma hora; a fila sobrevive a
+ * navegação, reload e fechar a aba (retoma sozinha no próximo boot).
  */
 export function AddMusicDialog({
   open,
@@ -36,29 +48,33 @@ export function AddMusicDialog({
   // botão "compartilhar" do YouTube no celular gera. Ver `listaEmbutida`.
   const listaJunto = listaEmbutida(url.trim());
 
-  const addLink = async (forcarPlaylist = false): Promise<void> => {
+  const addLink = (forcarPlaylist = false): void => {
     const link = url.trim();
-    if (!link || busy) return;
-    const playlist = forcarPlaylist || isPlaylistUrl(link);
-    setBusy(true);
-    const id = toast.loading(playlist ? 'Lendo playlist…' : 'Baixando e convertendo…');
-    try {
-      if (playlist) {
-        const { imported, total } = await localLibrary.addPlaylistByUrl(link, (done, tot) =>
-          toast.loading(`Baixando playlist… ${done}/${tot}`, { id }),
-        );
-        toast.success(`Playlist importada — ${imported}/${total} faixas`, { id });
-      } else {
-        const track = await localLibrary.addByUrl(link);
-        toast.success(`“${track.title}” adicionada`, { id });
-      }
-      setUrl('');
-      onOpenChange(false);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Não foi possível adicionar.', { id });
-    } finally {
-      setBusy(false);
+    if (!link) return;
+    // Só o que dá para saber SEM sair da aba (link mal formado, plataforma que
+    // nunca vamos suportar) barra aqui — o resto (host bloqueado, vídeo
+    // removido) só se descobre tentando, e por isso vai para a fila mesmo
+    // assim: melhor um erro visível minutos depois do que fingir certeza agora.
+    const validacao = localLibrary.validateImportUrl(link);
+    if (!validacao.ok) {
+      toast.error(validacao.message);
+      return;
     }
+    const playlist = forcarPlaylist || isPlaylistUrl(link);
+    // ENFILEIRA E DEVOLVE A TELA NA HORA — não espera o download+conversão.
+    // A fila (`importQueue`) persiste em localStorage e sobrevive a fechar o
+    // diálogo, trocar de tela ou fechar a aba; sucesso aparece sozinho na
+    // biblioteca, falha definitiva vira uma notificação no sino (ver
+    // `importQueue.ts`). Isto é o que faz "colar o link" ser instantâneo no
+    // celular em vez de travar atrás de um spinner por dezenas de segundos.
+    importQueue.enqueue(link, { forcePlaylist: playlist });
+    toast.success(
+      playlist
+        ? 'Playlist na fila — baixa em segundo plano, mesmo se você sair daqui'
+        : 'Música na fila — baixa em segundo plano, mesmo se você sair daqui',
+    );
+    setUrl('');
+    onOpenChange(false);
   };
 
   const addFiles = async (files: File[]): Promise<void> => {
@@ -100,13 +116,15 @@ export function AddMusicDialog({
             <Input
               value={url}
               onChange={(e) => setUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && void addLink()}
+              onKeyDown={(e) => e.key === 'Enter' && addLink()}
               placeholder="Cole o link aqui"
               inputMode="url"
               spellCheck={false}
             />
-            <Button variant="accent" disabled={busy || !url.trim()} onClick={() => void addLink()}>
-              {busy ? <Loader2 className="animate-spin" /> : 'Adicionar'}
+            {/* Sem `busy`/spinner aqui: enfileirar é síncrono, então não há
+                espera nenhuma para mostrar — o único estado é "tem link?". */}
+            <Button variant="accent" disabled={!url.trim()} onClick={() => addLink()}>
+              Adicionar
             </Button>
           </div>
 
@@ -117,7 +135,7 @@ export function AddMusicDialog({
               sumiam caladas. Agora a escolha aparece — e o botão de cima segue
               sendo o seguro (uma faixa), porque é o que o link literalmente
               aponta. */}
-          {listaJunto && !busy && (
+          {listaJunto && (
             <div className="space-y-2 rounded-lg border border-border bg-bg-elevated p-3">
               <p className="text-[12px] leading-relaxed text-fg-muted">
                 Esse link também carrega{' '}
@@ -133,12 +151,7 @@ export function AddMusicDialog({
                 )}{' '}
                 O botão acima adiciona só a música.
               </p>
-              <Button
-                variant="outline"
-                className="w-full"
-                onClick={() => void addLink(true)}
-                disabled={busy}
-              >
+              <Button variant="outline" className="w-full" onClick={() => addLink(true)}>
                 {ehRadioAutomatica(listaJunto)
                   ? 'Adicionar a fila inteira mesmo assim'
                   : 'Adicionar a playlist inteira'}

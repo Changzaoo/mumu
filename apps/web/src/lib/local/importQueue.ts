@@ -5,6 +5,15 @@
  * track. Progress is observable for a small status panel; failures are kept so
  * they can be retried, and duplicates are skipped by localLibrary itself.
  *
+ * PERSISTIDA, não em memória: o array vai para `localStorage` (ver `persist`) e
+ * volta sozinho no boot (`restore` + `init`). É o que permite ao "+" da barra
+ * (AddMusicDialog, aberto a qualquer usuário) só EMPILHAR o link e devolver a
+ * tela na hora — a pessoa fecha a aba, troca de página, o download continua
+ * quando o app reabrir, sem perder o que já estava em fila. Sucesso silencioso
+ * (o de sempre: a faixa só aparece na biblioteca), mas ERRO DEFINITIVO empurra
+ * uma notificação (ver `pushNotification` abaixo) — sem isso quem colou o link
+ * e fechou o diálogo nunca saberia que ele falhou de vez.
+ *
  * Circuit breaker: um erro de autenticação (401/403) ou 3 falhas seguidas
  * pausam a fila INTEIRA (ver PauseReason) — nunca mais aquele loop de centenas
  * de POSTs 403 no console quando a conta não tem acesso ao importer.
@@ -12,6 +21,7 @@
 import * as localLibrary from '@/lib/local/localLibrary';
 import { fetchPlaylistEntries, isPlaylistUrl } from '@/lib/local/importerHelper';
 import { subscribeAuth } from '@/lib/firebase';
+import { pushNotification } from '@/stores/notificationsStore';
 
 export type ImportStatus = 'pending' | 'downloading' | 'done' | 'error';
 
@@ -45,6 +55,17 @@ export interface ImportItem {
   permanent?: boolean;
   /** Rodadas de recuperação automática já gastas (teto: MAX_RECOVERIES). */
   recoveries?: number;
+  /**
+   * Trata este link como playlist mesmo que `isPlaylistUrl` diga que não.
+   *
+   * Existe para o link AMBÍGUO (`watch?v=…&list=…`, o que o "compartilhar" do
+   * YouTube no celular gera dentro de uma lista): `isPlaylistUrl` devolve
+   * `false` de propósito para ele, porque o link aponta pra UMA música. Quando
+   * a pessoa escolhe explicitamente "adicionar a playlist inteira mesmo assim"
+   * (ver AddMusicDialog), a fila precisa de um jeito de lembrar essa escolha —
+   * sem esta flag o item cairia no ramo de faixa única e a lista se perderia.
+   */
+  forcePlaylist?: boolean;
 }
 
 /** Downloads simultâneos. 3 por padrão (com o fluxo por job o cliente só
@@ -214,6 +235,19 @@ function clearPause(): void {
 function pause(reason: Exclude<PauseReason, null>): void {
   if (pausedFor === reason) return;
   pausedFor = reason;
+  // 'auth' PRECISA de uma ação da pessoa (logar de novo) e o painel da fila
+  // (ImportQueuePanel) só existe nas telas de admin — quem colou o link pelo
+  // botão "+" da barra (AddMusicDialog, aberto a qualquer usuário) já fechou o
+  // diálogo faz tempo e não veria a pausa de outro jeito. 'backoff' fica de
+  // fora de propósito: é o caso comum de rede de celular piscando e se resolve
+  // sozinho em 5 min — notificar aqui viraria ruído toda vez que o sinal cai.
+  if (reason === 'auth') {
+    pushNotification({
+      type: 'error',
+      title: 'Downloads pausados',
+      body: 'Entre na sua conta de novo para continuar baixando os links pendentes.',
+    });
+  }
   if (wakeTimer) {
     clearTimeout(wakeTimer);
     wakeTimer = null;
@@ -252,7 +286,7 @@ function update(id: string, patch: Partial<ImportItem>): void {
 }
 
 /** Add one or more links to the queue and start (or keep) processing. */
-export function enqueue(urls: string | string[]): void {
+export function enqueue(urls: string | string[], opts: { forcePlaylist?: boolean } = {}): void {
   const incoming = (Array.isArray(urls) ? urls : [urls]).map((u) => u.trim()).filter(Boolean);
   if (incoming.length === 0) return;
   const busyUrls = new Set(
@@ -261,7 +295,15 @@ export function enqueue(urls: string | string[]): void {
   for (const url of incoming) {
     if (busyUrls.has(url)) continue; // already queued / in progress
     busyUrls.add(url);
-    items = [...items, { id: `q${++seq}`, url, status: 'pending' }];
+    items = [
+      ...items,
+      {
+        id: `q${++seq}`,
+        url,
+        status: 'pending',
+        ...(opts.forcePlaylist ? { forcePlaylist: true } : {}),
+      },
+    ];
   }
   emit();
   pump();
@@ -372,7 +414,7 @@ async function process(item: ImportItem): Promise<void> {
       update(item.id, { status: 'done', title: existing.title });
       return;
     }
-    if (isPlaylistUrl(item.url)) {
+    if (item.forcePlaylist || isPlaylistUrl(item.url)) {
       // Expand the playlist into individual queued items so each downloads
       // independently (and a big list doesn't hold a slot the whole time).
       const { entries } = await fetchPlaylistEntries(item.url);
@@ -408,6 +450,15 @@ async function process(item: ImportItem): Promise<void> {
         attempts: MAX_ATTEMPTS,
         permanent: true, // fora da recuperação automática: nunca vai funcionar
         error: message,
+      });
+      // Definitivo e silencioso não combinam: quem colou o link pelo "+" da
+      // barra (qualquer usuário, sem o painel da fila à vista) já fechou o
+      // diálogo — sem isto o link simplesmente nunca aparece e a pessoa nem
+      // sabe que precisa tentar outro.
+      pushNotification({
+        type: 'error',
+        title: 'Não deu para baixar',
+        body: item.title ?? item.url,
       });
       return;
     }
@@ -447,6 +498,17 @@ async function process(item: ImportItem): Promise<void> {
         error: willRecover ? `${message} — nova tentativa em instantes` : message,
         notBefore: willRecover ? Date.now() + ERROR_RECOVERY_MS : undefined,
       });
+      // Mesmo aviso do 422/404: aqui é o fim da linha DEPOIS de esgotar as
+      // rodadas de recuperação automática (minutos tentando sozinho) — não é
+      // erro passageiro, é a resposta final, e sem notificação ela só existe
+      // no painel que a maioria de quem colou o link nunca abre.
+      if (!willRecover) {
+        pushNotification({
+          type: 'error',
+          title: 'Não deu para baixar',
+          body: item.title ?? item.url,
+        });
+      }
     }
   }
 }
