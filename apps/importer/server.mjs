@@ -57,6 +57,7 @@ import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
 import { soMusicas } from './ehMusica.mjs';
 import { analisarLinkDeMusica } from './linkDeMusica.mjs';
 import { criarResolvedorDeMusica, NaoAchei } from './resolverDeMusica.mjs';
+import { criarCentralDeTransmissoes } from './transmissaoCompartilhada.mjs';
 import {
   ARGS_DE_SEGURANCA,
   criarLimiteDeImport,
@@ -345,6 +346,12 @@ async function sweepStaleTmp() {
 // lossy already, so a FLAC re-encode would only inflate the file, not the sound.
 const QUALITY_KBPS = { low: 96, normal: 160, high: 320, lossless: 320 };
 const kbpsFor = (quality) => QUALITY_KBPS[quality] ?? 320;
+
+// Vários ouvintes da mesma faixa dividem UM transcode; a faixa recém-tocada
+// fica na RAM. STREAM_CACHE_MB=0 desliga só o cache (o compartilhamento fica).
+const transmissoes = criarCentralDeTransmissoes({
+  tetoCacheBytes: Math.max(0, Number(process.env.STREAM_CACHE_MB ?? 256)) * 1024 * 1024,
+});
 
 /**
  * Cookies do YouTube — o que realmente derruba o "Sign in to confirm you're
@@ -1677,7 +1684,11 @@ async function soMusicasDoCanal(lista) {
   const artista = String(lista.title ?? '')
     .replace(/\s*-\s*(?:videos|vídeos|home|início)\s*$/i, '')
     .trim();
-  const entradas = lista.entries.map((e) => ({ titulo: e.title, duracaoSeg: e.duracaoSeg ?? 0, url: e.url }));
+  const entradas = lista.entries.map((e) => ({
+    titulo: e.title,
+    duracaoSeg: e.duracaoSeg ?? 0,
+    url: e.url,
+  }));
   const { musicas, fora } = await soMusicas(entradas, { buscar: buscarNoCatalogoDaApple, artista });
   log('canal:', lista.title, `${musicas.length} músicas, ${fora.length} fora`);
   return {
@@ -1781,7 +1792,9 @@ function quemPede(req) {
   } catch {
     /* token que não é JWT: vai pelo IP */
   }
-  const ip = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+  const ip = String(req.headers['x-forwarded-for'] ?? '')
+    .split(',')[0]
+    .trim();
   return `ip:${ip || req.socket.remoteAddress || '?'}`;
 }
 
@@ -2118,6 +2131,7 @@ async function main() {
             version: VERSION,
             hosts: HOSTS,
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
+            transmissoes: transmissoes.estatisticas(),
             // Capabilities the web app gates on — the metadata-team healing pass
             // must NOT run against an old importer that lacks these fields.
             caps: [
@@ -3139,94 +3153,130 @@ async function main() {
         const streamKbps = kbpsFor(params.get('quality'));
 
         /**
-         * OS CABEÇALHOS SÓ SAEM COM O PRIMEIRO BYTE DE ÁUDIO NA MÃO.
+         * UM TRANSCODE POR FAIXA, NÃO POR OUVINTE (ver transmissaoCompartilhada.mjs).
          *
-         * Antes o `200` era escrito imediatamente, e isso amarrava o pedido à
-         * primeira tentativa: se ela não desse em nada, não havia mais como
-         * tentar outro caminho — a resposta já tinha prometido áudio. Segurando
-         * o cabeçalho, a via rápida pode falhar em SILÊNCIO e a via lenta assume
-         * sem que o ouvinte perceba nada além do tempo que já esperaria.
+         * O produtor abaixo escreve na TRANSMISSÃO, não na resposta: quem pedir a
+         * mesma faixa na mesma qualidade enquanto ela sai se pendura no mesmo
+         * ffmpeg, e quem pedir logo depois recebe da memória. Os cabeçalhos
+         * continuam saindo só com o primeiro byte de áudio na mão — é
+         * `Transmissao.servir` quem cuida disso —, então a via rápida ainda pode
+         * falhar em silêncio e a via lenta assumir.
          */
-        let cabecalhoEnviado = false;
-        const enviarCabecalho = () => {
-          if (cabecalhoEnviado || res.writableEnded) return;
-          cabecalhoEnviado = true;
-          res.writeHead(200, {
-            'Content-Type': 'audio/mpeg',
-            'Cache-Control': 'no-store',
-            'Accept-Ranges': 'none',
-          });
-        };
-
-        let clienteFoi = false;
-        req.on('close', () => {
-          clienteFoi = true;
-        });
-
-        /**
-         * Roda um pipeline e despeja o áudio na resposta. Resolve com `true` se
-         * ALGUM byte de áudio chegou a sair — que é a única prova de que o
-         * caminho funcionou.
-         *
-         * O ouvinte do primeiro byte é registrado ANTES do `pipe`, e é por isso
-         * que o cabeçalho sai antes do primeiro `write`: ouvintes de 'data'
-         * correm na ordem em que foram registrados, e o do `pipe` é o segundo.
-         */
-        const servir = (processos, entrada = null) =>
-          new Promise((resolve) => {
-            const ff = processos[processos.length - 1];
-            let saiuAudio = false;
-            let encerrado = false;
-            const matar = () => {
-              if (encerrado) return;
-              encerrado = true;
-              // A CONEXÃO DE ENTRADA MORRE JUNTO. Sem isto, o ouvinte que troca
-              // de música deixa para trás um download da CDN puxando bytes que
-              // ninguém vai ouvir — e num servidor doméstico, que serve a faixa
-              // seguinte pela mesma banda, isso se acumula.
-              entrada?.destroy();
-              for (const p of processos) {
-                try {
-                  p.kill('SIGKILL');
-                } catch {
-                  /* já morreu */
+        const produzirStream = async (t) => {
+          let inteiro = true;
+          /**
+           * Roda um pipeline e despeja o áudio na transmissão. Resolve com `true`
+           * se ALGUM byte de áudio chegou a sair — que é a única prova de que o
+           * caminho funcionou.
+           */
+          const servir = (processos, entrada = null) =>
+            new Promise((resolve) => {
+              const ff = processos[processos.length - 1];
+              let saiuAudio = false;
+              let encerrado = false;
+              const matar = () => {
+                if (encerrado) return;
+                encerrado = true;
+                // A CONEXÃO DE ENTRADA MORRE JUNTO. Sem isto, o ouvinte que troca
+                // de música deixa para trás um download da CDN puxando bytes que
+                // ninguém vai ouvir — e num servidor doméstico, que serve a faixa
+                // seguinte pela mesma banda, isso se acumula.
+                entrada?.destroy();
+                for (const p of processos) {
+                  try {
+                    p.kill('SIGKILL');
+                  } catch {
+                    /* já morreu */
+                  }
                 }
+              };
+              const terminar = () => {
+                matar();
+                resolve(saiuAudio);
+              };
+              for (const p of processos) {
+                p.stderr?.resume();
+                p.stdout?.on('error', () => undefined);
+                p.stdin?.on('error', () => undefined); // o outro lado pode sumir
+                p.on('error', terminar);
+                // Saída com erro = áudio possivelmente cortado: serve quem já está
+                // ouvindo, mas não vai para o cache da central.
+                p.on('exit', (code) => {
+                  if (code !== 0 && code !== null) inteiro = false;
+                });
               }
-            };
-            const terminar = () => {
-              matar();
-              resolve(saiuAudio);
-            };
-            for (const p of processos) {
-              p.stderr?.resume();
-              p.stdout?.on('error', () => undefined);
-              p.stdin?.on('error', () => undefined); // o outro lado pode sumir
-              p.on('error', terminar);
-            }
-            ff.stdout.once('data', () => {
-              saiuAudio = true;
-              enviarCabecalho();
+              ff.stdout.on('data', (chunk) => {
+                saiuAudio = true;
+                t.escrever(chunk);
+              });
+              ff.on('close', terminar);
+              // Só o ÚLTIMO ouvinte saindo cancela — ver `Transmissao.talvezCancelar`.
+              t.aoCancelar(terminar);
             });
-            ff.stdout.pipe(res, { end: false });
-            ff.on('close', terminar);
-            req.on('close', terminar);
-          });
 
-        // ── VIA RÁPIDA: a URL direta, do cache ou extraída agora ──────────
-        // O caro é RESOLVER a faixa (yt-dlp lendo a página do YouTube e
-        // decifrando o player), não os bytes chegando. Resolvida uma vez, as
-        // reproduções seguintes começam em fração de segundo — ver
-        // `resolverUrlDireta`. Os bytes vêm por `abrirUrlDireta` e não pelo
-        // `-i <url>` do ffmpeg, que segfalta no servidor.
-        let tocou = false;
-        const direta = await resolverUrlDireta(url);
-        if (direta && !clienteFoi) {
-          const bytes = await abrirUrlDireta(direta).catch((e) => {
-            log('url direta recusou os bytes:', e instanceof Error ? e.message : e);
-            return null;
-          });
-          if (bytes) {
-            log('stream (url direta):', url, `${streamKbps}k`);
+          // ── VIA RÁPIDA: a URL direta, do cache ou extraída agora ──────────
+          // O caro é RESOLVER a faixa (yt-dlp lendo a página do YouTube e
+          // decifrando o player), não os bytes chegando. Resolvida uma vez, as
+          // reproduções seguintes começam em fração de segundo — ver
+          // `resolverUrlDireta`. Os bytes vêm por `abrirUrlDireta` e não pelo
+          // `-i <url>` do ffmpeg, que segfalta no servidor.
+          let tocou = false;
+          const direta = await resolverUrlDireta(url);
+          if (direta && !t.cancelada) {
+            const bytes = await abrirUrlDireta(direta).catch((e) => {
+              log('url direta recusou os bytes:', e instanceof Error ? e.message : e);
+              return null;
+            });
+            if (bytes) {
+              log('stream (url direta):', url, `${streamKbps}k`);
+              const ff = spawn(
+                FFMPEG_BIN,
+                [
+                  '-hide_banner',
+                  '-loglevel',
+                  'error',
+                  '-i',
+                  'pipe:0',
+                  '-f',
+                  'mp3',
+                  '-b:a',
+                  `${streamKbps}k`,
+                  'pipe:1',
+                ],
+                { windowsHide: true },
+              );
+              bytes.on('error', () => undefined); // conexão cortada no meio
+              bytes.pipe(ff.stdin);
+              tocou = await servir([ff], bytes);
+            }
+            // Não saiu áudio nenhum: a URL venceu ou foi recusada. Guardá-la seria
+            // repetir a mesma falha até o TTL expirar.
+            if (!tocou) esquecerUrlDireta(url);
+          }
+
+          // ── VIA LENTA: o pipeline de sempre, quando a rápida não serviu ───
+          // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Continua aqui
+          // porque é o que funciona quando a extração falha ou o teto de
+          // simultaneidade está cheio: lento é muito melhor que mudo.
+          if (!tocou && !t.cancelada && t.bytes === 0) {
+            log('stream (extração ao vivo):', url, `${streamKbps}k`);
+            inteiro = true; // o erro era da via rápida, não desta
+            const yt = spawn(
+              ytdlp,
+              [
+                '-f',
+                'bestaudio/best',
+                '--no-playlist',
+                '--no-warnings',
+                ...cookieArgs(),
+                ...extractorArgs(),
+                '-o',
+                '-',
+                '--',
+                linkParaYtdlp(url),
+              ],
+              { windowsHide: true },
+            );
             const ff = spawn(
               FFMPEG_BIN,
               [
@@ -3243,62 +3293,16 @@ async function main() {
               ],
               { windowsHide: true },
             );
-            bytes.on('error', () => undefined); // conexão cortada no meio
-            bytes.pipe(ff.stdin);
-            tocou = await servir([ff], bytes);
+            yt.stdout.pipe(ff.stdin);
+            tocou = await servir([yt, ff]);
           }
-          // Não saiu áudio nenhum: a URL venceu ou foi recusada. Guardá-la seria
-          // repetir a mesma falha até o TTL expirar.
-          if (!tocou) esquecerUrlDireta(url);
-        }
 
-        // ── VIA LENTA: o pipeline de sempre, quando a rápida não serviu ───
-        // yt-dlp (bestaudio → stdout) | ffmpeg (→ mp3 stream). Continua aqui
-        // porque é o que funciona quando a extração falha ou o teto de
-        // simultaneidade está cheio: lento é muito melhor que mudo.
-        if (!tocou && !clienteFoi && !cabecalhoEnviado) {
-          log('stream (extração ao vivo):', url, `${streamKbps}k`);
-          const yt = spawn(
-            ytdlp,
-            [
-              '-f',
-              'bestaudio/best',
-              '--no-playlist',
-              '--no-warnings',
-              ...cookieArgs(),
-              ...extractorArgs(),
-              '-o',
-              '-',
-              '--',
-              linkParaYtdlp(url),
-            ],
-            { windowsHide: true },
-          );
-          const ff = spawn(
-            FFMPEG_BIN,
-            [
-              '-hide_banner',
-              '-loglevel',
-              'error',
-              '-i',
-              'pipe:0',
-              '-f',
-              'mp3',
-              '-b:a',
-              `${streamKbps}k`,
-              'pipe:1',
-            ],
-            { windowsHide: true },
-          );
-          yt.stdout.pipe(ff.stdin);
-          tocou = await servir([yt, ff]);
-        }
+          // Nenhum dos dois caminhos produziu áudio: a origem está morta — cada
+          // ouvinte pendurado recebe 502 (ver `Transmissao.servir`).
+          t.terminar(tocou && inteiro && !t.cancelada);
+        };
 
-        if (!cabecalhoEnviado && !clienteFoi) {
-          // Nenhum dos dois caminhos produziu áudio: a origem está morta.
-          res.writeHead(502, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
-        }
-        if (!res.writableEnded) res.end();
+        await transmissoes.obter(`${url}|${streamKbps}`, produzirStream).servir(req, res);
         return;
       }
 
@@ -3328,13 +3332,16 @@ async function main() {
           });
           // CANAL: nem todo vídeo é música (vlog, making of, documentário,
           // trecho, a mesma faixa em clipe e em áudio). Só as músicas seguem.
-          if (!listaDeServico && limparLinkDeImport(url).canal) result = await soMusicasDoCanal(result);
+          if (!listaDeServico && limparLinkDeImport(url).canal)
+            result = await soMusicasDoCanal(result);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Falha ao ler a playlist.';
           log('playlist error:', message);
-          res.writeHead(err instanceof NaoAchei ? 422 : 500, { 'Content-Type': 'application/json' });
+          res.writeHead(err instanceof NaoAchei ? 422 : 500, {
+            'Content-Type': 'application/json',
+          });
           res.end(JSON.stringify({ error: message }));
         }
         return;

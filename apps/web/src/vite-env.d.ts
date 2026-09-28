@@ -8,6 +8,10 @@ interface ImportMetaEnv {
   readonly VITE_WS_URL?: string;
   /** P2P signaling WebSocket URL, e.g. wss://host/rtc (defaults to same-origin /rtc). */
   readonly VITE_SIGNALING_URL?: string;
+  /** Nós/PoPs da CDN de áudio, separados por vírgula (ver lib/audio/cdn.ts). */
+  readonly VITE_AUDIO_CDN?: string;
+  /** Onde baixar o APK do Android (padrão: Release android-latest do GitHub). */
+  readonly VITE_ANDROID_APK_URL?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;
   readonly VITE_FIREBASE_PROJECT_ID?: string;

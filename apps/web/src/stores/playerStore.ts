@@ -46,6 +46,8 @@ import {
 import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
+import { candidatosDaCopia, marcarBordaFora, viaCdn } from '@/lib/audio/cdn';
+import { antecedenciaDoPreload } from '@/lib/perf/adaptacao';
 
 /** Faixas cuja duração já foi escrita de volta nesta sessão — o 'timeupdate'
  *  dispara várias vezes por segundo e a gravação é em disco. */
@@ -161,7 +163,11 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
    * hoje toca só pela foto.
    */
   const remote = remoteUrlFor(track.id);
-  if (remote) return remote === track.streamUrl ? track : { ...track, streamUrl: remote };
+  if (remote) {
+    // Pela borda da CDN quando houver — ver lib/audio/cdn.ts.
+    const url = viaCdn(remote);
+    return url === track.streamUrl ? track : { ...track, streamUrl: url };
+  }
   if (track.streamUrl) return track;
   const sourceUrl = sourceUrlFor(track.id);
   if (!sourceUrl) return track;
@@ -222,7 +228,15 @@ async function resolveNextSource(track: TrackDto, tried: Set<string>): Promise<T
     await garantirDetalhe(track.id).catch(() => false);
   }
   const remote = remoteUrlFor(track.id);
-  if (remote && !tried.has(remote)) return { ...track, streamUrl: remote };
+  if (remote) {
+    // Borda que já falhou nesta carga fica de fora por um minuto; a origem é
+    // sempre o último candidato, então a cópia nunca depende de uma borda.
+    for (const url of candidatosDaCopia(remote)) {
+      if (url !== remote && tried.has(url)) marcarBordaFora(url);
+    }
+    const proxima = candidatosDaCopia(remote).find((url) => !tried.has(url));
+    if (proxima) return { ...track, streamUrl: proxima };
+  }
   const sourceUrl = sourceUrlFor(track.id);
   if (sourceUrl) {
     try {
@@ -2391,7 +2405,13 @@ export function initPlayerEngine(): void {
     // pronto — pedir a rede no instante da troca travaria o play() no vão de
     // silêncio, que é justamente o bug que este preload evita.
     const hidden = typeof document !== 'undefined' && document.hidden;
-    if ((gapless || hidden) && !preloadRequested && duration > 0 && remaining <= 12) {
+    // Rede lenta pede mais cedo (ver lib/perf/adaptacao.ts).
+    if (
+      (gapless || hidden) &&
+      !preloadRequested &&
+      duration > 0 &&
+      remaining <= antecedenciaDoPreload()
+    ) {
       preloadRequested = true;
       const upcoming =
         state.queue[state.queueIndex + 1] ?? (state.repeat === 'all' ? state.queue[0] : undefined);

@@ -1,0 +1,93 @@
+# radinho.online — gera o APK do Android (Capacitor) e publica na Release
+# `android-latest`, sempre com o mesmo nome de arquivo. O app web aponta para
+# https://github.com/<repo>/releases/download/android-latest/radinho.apk.
+#
+# Segredos (Settings > Secrets and variables > Actions) — OBRIGATÓRIOS:
+#   ANDROID_KEYSTORE_BASE64    keystore em base64 (`base64 -w0 radinho.jks`)
+#   ANDROID_KEYSTORE_PASSWORD
+#   ANDROID_KEY_ALIAS
+#   ANDROID_KEY_PASSWORD
+# Gerar a chave uma vez só e GUARDAR (perdeu = ninguém consegue atualizar):
+#   keytool -genkeypair -v -keystore radinho.jks -alias radinho \
+#     -keyalg RSA -keysize 4096 -validity 36500
+# Sem os segredos o job para: um APK assinado com chave descartável não
+# atualizaria por cima do anterior.
+name: Android APK
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'apps/web/**'
+      - 'packages/shared/**'
+      - '.github/workflows/android-apk.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: android-apk
+  cancel-in-progress: true
+
+permissions:
+  contents: write # publicar a Release
+
+jobs:
+  apk:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Conferir segredos de assinatura
+        env:
+          KS: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+        run: |
+          if [ -z "$KS" ]; then
+            echo "::error::Faltam os segredos ANDROID_KEYSTORE_* (ver o topo deste arquivo)."
+            exit 1
+          fi
+
+      - uses: pnpm/action-setup@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: 21
+
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm --filter @radinho/shared build
+      - name: Build web + cap sync
+        run: pnpm --filter @radinho/web android:build
+
+      - name: Assinar e gerar APK
+        working-directory: apps/web/android
+        env:
+          VERSION_CODE: ${{ github.run_number }}
+          VERSION_NAME: 1.0.${{ github.run_number }}
+          ANDROID_KEYSTORE_PATH: ${{ runner.temp }}/radinho.jks
+          ANDROID_KEYSTORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          ANDROID_KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          ANDROID_KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          echo "${{ secrets.ANDROID_KEYSTORE_BASE64 }}" | base64 -d > "$ANDROID_KEYSTORE_PATH"
+          chmod +x gradlew
+          ./gradlew --no-daemon assembleRelease
+          cp app/build/outputs/apk/release/app-release.apk "${{ runner.temp }}/radinho.apk"
+          cd "${{ runner.temp }}" && sha256sum radinho.apk > radinho.apk.sha256
+          rm -f "$ANDROID_KEYSTORE_PATH"
+
+      - name: Publicar na Release android-latest
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cd "${{ runner.temp }}"
+          notas="Build ${{ github.run_number }} ($GITHUB_SHA). Confira o SHA-256 em radinho.apk.sha256."
+          if gh release view android-latest -R "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+            gh release upload android-latest radinho.apk radinho.apk.sha256 --clobber -R "$GITHUB_REPOSITORY"
+            gh release edit android-latest --notes "$notas" -R "$GITHUB_REPOSITORY"
+          else
+            gh release create android-latest radinho.apk radinho.apk.sha256 \
+              --title "radinho para Android" --notes "$notas" --latest -R "$GITHUB_REPOSITORY"
+          fi

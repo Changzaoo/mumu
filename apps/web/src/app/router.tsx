@@ -58,6 +58,7 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/radios', 'RadiosPage'],
   ['/liked', 'LikedPage'],
   ['/onboarding', 'OnboardingPage'],
+  ['/receber', 'ReceberLinkPage'],
   ['/login', 'LoginPage'],
   ['/admin', 'AdminPage'],
   ['/mix', 'MixPage'],
@@ -177,6 +178,8 @@ export const router = createBrowserRouter([
       // menu, player e abas oferecem uma dezena de saídas para uma tela cujo
       // propósito é receber UMA resposta. Ver OnboardingPage.
       { path: '/onboarding', element: page('OnboardingPage') },
+      // Destino do "Compartilhar → radinho" (share_target em vite.config.ts).
+      { path: '/receber', element: page('ReceberLinkPage') },
       {
         element: <AppShell />,
         children: [

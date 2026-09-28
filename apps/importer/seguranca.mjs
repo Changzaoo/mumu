@@ -66,6 +66,7 @@ export function limparLinkDeImport(bruto) {
   const texto = bruto.trim();
   if (!texto || texto.length > TAMANHO_MAX) return recusa('link inválido');
   // Espaço, controle ou quebra de linha no meio: não é um link, é outra coisa.
+  // eslint-disable-next-line no-control-regex -- procurar controle é o objetivo
   if (/[\s\u0000-\u001f\u007f]/.test(texto)) return recusa('link inválido');
   let u;
   try {
