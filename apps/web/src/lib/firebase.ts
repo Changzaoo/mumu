@@ -144,14 +144,22 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
  */
 export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday.read';
 
-/** Login com Google pedindo também o aniversário; devolve o token OAuth junto. */
+/**
+ * Pedir o aniversário JÁ NO LOGIN só depois de o Google aprovar o escopo
+ * (People API ativa + escopo verificado na tela de consentimento). Antes disso
+ * todo login mostraria "app não verificado" — o botão no diálogo de idade
+ * continua pedindo sob demanda. Liga com VITE_GOOGLE_ANIVERSARIO_NO_LOGIN=1.
+ */
+const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
+
+/** Login com Google (com o aniversário, se ligado); devolve o token OAuth junto. */
 export async function signInGoogle(): Promise<UserCredential & { accessToken: string | null }> {
   const [instance, { GoogleAuthProvider, signInWithPopup }] = await Promise.all([
     requireAuth(),
     import('firebase/auth'),
   ]);
   const provider = new GoogleAuthProvider();
-  provider.addScope(ESCOPO_ANIVERSARIO);
+  if (ANIVERSARIO_NO_LOGIN) provider.addScope(ESCOPO_ANIVERSARIO);
   const result = await signInWithPopup(instance, provider);
   const accessToken = GoogleAuthProvider.credentialFromResult(result)?.accessToken ?? null;
   return Object.assign(result, { accessToken });

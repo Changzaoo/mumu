@@ -12,6 +12,8 @@ interface ImportMetaEnv {
   readonly VITE_AUDIO_CDN?: string;
   /** Onde baixar o APK do Android (padrão: /radinho.apk, servido pelo site). */
   readonly VITE_ANDROID_APK_URL?: string;
+  /** '1' = o login com Google já pede o aniversário (depois de o Google aprovar o escopo). */
+  readonly VITE_GOOGLE_ANIVERSARIO_NO_LOGIN?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;
   readonly VITE_FIREBASE_PROJECT_ID?: string;

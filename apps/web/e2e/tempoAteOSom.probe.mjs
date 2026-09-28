@@ -18,7 +18,7 @@
  * Não é spec do Playwright de propósito: mede a PRODUÇÃO (rede, cofre, API),
  * que não cabe num portão de CI — o número varia com o 4G de quem mede.
  */
-/* global window, HTMLMediaElement -- os corpos de evaluate/addInitScript rodam no navegador */
+/* global window, HTMLMediaElement, localStorage -- os corpos de evaluate/addInitScript rodam no navegador */
 import { chromium } from '@playwright/test';
 
 const posicionais = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -55,6 +55,26 @@ if (s8) {
 // Relógio dentro da página: o primeiro `timeupdate` com o tempo andando, em
 // qualquer <audio>. O Howler cria os elementos FORA do documento, e aí nem a
 // captura no `document` os vê — por isso a escuta entra pelo `play()`.
+// Visitante novo: responde de antemão o que o app PERGUNTA na primeira visita
+// (idade, onboarding). Um diálogo aberto esconde o resto da tela da árvore de
+// acessibilidade, e a sonda deixava de achar os botões de play.
+await page.addInitScript(() => {
+  try {
+    const ajustes = JSON.parse(localStorage.getItem('aurial:settings') || '{"state":{}}');
+    ajustes.state = {
+      ...ajustes.state,
+      dataNascimento: ajustes.state?.dataNascimento || '1990-01',
+    };
+    localStorage.setItem('aurial:settings', JSON.stringify(ajustes));
+    if (!localStorage.getItem('aurial:gosto-inicial')) {
+      localStorage.setItem('aurial:gosto-inicial', JSON.stringify({ generos: [], artistas: [] }));
+    }
+    localStorage.setItem('aurial:apk-dispensado-em', String(Date.now()));
+  } catch {
+    /* sem storage: segue */
+  }
+});
+
 await page.addInitScript(() => {
   const w = /** @type {any} */ (window);
   w.__som = { t: 0, src: '', erro: '' };
@@ -94,7 +114,15 @@ const total = Math.min(faixas, await botoes.count());
 const tempos = [];
 for (let i = 0; i < total; i++) {
   const botao = botoes.nth(i);
-  const nome = (await botao.getAttribute('aria-label'))?.replace(/^Reproduzir /, '') ?? '?';
+  const nome = await botao
+    .getAttribute('aria-label', { timeout: 15_000 })
+    .then((n) => n?.replace(/^Reproduzir /, '') ?? '?')
+    .catch(async () => {
+      await page.screenshot({ path: 'sonda-travou.png' });
+      console.log(`botão ${i + 1} sumiu da tela — foto em sonda-travou.png (url: ${page.url()})`);
+      return null;
+    });
+  if (nome === null) break;
   await page.evaluate(() => {
     /** @type {any} */ (window).__som = { t: 0, src: '' };
   });
