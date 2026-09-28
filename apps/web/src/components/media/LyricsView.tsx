@@ -57,6 +57,8 @@ function estiloDeProfundidade(distancia: number): {
 export interface LyricsViewProps {
   track: TrackDto;
   className?: string;
+  /** A música toca em OUTRO aparelho: a letra segue o relógio dele. */
+  remoto?: { posicao: () => number; tocando: boolean; buscar: (segundos: number) => void };
 }
 
 /**
@@ -64,10 +66,17 @@ export interface LyricsViewProps {
  * destaque, e as vizinhas menores e mais apagadas conforme se afastam.
  * Clicar numa linha leva a música até ela (só letra sincronizada).
  */
-export function LyricsView({ track, className }: LyricsViewProps) {
-  const seek = usePlayerStore((s) => s.seek);
-  const isCurrent = usePlayerStore((s) => s.currentTrack?.id === track.id);
-  const isPlaying = usePlayerStore((s) => s.isPlaying);
+export function LyricsView({ track, className, remoto }: LyricsViewProps) {
+  const seekLocal = usePlayerStore((s) => s.seek);
+  const isCurrentLocal = usePlayerStore((s) => s.currentTrack?.id === track.id);
+  const isPlayingLocal = usePlayerStore((s) => s.isPlaying);
+  // Letra da música que toca em OUTRO aparelho: o relógio, o play e o pulo são
+  // os dele (ver `remoto` nas props).
+  const isCurrent = remoto ? true : isCurrentLocal;
+  const isPlaying = remoto ? remoto.tocando : isPlayingLocal;
+  const seek = remoto ? remoto.buscar : seekLocal;
+  const relogioRef = useRef<() => number>(() => audioEngine.getPosition());
+  relogioRef.current = remoto ? remoto.posicao : () => audioEngine.getPosition();
 
   const queryClient = useQueryClient();
   // A LETRA APARECE COM O QUE JÁ EXISTE. Antes a consulta só terminava depois
@@ -182,7 +191,7 @@ export function LyricsView({ track, className }: LyricsViewProps) {
       return;
     }
     const medir = (): void => {
-      const posMs = audioEngine.getPosition() * 1000 + LEAD_MS;
+      const posMs = relogioRef.current() * 1000 + LEAD_MS;
       const linha = linhaAtiva(lyrics.lines, posMs);
       const palavra = linha >= 0 ? palavraAtiva(palavrasPorLinha[linha] ?? [], posMs) : -1;
       setAtiva((atual) =>

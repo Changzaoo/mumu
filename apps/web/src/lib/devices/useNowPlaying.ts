@@ -81,7 +81,7 @@ export function useNowPlaying(): NowPlaying | null {
     const id = remoto.id;
     return {
       source: 'remote',
-      trackId: null,
+      trackId: remoto.trackId,
       title: remoto.track.title,
       artists: remoto.track.artist
         ? [{ id: '', name: remoto.track.artist, slug: '', imageUrl: null }]
