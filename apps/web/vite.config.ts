@@ -69,6 +69,9 @@ export default defineConfig({
           /^\/api/,
           /^\/importer/,
           /^\/(sitemap\.xml|robots\.txt|og\.png)$/,
+          // O botão "Baixar" navega para o APK: sem isto o worker responde com
+          // o index.html e o Android baixa uma página no lugar do app.
+          /^\/radinho\.apk$/,
         ],
         runtimeCaching: [
           {

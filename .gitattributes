@@ -8,5 +8,6 @@
 *.png binary
 *.jpg binary
 *.ico binary
+*.apk binary
 *.woff binary
 *.woff2 binary

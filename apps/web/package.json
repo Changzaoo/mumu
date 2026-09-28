@@ -16,7 +16,7 @@
     "perf": "playwright test --config playwright.desempenho.config.ts",
     "perf:memoria": "playwright test --config playwright.memoria.config.ts",
     "cap:sync": "cap sync android",
-    "android:build": "pnpm build && cap sync android",
+    "android:build": "pnpm build && node -e \"require('fs').rmSync('dist/radinho.apk',{force:true})\" && cap sync android",
     "android:apk": "pnpm android:build && cd android && gradlew.bat assembleDebug"
   },
   "dependencies": {
