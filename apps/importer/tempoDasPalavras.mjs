@@ -20,8 +20,11 @@
  *    devolveu lixo para trap com autotune ("proprietary Passe Passe…").
  *
  * Uma tarefa por vez, prioridade baixa de CPU (quem está ouvindo não pode
- * sentir isto), a pedida mais recentemente primeiro. Resultado em disco, nunca
- * refeito.
+ * sentir isto). Dentro da fila: ALINHAMENTO antes de TRANSCRIÇÃO (é o caminho
+ * comum e o mais rápido de entregar — ver `proximaChave`), e dentro de cada
+ * tipo a pedida mais recentemente primeiro. Pedido que ninguém renova por
+ * `ABANDONO_MS` é descartado sem processar (`pedidoAbandonado`) — a pessoa já
+ * pulou a faixa. Resultado em disco, nunca refeito.
  */
 import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
@@ -38,6 +41,46 @@ const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 15 * 60_000);
 const FILA_MAX = 20;
 /** Versão do formato em disco — mudou o modelo/saída, muda a chave. */
 const VERSAO = 'v2';
+/**
+ * NINGUÉM PERGUNTOU POR ISTO EM 3 MINUTOS = a pessoa pulou a faixa ou fechou
+ * o app. O cliente reancora (`pedirPorChave`) a cada poll enquanto ainda
+ * quer a resposta — ver `manterVivo` em calibragem.ts, que já para de
+ * perguntar sozinho quando a faixa deixa de ser a atual/próxima; aqui é o
+ * espelho do lado do servidor: uma CPU só, então processar um pedido morto é
+ * roubar tempo de quem ainda está esperando.
+ */
+const ABANDONO_MS = 3 * 60_000;
+
+/**
+ * Qual chave já não vale mais a pena processar — pura, para testar sem
+ * subir o servidor inteiro.
+ */
+export function pedidoAbandonado(pedidoEm, agora, abandonoMs = ABANDONO_MS) {
+  return agora - pedidoEm > abandonoMs;
+}
+
+/**
+ * Qual das entradas vivas processar a seguir.
+ *
+ * ALINHAMENTO FURA A TRANSCRIÇÃO: quem já tem letra publicada só espera o
+ * RELÓGIO (a etapa mais comum, e a mais rápida de entregar — ~45–80s);
+ * transcrever do zero (sem letra nenhuma) é o caminho raro. Sem esta
+ * prioridade, baixar uma playlist inteira sem letra conhecida enfileirava
+ * várias transcrições e a faixa que a pessoa está OUVINDO agora — que só
+ * precisa de alinhamento — esperava atrás delas.
+ *
+ * Dentro de cada tipo, a MAIS RECENTE (quem pediu por último — `pedirPorChave`
+ * promove ao reancorar): é a que alguém está de fato esperando agora.
+ *
+ * `entradas` é `[chave, { tarefa, pedidoEm }][]` na ordem de chegada do Map
+ * (mais recente por último). Pura.
+ */
+export function proximaChave(entradas) {
+  for (let i = entradas.length - 1; i >= 0; i -= 1) {
+    if (entradas[i][1].tarefa.tipo === 'alinhar') return entradas[i][0];
+  }
+  return entradas.length > 0 ? entradas[entradas.length - 1][0] : null;
+}
 
 /**
  * @param {{
@@ -144,8 +187,15 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
   async function drenar() {
     if (atual) return;
     while (fila.size > 0) {
-      // A MAIS RECENTE primeiro: é a que alguém está ouvindo agora.
-      const [chave, tarefa] = [...fila.entries()].at(-1);
+      // PODA ANTES DE ESCOLHER: pedido que ninguém renovou há muito tempo não
+      // concorre por CPU — nem por prioridade, nem por ordem de chegada.
+      const agora = Date.now();
+      for (const [chave, entrada] of fila) {
+        if (pedidoAbandonado(entrada.pedidoEm, agora)) fila.delete(chave);
+      }
+      const chave = proximaChave([...fila.entries()]);
+      if (chave === null) break; // só sobrava abandonado
+      const { tarefa } = fila.get(chave);
       fila.delete(chave);
       atual = chave;
       try {
@@ -177,9 +227,10 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
         : null;
       return { status: 'processando', ...(parcial ? { parcial } : {}) };
     }
-    // Pedir de novo PROMOVE: vai para o fim do Map, que é quem sai primeiro.
+    // Pedir de novo PROMOVE: vai para o fim do Map (mais recente) e renova
+    // `pedidoEm`, o que também a salva de ser podada como abandonada.
     fila.delete(chave);
-    fila.set(chave, tarefa);
+    fila.set(chave, { tarefa, pedidoEm: Date.now() });
     while (fila.size > FILA_MAX) fila.delete(fila.keys().next().value);
     void drenar();
     return { status: atual === chave ? 'processando' : 'na-fila', posicao: fila.size };
