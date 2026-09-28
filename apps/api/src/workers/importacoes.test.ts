@@ -43,3 +43,14 @@ describe('o mesmo link, o mesmo registro', () => {
     expect(a).toMatch(/^imp-[0-9a-f]{16}$/);
   });
 });
+
+describe('varredura dos pendentes', () => {
+  it('passa a carência como int (make_interval não aceita o bigint do Prisma)', async () => {
+    const { prisma } = await import('../infra/db/prisma.js');
+    const { terminarPendentes } = await import('./importacoes.worker.js');
+    vi.mocked(prisma.$queryRaw).mockClear();
+    await terminarPendentes();
+    const [partes] = vi.mocked(prisma.$queryRaw).mock.calls[0] as unknown as [string[]];
+    expect(partes.join('?')).toMatch(/make_interval\(mins => \?::int\)/);
+  });
+});

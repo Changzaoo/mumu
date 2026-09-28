@@ -137,7 +137,7 @@ export const adminRepository = {
                count(*) AS plays,
                count(DISTINCT "userId") AS unique_listeners
         FROM "PlayHistory"
-        WHERE "playedAt" >= now() - make_interval(days => ${days})
+        WHERE "playedAt" >= now() - make_interval(days => ${days}::int)
         GROUP BY 1
         ORDER BY 1 ASC
       `,

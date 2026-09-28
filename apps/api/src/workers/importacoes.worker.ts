@@ -82,11 +82,13 @@ async function gravar(userId: string, itemId: string, data: ImportacaoNaConta): 
 }
 
 async function pendentes(): Promise<Registro[]> {
+  // ::int é obrigatório: o Prisma manda número JS como bigint, e make_interval(mins => bigint)
+  // não existe — a varredura falhava a cada batida e nenhum link pendente era terminado.
   const linhas = await prisma.$queryRaw<Array<{ userId: string; itemId: string; data: unknown }>>`
     SELECT "userId", "itemId", data FROM "UserCollectionItem"
     WHERE collection = 'importacoes' AND deleted = false
       AND data->>'estado' = 'pendente'
-      AND "updatedAt" < now() - make_interval(mins => ${CARENCIA_MIN})
+      AND "updatedAt" < now() - make_interval(mins => ${CARENCIA_MIN}::int)
     ORDER BY "updatedAt" ASC
     LIMIT ${POR_BATIDA}
   `;
