@@ -396,7 +396,7 @@ function applyRemoteDelete(id: string): void {
 }
 
 /**
- * Tira do aparelho o que é catálogo grátis (audius:/apple:/prévia de 30s) —
+ * Tira do aparelho o que é catálogo grátis (audius:/itunes:/prévia de 30s) —
  * listas antigas foram montadas com substitutos do catálogo e ainda ocupam a
  * Sidebar como se fossem acervo do usuário.
  */

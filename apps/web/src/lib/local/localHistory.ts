@@ -112,7 +112,7 @@ export function clear(): void {
 }
 
 /**
- * Limpa do histórico o que veio do catálogo grátis (audius:/apple:/prévia de
+ * Limpa do histórico o que veio do catálogo grátis (audius:/itunes:/prévia de
  * 30s). O histórico é lido como "o que EU ouço" — e alimenta a recomendação
  * como se fosse acervo — então faixa de catálogo guardada aqui empurrava o
  * usuário de volta para músicas que ele não tem.

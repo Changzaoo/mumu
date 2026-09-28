@@ -4,7 +4,7 @@ import { isCatalogId, isCatalogTrack, isOwnTrack } from '@/lib/catalog/isCatalog
 describe('isCatalogId', () => {
   it('reconhece os prefixos do catálogo grátis', () => {
     expect(isCatalogId('audius:abc123')).toBe(true);
-    expect(isCatalogId('apple:987')).toBe(true);
+    expect(isCatalogId('itunes:987')).toBe(true);
   });
 
   it('não confunde faixa do usuário nem id vazio', () => {
@@ -22,7 +22,7 @@ describe('isCatalogId', () => {
 describe('isCatalogTrack / isOwnTrack', () => {
   it('classifica por id', () => {
     expect(isCatalogTrack({ id: 'audius:1' })).toBe(true);
-    expect(isCatalogTrack({ id: 'apple:1' })).toBe(true);
+    expect(isCatalogTrack({ id: 'itunes:1' })).toBe(true);
     expect(isCatalogTrack({ id: 'local:1' })).toBe(false);
   });
 
@@ -33,7 +33,7 @@ describe('isCatalogTrack / isOwnTrack', () => {
   it('isOwnTrack é o complemento exato', () => {
     for (const track of [
       { id: 'audius:1' },
-      { id: 'apple:1' },
+      { id: 'itunes:1' },
       { id: 'local:1' },
       { id: 'local:2', previewOnly: true },
     ]) {

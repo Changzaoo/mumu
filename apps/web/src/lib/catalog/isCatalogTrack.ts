@@ -1,7 +1,7 @@
 /**
  * Quem é "do catálogo" e quem é "do usuário".
  *
- * O catálogo grátis (Audius `audius:<id>`, prévias iTunes `apple:<id>`) existe
+ * O catálogo grátis (Audius `audius:<id>`, prévias iTunes `itunes:<id>`) existe
  * para navegar/buscar/descobrir — não para virar acervo pessoal. Quando uma
  * faixa dessas era persistida na biblioteca/listas do aparelho, o usuário
  * terminava com uma "biblioteca" que ele nunca montou e que some no dia em que
@@ -10,8 +10,14 @@
  */
 import type { TrackDto } from '@radinho/shared';
 
-/** Prefixos de id que identificam faixas vindas do catálogo grátis. */
-const CATALOG_ID_PREFIXES = ['audius:', 'apple:'] as const;
+/**
+ * Prefixos de id que identificam faixas vindas do catálogo grátis. O mapper de
+ * prévias (`mapApple.ts`) namespaced com `itunes:`, não `apple:` — usar o
+ * prefixo errado aqui deixava passar pela varredura de listas/playlists (que
+ * às vezes só tem o id, sem o DTO com `previewOnly`) qualquer prévia de 30s
+ * cujo id sobrevivesse sozinho num `trackIds[]`.
+ */
+const CATALOG_ID_PREFIXES = ['audius:', 'itunes:'] as const;
 
 /** True quando o id pertence ao catálogo grátis (sem precisar do DTO inteiro). */
 export function isCatalogId(id: string | null | undefined): boolean {
