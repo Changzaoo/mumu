@@ -35,6 +35,8 @@ export function analisarLinkDeMusica(bruto) {
   if (typeof bruto !== 'string') return recusa('link inválido');
   const texto = bruto.trim();
   if (!texto || texto.length > TAMANHO_MAX) return recusa('link inválido');
+  // Caractere de controle no meio: não é link (mesma regra de seguranca.mjs).
+  // eslint-disable-next-line no-control-regex
   if (/[\s\u0000-\u001f\u007f]/.test(texto)) return recusa('link inválido');
   let u;
   try {

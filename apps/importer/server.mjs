@@ -54,6 +54,8 @@ import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
 import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
+import { analisarLinkDeMusica } from './linkDeMusica.mjs';
+import { criarResolvedorDeMusica, NaoAchei } from './resolverDeMusica.mjs';
 import {
   ARGS_DE_SEGURANCA,
   criarLimiteDeImport,
@@ -765,7 +767,19 @@ function isPermanentImportError(message) {
 const importJobs = new Map(); // id → job
 const JOB_TTL_MS = 60 * 60_000; // 1h — igual ao sweep de /tmp
 
-function startImportJob(url, quality, quem = null) {
+/**
+ * Link de Spotify/Apple/Deezer/Tidal: `{ tipo, ... }` quando é um que o
+ * importador sabe IDENTIFICAR (o áudio vem do YouTube — ver resolverDeMusica),
+ * ou null. Só existe depois do boot (precisa da busca do YouTube).
+ */
+let resolvedorDeMusica = null;
+function linkDeMusica(url) {
+  if (!resolvedorDeMusica || typeof url !== 'string') return null;
+  const l = analisarLinkDeMusica(url);
+  return l.ok ? l : null;
+}
+
+function startImportJob(url, quality, quem = null, musica = null) {
   const id = crypto.randomUUID();
   const job = {
     status: 'running', // 'running' | 'done' | 'error'
@@ -778,8 +792,16 @@ function startImportJob(url, quality, quem = null) {
   };
   importJobs.set(id, job);
   log('import job:', id.slice(0, 8), url, `${kbpsFor(quality)}k`);
-  void importToMp3(ytdlpBin, url, quality)
-    .then(async (r) => {
+  // Link de serviço: primeiro descobre QUAL vídeo é (dentro do job — a busca
+  // pode levar segundos e o start precisa responder na hora), depois segue o
+  // caminho de sempre com o link canônico do YouTube.
+  const resolvido = musica ? resolvedorDeMusica.resolverFaixa(musica, quem) : Promise.resolve(null);
+  void resolvido
+    .then(async (achado) => {
+      const r = await importToMp3(ytdlpBin, achado ? achado.url : url, quality);
+      return { r, achado };
+    })
+    .then(async ({ r, achado }) => {
       job.dir = r.dir;
       job.file = r.file;
       const { size } = await stat(r.file);
@@ -792,6 +814,20 @@ function startImportJob(url, quality, quem = null) {
         uploader: r.uploader || null,
         size,
       };
+      if (achado) {
+        // Metadados do serviço valem mais que o título do vídeo ("(Official
+        // Video) [4K]"); e a origem gravada é o vídeo, que o /stream sabe tocar.
+        const m = achado.meta;
+        job.meta = {
+          ...job.meta,
+          title: m ? `${m.artistas.join(', ')} - ${m.titulo}` : r.title,
+          artist: m ? m.artistas.join(', ') : job.meta.artist,
+          track: m ? m.titulo : job.meta.track,
+          album: m?.album ?? job.meta.album,
+          coverUrl: m?.capa ?? job.meta.coverUrl,
+          sourceUrl: achado.url,
+        };
+      }
       job.status = 'done';
       log('job done:', r.title);
     })
@@ -799,7 +835,7 @@ function startImportJob(url, quality, quem = null) {
       const message = err instanceof Error ? err.message : 'Falha na importação.';
       job.status = 'error';
       job.error = message;
-      job.permanent = isPermanentImportError(message);
+      job.permanent = err instanceof NaoAchei || isPermanentImportError(message);
       log('job error:', message);
     })
     .finally(() => {
@@ -2001,6 +2037,15 @@ async function main() {
     binario: () => ytdlp,
     argsExtras: () => [...cookieArgs(), ...extractorArgs()],
   });
+  // Links de Spotify/Apple/Deezer/Tidal viram busca no YouTube (ver
+  // resolverDeMusica.mjs). Cache em disco, fora do git.
+  resolvedorDeMusica = criarResolvedorDeMusica({
+    buscar: (termo, quem) => buscaYoutube.buscar(termo, quem),
+    chaveSongLink: (process.env.SONGLINK_API_KEY ?? '').trim(),
+    arquivoCache: path.join(HERE, 'cache-links-de-musica.json'),
+    maxLista: MAX_PLAYLIST > 0 ? MAX_PLAYLIST : 300,
+    log,
+  });
   // Diretório local padrão pode ser criado; o EXTERNO nunca (mkdir num
   // mountpoint desmontado criaria a pasta no disco raiz).
   if (!BLOB_DIR_EXTERNAL) await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
@@ -2032,7 +2077,16 @@ async function main() {
             authMode: FIREBASE_GATED ? 'firebase' : IMPORT_TOKEN ? 'token' : 'open',
             // Capabilities the web app gates on — the metadata-team healing pass
             // must NOT run against an old importer that lacks these fields.
-            caps: ['uploader', 'album', 'quality', 'jobs', 'cover', 'credits', 'letra-externa'],
+            caps: [
+              'uploader',
+              'album',
+              'quality',
+              'jobs',
+              'cover',
+              'credits',
+              'letra-externa',
+              ...(resolvedorDeMusica ? ['links-de-musica'] : []),
+            ],
           }),
         );
         return;
@@ -3213,7 +3267,9 @@ async function main() {
         }
         try {
           const { url } = JSON.parse((await readBody(req)) || '{}');
-          if (typeof url !== 'string' || !hostSupported(url)) {
+          const musica = linkDeMusica(url);
+          const listaDeServico = musica && musica.tipo !== 'faixa';
+          if (typeof url !== 'string' || (!hostSupported(url) && !listaDeServico)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
@@ -3221,7 +3277,10 @@ async function main() {
           const quem = quemPede(req);
           if (!dentroDoLimite(req, res, quem)) return;
           log('playlist:', url);
-          const result = await listPlaylist(ytdlp, url).finally(() => {
+          // Álbum/playlist de serviço: devolve os links de FAIXA do serviço;
+          // cada um resolve para o YouTube no próprio job (ver listar()).
+          const ler = listaDeServico ? resolvedorDeMusica.listar(musica) : listPlaylist(ytdlp, url);
+          const result = await ler.finally(() => {
             if (quem) limiteDeImport.terminou(quem);
           });
           res.writeHead(200, { 'Content-Type': 'application/json' });
@@ -3229,7 +3288,7 @@ async function main() {
         } catch (err) {
           const message = err instanceof Error ? err.message : 'Falha ao ler a playlist.';
           log('playlist error:', message);
-          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.writeHead(err instanceof NaoAchei ? 422 : 500, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: message }));
         }
         return;
@@ -3546,14 +3605,16 @@ async function main() {
         }
         try {
           const { url, quality } = JSON.parse((await readBody(req)) || '{}');
-          if (typeof url !== 'string' || !hostSupported(url)) {
+          const musica = linkDeMusica(url);
+          const faixaDeServico = musica && musica.tipo === 'faixa' ? musica : null;
+          if (typeof url !== 'string' || (!hostSupported(url) && !faixaDeServico)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
           }
           const quem = quemPede(req);
           if (!dentroDoLimite(req, res, quem)) return;
-          const id = startImportJob(url, quality, quem);
+          const id = startImportJob(url, quality, quem, faixaDeServico);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ id }));
         } catch {
