@@ -1300,7 +1300,12 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
   }
   if (fallbackAttempts >= MAX_FALLBACK_ATTEMPTS) return false;
   fallbackAttempts++;
+  // A busca de fonte pode demorar (a de último recurso vai à rede). Se nesse
+  // meio-tempo começou OUTRA carga — mesmo da mesma faixa, tocada de novo —,
+  // esta resposta é velha: não pode trocar a fonte nem declarar a faixa morta.
+  const geracaoDaBusca = geracaoDeCarga;
   const resolved = await resolveNextSource(track, fallbackTried);
+  if (geracaoDaBusca !== geracaoDeCarga) return true;
   const s = usePlayerStore.getState();
   if (s.currentTrack?.id !== track.id) return true; // trocou de faixa — encerra
   if (!resolved?.streamUrl) return false;

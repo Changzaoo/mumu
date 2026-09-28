@@ -246,10 +246,12 @@ describe('fallback de fonte morta', () => {
 
     emit('error', { message: 'x', track: a, kind: 'load' });
 
+    // A troca passa pela busca de último recurso (assíncrona) antes de pular:
+    // espera a faixa E o estado de tocando, não só a primeira.
     await vi.waitFor(() => {
       expect(usePlayerStore.getState().currentTrack?.id).toBe('local:t2');
+      expect(usePlayerStore.getState().isPlaying).toBe(true);
     });
-    expect(usePlayerStore.getState().isPlaying).toBe(true);
   });
 
   it('não tenta fallback em bloqueio de autoplay (kind=play)', async () => {
