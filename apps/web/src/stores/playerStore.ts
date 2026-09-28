@@ -2005,11 +2005,12 @@ export function initPlayerEngine(): void {
   // clique. Auto-removível; unlock() é idempotente.
   if (typeof document !== 'undefined') {
     const eventos = ['pointerdown', 'keydown', 'touchend'] as const;
-    const destravar = (): void => {
-      audioEngine.unlock();
-      for (const ev of eventos) document.removeEventListener(ev, destravar, true);
-    };
-    for (const ev of eventos) document.addEventListener(ev, destravar, { capture: true });
+    // NÃO se remove depois do primeiro: cada toque reabastece o estoque de
+    // elementos destravados que o iPhone exige (ver `abastecerEstoque`).
+    const destravar = (): void => audioEngine.unlock();
+    for (const ev of eventos) {
+      document.addEventListener(ev, destravar, { capture: true, passive: true });
+    }
   }
 
   // Prefer local copies: the engine asks this resolver before the network.

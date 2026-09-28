@@ -92,6 +92,9 @@ interface HowlInternals {
   _sounds: Array<{ _node?: HTMLAudioElement }>;
 }
 
+/** Elementos destravados mantidos no estoque do Howler (ver `abastecerEstoque`). */
+const ESTOQUE_DESTRAVADO = 6;
+
 interface HowlerInternals {
   _html5AudioPool?: HTMLAudioElement[];
   _canPlayEvent?: string;
@@ -284,6 +287,8 @@ export class AudioEngine {
    * mesmo depois de um await de rede — não é mais barrado. Idempotente.
    */
   unlock = (): void => {
+    // O estoque é reabastecido em TODO gesto, não só no primeiro.
+    this.abastecerEstoque();
     if (this.audioUnlocked) return;
     this.audioUnlocked = true;
     if (!SEM_GRAFO_WEB_AUDIO) {
@@ -883,7 +888,11 @@ export class AudioEngine {
 
   private async prepareElementSlot(slot: Slot, track: TrackDto, url: string): Promise<void> {
     const seq = ++slot.seq;
-    const el = new Audio();
+    // Um elemento DESTRAVADO do estoque (ver `abastecerEstoque`): criado aqui,
+    // fora do toque, o iPhone recusaria o play.
+    const pool = (Howler as unknown as HowlerInternals)._html5AudioPool;
+    const el = (Array.isArray(pool) && pool.length > 0 ? pool.pop() : null) ?? new Audio();
+    el.removeAttribute('src');
     el.crossOrigin = 'anonymous';
     el.preload = 'auto';
     slot.source = { kind: 'element', el, hls: null };
@@ -1312,18 +1321,47 @@ export class AudioEngine {
    * the Web Audio graph. Seed the pool with a CORS-enabled element so the
    * next Howl picks it up.
    */
+  /**
+   * NUNCA PÕE ELEMENTO TRAVADO NO ESTOQUE.
+   *
+   * Isto empurrava um `new Audio()` CRU para o topo do estoque do Howler a cada
+   * faixa carregada — e o Howler pega sempre o do topo. No iPhone, um elemento
+   * que nunca passou por um toque só toca DENTRO de um toque: a próxima faixa
+   * da fila, a carga que termina depois do clique, a retomada — tudo recusado
+   * ("o iPhone está bloqueando a reprodução"). O estoque agora só recebe
+   * elementos destravados, e é reabastecido a cada toque (`abastecerEstoque`).
+   */
   private primeHtml5Pool(): void {
+    /* ver `abastecerEstoque` */
+  }
+
+  /**
+   * ESTOQUE DE ELEMENTOS DESTRAVADOS, reabastecido DENTRO de cada gesto.
+   *
+   * O `load()` chamado durante um toque é o que o iOS aceita como destravar um
+   * elemento (é o mesmo truque do `_unlockAudio` do Howler — que só roda uma
+   * vez por sessão; com duas faixas por troca e a pré-carga da próxima, o
+   * estoque dele acabava e o Howler criava elementos travados). Mantido cheio
+   * a cada toque, toda faixa nasce num elemento que pode tocar fora do gesto.
+   */
+  abastecerEstoque = (): void => {
     try {
-      const pool = (Howler as unknown as HowlerInternals)._html5AudioPool;
-      if (Array.isArray(pool)) {
-        const el = new Audio();
+      const howler = Howler as unknown as HowlerInternals & {
+        _releaseHtml5Audio?: (el: HTMLAudioElement) => void;
+      };
+      const pool = howler._html5AudioPool;
+      if (!Array.isArray(pool)) return;
+      while (pool.length < ESTOQUE_DESTRAVADO) {
+        const el = new Audio() as HTMLAudioElement & { _unlocked?: boolean };
         el.crossOrigin = 'anonymous';
-        pool.push(el);
+        el._unlocked = true;
+        el.load();
+        pool.unshift(el);
       }
     } catch {
-      /* non-critical */
+      /* não crítico: no pior caso, o Howler cria um elemento como antes */
     }
-  }
+  };
 }
 
 /** The one engine instance the whole app shares. */
