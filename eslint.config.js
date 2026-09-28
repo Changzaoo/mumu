@@ -16,6 +16,8 @@ export default tseslint.config(
       '**/playwright-report/**',
       '**/*.gen.ts',
       'apps/api/prisma/migrations/**',
+      // Cópia do dist que o `cap sync` joga dentro do projeto Android.
+      'apps/web/android/app/src/main/assets/**',
     ],
   },
   js.configs.recommended,

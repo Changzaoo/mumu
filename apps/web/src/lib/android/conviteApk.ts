@@ -2,7 +2,7 @@
  * CONVITE PARA O APP DE ANDROID.
  *
  * Quem abre o radinho pelo navegador do Android ganha um aviso com o botão
- * "Baixar": o APK sai da Release `android-latest` (.github/workflows/android-apk.yml),
+ * "Baixar": o APK é servido pelo próprio site (`public/radinho.apk`),
  * assinado sempre com a mesma chave — é o que deixa a versão nova instalar por
  * cima da antiga sem perder nada.
  *
@@ -14,8 +14,7 @@ import { toast } from 'sonner';
 import { pushNotification } from '@/stores/notificationsStore';
 
 export const APK_URL =
-  (import.meta.env.VITE_ANDROID_APK_URL as string | undefined) ||
-  'https://github.com/Changzaoo/mumu/releases/download/android-latest/radinho.apk';
+  (import.meta.env.VITE_ANDROID_APK_URL as string | undefined) || '/radinho.apk';
 
 const CHAVE_DISPENSADO = 'aurial:apk-dispensado-em';
 const CHAVE_NO_SINO = 'aurial:apk-no-sino';
