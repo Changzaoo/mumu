@@ -28,9 +28,10 @@
  */
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { useNavigate } from 'react-router';
-import { Check, Loader2, Music2 } from 'lucide-react';
+import { Check, Loader2, Music2, ShieldCheck } from 'lucide-react';
 import { GENRE_TAXONOMY } from '@radinho/shared';
 import { RadinhoLogo } from '@/components/brand/RadinhoMark';
+import { ColarLink } from '@/components/media/ColarLink';
 import { Button } from '@/components/ui/button';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -59,7 +60,69 @@ const VAZIO: localLibrary.LibraryEntry[] = [];
 const MAX_GENEROS = GENRE_TAXONOMY.length;
 const MAX_ARTISTAS = 48;
 
-type Passo = 'generos' | 'artistas';
+type Passo = 'generos' | 'artistas' | 'links';
+
+const ORDEM_DOS_PASSOS: readonly Passo[] = ['generos', 'artistas', 'links'];
+
+/** De onde dá para trazer música — o que a pessoa já usa no dia a dia. */
+const FONTES = ['Spotify', 'YouTube', 'YouTube Music', 'Apple Music', 'Deezer', 'SoundCloud'];
+
+/**
+ * PASSO 3: A PESSOA SABE QUE PODE TRAZER A MÚSICA DELA.
+ *
+ * O acervo é o que dá para tocar hoje; o que falta, cada um traz colando um
+ * link. Isso existia no "Adicionar música", mas ninguém descobre um botão que
+ * não sabe que procura — dito aqui, na primeira visita, vira hábito.
+ *
+ * O texto também responde a dúvida de segurança antes que ela vire desistência:
+ * o app só lê o LINK. Não pede login do Spotify, não acessa conta nenhuma.
+ */
+function PassoLinks() {
+  return (
+    <div className="mx-auto max-w-xl space-y-5">
+      <div className="flex flex-wrap gap-2">
+        {FONTES.map((f) => (
+          <span
+            key={f}
+            className="rounded-full bg-fg/5 px-3 py-1 text-[13px] font-medium text-fg ring-1 ring-fg/10"
+          >
+            {f}
+          </span>
+        ))}
+        <span className="rounded-full px-3 py-1 text-[13px] text-fg-muted">
+          ou link direto de um arquivo de áudio
+        </span>
+      </div>
+
+      <ol className="space-y-2 text-sm text-fg-muted">
+        <li>
+          <strong className="text-fg">1.</strong> No app do Spotify, YouTube ou outro, toque em{' '}
+          <em>Compartilhar → Copiar link</em> (música, álbum ou playlist).
+        </li>
+        <li>
+          <strong className="text-fg">2.</strong> Volte aqui e toque em <em>Colar</em>. Ela baixa em
+          segundo plano, mesmo se você sair.
+        </li>
+        <li>
+          <strong className="text-fg">3.</strong> Com o radinho instalado no celular, dá até para
+          escolher <em>Compartilhar → radinho</em> direto no outro app.
+        </li>
+      </ol>
+
+      <ColarLink />
+
+      <div className="flex gap-3 rounded-lg bg-fg/5 p-3 text-[13px] leading-relaxed text-fg-muted">
+        <ShieldCheck className="mt-0.5 size-4 shrink-0 text-accent" aria-hidden />
+        <p>
+          O radinho só lê o <strong className="text-fg">link</strong>: nunca pede sua senha nem
+          acesso à sua conta do Spotify ou do YouTube. Rastreadores do link (como o{' '}
+          <code>?si=</code>) são apagados antes de sair do seu aparelho. Vale para você também: se
+          alguém pedir sua senha “para importar músicas”, é golpe.
+        </p>
+      </div>
+    </div>
+  );
+}
 
 function Cartao({
   titulo,
@@ -171,6 +234,15 @@ export default function OnboardingPage() {
 
   const carregando = entries.length === 0;
   const noPasso1 = passo === 'generos';
+  const noPassoLinks = passo === 'links';
+  const numeroDoPasso = ORDEM_DOS_PASSOS.indexOf(passo) + 1;
+  const voltar = (): void =>
+    setPasso(ORDEM_DOS_PASSOS[Math.max(0, numeroDoPasso - 2)] ?? 'generos');
+  const avancar = (): void => {
+    const proximo = ORDEM_DOS_PASSOS[numeroDoPasso];
+    if (proximo) setPasso(proximo);
+    else concluir();
+  };
   const itens = noPasso1 ? todosGeneros.length : todosArtistas.length;
 
   return (
@@ -197,20 +269,28 @@ export default function OnboardingPage() {
         <header className="mx-auto w-full max-w-4xl px-5 pb-4 pt-8">
           <RadinhoLogo />
           <p className="mt-6 text-[13px] font-medium uppercase tracking-wide text-fg-muted">
-            Passo {noPasso1 ? 1 : 2} de 2
+            Passo {numeroDoPasso} de {ORDEM_DOS_PASSOS.length}
           </p>
           <h1 className="mt-1 text-2xl font-semibold text-fg sm:text-3xl">
-            {noPasso1 ? 'O que você gosta de ouvir?' : 'Escolha alguns artistas'}
+            {noPasso1
+              ? 'O que você gosta de ouvir?'
+              : noPassoLinks
+                ? 'Traga as suas músicas'
+                : 'Escolha alguns artistas'}
           </h1>
           <p className="mt-2 max-w-prose text-sm text-fg-muted">
             {noPasso1
               ? 'Escolha os estilos que combinam com você. Serve para a primeira tela já fazer sentido — depois ela se ajusta sozinha ao que você realmente ouvir.'
-              : 'Quem você escolher aqui ganha uma prateleira própria na Home. Pode deixar em branco se não reconhecer ninguém.'}
+              : noPassoLinks
+                ? 'Não achou alguma? Copie o link de uma música, álbum ou playlist de qualquer lugar e cole aqui. Dá para fazer isso a qualquer hora pelo botão "Adicionar música".'
+                : 'Quem você escolher aqui ganha uma prateleira própria na Home. Pode deixar em branco se não reconhecer ninguém.'}
           </p>
         </header>
 
         <main className="mx-auto w-full max-w-4xl px-5 pb-8">
-          {carregando ? (
+          {noPassoLinks ? (
+            <PassoLinks />
+          ) : carregando ? (
             <div className="flex flex-col items-center gap-3 py-20 text-center text-sm text-fg-muted">
               <Loader2 className="size-5 animate-spin" aria-hidden />
               Carregando o acervo…
@@ -263,7 +343,7 @@ export default function OnboardingPage() {
           home do iPhone. */}
       <footer className="glass relative z-20 shrink-0 border-t border-fg/10 px-5 pb-[calc(1rem+env(safe-area-inset-bottom))] pt-4">
         <div className="mx-auto flex w-full max-w-4xl items-center justify-between gap-4">
-          <Button variant="ghost" onClick={noPasso1 ? pular : () => setPasso('generos')}>
+          <Button variant="ghost" onClick={noPasso1 ? pular : voltar}>
             {noPasso1 ? 'Agora não' : 'Voltar'}
           </Button>
           <div className="flex items-center gap-3">
@@ -272,7 +352,9 @@ export default function OnboardingPage() {
                 ? generos.length === 0
                   ? 'Escolha ao menos um'
                   : `${generos.length} ${generos.length === 1 ? 'estilo' : 'estilos'}`
-                : `${artistas.length} ${artistas.length === 1 ? 'artista' : 'artistas'}`}
+                : noPassoLinks
+                  ? 'Opcional'
+                  : `${artistas.length} ${artistas.length === 1 ? 'artista' : 'artistas'}`}
             </span>
             <Button
               variant="accent"
@@ -281,9 +363,9 @@ export default function OnboardingPage() {
               // "Agora não" ao lado, que é explícito. A trava não se aplica
               // quando não há gênero A OFERECER — aí o passo é intransponível.
               disabled={noPasso1 && generos.length === 0 && todosGeneros.length > 0}
-              onClick={noPasso1 ? () => setPasso('artistas') : concluir}
+              onClick={avancar}
             >
-              {noPasso1 ? 'Continuar' : 'Pronto'}
+              {noPassoLinks ? 'Pronto' : 'Continuar'}
             </Button>
           </div>
         </div>

@@ -24,6 +24,14 @@ export default defineConfig({
         lang: 'pt-BR',
         start_url: '/',
         display: 'standalone',
+        // "Compartilhar → radinho" no app do Spotify/YouTube (Android, PWA
+        // instalado). GET e só texto: nada de arquivo, nada de POST para o
+        // service worker tratar. Ver src/pages/ReceberLinkPage.tsx.
+        share_target: {
+          action: '/receber',
+          method: 'GET',
+          params: { title: 'title', text: 'text', url: 'url' },
+        },
         theme_color: '#000000',
         background_color: '#000000',
         icons: [

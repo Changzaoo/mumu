@@ -10,10 +10,11 @@ import {
 } from '@/components/ui/dialog';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { ehRadioAutomatica, isPlaylistUrl, listaEmbutida } from '@/lib/local/importerHelper';
+import { ehRadioAutomatica, listaEmbutida } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
-import * as importQueue from '@/lib/local/importQueue';
+import { prepararLink } from '@/lib/local/linkColado';
 import { useIsAuthorized } from '@/lib/auth/roles';
+import { enfileirarLink } from './ColarLink';
 
 /**
  * Common-user "add music" — a hardened way to import by link (incl. YouTube
@@ -46,33 +47,17 @@ export function AddMusicDialog({
 
   // A lista que vem de carona num link de vídeo (`watch?v=…&list=…`) — o que o
   // botão "compartilhar" do YouTube no celular gera. Ver `listaEmbutida`.
-  const listaJunto = listaEmbutida(url.trim());
+  const preparado = prepararLink(url);
+  const listaJunto = preparado.ok ? listaEmbutida(preparado.url) : null;
 
   const addLink = (forcarPlaylist = false): void => {
-    const link = url.trim();
-    if (!link) return;
-    // Só o que dá para saber SEM sair da aba (link mal formado, plataforma que
-    // nunca vamos suportar) barra aqui — o resto (host bloqueado, vídeo
-    // removido) só se descobre tentando, e por isso vai para a fila mesmo
-    // assim: melhor um erro visível minutos depois do que fingir certeza agora.
-    const validacao = localLibrary.validateImportUrl(link);
-    if (!validacao.ok) {
-      toast.error(validacao.message);
-      return;
-    }
-    const playlist = forcarPlaylist || isPlaylistUrl(link);
-    // ENFILEIRA E DEVOLVE A TELA NA HORA — não espera o download+conversão.
-    // A fila (`importQueue`) persiste em localStorage e sobrevive a fechar o
-    // diálogo, trocar de tela ou fechar a aba; sucesso aparece sozinho na
-    // biblioteca, falha definitiva vira uma notificação no sino (ver
-    // `importQueue.ts`). Isto é o que faz "colar o link" ser instantâneo no
-    // celular em vez de travar atrás de um spinner por dezenas de segundos.
-    importQueue.enqueue(link, { forcePlaylist: playlist });
-    toast.success(
-      playlist
-        ? 'Playlist na fila — baixa em segundo plano, mesmo se você sair daqui'
-        : 'Música na fila — baixa em segundo plano, mesmo se você sair daqui',
-    );
+    if (!url.trim()) return;
+    // Só o que dá para saber SEM sair da aba (link mal formado, rede interna,
+    // plataforma que nunca vamos suportar) barra aqui — o resto (vídeo
+    // removido) só se descobre tentando. ENFILEIRA E DEVOLVE A TELA NA HORA:
+    // a fila (`importQueue`) sobrevive a fechar o diálogo, trocar de tela ou
+    // fechar a aba. Ver `enfileirarLink`.
+    if (!enfileirarLink(url, forcarPlaylist)) return;
     setUrl('');
     onOpenChange(false);
   };
@@ -107,8 +92,8 @@ export function AddMusicDialog({
         <DialogHeader>
           <DialogTitle>Adicionar música</DialogTitle>
           <DialogDescription>
-            Cole o link de uma música, álbum ou playlist do Spotify, Apple Music, Deezer,
-            YouTube ou SoundCloud
+            Cole o link de uma música, álbum ou playlist do Spotify, Apple Music, Deezer, YouTube ou
+            SoundCloud
             {podeEnviarArquivo ? ' — ou envie um arquivo de áudio do seu aparelho.' : '.'}
           </DialogDescription>
         </DialogHeader>
