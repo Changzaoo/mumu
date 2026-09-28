@@ -64,6 +64,23 @@ const CARIMBOS = new Set(['oficial', 'official', 'vevo', 'topic', 'music', 'musi
  * mesma pessoa para todos os efeitos da biblioteca: ficha, faixas e álbuns.
  */
 export function artistIdentityKey(name: string): string {
+  const pronta = chavePorNome.get(name);
+  if (pronta !== undefined) return pronta;
+  const chave = calcularChave(name);
+  // Teto só para uma sessão muito longa não acumular nomes sem fim.
+  if (chavePorNome.size >= 20_000) chavePorNome.clear();
+  chavePorNome.set(name, chave);
+  return chave;
+}
+
+/**
+ * Memo por nome: a função é pura, e a biblioteca pede a chave de cada artista
+ * de cada faixa a cada reagrupamento — 5 mil faixas com o acervo do app, a cada
+ * mudança da biblioteca. Medido em 2026-09-28: ~340ms num celular fraco só aqui.
+ */
+const chavePorNome = new Map<string, string>();
+
+function calcularChave(name: string): string {
   const base = normalizar(name);
   if (!base) return '';
   const inteiro = base.replace(/ /g, '');

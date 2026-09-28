@@ -109,9 +109,24 @@ export function veredictoDe(track: Pick<TrackDto, 'id' | 'title'>): VeredictoDeC
   // lista): sem resposta, o veredito é "desconhecido" e a regra da idade decide.
   const doServidor = veredictoDaBiblioteca(track.id);
   if (doServidor) return doServidor;
-  return classificarTexto(track.title ?? '').veredicto === 'explicito'
-    ? 'explicito'
-    : 'desconhecido';
+  return tituloEhExplicito(track.title ?? '') ? 'explicito' : 'desconhecido';
+}
+
+/**
+ * O julgamento do TÍTULO, memoizado pelo texto. Todo cartão de faixa pergunta
+ * a cada render, e `classificarTexto` roda a lista inteira de termos em regex:
+ * medido em 2026-09-28, ~630ms num celular fraco para abrir a /library. O
+ * título não muda de veredito — o que muda é a letra, que tem o próprio mapa.
+ */
+const tituloExplicito = new Map<string, boolean>();
+
+function tituloEhExplicito(titulo: string): boolean {
+  const pronto = tituloExplicito.get(titulo);
+  if (pronto !== undefined) return pronto;
+  const explicito = classificarTexto(titulo).veredicto === 'explicito';
+  if (tituloExplicito.size >= 20_000) tituloExplicito.clear();
+  tituloExplicito.set(titulo, explicito);
+  return explicito;
 }
 
 export function faixaEtariaAtual(): FaixaEtaria {

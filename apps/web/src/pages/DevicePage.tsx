@@ -50,6 +50,16 @@ const EMPTY: localLibrary.LibraryEntry[] = [];
 const EMPTY_LISTS: localPlaylists.LocalPlaylist[] = [];
 
 /**
+ * Quantas linhas de faixa existem no DOM de cada vez.
+ *
+ * A lista montava o registro INTEIRO — que inclui o acervo emprestado do app,
+ * mais de 5 mil faixas. Medido em 2026-09-28: 104 mil nós no DOM e 16s até a
+ * página aparecer num desktop; num celular fraco, mais de dois minutos. Ninguém
+ * lê a linha 3000 sem rolar até ela; o botão no fim traz o resto sob demanda.
+ */
+const PAGINA = 100;
+
+/**
  * Resolve as linhas coladas contra a BIBLIOTECA DO USUÁRIO — e só ela.
  *
  * Antes cada linha virava o primeiro resultado do catálogo grátis: a lista
@@ -95,6 +105,7 @@ export default function DevicePage() {
 
   const [selecting, setSelecting] = useState(false);
   const [selected, setSelected] = useState<ReadonlySet<string>>(() => new Set());
+  const [mostrar, setMostrar] = useState(PAGINA);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -451,7 +462,7 @@ export default function DevicePage() {
           />
         ) : (
           <div role="list" aria-label="Faixas no dispositivo" className="space-y-0.5">
-            {entries.map((entry, index) => {
+            {entries.slice(0, mostrar).map((entry, index) => {
               const track = entry.track;
               const active = track.id === currentTrack?.id;
               const isSel = selected.has(track.id);
@@ -563,6 +574,15 @@ export default function DevicePage() {
                 </div>
               );
             })}
+            {entries.length > mostrar && (
+              <button
+                type="button"
+                onClick={() => setMostrar((n) => n + PAGINA)}
+                className="mx-auto mt-2 block rounded-md bg-fg/10 px-4 py-2 text-sm font-medium hover:bg-fg/20"
+              >
+                Mostrar mais ({entries.length - mostrar} restantes)
+              </button>
+            )}
           </div>
         )}
       </section>

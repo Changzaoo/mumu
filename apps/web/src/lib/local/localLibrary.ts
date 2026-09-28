@@ -159,13 +159,22 @@ const listeners = new Set<() => void>();
 let cache: LibraryEntry[] | null = null;
 /** Derivados caros (álbuns/artistas/gêneros) memoizados até a próxima write() —
  *  Sidebar + Home consultam a cada render e recalcular O(n) toda vez derrubava
- *  celulares modestos. */
+ *  celulares modestos. Cada campo nasce na primeira consulta: quem só quer os
+ *  grupos do acervo inteiro não paga pelos da biblioteca própria. */
 let groupsCache: {
+  /** A biblioteca inteira já passada por `collapseForDisplay`. */
+  vista?: LibraryEntry[];
+  todos?: Grupos;
+  /** Só o que é do usuário (sem o acervo emprestado) — a página /library. */
+  proprios?: Grupos;
+} | null = null;
+
+interface Grupos {
   albums: LocalAlbum[];
   artists: LocalArtist[];
   genres: LocalGenre[];
   labels: LocalLabel[];
-} | null = null;
+}
 
 /**
  * Conta quantas vezes a biblioteca mudou.
@@ -1961,13 +1970,36 @@ export async function garantirAudioLocal(id: string): Promise<boolean> {
  * mesmo engano.
  */
 function normName(value: string): string {
-  return value
+  const pronto = normNameMemo.get(value);
+  if (pronto !== undefined) return pronto;
+  const norm = value
     .toLowerCase()
     .normalize('NFD')
     .replace(/\p{M}+/gu, '')
     .normalize('NFC')
     .replace(/[^\p{L}\p{N}]+/gu, ' ')
     .trim();
+  lembrar(normNameMemo, value, norm);
+  return norm;
+}
+
+/**
+ * MEMO DE TEXTO PARA A DEDUPLICAÇÃO DE EXIBIÇÃO.
+ *
+ * `collapseForDisplay` normaliza título e artista de cada faixa várias vezes
+ * por passada, e roda de novo a cada mudança da biblioteca — com o acervo do
+ * app são 5 mil faixas, e cada normalização é NFD + regex Unicode. Medido em
+ * 2026-09-28: ~250ms por colapso num desktop, o grosso do custo de abrir a
+ * /library. As funções são puras de string, então o memo é pelo próprio texto;
+ * o teto só impede que uma sessão muito longa acumule nomes sem fim.
+ */
+const MEMO_TETO = 50_000;
+const normNameMemo = new Map<string, string>();
+const tituloLimpoMemo = new Map<string, string>();
+
+function lembrar(memo: Map<string, string>, chave: string, valor: string): void {
+  if (memo.size >= MEMO_TETO) memo.clear();
+  memo.set(chave, valor);
 }
 
 export interface LocalAlbum {
@@ -2015,9 +2047,9 @@ const MARCA_DE_SINGLE = /[-–—]\s*single\s*$|\(\s*single\s*\)\s*$|\[\s*single
  *    lugar veio de um disco, mesmo que só ela tenha sido baixada.
  * E o que se diz single no título nunca é álbum, tenha o nome que tiver.
  */
-function computeAlbumGroups(entries: readonly LibraryEntry[] = read()): LocalAlbum[] {
+function computeAlbumGroups(vista: readonly LibraryEntry[]): LocalAlbum[] {
   const byKey = new Map<string, LocalAlbum>();
-  for (const entry of collapseForDisplay(entries)) {
+  for (const entry of vista) {
     const t = entry.track;
     const title = t.album?.title?.trim();
     if (!title) continue;
@@ -2062,14 +2094,41 @@ export function faixasDoAlbumDe(track: TrackDto): LocalAlbum | null {
   return album;
 }
 
+/**
+ * A biblioteca como a tela a mostra (duplicatas fundidas), memoizada.
+ *
+ * `collapseForDisplay` normaliza título e artista de cada faixa em várias
+ * passadas — com o acervo do app somado são 5 mil entradas, e cada tela de
+ * álbum/artista/gênero/selo refazia esse trabalho por conta própria. Medido em
+ * 2026-09-28: abrir /library custava 1,4s de CPU só aqui, porque os quatro
+ * agrupamentos colapsavam a biblioteca cada um de novo.
+ */
+function vista(): LibraryEntry[] {
+  const derivados = (groupsCache ??= {});
+  return (derivados.vista ??= collapseForDisplay(read()));
+}
+
+function agrupar(vistaDasFaixas: readonly LibraryEntry[]): Grupos {
+  return {
+    albums: computeAlbumGroups(vistaDasFaixas),
+    artists: computeArtists(vistaDasFaixas),
+    genres: computeGenreGroups(vistaDasFaixas),
+    labels: computeLabelGroups(vistaDasFaixas),
+  };
+}
+
 /** Memo dos derivados — recalcula UMA vez por mudança da biblioteca. */
-function ensureGroups(): NonNullable<typeof groupsCache> {
-  return (groupsCache ??= {
-    albums: computeAlbumGroups(),
-    artists: computeArtists(),
-    genres: computeGenreGroups(),
-    labels: computeLabelGroups(),
-  });
+function ensureGroups(): Grupos {
+  const derivados = (groupsCache ??= {});
+  return (derivados.todos ??= agrupar(vista()));
+}
+
+/** O mesmo memo, só com o que é do usuário. O colapso é feito à parte (e não
+ *  filtrando a vista inteira) porque a fusão pode eleger a cópia do acervo como
+ *  representante — e aí a faixa do usuário sumiria da biblioteca dele. */
+function ensureOwnedGroups(): Grupos {
+  const derivados = (groupsCache ??= {});
+  return (derivados.proprios ??= agrupar(collapseForDisplay(ownedEntries())));
 }
 
 export function albumGroups(): LocalAlbum[] {
@@ -2082,25 +2141,26 @@ export function albumGroups(): LocalAlbum[] {
  * grátis vive no Início e no Descobrir, não aqui. Sem isto, buscar na biblioteca
  * despejava o acervo inteiro do app, que não é do usuário.
  *
- * Não memoizado (recalcula a cada chamada): a lista da biblioteca já usa
- * `useMemo` na página, e as telas de acervo (Início/Descobrir) seguem usando as
- * versões memoizadas acima, que continuam somando tudo.
+ * Memoizado como os grupos do acervo inteiro (`ensureOwnedGroups`): antes
+ * recalculava a cada chamada, e a /library chamava as quatro a cada tecla do
+ * filtro e a cada gravação da biblioteca. Quem recebe NÃO pode mutar o que
+ * volta — é o mesmo array para todas as telas até a próxima mudança.
  */
 function ownedEntries(): LibraryEntry[] {
   return read().filter((e) => e.origem !== 'catalogo');
 }
 
 export function albumGroupsOwned(): LocalAlbum[] {
-  return computeAlbumGroups(ownedEntries());
+  return ensureOwnedGroups().albums;
 }
 export function artistsOwned(): LocalArtist[] {
-  return computeArtists(ownedEntries());
+  return ensureOwnedGroups().artists;
 }
 export function genreGroupsOwned(): LocalGenre[] {
-  return computeGenreGroups(ownedEntries());
+  return ensureOwnedGroups().genres;
 }
 export function labelGroupsOwned(): LocalLabel[] {
-  return computeLabelGroups(ownedEntries());
+  return ensureOwnedGroups().labels;
 }
 
 export function albumByKey(key: string): LocalAlbum | null {
@@ -2111,7 +2171,7 @@ export function albumByKey(key: string): LocalAlbum | null {
 export function singles(): TrackDto[] {
   const inAlbum = new Set<string>();
   for (const album of albumGroups()) for (const t of album.tracks) inAlbum.add(t.id);
-  return collapseForDisplay(read())
+  return vista()
     .map((e) => e.track)
     .filter((t) => !inAlbum.has(t.id));
 }
@@ -2144,7 +2204,7 @@ function grafiaConhecida(name: string): string {
   if (!chave) return name;
   if (!grafiasPorIdentidade) {
     const mapa = new Map<string, string>();
-    for (const a of computeArtists()) {
+    for (const a of artists()) {
       const k = artistIdentityKey(a.name) || normName(a.name);
       if (!mapa.has(k)) mapa.set(k, a.name);
     }
@@ -2156,7 +2216,7 @@ function grafiaConhecida(name: string): string {
   return name;
 }
 
-function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[] {
+function computeArtists(vista: readonly LibraryEntry[]): LocalArtist[] {
   // UMA FICHA POR PESSOA. A chave não é mais o nome quase cru: é a identidade
   // (ver `artistIdentity`), que faz "DJ Kennedi" e "Kennedi", "Brandão" e
   // "Brandao", "Fulano Oficial" e "Fulano" caírem no mesmo artista. Antes cada
@@ -2164,7 +2224,7 @@ function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[
   const byName = new Map<string, LocalArtist>();
   // Quantas faixas cada GRAFIA tem — é o que decide qual delas fica na ficha.
   const porGrafia = new Map<string, number>();
-  for (const entry of collapseForDisplay(entries)) {
+  for (const entry of vista) {
     for (const artist of entry.track.artists) {
       const name = artist.name?.trim();
       if (!name || name === 'Desconhecido') continue;
@@ -2196,7 +2256,7 @@ function computeArtists(entries: readonly LibraryEntry[] = read()): LocalArtist[
  */
 export function artistTracks(name: string): TrackDto[] {
   const key = artistIdentityKey(name) || normName(name);
-  return collapseForDisplay(read())
+  return vista()
     .map((e) => e.track)
     .filter((t) => t.artists.some((a) => (artistIdentityKey(a.name) || normName(a.name)) === key));
 }
@@ -2224,9 +2284,9 @@ export function genreGroups(): LocalGenre[] {
   return ensureGroups().genres;
 }
 
-function computeGenreGroups(entries: readonly LibraryEntry[] = read()): LocalGenre[] {
+function computeGenreGroups(vista: readonly LibraryEntry[]): LocalGenre[] {
   const byKey = new Map<string, LocalGenre>();
-  for (const entry of collapseForDisplay(entries)) {
+  for (const entry of vista) {
     const g = entry.track.genre?.trim();
     if (!g) continue;
     const key = g.toLowerCase();
@@ -2244,7 +2304,7 @@ function computeGenreGroups(entries: readonly LibraryEntry[] = read()): LocalGen
 /** All library tracks of a given genre (by name, case-insensitive). */
 export function genreTracks(genre: string): TrackDto[] {
   const key = genre.trim().toLowerCase();
-  return collapseForDisplay(read())
+  return vista()
     .map((e) => e.track)
     .filter((t) => (t.genre ?? '').trim().toLowerCase() === key);
 }
@@ -2254,9 +2314,9 @@ export function labelGroups(): LocalLabel[] {
   return ensureGroups().labels;
 }
 
-function computeLabelGroups(entries: readonly LibraryEntry[] = read()): LocalLabel[] {
+function computeLabelGroups(vista: readonly LibraryEntry[]): LocalLabel[] {
   const byKey = new Map<string, LocalLabel>();
-  for (const entry of collapseForDisplay(entries)) {
+  for (const entry of vista) {
     const name = entry.track.label?.trim();
     if (!name) continue;
     const key = normName(name);
@@ -2276,7 +2336,7 @@ function computeLabelGroups(entries: readonly LibraryEntry[] = read()): LocalLab
 export function labelTracks(label: string): TrackDto[] {
   const key = normName(label);
   if (!key) return [];
-  return collapseForDisplay(read())
+  return vista()
     .map((e) => e.track)
     .filter((t) => normName(t.label?.trim() ?? '') === key);
 }
@@ -2412,9 +2472,13 @@ export function artistaEhDesconhecido(track: TrackDto): boolean {
  * sai, pelo mesmo motivo.
  */
 export function tituloDuracaoKey(track: TrackDto): string | null {
-  const semNumero = track.title.replace(/^\s*\d{1,2}\s*[-–—.]\s*/, '');
-  const limpo = titleSearchCandidates(semNumero)[0] ?? semNumero;
-  const title = normName(limpo);
+  let title = tituloLimpoMemo.get(track.title);
+  if (title === undefined) {
+    const semNumero = track.title.replace(/^\s*\d{1,2}\s*[-–—.]\s*/, '');
+    const limpo = titleSearchCandidates(semNumero)[0] ?? semNumero;
+    title = normName(limpo);
+    lembrar(tituloLimpoMemo, track.title, title);
+  }
   if (!title || title === 'faixa') return null;
   const dur = track.durationMs || 0;
   if (dur <= 0) return null; // sem duração não há evidência suficiente para apagar
