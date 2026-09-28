@@ -237,6 +237,41 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     expect((await promessa)?.calibrada).toBe(true);
   });
 
+  it('alinhamento PROCESSANDO agora: pergunta nos ~2s, não nos 15s de sempre', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento
+      .mockResolvedValueOnce({ tipo: 'esperar', processando: true })
+      .mockResolvedValueOnce({ tipo: 'esperar', processando: true })
+      .mockResolvedValueOnce({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(letra);
+
+    const promessa = pedirCalibracao(faixa());
+    await vi.advanceTimersByTimeAsync(0);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(1);
+    // 2s bastam enquanto processa — nem chega perto dos 15s do INTERVALO_MS.
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(2);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(3);
+    expect((await promessa)?.calibrada).toBe(true);
+  });
+
+  it('alinhamento processando não gasta o orçamento de tentativas (só na fila gasta)', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    // "Processando" por 30 rodadas (bem mais que TENTATIVAS_MAX) sem nunca
+    // desistir — só a fila (sem processar) gasta o orçamento.
+    buscarAlinhamento.mockResolvedValue({ tipo: 'esperar', processando: true });
+    const promessa = pedirCalibracao(faixa());
+    for (let i = 0; i < 30; i += 1) await vi.advanceTimersByTimeAsync(2_000);
+    expect(buscarAlinhamento).toHaveBeenCalledTimes(31);
+    buscarAlinhamento.mockResolvedValueOnce({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(letra);
+    await vi.advanceTimersByTimeAsync(2_000);
+    expect((await promessa)?.calibrada).toBe(true);
+  });
+
   it('manterVivo falso PARA de perguntar sem esgotar o orçamento', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
     cachedLyrics.mockReturnValue(letra);

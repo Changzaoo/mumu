@@ -1,6 +1,7 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   aplicarAlinhamento,
+  buscarAlinhamento,
   recalibrarLetra,
   temposDasPalavras,
   transcricaoConfiavel,
@@ -179,6 +180,44 @@ describe('aplicarAlinhamento', () => {
       words: [p('x', l.timeMs, 0.01)],
     }));
     expect(aplicarAlinhamento(letra, [0, 1, 2], al)).toBeNull();
+  });
+});
+
+describe('buscarAlinhamento: 202 diz se o job já está rodando', () => {
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it('202 com status "processando": sinaliza para o chamador perguntar rápido', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ status: 'processando' }), { status: 202 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(buscarAlinhamento('http://x/alinhar', ['a'])).resolves.toEqual({
+      tipo: 'esperar',
+      processando: true,
+    });
+  });
+
+  it('202 com status "na-fila": não passa a marca de processando', async () => {
+    const fetchMock = vi.fn(
+      async () => new Response(JSON.stringify({ status: 'na-fila' }), { status: 202 }),
+    );
+    vi.stubGlobal('fetch', fetchMock);
+    await expect(buscarAlinhamento('http://x/alinhar', ['a'])).resolves.toEqual({
+      tipo: 'esperar',
+      processando: false,
+    });
+  });
+
+  it('503 (sem áudio ainda): espera, sem marca de processando', async () => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(null, { status: 503 })),
+    );
+    await expect(buscarAlinhamento('http://x/alinhar', ['a'])).resolves.toEqual({
+      tipo: 'esperar',
+    });
   });
 });
 

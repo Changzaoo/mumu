@@ -58,6 +58,14 @@ export function ehTranscricao(letra: Lyrics | null | undefined): boolean {
 /** Enquanto a transcrição roda, a tela mostra as palavras chegando. */
 const AO_VIVO_MS = 3_000;
 /**
+ * Alinhamento REALMENTE rodando agora (não só esperando vez): pergunta de
+ * novo rápido. É a etapa mais comum (a maioria das faixas já tem letra
+ * publicada, só falta o relógio) e a que mais pesava na demora sentida — o
+ * job acabava e a tela só descobria até 15s depois. Só na FILA (`na-fila`,
+ * sem CPU dedicada ainda) o ritmo lento evita martelar o importador à toa.
+ */
+const ALINHANDO_MS = 2_000;
+/**
  * Com quantas palavras ouvidas já dá para procurar a letra de verdade e
  * confirmá-la pela voz (ver lib/lyrics/confirmarPelaVoz.ts) — o bastante para
  * a prova valer, cedo o bastante para a letra certa chegar em segundos.
@@ -231,9 +239,16 @@ async function alinharAteChegar(
       writeLyrics(trackId, pronta);
       return pronta;
     }
-    if (r.tipo !== 'esperar' || ++tentativas >= TENTATIVAS_MAX) return null;
+    if (r.tipo !== 'esperar') return null;
     publicar(trackId, { fase: 'alinhando' });
-    await new Promise((resolve) => setTimeout(resolve, INTERVALO_MS));
+    // Só conta tentativa (e só espera o INTERVALO_MS lento) quando o job
+    // ainda nem começou — enquanto processa, o orçamento não é gasto: o job
+    // tem um teto próprio no importador (TETO_MS em tempoDasPalavras.mjs) e
+    // aqui a pessoa está vendo "sincronizando", não esperando no vazio.
+    if (!r.processando && ++tentativas >= TENTATIVAS_MAX) return null;
+    await new Promise((resolve) =>
+      setTimeout(resolve, r.processando ? ALINHANDO_MS : INTERVALO_MS),
+    );
   }
   return null;
 }

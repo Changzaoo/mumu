@@ -379,7 +379,15 @@ export function urlDoAlinhamento(remoteUrl: string, idioma: string): string | nu
 }
 
 export type RespostaDoAlinhamento =
-  { tipo: 'pronto'; linhas: LinhaAlinhada[] } | { tipo: 'esperar' } | { tipo: 'desistir' };
+  | { tipo: 'pronto'; linhas: LinhaAlinhada[] }
+  /**
+   * `processando`: o job de alinhamento DESTA faixa está rodando agora no
+   * importador (não só esperando vez na fila). É a diferença entre perguntar
+   * de novo em ~2s (o trabalho pode terminar a qualquer instante) ou em 15s
+   * (ainda nem começou, martelar não adianta nada).
+   */
+  | { tipo: 'esperar'; processando?: boolean }
+  | { tipo: 'desistir' };
 
 /** Pede o alinhamento destas linhas. Nunca lança. */
 export async function buscarAlinhamento(
@@ -398,7 +406,17 @@ export async function buscarAlinhamento(
         ? { tipo: 'pronto', linhas: corpo.linhas }
         : { tipo: 'desistir' };
     }
-    if (res.status === 202 || res.status === 503) return { tipo: 'esperar' };
+    if (res.status === 202) {
+      // O importador manda `status: 'processando' | 'na-fila'` no corpo (ver
+      // server.mjs) — sem lê-lo aqui, todo 202 virava o mesmo "esperar" e o
+      // laço em calibragem.ts perguntava de novo só depois de 15s mesmo com o
+      // job rodando, que era exatamente a demora reclamada.
+      const corpo = (await res.json().catch(() => ({}) as { status?: string })) as {
+        status?: string;
+      };
+      return { tipo: 'esperar', processando: corpo.status === 'processando' };
+    }
+    if (res.status === 503) return { tipo: 'esperar' };
     return { tipo: 'desistir' };
   } catch {
     return { tipo: 'esperar' };
