@@ -834,6 +834,31 @@ export async function fetchOutraFonteDeLetra(
   }
 }
 
+/**
+ * Manda para o importador o que a transcrição errou e a letra confirmada
+ * corrigiu (ver lib/lyrics/aprendizado.ts) — vira `initial_prompt` do whisper
+ * na próxima transcrição livre deste artista (apps/importer/vocabulario.mjs).
+ *
+ * SEM TOKEN, igual a `/letra/outras-fontes`: não é dado sensível, é só um par
+ * de palavras. Best-effort de propósito: nunca lança, e o chamador nem espera
+ * a resposta — perder este envio custa uma repetição futura da MESMA
+ * transcrição errada, não uma letra errada na tela.
+ */
+export async function enviarAprendizadoDeLetra(
+  artista: string,
+  correcoes: Array<{ ouvido: string; real: string }>,
+): Promise<void> {
+  try {
+    await fetch(`${helperUrl()}/letra/aprendizado`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ artista, correcoes }),
+    });
+  } catch {
+    /* melhor esforço: sem importador alcançável, só perde o aprendizado desta vez */
+  }
+}
+
 /** Fetch a real artist photo (Deezer, via the importer to dodge CORS). */
 export async function fetchArtistImage(name: string): Promise<string | null> {
   try {

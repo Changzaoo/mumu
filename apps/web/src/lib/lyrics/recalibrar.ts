@@ -94,13 +94,21 @@ export function recalibrarLetra(letra: Lyrics, palavras: AsrWord[]): Lyrics | nu
 /** Linhas a partir da transcrição pura (quando não existe letra publicada). */
 export { palavrasEmLinhas } from '@/lib/lyrics/syncFromAudio';
 
-/** URL do relógio da faixa, derivada da URL da cópia no cofre. */
-export function urlDoTempo(remoteUrl: string, idioma: string): string | null {
+/**
+ * URL do relógio da faixa, derivada da URL da cópia no cofre.
+ *
+ * `artista`, quando informado, vai na query — o importador usa isto só para
+ * emprestar o vocabulário já aprendido daquele artista na TRANSCRIÇÃO livre
+ * (ver vocabulario.mjs no importador); não muda o alinhamento nem entra na
+ * chave do cache do relógio.
+ */
+export function urlDoTempo(remoteUrl: string, idioma: string, artista?: string): string | null {
   try {
     const u = new URL(remoteUrl);
     if (!/^\/blob\/[^/]+$/.test(u.pathname)) return null;
     u.pathname = `${u.pathname}/tempo`;
     u.searchParams.set('lang', idioma);
+    if (artista?.trim()) u.searchParams.set('artista', artista.trim());
     return u.toString();
   } catch {
     return null;

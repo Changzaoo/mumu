@@ -34,6 +34,7 @@ import {
 } from '@/lib/lyrics/recalibrar';
 import { remoteUrlFor } from '@/lib/local/localLibrary';
 import { letraConfirmadaPelaVoz, palavrasOuvidas } from '@/lib/lyrics/confirmarPelaVoz';
+import { aprenderComATranscricao } from '@/lib/lyrics/aprendizado';
 
 /**
  * Espaço entre perguntas ao importador e o número de tentativas.
@@ -130,15 +131,24 @@ function idiomaPara(letra: Lyrics | null): string {
 /**
  * A letra de verdade apareceu (confirmada pela voz): guarda, mostra na hora e
  * alinha ao áudio — a mesma estrada de quem já tinha letra publicada.
+ *
+ * `ouvidas` é o que o modelo tinha ouvido ATÉ AQUI — a mesma prova que
+ * `letraConfirmadaPelaVoz` usou para aceitar esta letra. Comparar as duas dá o
+ * vocabulário que o artista "fala errado" para o autotune/sotaque (ver
+ * lib/lyrics/aprendizado.ts): best-effort, nunca atrasa nem derruba o
+ * caminho principal.
  */
 async function usarLetraConfirmada(
-  trackId: string,
+  track: TrackDto,
   remota: string,
   letra: Lyrics,
+  ouvidas: readonly { text: string }[],
   manterVivo: () => boolean,
 ): Promise<Lyrics | null> {
+  const trackId = track.id;
   writeLyrics(trackId, letra);
   publicar(trackId, { fase: 'alinhando', letra });
+  aprenderComATranscricao(track.artists[0]?.name, ouvidas, letra.lines);
   const url = urlDoAlinhamento(remota, idiomaPara(letra));
   const alinhada = url ? await alinharAteChegar(trackId, url, letra, manterVivo) : null;
   return alinhada ?? letra;
@@ -161,7 +171,7 @@ async function perguntarAteChegar(
       // lugar com outro artista/duração? A voz decide.
       if (!letraPublicada(cachedLyrics(trackId))) {
         const confirmada = await letraConfirmadaPelaVoz(track, r.words);
-        if (confirmada) return usarLetraConfirmada(trackId, remota, confirmada, manterVivo);
+        if (confirmada) return usarLetraConfirmada(track, remota, confirmada, r.words, manterVivo);
       }
       const atual = letraPublicada(cachedLyrics(trackId));
       // Letra em cache: reancora nela. Sem letra nenhuma: a transcrição vira
@@ -193,7 +203,7 @@ async function perguntarAteChegar(
       procurouCedo = true;
       const confirmada = await letraConfirmadaPelaVoz(track, r.parcial.words);
       if (confirmada && manterVivo()) {
-        return usarLetraConfirmada(trackId, remota, confirmada, manterVivo);
+        return usarLetraConfirmada(track, remota, confirmada, r.parcial.words, manterVivo);
       }
     }
     // Transcrevendo: a tela mostra as palavras chegando — pergunta a cada 3 s e
@@ -303,7 +313,10 @@ export function pedirCalibracao(
       const url = urlDoAlinhamento(remota, idiomaPara(letra));
       return url ? alinharAteChegar(track.id, url, letra, manterVivo) : null;
     }
-    const url = urlDoTempo(remota, idiomaPara(null));
+    // Vocabulário do artista (ver vocabulario.mjs no importador) só faz
+    // sentido aqui: é a TRANSCRIÇÃO livre, o único caminho onde o modelo
+    // "adivinha" a palavra em vez de recebê-la pronta.
+    const url = urlDoTempo(remota, idiomaPara(null), track.artists[0]?.name);
     return url ? perguntarAteChegar(track, remota, url, manterVivo) : null;
   })()
     .catch(() => null)

@@ -87,9 +87,10 @@ export function proximaChave(entradas) {
  *   dir: string,
  *   log: (...a: unknown[]) => void,
  *   rivaPalavras?: (arquivo: string) => Promise<Array<{text: string, startMs: number}> | null>,
+ *   vocabulario?: { promptPara: (artista: string) => Promise<string> },
  * }} opcoes
  */
-export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
+export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
   /** chave → tarefa esperando vez. Map preserva ordem de chegada. */
   const fila = new Map();
   /** chave em processamento agora. */
@@ -149,13 +150,19 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     });
   }
 
-  async function transcrever({ arquivo, idioma }) {
+  async function transcrever({ arquivo, idioma, artista }) {
     if (idioma === 'en' && rivaPalavras) {
       const words = await rivaPalavras(arquivo).catch(() => null);
       if (words && words.length > 0) return { words, motor: 'riva', language: 'en' };
     }
     const lingua = idioma === 'en' ? 'en' : idioma === 'auto' ? '' : 'pt';
-    const r = await python(['transcrever', arquivo, lingua, MODELO]);
+    // VOCABULÁRIO DO ARTISTA como `initial_prompt`: primar o whisper com as
+    // gírias/palavras que a letra publicada já confirmou no passado para
+    // ESTE artista (ver vocabulario.mjs) — só na TRANSCRIÇÃO livre, que é
+    // onde o modelo pode errar o que ouviu; o ALINHAMENTO já recebe o texto
+    // certo e não precisa de dica nenhuma.
+    const prompt = artista ? await vocabulario?.promptPara(artista).catch(() => '') : '';
+    const r = await python(['transcrever', arquivo, lingua, MODELO, prompt || '']);
     return { words: r.words, motor: `whisper-${MODELO}`, language: r.language ?? idioma };
   }
 
@@ -236,10 +243,16 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras }) {
     return { status: atual === chave ? 'processando' : 'na-fila', posicao: fila.size };
   }
 
-  /** Transcrição (sem letra publicada): palavras com tempo e confiança. */
-  function pedir(id, arquivo, idioma) {
+  /**
+   * Transcrição (sem letra publicada): palavras com tempo e confiança.
+   * `artista`, quando informado, só empresta o VOCABULÁRIO já aprendido dele
+   * (ver transcrever acima) — não entra na chave do cache: o resultado em
+   * disco já gravado não é refeito, mas a próxima faixa NOVA daquele artista
+   * já sai mais certa.
+   */
+  function pedir(id, arquivo, idioma, artista) {
     const chave = `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO}`;
-    return pedirPorChave(chave, { tipo: 'transcrever', id, arquivo, idioma });
+    return pedirPorChave(chave, { tipo: 'transcrever', id, arquivo, idioma, artista });
   }
 
   /** Alinhamento de uma letra conhecida: tempo de cada linha e palavra. */

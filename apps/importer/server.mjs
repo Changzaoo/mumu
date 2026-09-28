@@ -52,6 +52,7 @@ import {
 } from './riva.mjs';
 import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
+import { criarVocabulario } from './vocabulario.mjs';
 import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
@@ -1380,6 +1381,13 @@ const blobMetaPath = (id) => path.join(BLOB_DIR, `${encodeURIComponent(id)}.json
 // Fica FORA do cofre de propósito — a poda do cofre não pode levar isto junto,
 // e o cofre não pode contar estes arquivos como áudio. Ver tempoDasPalavras.mjs.
 const TEMPO_DIR = process.env.TEMPO_DIR ?? path.join(path.dirname(BLOB_DIR), 'tempos');
+// Memória de correção por artista (ver vocabulario.mjs) — mesma pasta do
+// relógio das letras: os dois vivem fora do cofre, e a poda do cofre não
+// pode levar nenhum dos dois junto.
+const vocabulario = criarVocabulario({
+  arquivo: path.join(TEMPO_DIR, 'vocabulario.json'),
+  log: (...a) => console.log('[radinho-importer]', ...a),
+});
 const tempoDasPalavras = criarTempoDasPalavras({
   dir: TEMPO_DIR,
   log: (...a) => console.log('[radinho-importer]', ...a),
@@ -1390,6 +1398,7 @@ const tempoDasPalavras = criarTempoDasPalavras({
         return words.length > 0 && !timestampsAreDegenerate(words) ? words : null;
       }
     : undefined,
+  vocabulario,
 });
 
 /** Buffer a request body (binary-safe) up to `limit` bytes, else reject. */
@@ -2359,6 +2368,35 @@ async function main() {
         return;
       }
 
+      // ── Aprendizado: pares ouvido→real de uma transcrição confirmada ─────
+      // O cliente manda isto depois que uma transcrição foi CONFIRMADA contra
+      // a letra de verdade (ver confirmarPelaVoz.ts/calibragem.ts) — nunca
+      // texto solto sem prova. Mesmo freio de taxa que `/letra/outras-fontes`
+      // (é o mesmo tipo de rota pública, sem login, sujeita a abuso).
+      if (req.method === 'POST' && pathname === '/letra/aprendizado') {
+        if (!permitirRequisicaoDeLetra(ipDoPedido(req))) {
+          res.writeHead(429, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Muitos pedidos — tente novamente em instantes.' }));
+          return;
+        }
+        let corpo = null;
+        try {
+          corpo = JSON.parse((await readBody(req)) || '{}');
+        } catch {
+          corpo = null;
+        }
+        const artista = typeof corpo?.artista === 'string' ? corpo.artista.trim() : '';
+        const correcoes = Array.isArray(corpo?.correcoes) ? corpo.correcoes : [];
+        // Best-effort: o cliente não espera confirmação de aprendizado — a
+        // resposta é sempre 204, com ou sem nada para gravar.
+        if (artista && correcoes.length > 0) {
+          void vocabulario.registrar(artista, correcoes).catch(() => undefined);
+        }
+        res.writeHead(204);
+        res.end();
+        return;
+      }
+
       // ── Network speed probe (admin telemetry) ────────────────────────────
       // GET  /speed?bytes=N → N random bytes (timed by the client = download).
       // POST /speed         → swallow the body, ack its size (= upload).
@@ -2635,7 +2673,10 @@ async function main() {
         }
         const pedido = (params.get('lang') ?? 'auto').toLowerCase();
         const idioma = pedido.startsWith('en') ? 'en' : pedido.startsWith('pt') ? 'pt' : 'auto';
-        const r = await tempoDasPalavras.pedir(id, blobPath(id), idioma);
+        // Artista da faixa (opcional): só empresta o vocabulário já aprendido
+        // dele para a transcrição livre — ver vocabulario.mjs.
+        const artista = (params.get('artista') || '').trim().slice(0, 200) || undefined;
+        const r = await tempoDasPalavras.pedir(id, blobPath(id), idioma, artista);
         if ('pronto' in r) {
           res.writeHead(200, {
             'Content-Type': 'application/json',

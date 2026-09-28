@@ -14,10 +14,13 @@ Dois modos:
       Saída: {"linhas": [{"startMs", "endMs", "words": [{"text", "startMs",
       "endMs", "prob"}]}]} — uma linha por linha do texto, na mesma ordem.
 
-  transcrever <audio> <saida.json> <idioma> <modelo>
+  transcrever <audio> <saida.json> <idioma> <modelo> [prompt]
       Último recurso, quando não existe letra publicada em lugar nenhum. Cada
       palavra sai com a confiança do modelo (`prob`), para quem consome
       descartar o que ele não ouviu direito em vez de mostrar texto inventado.
+      `prompt`, quando presente, é o vocabulário já aprendido deste artista
+      (ver vocabulario.mjs) — primeira o decodificador com a gíria/palavra
+      certa em vez de deixar o modelo "adivinhar" de novo o que já errou antes.
       Saída: {"language", "words": [{"text", "startMs", "endMs", "prob"}]}
 
 Compatível com a chamada antiga (sem modo): trata como `transcrever`.
@@ -31,7 +34,7 @@ def ms(s):
     return round(float(s) * 1000)
 
 
-def transcrever(audio, saida, idioma, modelo):
+def transcrever(audio, saida, idioma, modelo, prompt=None):
     from faster_whisper import WhisperModel
 
     model = WhisperModel(modelo, device="cpu", compute_type="int8", cpu_threads=3)
@@ -44,6 +47,11 @@ def transcrever(audio, saida, idioma, modelo):
         condition_on_previous_text=False,
         vad_filter=False,
         beam_size=5,
+        # Vocabulário aprendido deste artista (ver vocabulario.mjs) — só um
+        # empurrão de contexto no INÍCIO da decodificação; não repete a cada
+        # segmento (isso é `condition_on_previous_text`, que fica desligado
+        # de propósito acima).
+        initial_prompt=prompt or None,
     )
     palavras = []
     parcial = saida + ".parcial"
@@ -116,7 +124,8 @@ def main():
     if modo == "alinhar":
         r = alinhar(audio, saida, idioma, modelo, args[4])
     else:
-        r = transcrever(audio, saida, idioma, modelo)
+        prompt = args[4] if len(args) > 4 and args[4] else None
+        r = transcrever(audio, saida, idioma, modelo, prompt)
     r["segundos"] = round(time.time() - inicio, 1)
     r["modelo"] = modelo
     with open(saida, "w", encoding="utf-8") as f:
