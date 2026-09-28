@@ -30,9 +30,9 @@ const sizes = {
  * PAUSAR NÃO CORTA: a névoa desacelera e esmaece até assentar parada onde
  * estava. Sem movimento pedido, ela continua lá, só sem se mexer.
  */
-function Aura({ playing }: { playing: boolean }) {
+function Aura({ playing, carregando }: { playing: boolean; carregando: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');
-  return <AuraDoPlay playing={playing} toque={toque} />;
+  return <AuraDoPlay playing={playing} toque={toque} carregando={carregando} />;
 }
 
 /**
@@ -118,7 +118,7 @@ export function PlayButton({
   // cima dela e sobra só a névoa em volta.
   return (
     <span className={cn('relative inline-grid shrink-0 place-items-center', sizes[size])}>
-      <Aura playing={playing} />
+      <Aura playing={playing} carregando={carregando} />
       {button}
     </span>
   );

@@ -597,11 +597,10 @@
   filter: blur(3.5px);
   image-rendering: auto;
 }
-/* A BORDA-CD do play: UM rastro furta-cor na borda — a cabeça brilhante no
-   topo e a cauda se apagando atrás, como um cometa — e sulcos concêntricos.
-   A névoa sai dessa cabeça e a segue (ver "O TORNADO" no AuraDoPlay). Quem
-   gira é o AuraDoPlay (transform); aqui só o desenho. Sobre o botão branco do
-   tema escuro vira um furta-cor pastel; sobre o preto do claro, brilha. */
+/* A BORDA-CD do play: UM rastro PRETO na borda — a cabeça forte no topo e a
+   cauda se apagando atrás, como um cometa — e sulcos concêntricos. A névoa
+   sai dessa cabeça e a segue (ver "O TORNADO" no AuraDoPlay). Quem gira é o
+   AuraDoPlay (transform); aqui só o desenho. */
 .aura-play-cd {
   background:
     repeating-radial-gradient(circle, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
@@ -609,15 +608,21 @@
       from 0deg,
       transparent 0deg,
       transparent 200deg,
-      hsl(280 85% 70% / 0.18) 250deg,
-      hsl(200 90% 65% / 0.4) 300deg,
-      hsl(170 90% 70% / 0.6) 340deg,
-      rgb(255 255 255 / 0.9) 358deg,
+      rgb(0 0 0 / 0.08) 250deg,
+      rgb(0 0 0 / 0.3) 310deg,
+      rgb(0 0 0 / 0.7) 352deg,
+      rgb(0 0 0 / 0.85) 358deg,
       transparent 360deg
     );
   -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 63% 97%, transparent 100%);
   mask: radial-gradient(circle, transparent 0 60%, #000 63% 97%, transparent 100%);
-  will-change: transform;
+  will-change: transform, opacity;
+  /* Some com suavidade enquanto o disco de carregamento gira (ver
+     AuraDoPlay): o rastro de um lado só fazia o disco parecer descentrado. */
+  transition: opacity 250ms ease-out;
+}
+.aura-play-cd[data-oculto='true'] {
+  opacity: 0;
 }
 
 :root[data-perf='baixo'] .aura-play-nevoa {

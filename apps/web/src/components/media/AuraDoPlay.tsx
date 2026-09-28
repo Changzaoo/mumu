@@ -98,7 +98,16 @@ const ESPIRAL = 7;
 /** Comprimento da cauda atrás do braço (rad): a névoa rarefaz depois disso. */
 const CAUDA = 2.2;
 
-export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolean }) {
+export function AuraDoPlay({
+  playing,
+  toque,
+  carregando = false,
+}: {
+  playing: boolean;
+  toque: boolean;
+  /** O disco de carregamento está girando no botão: o rastro sai de cena. */
+  carregando?: boolean;
+}) {
   const semMovimento = useSemMovimento();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cdRef = useRef<HTMLSpanElement>(null);
@@ -366,6 +375,7 @@ export function AuraDoPlay({ playing, toque }: { playing: boolean; toque: boolea
       <span
         ref={cdRef}
         aria-hidden
+        data-oculto={carregando}
         className="aura-play-cd pointer-events-none absolute inset-0 z-10 rounded-full"
       />
     </>
