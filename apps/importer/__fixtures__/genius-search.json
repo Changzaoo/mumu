@@ -1,0 +1,38 @@
+{
+  "meta": { "status": 200 },
+  "response": {
+    "sections": [
+      {
+        "type": "song",
+        "hits": [
+          {
+            "type": "song",
+            "result": {
+              "id": 4931397,
+              "title": "Mantém",
+              "full_title": "Mantém by WIU & Matuê",
+              "primary_artist_names": "WIU & Matuê",
+              "artist_names": "WIU & Matuê",
+              "path": "/Wiu-and-matue-mantem-lyrics",
+              "instrumental": false,
+              "lyrics_state": "complete"
+            }
+          },
+          {
+            "type": "song",
+            "result": {
+              "id": 999,
+              "title": "Outra Música Qualquer",
+              "full_title": "Outra Música Qualquer by Ninguém Conhecido",
+              "primary_artist_names": "Ninguém Conhecido",
+              "artist_names": "Ninguém Conhecido",
+              "path": "/Ninguem-conhecido-outra-musica-qualquer-lyrics",
+              "instrumental": false,
+              "lyrics_state": "complete"
+            }
+          }
+        ]
+      }
+    ]
+  }
+}

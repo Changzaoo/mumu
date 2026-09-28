@@ -8,9 +8,12 @@
  * TEMPO para o app parar de cair direto na transcrição por IA — que inventa
  * texto quando o sotaque ou o autotune atrapalham.
  *
- * Fontes:
+ * Fontes, na ordem em que são tentadas:
  *  - NetEase Cloud Music: busca livre + letra por id. Cobertura parcial para
  *    Brasil, mas quando tem, geralmente tem tempo.
+ *  - Genius: busca pública sem chave + raspagem da página (não tem endpoint de
+ *    texto puro). Cobre bem o trap/funk que o LRCLIB e a NetEase não têm, mas
+ *    a busca não devolve duração — a prova mínima usa só o artista.
  *  - lyrics.ovh: só texto puro, sem metadado nenhum para conferir — último
  *    recurso, e só quando título E artista são conhecidos (ver `tentarLyricsOvh`).
  *
@@ -175,6 +178,174 @@ async function tentarNetease(pedido) {
   return null;
 }
 
+// ── Genius (busca pública + raspagem do texto) ──────────────────────────────
+//
+// O acervo tem muito trap/funk que o LRCLIB e a NetEase não cobrem, e boa
+// parte já está cadastrada no Genius. A busca (`/api/search/song`) é pública
+// e sem chave; a LETRA em si só existe na página da música — o Genius não
+// tem endpoint de texto puro, então aqui é raspagem mesmo. Os versos vêm em
+// `<div data-lyrics-container="true">…</div>`, mas o PRIMEIRO desses blocos
+// vem com o cabeçalho da música MISTURADO dentro (título, botão de
+// colaboradores, prévia da bio) — sem removê-lo a "letra" começaria com
+// "Mantém Lyrics 17 Contributors Read More…".
+//
+// SEM DURAÇÃO: a busca do Genius não devolve duração de faixa, então a prova
+// mínima (`casaCandidato`) aqui só pode vir do ARTISTA — título sozinho nunca
+// basta (é a mesma regra de sempre, ver o comentário no topo do arquivo).
+const GENIUS_HEADERS = {
+  'User-Agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36',
+};
+
+async function geniusBuscar(termo) {
+  const url = `https://genius.com/api/search/song?q=${encodeURIComponent(termo)}`;
+  const res = await fetch(url, {
+    headers: GENIUS_HEADERS,
+    signal: AbortSignal.timeout(FONTE_TIMEOUT_MS),
+  });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  const hits = (data?.response?.sections ?? []).flatMap((s) => s?.hits ?? []);
+  return hits.map((h) => h?.result).filter((r) => r && typeof r.path === 'string');
+}
+
+/**
+ * Fatia UM elemento com aninhamento de `<div>` a partir do índice onde a tag
+ * de abertura começa — bracket-matching manual porque este módulo não tem
+ * (nem precisa de) um parser de HTML completo (cheerio/jsdom) só para isto.
+ * Devolve `null` quando o HTML está truncado/mal-formado (não fecha o bloco).
+ */
+function fatiaDoElemento(html, inicioTag) {
+  const fimAbertura = html.indexOf('>', inicioTag);
+  if (fimAbertura < 0) return null;
+  let profundidade = 1;
+  let pos = fimAbertura + 1;
+  const abrePadrao = /<div\b/gi;
+  const fechaPadrao = /<\/div>/gi;
+  while (profundidade > 0) {
+    abrePadrao.lastIndex = pos;
+    fechaPadrao.lastIndex = pos;
+    const abre = abrePadrao.exec(html);
+    const fecha = fechaPadrao.exec(html);
+    if (!fecha) return null;
+    if (abre && abre.index < fecha.index) {
+      profundidade += 1;
+      pos = abre.index + abre[0].length;
+    } else {
+      profundidade -= 1;
+      pos = fecha.index + fecha[0].length;
+    }
+  }
+  return { inicioConteudo: fimAbertura + 1, fimConteudo: pos - '</div>'.length, fim: pos };
+}
+
+/** Remove do HTML de um bloco de letra o cabeçalho da música (título, botão
+ *  de colaboradores, prévia da bio) — tudo que não é verso cantado. */
+function removerCromadoGenius(html) {
+  let atual = html;
+  for (const classe of ['LyricsHeader__Container', 'SongBioPreview__Container']) {
+    const re = new RegExp(`<div[^>]*class="[^"]*${classe}[^"]*"[^>]*>`, 'i');
+    const m = re.exec(atual);
+    if (!m) continue;
+    const fatia = fatiaDoElemento(atual, m.index);
+    if (fatia) atual = atual.slice(0, m.index) + atual.slice(fatia.fim);
+  }
+  // O botão de contagem de colaboradores ("17 Contributors") não é um `<div>`.
+  return atual.replace(/<button\b[^>]*>[\s\S]*?<\/button>/gi, '');
+}
+
+const ENTIDADES_HTML = {
+  amp: '&',
+  lt: '<',
+  gt: '>',
+  quot: '"',
+  '#39': "'",
+  '#x27': "'",
+  nbsp: ' ',
+};
+
+function decodificarEntidades(s) {
+  return s.replace(/&([a-z#0-9]+);/gi, (m, nome) => ENTIDADES_HTML[nome.toLowerCase()] ?? m);
+}
+
+/**
+ * HTML de um bloco `data-lyrics-container` → texto de letra, um verso por
+ * linha. Marcações de seção do próprio Genius ("[Chorus]", "[Verse 1]")
+ * viram cabeçalho de seção igual ao resto do app já entende (`ehCabecalho`
+ * no cliente) — mantidas de propósito, não são texto cantado mas ajudam a
+ * ler a letra.
+ */
+function textoDoContainer(htmlContainer) {
+  const semCromado = removerCromadoGenius(htmlContainer);
+  const comQuebras = semCromado.replace(/<br\s*\/?>/gi, '\n');
+  const semTags = comQuebras.replace(/<[^>]+>/g, '');
+  return decodificarEntidades(semTags)
+    .split('\n')
+    .map((l) => l.trim())
+    .filter(Boolean)
+    .join('\n');
+}
+
+/** Todos os blocos `data-lyrics-container="true"` da página, já como texto
+ *  puro (um bloco por verso do site, juntados por linha em branco). */
+export function extrairLetraDaPagina(html) {
+  const containers = [];
+  const abrePadrao = /<div[^>]*data-lyrics-container="true"[^>]*>/gi;
+  let m;
+  while ((m = abrePadrao.exec(html))) {
+    const fatia = fatiaDoElemento(html, m.index);
+    if (!fatia) continue;
+    containers.push(html.slice(fatia.inicioConteudo, fatia.fimConteudo));
+    abrePadrao.lastIndex = fatia.fim;
+  }
+  const texto = containers.map(textoDoContainer).filter(Boolean).join('\n\n');
+  return texto || null;
+}
+
+async function geniusLetra(caminho) {
+  const res = await fetch(`https://genius.com${caminho}`, {
+    headers: GENIUS_HEADERS,
+    signal: AbortSignal.timeout(FONTE_TIMEOUT_MS),
+  });
+  if (!res.ok) return null;
+  const html = await res.text();
+  return extrairLetraDaPagina(html);
+}
+
+/**
+ * "WIU & Matuê" → ["WIU", "Matuê"] — o Genius devolve os artistas da faixa
+ * como um único texto; separar pelos conectivos comuns deixa `casaCandidato`
+ * comparar cada nome (o `normalizarArtista` já ignora o conectivo sozinho).
+ */
+export function separarArtistas(texto) {
+  // Conectivo exige espaço dos dois lados — sem isto "feat." (com o ponto)
+  // cindia no meio de "\bfeat\.?\b" (o `?` deixa o `\b` passar sem comer o
+  // ponto) e sobrava um "." grudado no próximo nome.
+  return String(texto ?? '')
+    .split(/\s*,\s*|\s*&\s*|\s+feat\.?\s+|\s+ft\.?\s+|\s+x\s+|\s+e\s+|\s+and\s+|\s+with\s+/i)
+    .map((s) => s.trim())
+    .filter(Boolean);
+}
+
+/** Exportada para teste direto com fixtures — evita depender do cache em
+ *  disco de `buscarOutraFonteDeLetra` só para exercitar a busca do Genius. */
+export async function tentarGenius(pedido) {
+  const termo = [pedido.titulo, pedido.artista].filter(Boolean).join(' ').trim();
+  if (!termo) return null;
+  const hits = await geniusBuscar(termo);
+  for (const hit of hits) {
+    if (hit?.instrumental) continue;
+    const titulo = typeof hit?.title === 'string' ? hit.title : hit?.full_title;
+    if (typeof titulo !== 'string') continue;
+    const artistas = separarArtistas(hit?.primary_artist_names ?? hit?.artist_names);
+    // Sem duração na busca do Genius: a prova só pode vir do artista.
+    if (!casaCandidato({ titulo, artistas, duracaoSeg: null }, pedido)) continue;
+    const plain = await geniusLetra(hit.path).catch(() => null);
+    if (plain) return { synced: false, plain, fonte: 'genius' };
+  }
+  return null;
+}
+
 // ── lyrics.ovh (só texto puro, sem metadado para conferir) ─────────────────
 
 /**
@@ -260,6 +431,16 @@ export async function buscarOutraFonteDeLetra(pedido) {
     resultado = null;
   }
   if (!resultado) {
+    try {
+      resultado = await tentarGenius(normalizado);
+    } catch {
+      resultado = null;
+    }
+  }
+  if (!resultado) {
+    // ÚLTIMO da fila: é a única fonte sem NENHUM metadado para conferir (nem
+    // artista de volta, nem duração) — só entra quando as outras, que ao
+    // menos provam a identidade da faixa, não tinham nada.
     try {
       resultado = await tentarLyricsOvh(normalizado);
     } catch {
