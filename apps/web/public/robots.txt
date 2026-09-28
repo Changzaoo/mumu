@@ -1,4 +1,21 @@
 User-agent: *
 Allow: /
+# Páginas pessoais e de gestão: sem valor para quem busca, só gastam rastreio.
 Disallow: /admin
 Disallow: /settings
+Disallow: /library
+Disallow: /liked
+Disallow: /history
+Disallow: /downloads
+Disallow: /uploads
+Disallow: /dispositivo
+Disallow: /telemetria
+Disallow: /diagnostico
+Disallow: /onboarding
+Disallow: /login
+Disallow: /compartilhar
+Disallow: /mix/
+Disallow: /api/
+Disallow: /importer/
+
+Sitemap: https://radinho.online/sitemap.xml

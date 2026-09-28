@@ -12,7 +12,78 @@
     <meta name="color-scheme" content="dark light" />
     <meta name="theme-color" media="(prefers-color-scheme: dark)" content="#0A0A0C" />
     <meta name="theme-color" media="(prefers-color-scheme: light)" content="#FCFCFC" />
-    <meta name="description" content="radinho.online — sua rádio de música online" />
+    <!-- SEO. Estes são os valores da Home e o que robôs sem JavaScript (prévia
+         de link no WhatsApp, Facebook, X) enxergam em QUALQUER URL. O app
+         reescreve título, descrição, canonical e og:* a cada rota — ver
+         src/lib/seo.ts, que só troca o conteúdo destas mesmas tags. -->
+    <meta
+      name="description"
+      content="Ouça música online grátis no radinho.online: milhares de músicas de funk, rap, pop, rock, MPB, sertanejo e trap, rádios ao vivo e podcasts. Sem cadastro, direto no navegador."
+    />
+    <meta name="robots" content="index, follow, max-image-preview:large" />
+    <link rel="canonical" href="https://radinho.online/" />
+    <meta name="application-name" content="radinho.online" />
+    <meta property="og:type" content="website" />
+    <meta property="og:site_name" content="radinho.online" />
+    <meta property="og:locale" content="pt_BR" />
+    <meta property="og:title" content="radinho.online — Ouça música online grátis" />
+    <meta
+      property="og:description"
+      content="Ouça música online grátis no radinho.online: milhares de músicas de funk, rap, pop, rock, MPB, sertanejo e trap, rádios ao vivo e podcasts. Sem cadastro, direto no navegador."
+    />
+    <meta property="og:url" content="https://radinho.online/" />
+    <meta property="og:image" content="https://radinho.online/og.png" />
+    <meta property="og:image:width" content="1200" />
+    <meta property="og:image:height" content="630" />
+    <meta property="og:image:alt" content="radinho.online — ouça música online grátis" />
+    <meta name="twitter:card" content="summary_large_image" />
+    <meta name="twitter:title" content="radinho.online — Ouça música online grátis" />
+    <meta
+      name="twitter:description"
+      content="Ouça música online grátis no radinho.online: milhares de músicas de funk, rap, pop, rock, MPB, sertanejo e trap, rádios ao vivo e podcasts. Sem cadastro, direto no navegador."
+    />
+    <meta name="twitter:image" content="https://radinho.online/og.png" />
+    <script type="application/ld+json">
+      {
+        "@context": "https://schema.org",
+        "@graph": [
+          {
+            "@type": "WebSite",
+            "@id": "https://radinho.online/#site",
+            "url": "https://radinho.online/",
+            "name": "radinho.online",
+            "alternateName": ["radinho", "radinho online"],
+            "inLanguage": "pt-BR",
+            "publisher": { "@id": "https://radinho.online/#org" },
+            "potentialAction": {
+              "@type": "SearchAction",
+              "target": {
+                "@type": "EntryPoint",
+                "urlTemplate": "https://radinho.online/search?q={search_term_string}"
+              },
+              "query-input": "required name=search_term_string"
+            }
+          },
+          {
+            "@type": "Organization",
+            "@id": "https://radinho.online/#org",
+            "name": "radinho.online",
+            "url": "https://radinho.online/",
+            "logo": "https://radinho.online/icons/pwa-512.png"
+          },
+          {
+            "@type": "WebApplication",
+            "name": "radinho.online",
+            "url": "https://radinho.online/",
+            "applicationCategory": "MultimediaApplication",
+            "operatingSystem": "Web, Android, iOS, Windows, macOS",
+            "inLanguage": "pt-BR",
+            "description": "Player de música online grátis: músicas, rádios ao vivo e podcasts, sem cadastro, direto no navegador.",
+            "offers": { "@type": "Offer", "price": "0", "priceCurrency": "BRL" }
+          }
+        ]
+      }
+    </script>
     <meta name="mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-capable" content="yes" />
     <meta name="apple-mobile-web-app-title" content="radinho.online" />
@@ -26,7 +97,7 @@
     <link rel="icon" type="image/svg+xml" href="/icons/favicon.svg" />
     <link rel="icon" type="image/png" href="/icons/favicon.png" />
     <link rel="apple-touch-icon" href="/icons/apple-touch-icon.png" />
-    <title>radinho.online</title>
+    <title>radinho.online — Ouça música online grátis</title>
     <script>
       // Apply theme before first paint — no flash. Mirrors settingsStore persistence.
       (function () {
@@ -48,6 +119,23 @@
   </head>
   <body>
     <div id="root"></div>
+    <!-- Para quem não roda JavaScript (alguns robôs de busca): diz o que é o
+         site e dá caminhos rastreáveis para as páginas públicas. -->
+    <noscript>
+      <h1>radinho.online — Ouça música online grátis</h1>
+      <p>
+        Milhares de músicas de funk, rap, pop, rock, MPB, sertanejo e trap, rádios ao vivo e
+        podcasts. Sem cadastro, direto no navegador. Ative o JavaScript para ouvir.
+      </p>
+      <nav>
+        <a href="/discover">Descobrir</a> · <a href="/search">Buscar</a> ·
+        <a href="/radios">Rádios</a> · <a href="/podcasts">Podcasts</a> ·
+        <a href="/artistas">Artistas</a> · <a href="/genero/Funk">Funk</a> ·
+        <a href="/genero/Hip-Hop%2FRap">Rap</a> · <a href="/genero/Pop">Pop</a> ·
+        <a href="/genero/Rock">Rock</a> · <a href="/genero/MPB">MPB</a> ·
+        <a href="/genero/Sertanejo">Sertanejo</a> · <a href="/genero/Trap">Trap</a>
+      </nav>
+    </noscript>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>

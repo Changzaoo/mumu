@@ -6,7 +6,7 @@
   "description": "radinho.online web app — React 19 + Vite + Tailwind v4. Deep black, glass, one green.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc -b && vite build",
+    "build": "tsc -b && vite build && node scripts/gerarSitemap.mjs",
     "preview": "vite preview",
     "typecheck": "tsc -b",
     "test": "vitest run",

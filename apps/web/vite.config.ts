@@ -55,7 +55,13 @@ export default defineConfig({
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         // Never serve the SPA shell for API / importer-proxy calls.
-        navigateFallbackDenylist: [/^\/api/, /^\/importer/],
+        // Arquivos de SEO não são rotas do app: servir o index.html no lugar
+        // deles quebraria o sitemap para quem abre pelo navegador.
+        navigateFallbackDenylist: [
+          /^\/api/,
+          /^\/importer/,
+          /^\/(sitemap\.xml|robots\.txt|og\.png)$/,
+        ],
         runtimeCaching: [
           {
             urlPattern: ({ request }) => request.destination === 'image',
