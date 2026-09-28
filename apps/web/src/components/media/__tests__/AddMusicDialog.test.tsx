@@ -49,7 +49,7 @@ describe('AddMusicDialog', () => {
 
   it('enfileira e fecha na hora — não espera o download terminar', () => {
     const { onOpenChange } = abrir();
-    fireEvent.change(screen.getByPlaceholderText('Cole o link aqui'), {
+    fireEvent.change(screen.getByPlaceholderText(/Link do Spotify/), {
       target: { value: 'https://youtu.be/abc' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar' }));
@@ -65,7 +65,7 @@ describe('AddMusicDialog', () => {
       message: 'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
     });
     abrir();
-    fireEvent.change(screen.getByPlaceholderText('Cole o link aqui'), {
+    fireEvent.change(screen.getByPlaceholderText(/Link do Spotify/), {
       target: { value: 'https://open.spotify.com/track/x' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar' }));
@@ -76,7 +76,7 @@ describe('AddMusicDialog', () => {
 
   it('link ambíguo (watch?v=…&list=…): o botão extra força a playlist inteira', () => {
     abrir();
-    fireEvent.change(screen.getByPlaceholderText('Cole o link aqui'), {
+    fireEvent.change(screen.getByPlaceholderText(/Link do Spotify/), {
       target: { value: 'https://www.youtube.com/watch?v=x&list=PLabc' },
     });
     fireEvent.click(screen.getByRole('button', { name: 'Adicionar a playlist inteira' }));

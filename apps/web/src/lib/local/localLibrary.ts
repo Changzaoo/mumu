@@ -81,6 +81,7 @@ import {
   helperSupportsMetaTeam,
   importerHostLabel,
   importViaHelper,
+  servicoDeMusicaLabel,
   uploadTrackBlob,
 } from '@/lib/local/importerHelper';
 
@@ -1548,7 +1549,13 @@ async function enrichSequentially(ids: string[]): Promise<void> {
 
 // ── add by direct URL ───────────────────────────────────────────
 
-/** Streaming-platform PAGE hosts we must refuse (never scrape/resolve). */
+/**
+ * Streaming-platform PAGE hosts we must refuse (never scrape/resolve).
+ * Os links de música do Spotify, Apple Music, Deezer e Tidal passam ANTES
+ * desta lista (`servicoDeMusicaLabel`): eles só identificam a música, e o
+ * importador baixa o áudio do YouTube. O resto desses domínios (podcast,
+ * página de artista em spotify.com…) segue recusado aqui.
+ */
 const STREAMING_HOSTS: ReadonlyArray<{ match: RegExp; label: string }> = [
   { match: /(^|\.)spotify\.com$/i, label: 'Spotify' },
   { match: /(^|\.)youtube\.com$/i, label: 'YouTube' },
@@ -1585,7 +1592,11 @@ export function validateImportUrl(url: string): { ok: true } | { ok: false; mess
     return { ok: false, message: 'Cole um link válido (que comece com http:// ou https://).' };
   }
   const host = parsed.hostname.toLowerCase();
-  if (!importerHostLabel(host) && STREAMING_HOSTS.some((s) => s.match.test(host))) {
+  if (
+    !importerHostLabel(host) &&
+    !servicoDeMusicaLabel(host) &&
+    STREAMING_HOSTS.some((s) => s.match.test(host))
+  ) {
     return {
       ok: false,
       message:
@@ -1688,11 +1699,15 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   // their audio directly (CORS + player signature). If the user is running the
   // local importer helper (apps/importer), route the link through it — it fetches
   // + converts to MP3 on their own machine and we store it like any local track.
-  if (importerHostLabel(host)) {
+  // Spotify/Apple Music/Deezer/Tidal: o importador acha a mesma música no
+  // YouTube e devolve o vídeo em `sourceUrl` — é ele a origem gravada, porque
+  // é o que o /stream e o cofre sabem tocar de novo.
+  if (importerHostLabel(host) || servicoDeMusicaLabel(host)) {
     const imported = await importViaHelper(parsed.toString());
+    const origem = imported.sourceUrl ?? parsed.toString();
     const track = await saveBlobAsLocalTrack(imported.blob, {
       title: `${imported.title}.mp3`,
-      sourceUrl: parsed.toString(),
+      sourceUrl: origem,
       coverUrl: imported.coverUrl,
       artist: imported.artist,
       track: imported.track,
@@ -1700,7 +1715,7 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
       uploader: imported.uploader,
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
-    void publishSharedTrack(track, parsed.toString()); // share with the community
+    void publishSharedTrack(track, origem); // share with the community
     if (!opts.silent)
       pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;

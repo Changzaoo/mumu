@@ -107,8 +107,9 @@ export function AddMusicDialog({
         <DialogHeader>
           <DialogTitle>Adicionar música</DialogTitle>
           <DialogDescription>
-            Cole o link de uma música ou de uma playlist
-            {podeEnviarArquivo ? ' ou envie um arquivo de áudio do seu aparelho.' : '.'}
+            Cole o link de uma música, álbum ou playlist do Spotify, Apple Music, Deezer,
+            YouTube ou SoundCloud
+            {podeEnviarArquivo ? ' — ou envie um arquivo de áudio do seu aparelho.' : '.'}
           </DialogDescription>
         </DialogHeader>
         <div className="space-y-3">
@@ -117,7 +118,7 @@ export function AddMusicDialog({
               value={url}
               onChange={(e) => setUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && addLink()}
-              placeholder="Cole o link aqui"
+              placeholder="Link do Spotify, Apple Music, Deezer, YouTube…"
               inputMode="url"
               spellCheck={false}
             />

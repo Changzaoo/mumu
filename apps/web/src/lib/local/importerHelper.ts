@@ -73,6 +73,45 @@ export function importerHostLabel(host: string): string | null {
 }
 
 /**
+ * Serviços de streaming cujo link só IDENTIFICA a música: o importador lê
+ * nome/artista/duração e baixa o áudio do YouTube (nunca do serviço, que é
+ * DRM). Espelha o `analisarLinkDeMusica` de apps/importer/linkDeMusica.mjs.
+ */
+export const MUSIC_SERVICE_HOSTS: ReadonlyArray<{ match: RegExp; label: string }> = [
+  { match: /^open\.spotify\.com$/i, label: 'Spotify' },
+  { match: /^spotify\.link$/i, label: 'Spotify' },
+  { match: /^music\.apple\.com$/i, label: 'Apple Music' },
+  { match: /^(www\.)?deezer\.com$/i, label: 'Deezer' },
+  { match: /^(deezer\.page\.link|link\.deezer\.com)$/i, label: 'Deezer' },
+  { match: /^(www\.|listen\.)?tidal\.com$/i, label: 'Tidal' },
+];
+
+export function servicoDeMusicaLabel(host: string): string | null {
+  return MUSIC_SERVICE_HOSTS.find((h) => h.match.test(host))?.label ?? null;
+}
+
+function hostOf(url: string): string {
+  try {
+    return new URL(url).hostname.toLowerCase();
+  } catch {
+    return '';
+  }
+}
+
+/** Álbum ou playlist de Spotify/Apple Music/Deezer/Tidal (não uma faixa só). */
+function ehListaDeServico(u: URL): boolean {
+  const host = u.hostname.toLowerCase();
+  if (!servicoDeMusicaLabel(host)) return false;
+  const partes = u.pathname.split('/').filter(Boolean);
+  if (host === 'music.apple.com') {
+    // /br/album/nome/123?i=456 é UMA faixa dentro do álbum.
+    if (partes.includes('playlist')) return true;
+    return partes.includes('album') && !u.searchParams.has('i');
+  }
+  return partes.includes('album') || partes.includes('playlist');
+}
+
+/**
  * Addresses that only work on the machine/network that saved them — old
  * localhost defaults, LAN IPs, Tailscale/tailnet names. A device carrying one
  * of these from an earlier build can never reach the importer, so we drop it
@@ -235,6 +274,11 @@ export interface HelperImport {
   album: string | null;
   /** Channel/uploader name — the artist identity for underground/self-published tracks. */
   uploader: string | null;
+  /**
+   * Link de serviço (Spotify, Apple Music, Deezer): o vídeo do YouTube que o
+   * importador achou para a música — é ELE a origem que o /stream sabe tocar.
+   */
+  sourceUrl?: string | null;
 }
 
 export interface PlaylistEntry {
@@ -298,7 +342,7 @@ export function isPlaylistUrl(url: string): boolean {
       return u.searchParams.has('list') && !u.searchParams.has('v');
     }
     if (host.endsWith('soundcloud.com')) return /\/sets\//.test(u.pathname);
-    return false;
+    return ehListaDeServico(u);
   } catch {
     return false;
   }
@@ -1143,6 +1187,8 @@ interface JobStatus {
     track?: string | null;
     album?: string | null;
     uploader?: string | null;
+    /** Link de serviço (Spotify…): o vídeo do YouTube que o importador achou. */
+    sourceUrl?: string | null;
   } | null;
 }
 
@@ -1216,6 +1262,7 @@ async function importViaJob(url: string): Promise<HelperImport> {
     track: meta.track ?? null,
     album: meta.album ?? null,
     uploader: meta.uploader ?? null,
+    sourceUrl: meta.sourceUrl ?? null,
   };
 }
 
@@ -1223,6 +1270,11 @@ async function importViaJob(url: string): Promise<HelperImport> {
 export async function importViaHelper(url: string): Promise<HelperImport> {
   // Importador novo → fluxo por job (sem 524, sem progresso perdido).
   if ((await helperCaps()).includes('jobs')) return importViaJob(url);
+  // O /import clássico não sabe ler link de serviço (só o fluxo por job resolve
+  // Spotify/Deezer… para o YouTube) — melhor dizer do que mandar e tomar 400.
+  if (servicoDeMusicaLabel(hostOf(url))) {
+    throw new Error('O importador precisa ser atualizado para ler esse link.');
+  }
 
   let res: Response;
   try {
