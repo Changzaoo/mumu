@@ -172,8 +172,13 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   );
   const [ativa, setAtiva] = useState({ linha: -1, palavra: -1 });
   useEffect(() => {
-    if (!synced || !lyrics) {
-      setAtiva({ linha: -1, palavra: -1 });
+    // PAUSADO NÃO GASTA QUADRO: `isPlaying` estava só nas dependências (para
+    // reabrir o efeito), mas o laço em si nunca olhava para ele — pausar a
+    // música deixava este rAF girando a 60/s para sempre, recalculando a
+    // mesma linha/palavra sem nada de novo para mostrar. O mesmo desperdício
+    // que `SpectrumVisualizer` já evita.
+    if (!synced || !lyrics || !isPlaying) {
+      if (!synced || !lyrics) setAtiva({ linha: -1, palavra: -1 });
       return;
     }
     let raf = 0;
