@@ -610,21 +610,23 @@
   filter: blur(3.5px);
   image-rendering: auto;
 }
-/* A BORDA-CD do play: UM rastro PRETO na borda — a cabeça forte no topo e a
+/* A BORDA-CD do play: UM rastro na COR DO ÍCONE (--accent-fg) na borda — preto
+   no tema escuro (botão branco), branco no claro (botão quase preto); preto fixo
+   sumia no botão escuro do tema claro. A cabeça forte no topo e a
    cauda se apagando atrás, como um cometa — e sulcos concêntricos. A névoa
    sai dessa cabeça e a segue (ver "O TORNADO" no AuraDoPlay). Quem gira é o
    AuraDoPlay (transform); aqui só o desenho. */
 .aura-play-cd {
   background:
-    repeating-radial-gradient(circle, rgb(0 0 0 / 0.07) 0 1px, transparent 1px 3px),
+    repeating-radial-gradient(circle, hsl(var(--accent-fg) / 0.07) 0 1px, transparent 1px 3px),
     conic-gradient(
       from 0deg,
       transparent 0deg,
       transparent 200deg,
-      rgb(0 0 0 / 0.08) 250deg,
-      rgb(0 0 0 / 0.3) 310deg,
-      rgb(0 0 0 / 0.7) 352deg,
-      rgb(0 0 0 / 0.85) 358deg,
+      hsl(var(--accent-fg) / 0.08) 250deg,
+      hsl(var(--accent-fg) / 0.3) 310deg,
+      hsl(var(--accent-fg) / 0.7) 352deg,
+      hsl(var(--accent-fg) / 0.85) 358deg,
       transparent 360deg
     );
   -webkit-mask: radial-gradient(circle, transparent 0 60%, #000 63% 97%, transparent 100%);

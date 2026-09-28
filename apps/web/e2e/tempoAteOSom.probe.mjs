@@ -9,6 +9,11 @@
  * Uso (em apps/web):
  *   node e2e/tempoAteOSom.probe.mjs [url] [faixas]
  *   node e2e/tempoAteOSom.probe.mjs https://radinho.online 12
+ *   node e2e/tempoAteOSom.probe.mjs https://radinho.online 12 --s8
+ *
+ * `--s8` emula um Galaxy S8: tela 360×740 (DPR 3), toque, user agent de
+ * Android, CPU 4× mais lenta e 4G (9 Mbps / 60 ms). É o aparelho em que a
+ * espera para começar a tocar mais aparece.
  *
  * Não é spec do Playwright de propósito: mede a PRODUÇÃO (rede, cofre, API),
  * que não cabe num portão de CI — o número varia com o 4G de quem mede.
@@ -16,11 +21,36 @@
 /* global window, HTMLMediaElement -- os corpos de evaluate/addInitScript rodam no navegador */
 import { chromium } from '@playwright/test';
 
-const url = process.argv[2] ?? 'https://radinho.online';
-const faixas = Number(process.argv[3] ?? 10);
+const posicionais = process.argv.slice(2).filter((a) => !a.startsWith('--'));
+const s8 = process.argv.includes('--s8');
+const url = posicionais[0] ?? 'https://radinho.online';
+const faixas = Number(posicionais[1] ?? 10);
 
 const browser = await chromium.launch({ args: ['--autoplay-policy=no-user-gesture-required'] });
-const page = await browser.newPage();
+const page = await browser.newPage(
+  s8
+    ? {
+        viewport: { width: 360, height: 740 },
+        deviceScaleFactor: 3,
+        isMobile: true,
+        hasTouch: true,
+        userAgent:
+          'Mozilla/5.0 (Linux; Android 9; SM-G950F) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/128.0 Mobile Safari/537.36',
+      }
+    : {},
+);
+if (s8) {
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send('Emulation.setCPUThrottlingRate', { rate: 4 });
+  await cdp.send('Network.enable');
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false,
+    latency: 60,
+    downloadThroughput: (9 * 1024 * 1024) / 8,
+    uploadThroughput: (3 * 1024 * 1024) / 8,
+  });
+  console.log('emulando Galaxy S8 (CPU 4×, 4G)');
+}
 
 // Relógio dentro da página: o primeiro `timeupdate` com o tempo andando, em
 // qualquer <audio>. O Howler cria os elementos FORA do documento, e aí nem a
