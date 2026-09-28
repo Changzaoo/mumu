@@ -54,7 +54,22 @@ export function dispositivoFraco(): boolean {
   // iPhone por falta de informação seria pior que o problema.
   if (nucleos > 0 && nucleos < NUCLEOS_MINIMOS) return true;
   if (memoria > 0 && memoria < MEMORIA_MINIMA) return true;
+  // ANDROID COM ATÉ 4 GB. Oito núcleos e 4 GB passavam no teste acima — e é
+  // exatamente o Galaxy S8 (2017), cuja GPU sofre com o vidro: 21 superfícies
+  // com `backdrop-filter` re-borradas a cada quadro numa tela de DPR 3–4. O
+  // monitor de quadros não o pegava porque o travamento vinha em tarefas
+  // longas espaçadas, não em rajadas. Núcleo não mede GPU; memória, num
+  // Android, acompanha a geração do aparelho. O Chrome arredonda para baixo
+  // (6 GB → 4), então isto cobre intermediários e antigos, e nunca um iPhone
+  // (sem `deviceMemory`) nem um computador.
+  if (ehAndroid(nav) && memoria > 0 && memoria <= MEMORIA_MINIMA) return true;
   return false;
+}
+
+function ehAndroid(nav: Navigator): boolean {
+  const dados = (nav as Navigator & { userAgentData?: { platform?: string } }).userAgentData;
+  if (dados?.platform) return dados.platform === 'Android';
+  return /Android/i.test(nav.userAgent);
 }
 
 /**

@@ -167,7 +167,30 @@ let groupsCache: {
   todos?: Grupos;
   /** Só o que é do usuário (sem o acervo emprestado) — a página /library. */
   proprios?: Grupos;
+  /** id → entrada. Ver `porId`. */
+  indice?: Map<string, LibraryEntry>;
 } | null = null;
+
+/**
+ * A entrada de um id, sem varrer a biblioteca.
+ *
+ * Era `read().find(...)` em mais de vinte lugares, e um deles fica no caminho
+ * de TODO cartão de faixa: o filtro de idade pergunta o veredito de cada faixa
+ * a cada render. Com o acervo do app são 5 mil entradas por pergunta — medido
+ * em 2026-09-28 num Galaxy S8 emulado, era o maior custo recorrente da Home.
+ * O índice nasce na primeira consulta e cai junto com os outros derivados a
+ * cada mudança do registro. Em id repetido vale a PRIMEIRA entrada, como no
+ * `find` que ele substitui.
+ */
+function porId(id: string): LibraryEntry | undefined {
+  const derivados = (groupsCache ??= {});
+  if (!derivados.indice) {
+    const indice = new Map<string, LibraryEntry>();
+    for (const e of read()) if (!indice.has(e.track.id)) indice.set(e.track.id, e);
+    derivados.indice = indice;
+  }
+  return derivados.indice.get(id);
+}
 
 interface Grupos {
   albums: LocalAlbum[];
@@ -1036,7 +1059,7 @@ async function uploadAndLink(id: string, blob: Blob): Promise<void> {
   // que a poda levar os bytes, em vez de devolver 404 para sempre.
   const url = await uploadTrackBlob(id, blob, sourceUrlFor(id));
   if (!url) return;
-  const current = read().find((e) => e.track.id === id);
+  const current = porId(id);
   if (!current) return; // removed while uploading
   patchEntry(id, {
     ...current,
@@ -1054,7 +1077,7 @@ async function uploadAndLink(id: string, blob: Blob): Promise<void> {
  * a registrada.
  */
 export function reportDeadRemote(id: string, deadUrl: string): void {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry || entry.remoteUrl !== deadUrl) return;
 
   // CONFIRMAR ANTES DE DESCARTAR — e isso passou a ser obrigatório.
@@ -1081,7 +1104,7 @@ export function reportDeadRemote(id: string, deadUrl: string): void {
     }
     if (!morta) return;
 
-    const atual = read().find((e) => e.track.id === id);
+    const atual = porId(id);
     if (!atual || atual.remoteUrl !== deadUrl) return; // mudou enquanto sondava
     const { remoteUrl: _dead, ...rest } = atual;
     patchEntry(id, {
@@ -1404,7 +1427,7 @@ function patchEntry(id: string, next: LibraryEntry): void {
  * resposta que estava em voo.
  */
 export function hidratarEntrada(id: string, extras: Partial<LibraryEntry>): void {
-  const atual = read().find((e) => e.track.id === id);
+  const atual = porId(id);
   if (!atual) return;
   const track = extras.track ? { ...atual.track, ...extras.track } : atual.track;
   const proximo: LibraryEntry = {
@@ -1434,7 +1457,7 @@ export function hidratarEntrada(id: string, extras: Partial<LibraryEntry>): void
  * "buscar capa" retry. Never throws; keeps the audio + id unchanged.
  */
 export async function enrichLocalTrack(id: string): Promise<boolean> {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry) return false;
   // Hint = the artist we already have (from the filename / a prior confirmed
   // match) — NEVER an AI guess (that hallucinated, e.g. Charlie Brown → Geraldo
@@ -1453,7 +1476,7 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
   const verified =
     (await verificadorConfirma(entry.track.title, currentArtist)) ??
     (await verificadorPorTitulo(entry.track.title, currentArtist));
-  const current = read().find((e) => e.track.id === id);
+  const current = porId(id);
   if (!current) return false;
 
   if (!verified) return false; // couldn't confirm → NEVER guess; leave as-is
@@ -1489,7 +1512,7 @@ export async function enrichLocalTrack(id: string): Promise<boolean> {
 /** AGENTE DE CATEGORIAS: aplica um gênero classificado a uma faixa (patch
  *  mínimo — não mexe em crédito/capa; ver lib/local/genreAgent.ts). */
 export function setTrackGenre(id: string, genre: string | null): void {
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   // `null` é um valor legítimo aqui: é como a revisão esvazia um rótulo que não
   // era gênero ("Brasileira" é nacionalidade) e devolve a faixa para a fila do
   // agente — que só enxerga quem está SEM categoria. Ver generoCoerencia.ts.
@@ -1520,7 +1543,7 @@ export function setTrackGenre(id: string, genre: string | null): void {
  */
 export function setTrackDuration(id: string, durationMs: number): void {
   if (!Number.isFinite(durationMs) || durationMs < 1000) return;
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   if (!cur) return;
   if ((cur.track.durationMs ?? 0) > 0) return; // já tinha: não se mexe
   const track = { ...cur.track, durationMs: Math.round(durationMs) };
@@ -1537,7 +1560,7 @@ export function setTrackDuration(id: string, durationMs: number): void {
  * e o cofre usam o link novo.
  */
 export function setTrackSource(id: string, sourceUrl: string): void {
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   if (!cur || cur.sourceUrl === sourceUrl) return;
   patchEntry(id, { ...cur, sourceUrl });
 }
@@ -1550,7 +1573,7 @@ async function enrichSequentially(ids: string[]): Promise<void> {
     // O catálogo não confirmou, mas a TAG do arquivo pode já ter dado um nome
     // bom o bastante para achar a letra — só não vale gastar a busca com
     // "Desconhecido", que nunca casa com nada no LRCLIB.
-    const entry = read().find((e) => e.track.id === id);
+    const entry = porId(id);
     const artist = entry?.track.artists[0]?.name;
     if (entry && artist && artist !== 'Desconhecido') queueLyricsSync(entry.track);
   }
@@ -1808,7 +1831,7 @@ export function list(): LibraryEntry[] {
 }
 
 export function has(id: string): boolean {
-  return read().some((e) => e.track.id === id);
+  return porId(id) !== undefined;
 }
 
 /** A locally-stored track imported from the same source URL, if any. */
@@ -1837,12 +1860,12 @@ export function findOwnedTrack(title: string, artist?: string): TrackDto | null 
 
 /** The original import link for a local track (for streaming on a device without the audio). */
 export function sourceUrlFor(id: string): string | null {
-  return read().find((e) => e.track.id === id)?.sourceUrl ?? null;
+  return porId(id)?.sourceUrl ?? null;
 }
 
 /** The uploaded-audio stream URL for a local track, if it was uploaded. */
 export function remoteUrlFor(id: string): string | null {
-  return read().find((e) => e.track.id === id)?.remoteUrl ?? null;
+  return porId(id)?.remoteUrl ?? null;
 }
 
 /** Os bytes desta faixa estão mesmo no cofre deste aparelho? Diferente de
@@ -1854,7 +1877,7 @@ export async function hasStoredAudio(id: string): Promise<boolean> {
 
 /** A entrada do registro, para diagnóstico. */
 export function entryFor(id: string): LibraryEntry | null {
-  return read().find((e) => e.track.id === id) ?? null;
+  return porId(id) ?? null;
 }
 
 /**
@@ -1910,7 +1933,7 @@ export async function repairMissingAudio(): Promise<number> {
  * derrubar as outras.
  */
 export async function garantirAudioLocal(id: string): Promise<boolean> {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry) return false;
 
   // Pode já estar no cofre e só faltar o object URL desta sessão — nesse caso
@@ -2367,7 +2390,7 @@ export async function blobFor(id: string): Promise<Blob | null> {
 }
 
 export async function remove(id: string): Promise<void> {
-  const alvo = read().find((e) => e.track.id === id);
+  const alvo = porId(id);
   // FAIXA EMPRESTADA DO ACERVO: some da tela deste usuário e para por aí.
   //
   // O caminho normal apaga a cópia que o importador serve (`deleteTrackBlob`),
@@ -2698,7 +2721,7 @@ export function totalBytes(): number {
 
 /** Advertise-able metadata for a local track (for P2P manifests). */
 export function sharedMeta(id: string): SharedTrackMeta | null {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry) return null;
   const { track } = entry;
   return {
@@ -3254,7 +3277,7 @@ export function guessArtistFromSiblings(
 }
 
 async function healCoverFor(id: string): Promise<boolean> {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry) return true; // removida no meio do passe — não é mais pendência
   const { track } = entry;
   const artist =
@@ -3343,7 +3366,7 @@ async function healCoverFor(id: string): Promise<boolean> {
     if (thumb && (await coverUrlLoads(thumb))) cover = thumb;
   }
 
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   if (!cur) return true;
   const nextCover = cover ? safeCoverUrl(cover) : null;
   const label = cur.track.label ?? credits?.label ?? null;
@@ -3370,10 +3393,16 @@ async function healCoverFor(id: string): Promise<boolean> {
       ? { id: `local-album:${id}`, title: confirmed.album, slug: '', coverUrl: null }
       : cur.track.album;
 
+  // `?? null` dos dois lados: faixa sem o campo (`undefined`) e faixa com
+  // `null` são a mesma ausência. Sem isso `null !== undefined` dava "mudou" em
+  // TODA faixa sem selo/compositor, e a varredura de capas regravava a
+  // biblioteca a cada faixa sem ter mudado nada — ~1 gravação por segundo, cada
+  // uma redesenhando a tela inteira. Medido em 2026-09-28 num Galaxy S8
+  // emulado: uma tarefa de ~700ms por segundo enquanto a varredura corria.
   const changed =
     Boolean(nextCover) ||
-    label !== cur.track.label ||
-    composer !== cur.track.composer ||
+    label !== (cur.track.label ?? null) ||
+    composer !== (cur.track.composer ?? null) ||
     artists !== cur.track.artists ||
     title !== cur.track.title ||
     album !== cur.track.album;
@@ -3636,7 +3665,7 @@ function markAudited(ids: string[]): void {
 /** Strip a credit we KNOW is wrong: better "Desconhecido" than the wrong name
  *  (the wrong artist photo disappears with it — photos are looked up by name). */
 function clearWrongCredit(id: string): void {
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   if (!cur) return;
   const track: TrackDto = {
     ...cur.track,
@@ -3728,7 +3757,7 @@ const hostOf = (url: string): string => {
 type RederiveResult = 'failed' | 'unchanged' | 'updated';
 
 async function rederiveTrackFromSource(id: string): Promise<RederiveResult> {
-  const entry = read().find((e) => e.track.id === id);
+  const entry = porId(id);
   if (!entry?.sourceUrl || importerHostLabel(hostOf(entry.sourceUrl)) === null) return 'unchanged';
   const meta = await fetchTrackMeta(entry.sourceUrl).catch(() => null);
   if (!meta) return 'failed';
@@ -3825,7 +3854,7 @@ async function redriveFromSource(limit = 6): Promise<boolean> {
 
 /** Split a single merged artist credit on an existing track (when enrichment couldn't). */
 async function resplitArtistsInPlace(id: string): Promise<void> {
-  const cur = read().find((e) => e.track.id === id);
+  const cur = porId(id);
   if (!cur || cur.track.artists.length > 1) return; // already split
   const combined = cur.track.artists[0]?.name?.trim();
   if (!combined || combined === 'Desconhecido') return;
