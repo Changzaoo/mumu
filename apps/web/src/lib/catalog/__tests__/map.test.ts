@@ -57,4 +57,13 @@ describe('audiusTrackToDto', () => {
     expect(dto.playsCount).toBe(0);
     expect(dto.durationMs).toBe(0);
   });
+
+  it('nó que omite `duration` vira 0:00 (não NaN) — ver guarda em map.ts', () => {
+    // A API do Audius às vezes devolve a faixa sem `duration` nenhuma; sem
+    // `Number.isFinite`, `undefined * 1000` vaza como NaN até o cronômetro da UI.
+    const semDuracao = { ...sample, duration: undefined } as unknown as AudiusTrack;
+    const dto = audiusTrackToDto(semDuracao);
+    expect(dto.durationMs).toBe(0);
+    expect(Number.isNaN(dto.durationMs)).toBe(false);
+  });
 });

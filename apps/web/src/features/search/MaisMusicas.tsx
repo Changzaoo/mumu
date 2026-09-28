@@ -62,10 +62,24 @@ function chaveDaMusica(t: TrackDto): string {
 const VERSAO_ALTERADA =
   /\b(?:speed ?up|sped ?up|slowed|reverb|8d|nightcore|bass ?boost(?:ed)?|karaok[eê]|instrumental|cover|reac(?:t|tion|ting)|reagindo|react|tutorial|aula|remix)\b/i;
 
+/**
+ * Resultado da busca por baixo: distingue "não achou nada" de "a fonte caiu"
+ * (`falha`/`limite`) — juntar os dois faria quem esbarrou num 429/importador
+ * fora do ar ler "confira a grafia", quando o problema não é a busca dele.
+ */
+interface ResultadoBusca {
+  faixas: TrackDto[];
+  motivoFalha: 'limite' | 'falha' | null;
+}
+
 /** Busca por baixo e monta faixas prontas para tocar; nunca lança. */
-async function buscarFaixas(termo: string, signal: AbortSignal): Promise<TrackDto[] | null> {
+async function buscarFaixas(termo: string, signal: AbortSignal): Promise<ResultadoBusca> {
   const busca = await buscarNoYoutube(termo, signal);
-  if (!busca.ok) return null;
+  if (!busca.ok) {
+    // 'login' já tem tela própria (ver `logado` abaixo) — só falha/limite
+    // precisam ser sinalizados aqui como "a fonte caiu", não "vazio".
+    return { faixas: [], motivoFalha: busca.motivo === 'login' ? null : busca.motivo };
+  }
   const pedeAlterada = VERSAO_ALTERADA.test(termo);
   const faixas = await Promise.all(
     busca.resultados
@@ -75,7 +89,7 @@ async function buscarFaixas(termo: string, signal: AbortSignal): Promise<TrackDt
         (r) => localLibrary.findBySource(r.url) ?? faixaDoYoutube(r),
       ),
   );
-  return faixas.filter((f): f is TrackDto => f !== null);
+  return { faixas: faixas.filter((f): f is TrackDto => f !== null), motivoFalha: null };
 }
 
 export function MaisMusicas({
@@ -111,7 +125,7 @@ export function MaisMusicas({
   const faixas = useMemo(() => {
     const vistas = new Set(jaNaTela.map(chaveDaMusica));
     const saida: TrackDto[] = [];
-    for (const f of busca.data ?? []) {
+    for (const f of busca.data?.faixas ?? []) {
       const chave = chaveDaMusica(f);
       if (vistas.has(chave)) continue;
       vistas.add(chave);
@@ -150,13 +164,27 @@ export function MaisMusicas({
     }
   };
 
-  const vazio = (
-    <EmptyState
-      icon={SearchX}
-      title={`Nada encontrado para "${termo}"`}
-      description="Confira a grafia ou tente o nome do artista junto."
-    />
-  );
+  const motivoFalha = busca.data?.motivoFalha ?? null;
+  const vazio =
+    motivoFalha === 'limite' ? (
+      <EmptyState
+        icon={SearchX}
+        title="Muitas buscas em pouco tempo"
+        description="Espere um instante e tente de novo — não é que a música não existe."
+      />
+    ) : motivoFalha === 'falha' ? (
+      <EmptyState
+        icon={SearchX}
+        title="Busca fora do ar agora"
+        description="Não deu para procurar por baixo desta vez. Tente de novo em instantes."
+      />
+    ) : (
+      <EmptyState
+        icon={SearchX}
+        title={`Nada encontrado para "${termo}"`}
+        description="Confira a grafia ou tente o nome do artista junto."
+      />
+    );
 
   if (!carregandoConta && !logado) {
     if (!semNadaNoAcervo) return null;

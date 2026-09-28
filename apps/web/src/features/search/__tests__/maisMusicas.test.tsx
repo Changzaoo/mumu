@@ -138,4 +138,19 @@ describe('MaisMusicas', () => {
     await new Promise((r) => setTimeout(r, 900));
     expect(estado.buscar).not.toHaveBeenCalled();
   });
+
+  it('fonte fora do ar: mensagem distinta de "nada encontrado"', async () => {
+    estado.buscar.mockResolvedValue({ ok: false, motivo: 'falha' });
+    montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo />);
+    expect(await screen.findByText('Busca fora do ar agora', {}, { timeout: 3000 })).toBeTruthy();
+    expect(screen.queryByText(/Nada encontrado/)).toBeNull();
+  });
+
+  it('limite de buscas: pede espera, não "confira a grafia"', async () => {
+    estado.buscar.mockResolvedValue({ ok: false, motivo: 'limite' });
+    montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo />);
+    expect(
+      await screen.findByText('Muitas buscas em pouco tempo', {}, { timeout: 3000 }),
+    ).toBeTruthy();
+  });
 });
