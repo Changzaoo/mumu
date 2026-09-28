@@ -161,6 +161,8 @@ export function AuraDoPlay({
     // A COR: a de destaque do tema, relida de tempos em tempos (a cor da capa
     // muda o destaque a cada faixa).
     let cor: [number, number, number] = [255, 255, 255];
+    /** Opacidade máxima da névoa (0–255), ajustada à cor em `lerCor`. */
+    let teto = 230;
     let corLidaEm = -Infinity;
     const lerCor = (agora: number) => {
       if (agora - corLidaEm < 1000) return;
@@ -172,6 +174,12 @@ export function AuraDoPlay({
       const hex = String(ctx.fillStyle);
       const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
       if (m) cor = [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+      // MESMA PRESENÇA NOS DOIS TEMAS. Névoa clara sobre fundo escuro é brilho;
+      // a mesma opacidade em névoa ESCURA sobre fundo claro vira fumaça pesada
+      // (o olho pesa muito mais o escuro no claro). Cor escura → mais rala.
+      const [cr, cg, cb] = cor;
+      const luz = (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 255;
+      teto = luz < 0.5 ? 130 : 230;
     };
 
     // Deslocamentos sorteados: duas montagens nunca começam no mesmo desenho.
@@ -293,7 +301,7 @@ export function AuraDoPlay({
         px[o] = r;
         px[o + 1] = g;
         px[o + 2] = b;
-        px[o + 3] = Math.round(densidade * presenca * 230);
+        px[o + 3] = Math.round(densidade * presenca * teto);
       }
       ctx.putImageData(imagem, 0, 0);
     };

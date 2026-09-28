@@ -138,12 +138,49 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
   return user.getIdToken(forceRefresh);
 }
 
-export async function signInGoogle(): Promise<UserCredential> {
+/**
+ * Só leitura do ANIVERSÁRIO (People API). É o que tira do usuário a pergunta de
+ * "quando você nasceu?": a conta Google já sabe. Ver lib/auth/nascimentoGoogle.ts.
+ */
+export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday.read';
+
+/**
+ * Pedir o aniversário JÁ NO LOGIN só depois de o Google aprovar o escopo
+ * (People API ativa + escopo verificado na tela de consentimento). Antes disso
+ * todo login mostraria "app não verificado" — o botão no diálogo de idade
+ * continua pedindo sob demanda. Liga com VITE_GOOGLE_ANIVERSARIO_NO_LOGIN=1.
+ */
+const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
+
+/** Login com Google (com o aniversário, se ligado); devolve o token OAuth junto. */
+export async function signInGoogle(): Promise<UserCredential & { accessToken: string | null }> {
   const [instance, { GoogleAuthProvider, signInWithPopup }] = await Promise.all([
     requireAuth(),
     import('firebase/auth'),
   ]);
-  return signInWithPopup(instance, new GoogleAuthProvider());
+  const provider = new GoogleAuthProvider();
+  if (ANIVERSARIO_NO_LOGIN) provider.addScope(ESCOPO_ANIVERSARIO);
+  const result = await signInWithPopup(instance, provider);
+  const accessToken = GoogleAuthProvider.credentialFromResult(result)?.accessToken ?? null;
+  return Object.assign(result, { accessToken });
+}
+
+/**
+ * Para quem JÁ está logado com Google: pede de novo à conta, agora com o
+ * escopo do aniversário, e devolve o token OAuth. Null se não é conta Google.
+ */
+export async function tokenGoogleComAniversario(): Promise<string | null> {
+  const [instance, { GoogleAuthProvider, reauthenticateWithPopup }] = await Promise.all([
+    requireAuth(),
+    import('firebase/auth'),
+  ]);
+  const user = instance.currentUser;
+  if (!user || !user.providerData.some((p) => p.providerId === 'google.com')) return null;
+  const provider = new GoogleAuthProvider();
+  provider.addScope(ESCOPO_ANIVERSARIO);
+  provider.setCustomParameters({ login_hint: user.email ?? '' });
+  const result = await reauthenticateWithPopup(user, provider);
+  return GoogleAuthProvider.credentialFromResult(result)?.accessToken ?? null;
 }
 
 export async function signInEmail(email: string, password: string): Promise<UserCredential> {

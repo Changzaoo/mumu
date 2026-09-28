@@ -20,7 +20,10 @@ import {
   DialogHeader,
   DialogTitle,
 } from '@/components/ui/dialog';
+import { useAuthUser } from '@/hooks/useAuthUser';
+import { aplicarNascimento, lerNascimentoDoGoogle } from '@/lib/auth/nascimentoGoogle';
 import { julgarLetrasGuardadas, podeTrocarPara } from '@/lib/conteudo/faixaEtaria';
+import { tokenGoogleComAniversario } from '@/lib/firebase';
 import { useSettingsStore } from '@/stores/settingsStore';
 
 const MESES = [
@@ -49,6 +52,8 @@ export function PerguntaDeIdade({
   const dataNascimento = useSettingsStore((s) => s.dataNascimento);
   const definir = useSettingsStore((s) => s.setDataNascimento);
   const [dispensada, setDispensada] = useState(false);
+  const { user } = useAuthUser();
+  const contaGoogle = Boolean(user?.providerData.some((p) => p.providerId === 'google.com'));
   const aberta = abertaForcada ?? (!dataNascimento && !dispensada);
 
   const anoAtual = new Date().getFullYear();
@@ -64,6 +69,27 @@ export function PerguntaDeIdade({
   const fechar = (): void => {
     setDispensada(true);
     aoFechar?.();
+  };
+
+  const [buscando, setBuscando] = useState(false);
+  const usarGoogle = async (): Promise<void> => {
+    setErro('');
+    setBuscando(true);
+    try {
+      const token = await tokenGoogleComAniversario();
+      const valor = token ? await lerNascimentoDoGoogle(token) : null;
+      if (!valor) {
+        setErro('Sua conta Google não informa o ano de nascimento. Escolha abaixo.');
+      } else if (!aplicarNascimento(valor)) {
+        setErro('Para mudar para uma idade maior, peça a um responsável pela conta.');
+      } else {
+        fechar();
+      }
+    } catch {
+      setErro('Não deu para ler da conta Google agora. Escolha abaixo.');
+    } finally {
+      setBuscando(false);
+    }
   };
 
   const salvar = (): void => {
@@ -83,14 +109,29 @@ export function PerguntaDeIdade({
 
   return (
     <Dialog open={aberta} onOpenChange={(o) => !o && fechar()}>
-      <DialogContent className="sm:max-w-sm">
+      {/* O seletor nativo do celular abre FORA do diálogo; o Radix entendia o
+          toque nele como "clicou fora" e fechava tudo no meio da escolha. Aqui
+          só fecha pelo X ou pelo Esc. */}
+      <DialogContent
+        className="sm:max-w-sm"
+        onInteractOutside={(e) => e.preventDefault()}
+        onPointerDownOutside={(e) => e.preventDefault()}
+      >
         <DialogHeader>
           <DialogTitle>Quando você nasceu?</DialogTitle>
           <DialogDescription>
-            Usamos só para mostrar músicas adequadas à sua idade. Menores de 18 não ouvem músicas
-            com palavrão ou conteúdo explícito.
+            Usamos só mês e ano, para mostrar músicas adequadas à sua idade. Menores de 18 não ouvem
+            músicas com palavrão ou conteúdo explícito.
           </DialogDescription>
         </DialogHeader>
+        {contaGoogle && (
+          <>
+            <Button variant="accent" disabled={buscando} onClick={() => void usarGoogle()}>
+              {buscando ? 'Lendo da conta…' : 'Usar a data da minha conta Google'}
+            </Button>
+            <p className="text-center text-[11px] text-fg-subtle">ou escolha</p>
+          </>
+        )}
         <div className="flex gap-2">
           <select
             aria-label="Mês de nascimento"
@@ -120,7 +161,7 @@ export function PerguntaDeIdade({
           </select>
         </div>
         {erro && <p className="text-sm text-danger">{erro}</p>}
-        <Button variant="accent" onClick={salvar}>
+        <Button variant={contaGoogle ? 'outline' : 'accent'} onClick={salvar}>
           Confirmar
         </Button>
       </DialogContent>

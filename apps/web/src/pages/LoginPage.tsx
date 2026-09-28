@@ -6,6 +6,7 @@ import { RadinhoLogo } from '@/components/brand/RadinhoMark';
 import { Button } from '@/components/ui/button';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { authDisabled, signInGoogle } from '@/lib/firebase';
+import { preencherNascimentoDoLogin } from '@/lib/auth/nascimentoGoogle';
 
 const AUTH_ERRORS: Record<string, string> = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco.',
@@ -73,7 +74,9 @@ export default function LoginPage() {
   const loginGoogle = async (): Promise<void> => {
     setPending(true);
     try {
-      await signInGoogle();
+      const { accessToken } = await signInGoogle();
+      // Mês/ano de nascimento vêm da conta — sem perguntar (nascimentoGoogle.ts).
+      void preencherNascimentoDoLogin(accessToken);
       void navigate('/', { replace: true });
     } catch (error) {
       toast.error(friendlyError(error));
