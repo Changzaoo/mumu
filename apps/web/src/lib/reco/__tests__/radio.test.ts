@@ -118,4 +118,21 @@ describe('construirRadio — a fronteira que não pode vazar', () => {
     expect(ids).toContain('sem');
     expect(ids).not.toContain('s1');
   });
+
+  it('NUNCA MAIS QUE DUAS SEGUIDAS DO MESMO ARTISTA — um álbum não vira "álbum de novo"', () => {
+    // O caso que motiva isto: um álbum inteiro de um artista está na
+    // biblioteca. Sem intercalar, a "rádio" que emenda o fim do álbum seria
+    // esse MESMO artista de novo, faixa após faixa — o oposto de "parecidas".
+    const seed = faixa('seed', 'Dominante', 'Rock', 'limpo');
+    biblioteca.push(seed);
+    for (let i = 0; i < 6; i++) biblioteca.push(faixa(`m${i}`, 'Dominante', 'Rock', 'limpo'));
+    for (let i = 0; i < 4; i++) biblioteca.push(faixa(`v${i}`, 'Variado', 'Rock', 'limpo'));
+
+    const fila = construirRadio(seed, 40);
+
+    for (let i = 0; i + 2 < fila.length; i++) {
+      const trio = [fila[i]!, fila[i + 1]!, fila[i + 2]!].map((t) => t.artists?.[0]?.name);
+      expect(new Set(trio).size).toBeGreaterThan(1);
+    }
+  });
 });

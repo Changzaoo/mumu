@@ -19,6 +19,7 @@ import { podemConviver, type VeredictoDeConteudo, type TrackDto } from '@radinho
 import * as localLibrary from '@/lib/local/localLibrary';
 import { similarTo } from './semanticMixes';
 import { daySeed, seededShuffle } from './recommend';
+import { comVariedade } from './variedadeDeArtista';
 
 function nomeArtista(t: TrackDto): string {
   return t.artists?.[0]?.name ?? '';
@@ -89,7 +90,12 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
 
   // 1) Semântico — só quando há vetores suficientes (senão devolve pouco/nada).
   const semantico = similarTo(seed, pool, limite);
-  if (semantico.length >= Math.min(8, pool.length)) return semantico;
+  if (semantico.length >= Math.min(8, pool.length)) {
+    // O ranking semântico não sabe nada de "quantas seguidas" — sem esta
+    // passada, um acervo com muitas faixas próximas do MESMO artista emendava
+    // álbum com álbum, e a "rádio" virava só mais do mesmo artista.
+    return comVariedade(semantico, semantico.length);
+  }
 
   // 2) Heurístico: mesmo artista primeiro, depois gênero/resto; teto por artista.
   const dia = daySeed();
@@ -132,5 +138,9 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
       if (out.length >= limite) break;
     }
   }
-  return out.slice(0, limite);
+  // MAX_POR_ARTISTA (acima) só limita o TOTAL de um artista na lista inteira;
+  // não impede duas seguidas logo no começo, que é exatamente o corte que se
+  // percebe quando um álbum termina e "a continuação" é o próprio artista de
+  // novo. `comVariedade` intercala sem tirar ninguém da lista.
+  return comVariedade(out.slice(0, limite), Math.min(limite, out.length));
 }

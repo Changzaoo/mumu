@@ -37,6 +37,7 @@
 import type { TrackDto } from '@radinho/shared';
 import { familiaDoGenero } from '@radinho/shared';
 import { artistIdentityKey } from '@/lib/local/artistIdentity';
+import { comVariedade } from '@/lib/reco/variedadeDeArtista';
 import * as localLibrary from '@/lib/local/localLibrary';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localLikes from '@/lib/local/localLikes';
@@ -58,8 +59,6 @@ const PENALIDADE_RECENTE = 0.35;
 const JANELA_EXCLUSAO = 3;
 /** Além da exclusão, ainda "recente" o bastante para pesar menos. */
 const JANELA_PENALIDADE = 15;
-/** Não mais que isto do MESMO artista em sequência — vira "álbum", não "rádio". */
-const MAX_POR_ARTISTA_SEGUIDO = 2;
 /** Poda antes da passada de variedade — a lista pode ter milhares de faixas
  *  disponíveis; só o topo do ranking pode virar a fila final. */
 const POOL_MAX = 200;
@@ -103,31 +102,6 @@ function pesoDecaido(playedAt: string, nowMs: number): number {
 function bump(mapa: Map<string, number>, chave: string, delta: number): void {
   if (!chave) return;
   mapa.set(chave, (mapa.get(chave) ?? 0) + delta);
-}
-
-/**
- * Round-robin de variedade: sem isto o artista líder do ranking ocupa a fila
- * inteira (a pontuação dele nunca cai o bastante para intercalar sozinha).
- * Preserva a ordem de pontuação ao máximo — só pula na frente quando os
- * últimos `MAX_POR_ARTISTA_SEGUIDO` já são do mesmo artista do candidato.
- */
-function comVariedade(ordenadas: readonly TrackDto[], limite: number): TrackDto[] {
-  const fila = [...ordenadas];
-  const out: TrackDto[] = [];
-  while (fila.length > 0 && out.length < limite) {
-    const ultimos = out
-      .slice(-MAX_POR_ARTISTA_SEGUIDO)
-      .map((t) => artistIdentityKey(nomeArtista(t)));
-    let idx = fila.findIndex((t) => {
-      const chave = artistIdentityKey(nomeArtista(t));
-      if (!chave || ultimos.length < MAX_POR_ARTISTA_SEGUIDO) return true;
-      return !ultimos.every((k) => k === chave);
-    });
-    if (idx === -1) idx = 0; // biblioteca de um artista só: não tem como variar
-    out.push(fila[idx]!);
-    fila.splice(idx, 1);
-  }
-  return out;
 }
 
 /**

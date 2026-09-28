@@ -74,19 +74,38 @@ export interface SinaisDeGosto {
   fatorDePulo: (track: TrackDto) => number;
   /** Afinidade com o artista da faixa, em [0, 1] (1 = o mais ouvido). */
   afinidade?: (track: TrackDto) => number;
+  /** Afinidade com o GÊNERO da faixa, em [0, 1] (1 = o gênero que ela mais ouve). */
+  afinidadeDeGenero?: (track: TrackDto) => number;
+  /**
+   * A FAIXA em si foi curtida — não o artista dela.
+   *
+   * Separado de `afinidade` de propósito: curtir uma música específica de um
+   * artista que a pessoa ainda não ouve muito é o pedido explícito mais forte
+   * que existe ("dando prioridade às músicas que o usuário gosta"), e não pode
+   * ficar refém de um artista que ainda não acumulou histórico.
+   */
+  curtida?: (track: TrackDto) => boolean;
 }
 
 /** Quanto a posição original ainda manda: 0,6 = o último perde 60% do peso. */
 const PESO_DA_ORDEM = 0.6;
 /** Quanto o artista favorito sobe: até +50% no topo da afinidade. */
 const BONUS_DE_GOSTO = 0.5;
+/** Quanto o gênero favorito sobe: menos que o artista — é um sinal mais fraco. */
+const BONUS_DE_GENERO = 0.25;
+/** Curtir a FAIXA é o sinal explícito mais forte — sobe mais que artista e gênero juntos. */
+const BONUS_DE_CURTIDA = 1;
 
 export function reordenarPeloGosto(faixas: readonly TrackDto[], sinais: SinaisDeGosto): TrackDto[] {
   const n = faixas.length;
   if (n <= 1) return [...faixas];
   const notas = faixas.map((t, i) => {
     const ordem = 1 - PESO_DA_ORDEM * (i / (n - 1));
-    const gosto = 1 + BONUS_DE_GOSTO * (sinais.afinidade?.(t) ?? 0);
+    const gosto =
+      1 +
+      BONUS_DE_GOSTO * (sinais.afinidade?.(t) ?? 0) +
+      BONUS_DE_GENERO * (sinais.afinidadeDeGenero?.(t) ?? 0) +
+      (sinais.curtida?.(t) ? BONUS_DE_CURTIDA : 0);
     return { t, i, nota: ordem * sinais.fatorDePulo(t) * gosto };
   });
   // Estável: empate fica na ordem que veio.
