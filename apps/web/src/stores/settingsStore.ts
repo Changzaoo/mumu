@@ -26,6 +26,8 @@ export interface SettingsState {
   theme: ThemeSetting;
   language: string;
   audioQuality: AudioQuality;
+  /** A rede/aparelho podem baixar a qualidade do que toca agora (nunca subir). */
+  qualidadeAutomatica: boolean;
   crossfadeSeconds: number;
   gapless: boolean;
   normalizeVolume: boolean;
@@ -60,6 +62,7 @@ export interface SettingsState {
   setLanguage: (language: string) => void;
   setPesquisadorAtivo: (ativo: boolean) => void;
   setAudioQuality: (quality: AudioQuality) => void;
+  setQualidadeAutomatica: (ativa: boolean) => void;
   setCrossfadeSeconds: (seconds: number) => void;
   setGapless: (enabled: boolean) => void;
   setNormalizeVolume: (enabled: boolean) => void;
@@ -120,6 +123,7 @@ export const useSettingsStore = create<SettingsState>()(
       theme: 'dark',
       language: 'pt-BR',
       audioQuality: 'high',
+      qualidadeAutomatica: true,
       pesquisadorAtivo: false,
       dataNascimento: null,
       crossfadeSeconds: 0,
@@ -141,6 +145,7 @@ export const useSettingsStore = create<SettingsState>()(
       setPesquisadorAtivo: (pesquisadorAtivo) => set({ pesquisadorAtivo }),
       setDataNascimento: (dataNascimento) => set({ dataNascimento }),
       setAudioQuality: (audioQuality) => set({ audioQuality }),
+      setQualidadeAutomatica: (qualidadeAutomatica) => set({ qualidadeAutomatica }),
       setCrossfadeSeconds: (seconds) => set({ crossfadeSeconds: clamp(seconds, 0, 12) }),
       setGapless: (gapless) => set({ gapless }),
       setNormalizeVolume: (normalizeVolume) => set({ normalizeVolume }),

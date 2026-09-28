@@ -15,6 +15,7 @@ import type { CatalogTrack } from '@/lib/local/catalogMatch';
 import { faixaDoVideo } from '@/lib/local/sourceArtist';
 import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
+import { qualidadeEfetiva } from '@/lib/perf/adaptacao';
 
 /**
  * Erro de uma chamada ao helper que carrega o status HTTP da resposta. A fila
@@ -38,10 +39,13 @@ export class HelperError extends Error {
 const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** The user's chosen audio quality — sent to the helper so downloads/streams
- *  are encoded at the matching bitrate (96/160/320 kbps, Spotify-style). */
-function preferredQuality(): string {
+ *  are encoded at the matching bitrate (96/160/320 kbps, Spotify-style).
+ *  Com "qualidade automática", a rede/aparelho baixam abaixo da escolha
+ *  (ver lib/perf/adaptacao.ts). Downloads para offline ficam com a escolha. */
+function preferredQuality(paraOuvirAgora = false): string {
   try {
-    return useSettingsStore.getState().audioQuality;
+    const { audioQuality, qualidadeAutomatica } = useSettingsStore.getState();
+    return paraOuvirAgora ? qualidadeEfetiva(audioQuality, qualidadeAutomatica) : audioQuality;
   } catch {
     return 'high';
   }
@@ -513,7 +517,7 @@ export async function aiEmbed(
 export async function buildStreamUrl(sourceUrl: string): Promise<string | null> {
   const token = await getIdToken().catch(() => null);
   if (!token) return null;
-  return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}&quality=${encodeURIComponent(preferredQuality())}`;
+  return `${helperUrl()}/stream?url=${encodeURIComponent(sourceUrl)}&token=${encodeURIComponent(token)}&quality=${encodeURIComponent(preferredQuality(true))}`;
 }
 
 /**

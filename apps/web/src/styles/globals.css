@@ -380,6 +380,19 @@
 :root[data-perf='baixo'] .aurora {
   display: none;
 }
+/* Degrau do MEIO (lib/perf/dispositivo.ts → perfilDoHardware): o vidro fica,
+   mas com metade do raio, e os desfoques gigantes de decoração (brilho de fundo
+   do NowPlaying, 120px sobre 60vh) saem — são o que mais pesa e o que menos se
+   vê num celular intermediário. */
+:root[data-perf='medio'] .glass,
+:root[data-perf='medio'] .glass-strong,
+:root[data-perf='medio'] .glass-topo {
+  backdrop-filter: blur(12px) saturate(140%);
+}
+:root[data-perf='medio'] [class*='blur-['],
+:root[data-perf='medio'] .blur-3xl {
+  filter: none !important;
+}
 /* Quem pediu menos movimento no sistema não leva a deriva — o vidro e a aurora
    FICAM (translucidez não é movimento), só as animações param. */
 @media (prefers-reduced-motion: reduce) {

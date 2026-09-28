@@ -347,6 +347,20 @@ export default function SettingsPage() {
             />
           </span>
         </Row>
+        <Row
+          label="Qualidade automática"
+          hint="Baixa a qualidade em rede lenta ou aparelho modesto — nunca acima da escolhida"
+          htmlFor="st-quality-auto"
+        >
+          <Switch
+            id="st-quality-auto"
+            checked={settings.qualidadeAutomatica}
+            onCheckedChange={(checked) => {
+              settings.setQualidadeAutomatica(checked);
+              saved();
+            }}
+          />
+        </Row>
         <Row label="Reprodução sem pausas" hint="Pré-carrega a próxima faixa" htmlFor="st-gapless">
           <Switch
             id="st-gapless"

@@ -47,6 +47,7 @@ import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 import { candidatosDaCopia, marcarBordaFora, viaCdn } from '@/lib/audio/cdn';
+import { antecedenciaDoPreload } from '@/lib/perf/adaptacao';
 
 /** Faixas cuja duração já foi escrita de volta nesta sessão — o 'timeupdate'
  *  dispara várias vezes por segundo e a gravação é em disco. */
@@ -2404,7 +2405,13 @@ export function initPlayerEngine(): void {
     // pronto — pedir a rede no instante da troca travaria o play() no vão de
     // silêncio, que é justamente o bug que este preload evita.
     const hidden = typeof document !== 'undefined' && document.hidden;
-    if ((gapless || hidden) && !preloadRequested && duration > 0 && remaining <= 12) {
+    // Rede lenta pede mais cedo (ver lib/perf/adaptacao.ts).
+    if (
+      (gapless || hidden) &&
+      !preloadRequested &&
+      duration > 0 &&
+      remaining <= antecedenciaDoPreload()
+    ) {
       preloadRequested = true;
       const upcoming =
         state.queue[state.queueIndex + 1] ?? (state.repeat === 'all' ? state.queue[0] : undefined);

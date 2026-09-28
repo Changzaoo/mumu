@@ -83,6 +83,70 @@ export function modoLeve(): boolean {
   return document.documentElement.getAttribute('data-perf') === 'baixo';
 }
 
+/**
+ * PERFIL DO APARELHO — o que ele aguenta, em três degraus.
+ *
+ * O binário "fraco/forte" deixava o meio da pirâmide (a maior parte dos
+ * celulares Android no Brasil: 4–6 GB, 4–8 núcleos) com o custo inteiro do
+ * aparelho de ponta. Com o degrau do meio, esses perdem só o que é
+ * desproporcional (desfoques gigantes de decoração) e mantêm o vidro.
+ *
+ * Apple não expõe `deviceMemory`; iPhone/Mac com 6+ núcleos tem GPU de sobra.
+ */
+export type PerfilDoAparelho = 'baixo' | 'medio' | 'alto';
+
+export function perfilDoHardware(
+  nav: NavegadorComPistas | undefined = globalThis.navigator,
+): PerfilDoAparelho {
+  if (!nav) return 'alto';
+  const nucleos = nav.hardwareConcurrency ?? 0;
+  const memoria = nav.deviceMemory ?? 0;
+  if ((nucleos > 0 && nucleos < NUCLEOS_MINIMOS) || (memoria > 0 && memoria < MEMORIA_MINIMA)) {
+    return 'baixo';
+  }
+  if (nucleos >= 8 && (memoria === 0 || memoria >= 8)) return 'alto';
+  if (memoria === 0 && nucleos >= 6) return 'alto';
+  if (nucleos === 0 && memoria === 0) return 'alto'; // navegador não conta nada: não rebaixa
+  return 'medio';
+}
+
+/** O perfil em vigor (o carimbado no `<html>`, que o monitor pode rebaixar). */
+export function perfilAtual(): PerfilDoAparelho {
+  if (typeof document === 'undefined') return 'alto';
+  const v = document.documentElement.getAttribute('data-perf');
+  return v === 'baixo' || v === 'medio' ? v : 'alto';
+}
+
+/**
+ * A REDE DE AGORA. Hardware não muda; a rede muda no meio da música (Wi-Fi →
+ * 4G → túnel). `saveData` é a pessoa pedindo economia — vale mais que medida.
+ * Sem Network Information API (Safari, Firefox) não rebaixa nada: sem sinal,
+ * sem castigo.
+ */
+export type QualidadeDaRede = 'lenta' | 'media' | 'rapida';
+
+interface ConexaoComPistas {
+  effectiveType?: string;
+  downlink?: number;
+  saveData?: boolean;
+  addEventListener?: (tipo: 'change', fn: () => void) => void;
+}
+
+function conexao(): ConexaoComPistas | undefined {
+  if (typeof navigator === 'undefined') return undefined;
+  return (navigator as Navigator & { connection?: ConexaoComPistas }).connection;
+}
+
+export function qualidadeDaRede(c: ConexaoComPistas | undefined = conexao()): QualidadeDaRede {
+  if (!c) return 'rapida';
+  if (c.saveData) return 'lenta';
+  const tipo = c.effectiveType ?? '';
+  if (tipo === 'slow-2g' || tipo === '2g') return 'lenta';
+  if (tipo === '3g') return 'media';
+  if (typeof c.downlink === 'number' && c.downlink > 0 && c.downlink < 1.5) return 'media';
+  return 'rapida';
+}
+
 /** Chave onde guardamos "este aparelho já provou que trava". */
 const CHAVE_REBAIXADO = 'aurial:perf-baixo';
 
@@ -114,7 +178,15 @@ export function marcarDesempenho(): void {
   } catch {
     /* sem localStorage: cai na heurística */
   }
-  if (lembrado || dispositivoFraco()) rebaixar();
+  if (lembrado || dispositivoFraco()) {
+    rebaixar();
+  } else {
+    document.documentElement.setAttribute('data-perf', perfilDoHardware());
+  }
+  // A rede é carimbada à parte e acompanha as trocas (Wi-Fi ↔ dados).
+  const carimbarRede = () => document.documentElement.setAttribute('data-rede', qualidadeDaRede());
+  carimbarRede();
+  conexao()?.addEventListener?.('change', carimbarRede);
 }
 
 /**
