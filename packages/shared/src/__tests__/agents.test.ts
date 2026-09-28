@@ -133,9 +133,17 @@ describe('cosineSimilarity', () => {
 });
 
 describe('política de modelos', () => {
-  it('veredito vai no barato, identidade vai no grande', () => {
-    expect(modelFor('verify')).toBe(CHAT_MODELS.nano);
+  it('veredito e identidade vão no super (o nano vivo não foi medido)', () => {
+    expect(modelFor('verify')).toBe(CHAT_MODELS.super);
+    expect(modelFor('genre')).toBe(CHAT_MODELS.super);
     expect(modelFor('identity')).toBe(CHAT_MODELS.super);
+  });
+
+  it('nenhum modelo com fim de vida anunciado (a NVIDIA responde 410)', () => {
+    const usados = Object.values(CHAT_MODELS) as string[];
+    for (const morto of ['nvidia/nemotron-3-nano-30b-a3b', 'nvidia/nemotron-mini-4b-instruct']) {
+      expect(usados).not.toContain(morto);
+    }
   });
 
   it('o ultra é escalação da identidade, não o padrão dela', () => {

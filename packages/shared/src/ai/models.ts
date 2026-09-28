@@ -30,10 +30,16 @@
 
 /** Modelos de chat, do mais barato ao mais caro. */
 export const CHAT_MODELS = {
-  /** Uma palavra, classificação simples. ~0,3s. Recall fraco em erro. */
-  mini: 'nvidia/nemotron-mini-4b-instruct',
-  /** Veredito e classificação com recall bom. ~3s. */
-  nano: 'nvidia/nemotron-3-nano-30b-a3b',
+  /**
+   * O `nemotron-3-nano-30b-a3b` chegou ao fim da vida em 2026-09-01 e passou a
+   * responder `410 Gone` — veredito e gênero pararam em silêncio (7 recusas/dia no
+   * log). O `mini-4b` também sumiu da lista. O substituto vivo do mesmo porte é o
+   * `nemotron-3.5-lightning-30b-a3b`, mas na sonda (2026-09-28) ele chamou Matuê
+   * de "Folk" onde o `super` disse "trap" — por isso NENHUMA tarefa usa este
+   * degrau até alguém medir recall de verdade; as do nano subiram para o `super`,
+   * que a medição original já dava como tão rápido quanto.
+   */
+  nano: 'nvidia/nemotron-3.5-lightning-30b-a3b',
   /** Raciocínio de verdade (identidade, desambiguação). ~2s. */
   super: 'nvidia/nemotron-3-super-120b-a12b',
   /** Escalação: só quando o `super` devolve nada aproveitável. ~4–17s. */
@@ -85,14 +91,14 @@ export type ChatTier = keyof typeof CHAT_MODELS;
 
 /** Tarefas que os agentes executam, e o degrau de modelo de cada uma. */
 export const TASK_TIER = {
-  verify: 'nano',
-  genre: 'nano',
+  verify: 'super',
+  genre: 'super',
   // O gênero do ARTISTA é conhecimento de mundo ("quem é o Alee?"), não leitura
   // de uma faixa — a mesma classe de tarefa que a identidade, e por isso o mesmo
   // degrau. O `nano` classifica uma música pelo nome; saber a carreira de um
   // artista pede o modelo que raciocina.
   artistGenre: 'super',
-  cleanTitle: 'nano',
+  cleanTitle: 'super',
   splitArtists: 'super',
   identity: 'super',
   describe: 'creative',
@@ -111,7 +117,7 @@ export function modelFor(task: AiTask): string {
  * resposta que já veio boa.
  */
 export function escalationFor(task: AiTask): string | null {
-  const ladder: ChatTier[] = ['mini', 'nano', 'super', 'ultra'];
+  const ladder: ChatTier[] = ['nano', 'super', 'ultra'];
   const current = ladder.indexOf(TASK_TIER[task]);
   if (current === -1 || current === ladder.length - 1) return null;
   return CHAT_MODELS[ladder[current + 1]!];
