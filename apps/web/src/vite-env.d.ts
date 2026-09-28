@@ -10,7 +10,7 @@ interface ImportMetaEnv {
   readonly VITE_SIGNALING_URL?: string;
   /** Nós/PoPs da CDN de áudio, separados por vírgula (ver lib/audio/cdn.ts). */
   readonly VITE_AUDIO_CDN?: string;
-  /** Onde baixar o APK do Android (padrão: Release android-latest do GitHub). */
+  /** Onde baixar o APK do Android (padrão: /radinho.apk, servido pelo site). */
   readonly VITE_ANDROID_APK_URL?: string;
   readonly VITE_FIREBASE_API_KEY?: string;
   readonly VITE_FIREBASE_AUTH_DOMAIN?: string;
