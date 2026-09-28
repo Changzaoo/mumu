@@ -115,8 +115,73 @@ describe('construirRadio — a fronteira que não pode vazar', () => {
 
     expect(ids).toContain('r2');
     expect(ids).toContain('m1');
-    expect(ids).toContain('sem');
     expect(ids).not.toContain('s1');
+  });
+
+  it('faixa sem gênero entra só se o ARTISTA dela é da mesma família', () => {
+    // "Sem categoria" não quer dizer "combina": era por aí que o acervo inteiro
+    // vazava para a rádio de quem ouvia outra coisa.
+    const rock = faixa('r1', 'Banda', 'Rock', 'limpo');
+    biblioteca.push(
+      rock,
+      faixa('semRock', 'Roqueiro', null),
+      faixa('outraRock', 'Roqueiro', 'Rock', 'limpo'),
+      faixa('semTrap', 'Trapper', null),
+      faixa('outraTrap', 'Trapper', 'Trap', 'limpo'),
+      faixa('semNada', 'Desconhecido', null),
+    );
+
+    const ids = construirRadio(rock, 40).map((t) => t.id);
+
+    expect(ids).toContain('semRock');
+    expect(ids).not.toContain('semTrap');
+    expect(ids).not.toContain('semNada');
+  });
+
+  it('MÚSICA ANTIGA SEM GÊNERO NÃO VIRA TRAP: a âncora vem do artista', () => {
+    // O caso relatado: a pessoa pôs uma música antiga (importada, sem gênero)
+    // e a continuação tocou trap. Sem gênero na semente, valia tudo.
+    const antiga = faixa('a1', 'Cantor Antigo', null, 'limpo');
+    biblioteca.push(
+      antiga,
+      faixa('a2', 'Cantor Antigo', 'MPB', 'limpo'),
+      faixa('mpb1', 'Outra Voz', 'MPB', 'limpo'),
+      faixa('t1', 'Rapper', 'Trap', 'limpo'),
+      faixa('t2', 'Rapper 2', 'Trap', 'limpo'),
+    );
+
+    const ids = construirRadio(antiga, 40, { generoDoGosto: () => 'Trap' }).map((t) => t.id);
+
+    expect(ids).toEqual(expect.arrayContaining(['a2', 'mpb1']));
+    expect(ids).not.toContain('t1');
+    expect(ids).not.toContain('t2');
+  });
+
+  it('sem gênero nem artista conhecido, a âncora é o que tocou antes', () => {
+    const solta = faixa('s0', 'Ninguém', null, 'limpo');
+    const antes = [faixa('p1', 'X', 'MPB', 'limpo'), faixa('p2', 'Y', 'MPB', 'limpo')];
+    biblioteca.push(
+      solta,
+      ...antes,
+      faixa('mpb9', 'Z', 'MPB', 'limpo'),
+      faixa('t1', 'R', 'Trap', 'limpo'),
+    );
+
+    const ids = construirRadio(solta, 40, { vizinhas: antes, generoDoGosto: () => 'Trap' }).map(
+      (t) => t.id,
+    );
+
+    expect(ids).toContain('mpb9');
+    expect(ids).not.toContain('t1');
+  });
+
+  it('por último vale o gosto DESTA conta — nunca o acervo inteiro', () => {
+    const solta = faixa('s0', 'Ninguém', null, 'limpo');
+    biblioteca.push(solta, faixa('sa1', 'A', 'Samba', 'limpo'), faixa('t1', 'R', 'Trap', 'limpo'));
+
+    const ids = construirRadio(solta, 40, { generoDoGosto: () => 'Samba' }).map((t) => t.id);
+
+    expect(ids).toEqual(['sa1']);
   });
 
   it('NUNCA MAIS QUE DUAS SEGUIDAS DO MESMO ARTISTA — um álbum não vira "álbum de novo"', () => {

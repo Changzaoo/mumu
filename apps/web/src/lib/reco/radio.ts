@@ -16,7 +16,15 @@ import { podeOuvir } from '@/lib/conteudo/faixaEtaria';
  * o que vem a seguir), então "escutar música por música" já vai puxando as
  * próximas sem a pessoa pedir.
  */
-import { podemConviver, type VeredictoDeConteudo, type TrackDto } from '@radinho/shared';
+import {
+  familiaDoGenero,
+  podemConviver,
+  type VeredictoDeConteudo,
+  type TrackDto,
+} from '@radinho/shared';
+import * as localHistory from '@/lib/local/localHistory';
+import * as localLikes from '@/lib/local/localLikes';
+import { perfilDeGosto } from './perfilDeGosto';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { similarTo } from './semanticMixes';
 import { daySeed, seededShuffle } from './recommend';
@@ -54,39 +62,120 @@ function vereditosPorFaixa(): Map<string, VeredictoDeConteudo> {
   return mapa;
 }
 
-export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
+/** Gênero mais frequente de um conjunto de faixas (ignorando as sem gênero). */
+function generoDominante(faixas: readonly TrackDto[]): string | null {
+  const conta = new Map<string, number>();
+  for (const t of faixas) if (t.genre) conta.set(t.genre, (conta.get(t.genre) ?? 0) + 1);
+  let melhor: string | null = null;
+  let max = 0;
+  for (const [g, n] of conta) if (n > max) [melhor, max] = [g, n];
+  return melhor;
+}
+
+/** O gênero que ESTA conta mais ouve — nunca o de outra pessoa do aparelho. */
+function generoDoGostoDaConta(): string | null {
+  const perfil = perfilDeGosto({
+    historico: localHistory.listForCurrentUser(),
+    curtidas: localLikes.list(),
+  });
+  let melhor: string | null = null;
+  let max = 0;
+  for (const [chave, peso] of perfil.porGenero) {
+    if (peso > max) [melhor, max] = [perfil.nomeDoGenero.get(chave) ?? chave, peso];
+  }
+  return melhor;
+}
+
+export interface OpcoesDaRadio {
+  /** O que tocou logo antes (a fila): diz o clima da sessão quando a semente não diz. */
+  vizinhas?: readonly TrackDto[];
+  /** Só para testes: o gênero que a conta mais ouve. */
+  generoDoGosto?: () => string | null;
+}
+
+/**
+ * O GÊNERO-ÂNCORA da rádio.
+ *
+ * Semente sem gênero (música antiga importada quase nunca vem com categoria)
+ * liberava QUALQUER gênero: `podemConviver` não tem fronteira a defender sem
+ * família, e o acervo — dominado por trap — enchia a fila. Quem ouvia MPB dos
+ * anos 70 recebia trap "do nada". Agora a âncora vem, nesta ordem, da própria
+ * faixa, do que o ARTISTA dela costuma ser, do que a pessoa acabou de ouvir, e
+ * por fim do gosto DA CONTA dela. O acervo inteiro nunca é a resposta.
+ */
+function generoAncora(seed: TrackDto, opcoes: OpcoesDaRadio): string | null {
+  if (seed.genre) return seed.genre;
+  const artista = nomeArtista(seed);
+  return (
+    (artista ? generoDominante(localLibrary.artistTracks(artista)) : null) ??
+    generoDominante(opcoes.vizinhas ?? []) ??
+    (opcoes.generoDoGosto ?? generoDoGostoDaConta)()
+  );
+}
+
+export function construirRadio(
+  seed: TrackDto,
+  limite = 40,
+  opcoes: OpcoesDaRadio = {},
+): TrackDto[] {
   const seedArtista = nomeArtista(seed);
-  const seedGenero = seed.genre ?? null;
+  const ancora = generoAncora(seed, opcoes);
+  const familiaAncora = familiaDoGenero(ancora);
 
   const doArtista = seedArtista ? localLibrary.artistTracks(seedArtista) : [];
-  const doGenero = seedGenero ? localLibrary.genreTracks(seedGenero) : [];
+  const doGenero = ancora ? localLibrary.genreTracks(ancora) : [];
   const biblioteca = localLibrary.list().map((e) => e.track);
 
-  // Pool único, sem a própria semente, na ordem de afinidade grosseira
-  // (artista > gênero > resto).
-  // O TERCEIRO NÍVEL ERA A BIBLIOTECA INTEIRA, SEM OLHAR GÊNERO.
-  //
-  // Era ele que enchia a fila na prática — os dois primeiros acabam rápido — e
-  // era por ele que um louvor podia ser seguido de funk com palavrão, sem a
-  // pessoa ter pedido nada. O filtro abaixo é a única porta: vale para o poço
-  // inteiro, então protege também o caminho semântico logo adiante, que
-  // ranqueia SOBRE este mesmo poço.
+  // A família de cada ARTISTA (pelo gênero que as faixas dele têm): é o que
+  // decide sobre uma faixa sem gênero — "sem categoria" não quer dizer "combina".
+  const familiaDoArtista = new Map<string, ReturnType<typeof familiaDoGenero>>();
+  {
+    const porArtista = new Map<string, TrackDto[]>();
+    for (const t of biblioteca) {
+      const k = chaveArtista(t);
+      if (!k || !t.genre) continue;
+      const lista = porArtista.get(k);
+      if (lista) lista.push(t);
+      else porArtista.set(k, [t]);
+    }
+    for (const [k, faixas] of porArtista)
+      familiaDoArtista.set(k, familiaDoGenero(generoDominante(faixas)));
+  }
+
+  // Poço em NÍVEIS, sem a própria semente: mesmo artista > mesmo gênero >
+  // mesma família. O antigo terceiro nível — "a biblioteca inteira" — não
+  // existe mais: é por ele que o gosto de uma pessoa virava o do acervo.
   const veredictos = vereditosPorFaixa();
   const paraConvivencia = (t: TrackDto) => ({
     genero: t.genre ?? null,
     conteudo: veredictos.get(t.id) ?? null,
   });
-  const semente = paraConvivencia(seed);
+  const semente = { genero: ancora, conteudo: veredictos.get(seed.id) ?? null };
+  const mesmaFamilia = (t: TrackDto): boolean => {
+    if (familiaAncora === null) return false;
+    const f = familiaDoGenero(t.genre) ?? familiaDoArtista.get(chaveArtista(t)) ?? null;
+    return f === familiaAncora;
+  };
   const vistos = new Set<string>([seed.id]);
   const pool: TrackDto[] = [];
-  for (const grupo of [doArtista, doGenero, biblioteca]) {
+  const nivelDe = new Map<string, number>();
+  const niveis: [number, readonly TrackDto[]][] = [
+    [0, doArtista],
+    [1, doGenero],
+    [2, biblioteca.filter(mesmaFamilia)],
+  ];
+  for (const [nivel, grupo] of niveis) {
     for (const t of grupo) {
       if (vistos.has(t.id)) continue;
-      vistos.add(t.id);
+      // Faixa SEM gênero de OUTRO artista só entra se o artista dela é da
+      // família da âncora (o nível 2 já cuidou disso).
+      if (nivel === 1 && !t.genre) continue;
       if (!podemConviver(semente, paraConvivencia(t))) continue;
       // Idade × conteúdo: a rádio nunca sugere o que esta pessoa não pode ouvir.
       if (!podeOuvir(t)) continue;
+      vistos.add(t.id);
       pool.push(t);
+      nivelDe.set(t.id, nivel);
     }
   }
   if (pool.length === 0) return [];
@@ -106,9 +195,15 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
     pool.filter((t) => chaveArtista(t) === chaveArtista(seed)),
     dia,
   );
-  const resto = seededShuffle(
-    pool.filter((t) => chaveArtista(t) !== chaveArtista(seed)),
-    (dia ^ 0x9e3779b9) >>> 0,
+  // O resto EM ORDEM DE NÍVEL (mesmo gênero antes de só mesma família);
+  // embaralhado só dentro de cada nível. Embaralhar tudo junto apagava a
+  // afinidade: a faixa de outro gênero da família valia o mesmo que a do gênero.
+  const outros = pool.filter((t) => chaveArtista(t) !== chaveArtista(seed));
+  const resto = [1, 2, 0].flatMap((nivel) =>
+    seededShuffle(
+      outros.filter((t) => nivelDe.get(t.id) === nivel),
+      (dia ^ (0x9e3779b9 + nivel)) >>> 0,
+    ),
   );
 
   const usados = new Map<string, number>();

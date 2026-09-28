@@ -1034,7 +1034,8 @@ async function continuarNumaParecida(morta: TrackDto | null, message: string): P
   }
   try {
     const { construirRadio } = await import('@/lib/reco/radio');
-    const similares = construirRadio(morta).filter((t) => t.id !== morta.id);
+    const vizinhas = usePlayerStore.getState().queue.slice(-15);
+    const similares = construirRadio(morta, 40, { vizinhas }).filter((t) => t.id !== morta.id);
     const st = usePlayerStore.getState();
     if (st.currentTrack?.id !== morta.id) return; // o usuário já trocou de faixa
     if (similares.length === 0) {
@@ -2200,7 +2201,10 @@ export function initPlayerEngine(): void {
 
       // 2) SEM PLAYLIST PARECIDA (ou não era playlist): rádio de parecidas,
       //    com o gosto dela por cima — pulado recente desce, favorito sobe.
-      const parecidas = reordenarPeloGosto(construirRadio(track), sinais.sinaisDoAparelho());
+      const parecidas = reordenarPeloGosto(
+        construirRadio(track, 40, { vizinhas: st.queue.slice(-15) }),
+        sinais.sinaisDoAparelho(),
+      );
       // Primeiro o que ainda não tocou nesta fila; se a biblioteca já deu
       // tudo, aceita repetir — mas não o que acabou de tocar.
       let novas = parecidas.filter((t) => !naFila.has(t.id));
