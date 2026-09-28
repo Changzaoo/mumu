@@ -31,6 +31,8 @@ import type { TrackDto } from '@radinho/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { resumeAt, usePlayerStore } from '@/stores/playerStore';
 import { definirAlvoRemoto } from '@/lib/devices/alvoRemoto';
+import { PRESETS_EM_ORDEM } from '@/lib/audio/eqPresets';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 const DEVICE_ID_KEY = 'aurial:deviceId';
 const HEARTBEAT_MS = 25_000;
@@ -280,6 +282,10 @@ export interface DevicePresence {
   aparelho?: string;
   /** Relógio LOCAL de quem publicou quando `progress` foi medido (ms). */
   progressAt?: number;
+  /** O que o controle remoto mostra como ligado: velocidade, sono, equalizador. */
+  rate?: number;
+  sono?: number | null;
+  eq?: string | null;
   /** ISO do relógio do PRÓPRIO aparelho — usado só como reserva. */
   lastSeenAt: string;
   /** Carimbo do SERVIDOR: normaliza relógios tortos entre aparelhos. */
@@ -312,6 +318,9 @@ export interface DeviceInfo {
   seenAt: number;
   /** Impressão do aparelho físico (entradas de navegadores do mesmo aparelho). */
   aparelho: string | null;
+  rate: number;
+  sono: number | null;
+  eq: string | null;
 }
 
 /** Outro aparelho da MESMA conta tocando agora (para o banner). */
@@ -334,7 +343,13 @@ export type DeviceCommandType =
   | 'volume'
   | 'stop'
   /** "Toque ESTA música aí" — trocar de faixa sem trazer o som para cá. */
-  | 'playTrack';
+  | 'playTrack'
+  /** Velocidade (value = 0.75…2). */
+  | 'rate'
+  /** Timer de sono (value = minutos; 0 desliga). */
+  | 'sleep'
+  /** Preset do equalizador (value = índice em PRESETS_EM_ORDEM; −1 desliga). */
+  | 'eqPreset';
 
 /** O que vai junto do `playTrack`: a faixa e, se houver, a fila em volta dela. */
 export interface CargaDeComando {
@@ -581,8 +596,9 @@ function seenMillis(p: DevicePresence): number {
 function publish(force = false): void {
   if (!db || !currentUser) return;
   const state = usePlayerStore.getState();
+  const ajustes = useSettingsStore.getState();
   const track = state.currentTrack;
-  const signature = `${track?.id ?? ''}|${state.isPlaying}|${Math.round(state.volume * 20)}`;
+  const signature = `${track?.id ?? ''}|${state.isPlaying}|${Math.round(state.volume * 20)}|${state.playbackRate}|${ajustes.sleepTimerMinutes}|${ajustes.eq.enabled ? ajustes.eq.preset : ''}`;
   const now = Date.now();
   if (!force && signature === lastSignature && now - lastWriteAt < HEARTBEAT_MS) return;
   if (!force && now - lastWriteAt < 2_000) return;
@@ -597,6 +613,9 @@ function publish(force = false): void {
       name: deviceLabel(),
       aparelho: impressaoDoAparelho(),
       progressAt: now,
+      rate: state.playbackRate,
+      sono: ajustes.sleepTimerMinutes,
+      eq: ajustes.eq.enabled ? ajustes.eq.preset : null,
       lastSeenAt: new Date().toISOString(),
       seenAt: serverTimestamp() as unknown as Timestamp,
       isPlaying: state.isPlaying,
@@ -770,12 +789,35 @@ async function tocarFaixaPedida(command: DeviceCommand): Promise<void> {
     const inicio = fila.findIndex((t) => t.id === principal.id);
     if (inicio >= 0 && fila.length > 1) {
       player.playQueue(fila, inicio);
+      if (typeof command.value === 'number') resumeAt(command.value);
       publish(true);
       return;
     }
   }
   player.playTrack(principal);
+  // "Tocar lá" leva a POSIÇÃO junto: a música continua de onde estava.
+  if (typeof command.value === 'number') resumeAt(command.value);
   publish(true);
+}
+
+/**
+ * "TOCAR LÁ" — manda o que toca AQUI para outro aparelho: mesma faixa, mesma
+ * fila, mesma posição; e este se cala. No app instalado (Android) o outro lado
+ * toca sem precisar de toque — o WebView do app não exige gesto para áudio.
+ * No navegador, o outro aparelho só obedece se já tiver sido tocado nesta
+ * sessão (regra do navegador, não nossa).
+ */
+export async function tocarEm(deviceId: string): Promise<void> {
+  const player = usePlayerStore.getState();
+  const faixa = player.currentTrack;
+  if (!faixa) return;
+  const fila = player.queue.map((t) => t.id);
+  await sendCommand(deviceId, 'playTrack', player.progress, {
+    trackId: faixa.id,
+    queue: fila,
+    index: player.queueIndex,
+  });
+  player.pause();
 }
 
 /** Aplica um comando recebido no player LOCAL. */
@@ -806,6 +848,28 @@ function applyCommand(command: DeviceCommand): void {
     case 'stop':
       player.pause();
       break;
+    case 'rate':
+      if (typeof command.value === 'number' && command.value >= 0.5 && command.value <= 2) {
+        player.setRate(command.value);
+      }
+      break;
+    case 'sleep':
+      if (typeof command.value === 'number') {
+        useSettingsStore.getState().setSleepTimer(command.value > 0 ? command.value : null);
+      }
+      break;
+    case 'eqPreset': {
+      const ajustes = useSettingsStore.getState();
+      const preset =
+        typeof command.value === 'number' ? PRESETS_EM_ORDEM[command.value] : undefined;
+      if (preset) {
+        ajustes.setEqPreset(preset);
+        ajustes.setEqEnabled(true);
+      } else {
+        ajustes.setEqEnabled(false);
+      }
+      break;
+    }
     case 'playTrack':
       // ASSÍNCRONO de propósito: a faixa pode não estar na fila daqui e ter que
       // vir da biblioteca. O `publish` no fim deste corpo sai antes disso e
@@ -836,6 +900,13 @@ function start(user: User): void {
     if (Math.abs(state.progress - esperado) > 1.5) publish(true);
     else publish();
   });
+  // Sono, equalizador: o controle remoto do outro aparelho mostra o que está ligado.
+  const unsubAjustes = useSettingsStore.subscribe(() => publish());
+  const unsubSoPlayer = unsubPlayer;
+  unsubPlayer = () => {
+    unsubSoPlayer();
+    unsubAjustes();
+  };
 
   // Os três ouvintes abaixo dependem do Firestore, que chega por import
   // dinâmico. `stop()` continua correto no meio do caminho: ele zera
@@ -910,6 +981,9 @@ function start(user: User): void {
           }
           devices.push({
             aparelho: p.aparelho ?? null,
+            rate: typeof p.rate === 'number' ? p.rate : 1,
+            sono: typeof p.sono === 'number' ? p.sono : null,
+            eq: typeof p.eq === 'string' ? p.eq : null,
             id: d.id,
             name: p.name,
             isSelf: d.id === me,

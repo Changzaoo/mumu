@@ -29,6 +29,7 @@ import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
+import { OpcoesRemotas } from '@/components/media/OpcoesRemotas';
 import { useTrackLikes } from '@/features/library/api';
 import { SeekSlider } from '@/components/media/SeekSlider';
 import { ConviteDeRetomada, PlayDoPlayer, StatusDeCarga } from '@/components/media/StatusDeCarga';
@@ -50,7 +51,6 @@ import { useDominantColor } from '@/hooks/useDominantColor';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { api } from '@/lib/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
-import { useRemoteControl } from '@/lib/devices/useRemoteControl';
 import { cn, formatTime, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -155,7 +155,6 @@ export function NowPlaying() {
   // faixa carregada aqui. Agora ela espelha a mesma fonte.
   const agora = useNowPlaying();
   const remoto = agora && agora.source === 'remote' ? agora : null;
-  const controleRemoto = useRemoteControl();
   // Com o remoto no comando, a faixa daqui não deve pintar nada: capa, letra,
   // créditos e fila são dela, não da que está tocando.
   const faixaLocal = remoto ? null : track;
@@ -421,10 +420,10 @@ export function NowPlaying() {
                     </h1>
                     {/* Curtir age sobre a faixa DAQUI; do remoto só temos título e
                       artista em texto, não a faixa do catálogo. */}
-                    {faixaLocal && (
+                    {(faixaLocal ?? faixaRemota) && (
                       <LikeButton
-                        liked={likes.isLiked(faixaLocal)}
-                        onToggle={(liked) => likes.toggle(faixaLocal, liked)}
+                        liked={likes.isLiked((faixaLocal ?? faixaRemota)!)}
+                        onToggle={(liked) => likes.toggle((faixaLocal ?? faixaRemota)!, liked)}
                         className="shrink-0"
                       />
                     )}
@@ -541,39 +540,16 @@ export function NowPlaying() {
                     comando sobra o volume, e esse o `useRemoteControl` manda
                     para onde o som de fato sai. */}
                 {remoto ? (
-                  <div className="flex items-center gap-2">
-                    {/* A letra acompanha o relógio do outro aparelho. */}
-                    {faixaRemota && (
-                      <IconButton
-                        aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
-                        size="sm"
-                        active={lyricsOpen}
-                        onClick={() => {
-                          toggleLyrics();
-                          setVisualizer(false);
-                        }}
-                      >
-                        <MicVocal />
-                      </IconButton>
-                    )}
-                    <span className="grid size-9 place-items-center text-fg-muted" aria-hidden>
-                      {controleRemoto.volume === 0 ? (
-                        <VolumeX className="size-5" />
-                      ) : controleRemoto.volume < 0.5 ? (
-                        <Volume1 className="size-5" />
-                      ) : (
-                        <Volume2 className="size-5" />
-                      )}
-                    </span>
-                    <Slider
-                      aria-label={`Volume em ${remoto.deviceName ?? 'outro aparelho'}`}
-                      value={[Math.round(controleRemoto.volume * 100)]}
-                      max={100}
-                      step={1}
-                      onValueChange={([v]) => controleRemoto.setVolume((v ?? 0) / 100)}
-                      className="w-40"
-                    />
-                  </div>
+                  <OpcoesRemotas
+                    deviceId={remoto.deviceId ?? ''}
+                    deviceName={remoto.deviceName}
+                    faixa={faixaRemota}
+                    letraAberta={lyricsOpen}
+                    alternarLetra={() => {
+                      toggleLyrics();
+                      setVisualizer(false);
+                    }}
+                  />
                 ) : (
                   <>
                     {faixaLocal && (

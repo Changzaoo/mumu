@@ -1,9 +1,11 @@
 package online.radinho.app;
 
+import android.content.Intent;
 import android.graphics.Color;
+import android.net.Uri;
 import android.os.Bundle;
-import android.view.View;
 import android.view.ViewGroup;
+import android.webkit.WebView;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -32,12 +34,22 @@ public class MainActivity extends BridgeActivity {
         // O vão das barras mostra o fundo da janela: preto, como o app, com
         // ícones claros por cima (senão ficariam brancos no branco).
         getWindow().getDecorView().setBackgroundColor(Color.BLACK);
-        WindowInsetsControllerCompat barras =
+        WindowInsetsControllerCompat controleDasBarras =
             WindowCompat.getInsetsController(getWindow(), getWindow().getDecorView());
-        barras.setAppearanceLightStatusBars(false);
-        barras.setAppearanceLightNavigationBars(false);
+        controleDasBarras.setAppearanceLightStatusBars(false);
+        controleDasBarras.setAppearanceLightNavigationBars(false);
 
-        View webView = getBridge().getWebView();
+        WebView webView = getBridge().getWebView();
+        // DOWNLOAD SAI PELO NAVEGADOR DO SISTEMA. O WebView não baixa nada
+        // sozinho: tocar em "Baixar" no aviso de versão nova do app (o próprio
+        // radinho.apk) não fazia nada. O navegador baixa e o Android instala.
+        webView.setDownloadListener((url, userAgent, disposicao, mime, tamanho) -> {
+            try {
+                startActivity(new Intent(Intent.ACTION_VIEW, Uri.parse(url)));
+            } catch (Exception ignorado) {
+                // sem navegador: não há o que fazer
+            }
+        });
         ViewCompat.setOnApplyWindowInsetsListener(webView, (v, insets) -> {
             Insets barras = insets.getInsets(
                 WindowInsetsCompat.Type.systemBars() | WindowInsetsCompat.Type.displayCutout()
