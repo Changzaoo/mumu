@@ -1,5 +1,7 @@
 import { useEffect, useRef } from 'react';
 import { useSemMovimento } from '@/hooks/useSemMovimento';
+import { posicaoDoQueToca } from '@/lib/devices/presence';
+import { audioEngine } from '@/lib/audio/AudioEngine';
 import { modoLeve } from '@/lib/perf/dispositivo';
 import { cn } from '@/lib/utils';
 
@@ -32,17 +34,32 @@ import { cn } from '@/lib/utils';
 
 const sorteio = (min: number, max: number) => min + Math.random() * (max - min);
 
-/** Ruído de valor 3D, suave (fade quíntico), com tabela embaralhada por montagem. */
-function criarRuido(): (x: number, y: number, z: number) => number {
+/**
+ * Sequência pseudoaleatória com SEMENTE FIXA (mulberry32). O campo de névoa
+ * tem de ser o mesmo em todos os aparelhos: com `Math.random` cada tela
+ * desenhava uma névoa diferente, e "sincronizado" não passava do giro.
+ */
+function sequencia(semente: number): () => number {
+  let a = semente >>> 0;
+  return () => {
+    a = (a + 0x6d2b79f5) >>> 0;
+    let t = Math.imul(a ^ (a >>> 15), 1 | a);
+    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
+    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
+  };
+}
+
+/** Ruído de valor 3D, suave (fade quíntico), com tabela embaralhada pela semente. */
+function criarRuido(aleatorio: () => number): (x: number, y: number, z: number) => number {
   const p = new Uint8Array(512);
   const base = Array.from({ length: 256 }, (_, i) => i);
   for (let i = 255; i > 0; i--) {
-    const j = Math.floor(Math.random() * (i + 1));
+    const j = Math.floor(aleatorio() * (i + 1));
     [base[i], base[j]] = [base[j]!, base[i]!];
   }
   for (let i = 0; i < 512; i++) p[i] = base[i & 255]!;
   const valor = new Float32Array(256);
-  for (let i = 0; i < 256; i++) valor[i] = Math.random();
+  for (let i = 0; i < 256; i++) valor[i] = aleatorio();
   const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
   const h = (x: number, y: number, z: number) => valor[p[p[p[x]! + y]! + z]!]!;
   return (x, y, z) => {
@@ -130,7 +147,8 @@ export function AuraDoPlay({
     canvas.height = N;
     const imagem = ctx.createImageData(N, N);
     const px = imagem.data;
-    const ruido = criarRuido();
+    // Mesma semente em todo aparelho: a mesma névoa (ver `sequencia`).
+    const ruido = criarRuido(sequencia(0x72616469));
 
     // Onde cada pixel está: raio e ângulo, calculados uma vez.
     const raioDe = new Float32Array(N * N);
@@ -183,8 +201,9 @@ export function AuraDoPlay({
     };
 
     // Deslocamentos sorteados: duas montagens nunca começam no mesmo desenho.
-    const ox = sorteio(0, 200);
-    const oy = sorteio(0, 200);
+    // Deslocamentos FIXOS pelo mesmo motivo da semente: os aparelhos desenham igual.
+    const ox = 73.1;
+    const oy = 141.7;
     /** Relógio da FORMA da névoa (só anda para a frente). */
     let t = sorteio(0, 100);
     /** Relógio do VENTO (tempo real; nunca desacelera). */
@@ -231,6 +250,22 @@ export function AuraDoPlay({
       const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
       velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
       anguloCd += dt * sentido * velCd * VEL_CD;
+      // PRESO AO RELÓGIO DA MÚSICA. Tocando, giro, forma e chama convergem para
+      // valores que são FUNÇÃO DA POSIÇÃO da faixa — a mesma em todos os
+      // aparelhos (a do outro aparelho vem do relógio corrigido pelo servidor).
+      // A correção é suave: nada salta, só se acerta em ~1 s.
+      if (!semMovimento && tocandoRef.current && velCd > 0.9) {
+        const pos = posicaoDoQueToca(() => audioEngine.getPosition());
+        if (pos !== null && Number.isFinite(pos)) {
+          const puxao = 1 - Math.exp(-dt / 0.6);
+          const alvo = pos * VEL_CD;
+          const dif = ((((alvo - anguloCd) % DOIS_PI) + 3 * Math.PI) % DOIS_PI) - Math.PI;
+          anguloCd += dif * puxao;
+          const devagar = 1 - Math.exp(-dt / 1.2);
+          t += (pos * 0.2 + 11 - t) * devagar;
+          fluxo += (pos * 0.95 + 5 - fluxo) * devagar;
+        }
+      }
       angulo = anguloCd;
       const cd = cdRef.current;
       if (cd) cd.style.transform = `rotate(${anguloCd.toFixed(4)}rad)`;

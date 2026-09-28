@@ -1,4 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
+import type { TrackDto } from '@radinho/shared';
+import { acharFaixa, posicaoDoQueToca } from '@/lib/devices/presence';
 import { Link } from 'react-router';
 import { useQuery } from '@tanstack/react-query';
 import { AnimatePresence, motion } from 'framer-motion';
@@ -157,6 +159,23 @@ export function NowPlaying() {
   // Com o remoto no comando, a faixa daqui não deve pintar nada: capa, letra,
   // créditos e fila são dela, não da que está tocando.
   const faixaLocal = remoto ? null : track;
+  // A faixa do OUTRO aparelho, achada pelo id na biblioteca daqui — é o que
+  // deixa ver a letra do que toca lá.
+  const [faixaRemota, setFaixaRemota] = useState<TrackDto | null>(null);
+  const idRemoto = remoto?.trackId ?? null;
+  useEffect(() => {
+    if (!idRemoto) {
+      setFaixaRemota(null);
+      return;
+    }
+    let vivo = true;
+    void acharFaixa(idRemoto).then((t) => {
+      if (vivo) setFaixaRemota(t);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [idRemoto]);
   const capaUrl = remoto ? remoto.coverUrl : (track?.coverUrl ?? null);
   const titulo = remoto ? remoto.title : track?.title;
   const artistas = remoto ? remoto.artists : (track?.artists ?? []);
@@ -365,6 +384,16 @@ export function NowPlaying() {
                   </div>
                 ) : lyricsOpen && faixaLocal ? (
                   <LyricsView track={faixaLocal} className="h-full px-2" />
+                ) : lyricsOpen && remoto && faixaRemota ? (
+                  <LyricsView
+                    track={faixaRemota}
+                    className="h-full px-2"
+                    remoto={{
+                      posicao: () => posicaoDoQueToca(() => 0) ?? 0,
+                      tocando: remoto.isPlaying,
+                      buscar: remoto.seek,
+                    }}
+                  />
                 ) : (
                   <TrocaDeFaixa
                     chave={chaveDaFaixa}
@@ -513,6 +542,20 @@ export function NowPlaying() {
                     para onde o som de fato sai. */}
                 {remoto ? (
                   <div className="flex items-center gap-2">
+                    {/* A letra acompanha o relógio do outro aparelho. */}
+                    {faixaRemota && (
+                      <IconButton
+                        aria-label={lyricsOpen ? 'Voltar para a capa' : 'Letra'}
+                        size="sm"
+                        active={lyricsOpen}
+                        onClick={() => {
+                          toggleLyrics();
+                          setVisualizer(false);
+                        }}
+                      >
+                        <MicVocal />
+                      </IconButton>
+                    )}
                     <span className="grid size-9 place-items-center text-fg-muted" aria-hidden>
                       {controleRemoto.volume === 0 ? (
                         <VolumeX className="size-5" />

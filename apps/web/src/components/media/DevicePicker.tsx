@@ -24,7 +24,10 @@ import {
 } from 'lucide-react';
 import {
   currentDevices,
+  deviceLabel,
   getDeviceId,
+  nomePersonalizado,
+  renomearEsteAparelho,
   sendCommand,
   subscribeDevices,
   transferPlaybackHere,
@@ -32,6 +35,8 @@ import {
 } from '@/lib/devices/presence';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { Slider } from '@/components/ui/slider';
+import { Button } from '@/components/ui/button';
+import { Input } from '@/components/ui/input';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -44,7 +49,8 @@ import { usePlayerStore } from '@/stores/playerStore';
 const EMPTY: DeviceInfo[] = [];
 
 function DeviceIcon({ name }: { name: string }) {
-  const mobile = /iPhone|Android|iPad/i.test(name);
+  // O nome agora é o do modelo ("Galaxy S8 · Chrome"), não mais "Android".
+  const mobile = /iPhone|Android|iPad|Galaxy|moto|Redmi|Xiaomi|POCO|Pixel|· App/i.test(name);
   return mobile ? <Smartphone className="size-4" /> : <Laptop className="size-4" />;
 }
 
@@ -199,8 +205,49 @@ export function DevicePicker({ open, onOpenChange }: DevicePickerProps) {
             </li>
           ))}
         </ul>
+        <NomeDesteAparelho />
       </SheetContent>
     </Sheet>
+  );
+}
+
+/**
+ * RENOMEAR ESTE APARELHO. O nome automático sai do modelo e do navegador, mas
+ * só a pessoa sabe que "Galaxy S8 · Chrome" é "o celular da sala". Vale para
+ * todos os aparelhos da conta assim que salva.
+ */
+function NomeDesteAparelho() {
+  const [nome, setNome] = useState(() => nomePersonalizado() ?? '');
+  const [salvo, setSalvo] = useState(false);
+  const salvar = (): void => {
+    renomearEsteAparelho(nome);
+    setSalvo(true);
+  };
+  return (
+    <form
+      className="flex items-center gap-2 border-t border-fg/8 px-4 py-4"
+      onSubmit={(e) => {
+        e.preventDefault();
+        salvar();
+      }}
+    >
+      <label htmlFor="nome-aparelho" className="sr-only">
+        Nome deste aparelho
+      </label>
+      <Input
+        id="nome-aparelho"
+        value={nome}
+        maxLength={40}
+        placeholder={`Nome deste aparelho (${deviceLabel()})`}
+        onChange={(e) => {
+          setNome(e.target.value);
+          setSalvo(false);
+        }}
+      />
+      <Button type="submit" variant="outline" size="sm">
+        {salvo ? 'Salvo' : 'Salvar'}
+      </Button>
+    </form>
   );
 }
 

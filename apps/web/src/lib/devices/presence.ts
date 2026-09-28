@@ -71,21 +71,174 @@ export function getDeviceId(): string {
 }
 
 /**
- * Nome do APARELHO, não do navegador — "moto g(60)", "iPhone", "Windows".
- *
- * O usuário quer saber ONDE a música está tocando, não em qual navegador. O
- * Android expõe o modelo no user-agent ("… Android 13; moto g(60) Build/…"), e é
- * ele que aparece. O iOS não expõe modelo nenhum (todo iPhone se anuncia só como
- * "iPhone"), então fica o tipo. No computador não há modelo — fica o sistema.
+ * Modelos Samsung pelo código ("SM-G950F" → "Galaxy S8"). Só o prefixo de
+ * letras+3 dígitos importa; a letra final é região/operadora. Lista curta de
+ * propósito: os mais comuns por aqui. Fora dela, o código mesmo — melhor que
+ * "K", que é o que o Chrome manda desde a redução do user-agent.
+ */
+const SAMSUNG: Record<string, string> = {
+  G950: 'Galaxy S8',
+  G955: 'Galaxy S8+',
+  G960: 'Galaxy S9',
+  G965: 'Galaxy S9+',
+  G970: 'Galaxy S10e',
+  G973: 'Galaxy S10',
+  G975: 'Galaxy S10+',
+  G980: 'Galaxy S20',
+  G985: 'Galaxy S20+',
+  G780: 'Galaxy S20 FE',
+  G781: 'Galaxy S20 FE',
+  G990: 'Galaxy S21 FE',
+  G991: 'Galaxy S21',
+  G996: 'Galaxy S21+',
+  S901: 'Galaxy S22',
+  S906: 'Galaxy S22+',
+  S908: 'Galaxy S22 Ultra',
+  S911: 'Galaxy S23',
+  S916: 'Galaxy S23+',
+  S918: 'Galaxy S23 Ultra',
+  S711: 'Galaxy S23 FE',
+  S921: 'Galaxy S24',
+  S926: 'Galaxy S24+',
+  S928: 'Galaxy S24 Ultra',
+  N950: 'Galaxy Note8',
+  N960: 'Galaxy Note9',
+  N970: 'Galaxy Note10',
+  N975: 'Galaxy Note10+',
+  A105: 'Galaxy A10',
+  A107: 'Galaxy A10s',
+  A115: 'Galaxy A11',
+  A125: 'Galaxy A12',
+  A135: 'Galaxy A13',
+  A145: 'Galaxy A14',
+  A155: 'Galaxy A15',
+  A165: 'Galaxy A16',
+  A205: 'Galaxy A20',
+  A207: 'Galaxy A20s',
+  A217: 'Galaxy A21s',
+  A225: 'Galaxy A22',
+  A235: 'Galaxy A23',
+  A245: 'Galaxy A24',
+  A256: 'Galaxy A25',
+  A305: 'Galaxy A30',
+  A307: 'Galaxy A30s',
+  A315: 'Galaxy A31',
+  A325: 'Galaxy A32',
+  A336: 'Galaxy A33',
+  A346: 'Galaxy A34',
+  A356: 'Galaxy A35',
+  A505: 'Galaxy A50',
+  A507: 'Galaxy A50s',
+  A515: 'Galaxy A51',
+  A525: 'Galaxy A52',
+  A528: 'Galaxy A52s',
+  A536: 'Galaxy A53',
+  A546: 'Galaxy A54',
+  A556: 'Galaxy A55',
+  A715: 'Galaxy A71',
+  A725: 'Galaxy A72',
+  A032: 'Galaxy A03',
+  A037: 'Galaxy A03s',
+  A045: 'Galaxy A04',
+  A047: 'Galaxy A04s',
+  A055: 'Galaxy A05',
+  A057: 'Galaxy A05s',
+  M135: 'Galaxy M13',
+  M236: 'Galaxy M23',
+  M336: 'Galaxy M33',
+  M526: 'Galaxy M52',
+  M536: 'Galaxy M53',
+  M546: 'Galaxy M54',
+};
+
+/** Nome amigável a partir do modelo cru do Android. */
+export function nomeDoModelo(cru: string): string {
+  const modelo = cru.replace(/\s*build.*$/i, '').trim();
+  const sm = /^SM-([A-Z]\d{3})/i.exec(modelo);
+  if (sm) return SAMSUNG[sm[1]!.toUpperCase()] ?? modelo;
+  return modelo;
+}
+
+const MODELO_KEY = 'aurial:deviceModel';
+const NOME_KEY = 'aurial:deviceName';
+
+/**
+ * O Chrome no Android REDUZ o user-agent: em vez do modelo, manda "K". Era
+ * daí que vinham os aparelhos com nome errado. O modelo de verdade só sai pelas
+ * Client Hints de alta entropia — pedidas uma vez e guardadas.
+ */
+export async function descobrirModelo(): Promise<void> {
+  const uad = (
+    navigator as Navigator & {
+      userAgentData?: { getHighEntropyValues?: (h: string[]) => Promise<{ model?: string }> };
+    }
+  ).userAgentData;
+  if (!uad?.getHighEntropyValues) return;
+  try {
+    const { model } = await uad.getHighEntropyValues(['model']);
+    if (model && model.trim()) window.localStorage.setItem(MODELO_KEY, model.trim());
+  } catch {
+    /* sem hints: fica o que o user-agent disser */
+  }
+}
+
+/** Qual navegador (ou o app) — é o que separa duas entradas do MESMO aparelho. */
+export function nomeDoNavegador(ua = navigator.userAgent): string {
+  const w = window as Window & { Capacitor?: { isNativePlatform?: () => boolean } };
+  if (w.Capacitor?.isNativePlatform?.()) return 'App';
+  if (/Edg\//.test(ua)) return 'Edge';
+  if (/OPR\/|Opera/.test(ua)) return 'Opera';
+  if (/SamsungBrowser/.test(ua)) return 'Samsung Internet';
+  if (/Firefox\/|FxiOS/.test(ua)) return 'Firefox';
+  if (/CriOS|Chrome\//.test(ua)) return 'Chrome';
+  if (/Safari\//.test(ua)) return 'Safari';
+  return 'Navegador';
+}
+
+/** O nome que a própria pessoa deu a este aparelho (vale acima de tudo). */
+export function nomePersonalizado(): string | null {
+  try {
+    return window.localStorage.getItem(NOME_KEY)?.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+export function renomearEsteAparelho(nome: string): void {
+  try {
+    const limpo = nome.trim().slice(0, 40);
+    if (limpo) window.localStorage.setItem(NOME_KEY, limpo);
+    else window.localStorage.removeItem(NOME_KEY);
+  } catch {
+    /* sem storage */
+  }
+  publish(true);
+}
+
+/**
+ * Nome do APARELHO — "Galaxy S8", "iPhone", "Windows" — com o navegador ao
+ * lado: o mesmo computador no Chrome e no Edge são duas entradas, e sem o
+ * navegador no nome pareciam aparelhos fantasmas.
  */
 export function deviceLabel(): string {
+  return nomePersonalizado() ?? `${nomeDoAparelhoFisico()} · ${nomeDoNavegador()}`;
+}
+
+function nomeDoAparelhoFisico(): string {
   const ua = navigator.userAgent;
-  // Android traz o modelo real entre o número da versão e o "Build" (ou o ")").
+  let guardado: string | null = null;
+  try {
+    guardado = window.localStorage.getItem(MODELO_KEY);
+  } catch {
+    /* sem storage */
+  }
+  if (guardado && !/^k$/i.test(guardado)) return nomeDoModelo(guardado);
+  // Android antigo (sem redução) ainda traz o modelo entre a versão e o "Build".
   const android = /Android[\d.\s]*;\s*([^;)]+?)(?:\s+Build|\))/i.exec(ua);
   if (android?.[1]) {
-    const modelo = android[1].replace(/\s*build.*$/i, '').trim();
-    // "wv" é o marcador de WebView, não um modelo; nesse caso cai para "Android".
-    if (modelo && !/^wv$/i.test(modelo)) return modelo;
+    const modelo = nomeDoModelo(android[1]);
+    // "K" (user-agent reduzido) e "wv" (WebView) não são modelos.
+    if (modelo && !/^(wv|k)$/i.test(modelo)) return modelo;
   }
   if (/iPhone/.test(ua)) return 'iPhone';
   if (/iPad/.test(ua) || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1)) {
@@ -98,8 +251,35 @@ export function deviceLabel(): string {
   return 'Dispositivo';
 }
 
+/**
+ * IMPRESSÃO DO APARELHO FÍSICO — igual em todos os navegadores dele.
+ *
+ * Cada navegador tem seu armazenamento, então ganha seu próprio id; não há como
+ * um saber do outro. O que dá para comparar é o que o HARDWARE diz a qualquer
+ * navegador: modelo/sistema, tela, fuso, núcleos. É com isto que as entradas
+ * velhas do mesmo aparelho (id de um navegador limpo, de outro navegador) são
+ * reconhecidas e recolhidas na lista.
+ */
+export function impressaoDoAparelho(): string {
+  const nav = navigator as Navigator & { deviceMemory?: number };
+  const partes = [
+    nomeDoAparelhoFisico(),
+    `${Math.min(screen.width, screen.height)}x${Math.max(screen.width, screen.height)}`,
+    String(Math.round((window.devicePixelRatio || 1) * 100)),
+    Intl.DateTimeFormat().resolvedOptions().timeZone ?? '',
+    String(nav.hardwareConcurrency ?? 0),
+  ];
+  let h = 0x811c9dc5;
+  for (const c of partes.join('|')) h = Math.imul(h ^ c.charCodeAt(0), 0x01000193);
+  return (h >>> 0).toString(36);
+}
+
 export interface DevicePresence {
   name: string;
+  /** Impressão do aparelho físico (ver `impressaoDoAparelho`). */
+  aparelho?: string;
+  /** Relógio LOCAL de quem publicou quando `progress` foi medido (ms). */
+  progressAt?: number;
   /** ISO do relógio do PRÓPRIO aparelho — usado só como reserva. */
   lastSeenAt: string;
   /** Carimbo do SERVIDOR: normaliza relógios tortos entre aparelhos. */
@@ -130,6 +310,8 @@ export interface DeviceInfo {
   duration: number;
   /** Quando este estado foi publicado (ms). A posição envelhece a partir daqui. */
   seenAt: number;
+  /** Impressão do aparelho físico (entradas de navegadores do mesmo aparelho). */
+  aparelho: string | null;
 }
 
 /** Outro aparelho da MESMA conta tocando agora (para o banner). */
@@ -182,6 +364,26 @@ let unsubCommands: (() => void) | null = null;
 let unsubActive: (() => void) | null = null;
 let lastWriteAt = 0;
 let lastSignature = '';
+/** Última posição publicada e quando (relógio local): detecta pulos e travadas. */
+let publicado = { progresso: 0, em: 0, tocando: false };
+/**
+ * DIFERENÇA ENTRE O RELÓGIO DESTE APARELHO E O DO SERVIDOR (ms).
+ *
+ * A posição do outro aparelho é extrapolada a partir do carimbo do servidor;
+ * comparar isso com `Date.now()` daqui somava o erro dos DOIS relógios — celular
+ * com relógio alguns segundos torto já deixava tempo e letra fora de sincronia.
+ * Medido pelas próprias escritas: carimbo do servidor − hora local da medida.
+ * O MENOR valor visto é o que tem menos atraso de rede embutido.
+ */
+let desvioDoRelogio: number | null = null;
+/** Poda das entradas mortas: uma vez por sessão. */
+let podado = false;
+const PODA_MS = 30 * 24 * 60 * 60 * 1000;
+
+/** Agora, no relógio do servidor. */
+function agoraNoServidor(): number {
+  return Date.now() + (desvioDoRelogio ?? 0);
+}
 let initialized = false;
 
 /**
@@ -350,6 +552,18 @@ export function dispositivoRemotoAtivo(): DeviceInfo | null {
   return deviceState.find((d) => d.id !== me && d.online && d.isPlaying && d.track) ?? null;
 }
 
+/**
+ * A POSIÇÃO DA MÚSICA QUE ESTA TELA MOSTRA, em segundos: a do outro aparelho
+ * quando é ele que está tocando (e daqui nada toca), senão a daqui. É o relógio
+ * que a letra e a animação do play seguem — o mesmo em todos os aparelhos.
+ */
+export function posicaoDoQueToca(posicaoLocal: () => number): number | null {
+  const local = usePlayerStore.getState();
+  if (local.isPlaying || (local.currentTrack && !dispositivoRemotoAtivo())) return posicaoLocal();
+  const remoto = dispositivoRemotoAtivo();
+  return remoto ? posicaoAtualDe(remoto) : null;
+}
+
 /** A posição estimada AGORA de um aparelho remoto (extrapola o relógio). */
 export function posicaoEstimada(device: DeviceInfo): number {
   return posicaoAtualDe(device);
@@ -374,12 +588,15 @@ function publish(force = false): void {
   if (!force && now - lastWriteAt < 2_000) return;
   lastSignature = signature;
   lastWriteAt = now;
+  publicado = { progresso: state.progress, em: now, tocando: state.isPlaying };
   const uid = currentUser.uid;
   void (async () => {
     const { doc, serverTimestamp, setDoc } = await firestore();
     if (!db) return;
     const payload: DevicePresence = {
       name: deviceLabel(),
+      aparelho: impressaoDoAparelho(),
+      progressAt: now,
       lastSeenAt: new Date().toISOString(),
       seenAt: serverTimestamp() as unknown as Timestamp,
       isPlaying: state.isPlaying,
@@ -467,7 +684,7 @@ export async function sendCommand(
  */
 function posicaoAtualDe(device: DeviceInfo): number {
   if (!device.isPlaying) return device.progress;
-  const decorrido = Math.max(0, (Date.now() - device.seenAt) / 1000);
+  const decorrido = Math.max(0, (agoraNoServidor() - device.seenAt) / 1000);
   const estimada = device.progress + decorrido;
   // Nunca passar do fim: com sinal velho a conta pode estourar a duração, e
   // buscar além do fim faz a faixa acabar na hora em que ela chega.
@@ -519,7 +736,7 @@ export async function transferPlaybackHere(fromDeviceId?: string): Promise<void>
  * local (que espelha o Firestore, então a faixa do outro aparelho está aqui
  * mesmo que o áudio não esteja — o player resolve a fonte sozinho).
  */
-async function acharFaixa(trackId: string): Promise<TrackDto | null> {
+export async function acharFaixa(trackId: string): Promise<TrackDto | null> {
   const naFila = usePlayerStore.getState().queue.find((t) => t.id === trackId);
   if (naFila) return naFila;
   try {
@@ -610,7 +827,14 @@ function start(user: User): void {
     // Começou a tocar AQUI → esta passa a ser a aparelha da vez.
     if (state.isPlaying && !wasPlaying) claimPlayback();
     wasPlaying = state.isPlaying;
-    publish();
+    // PULO OU TRAVADA: a posição saiu do que os outros estão extrapolando.
+    // Sem republicar na hora, o outro aparelho seguia com o tempo errado (e a
+    // letra com ele) até o próximo sinal de vida, 25 s depois.
+    const esperado = publicado.tocando
+      ? publicado.progresso + (Date.now() - publicado.em) / 1000
+      : publicado.progresso;
+    if (Math.abs(state.progress - esperado) > 1.5) publish(true);
+    else publish();
   });
 
   // Os três ouvintes abaixo dependem do Firestore, que chega por import
@@ -665,14 +889,27 @@ function start(user: User): void {
       collection(db, 'users', user.uid, 'devices'),
       (snap) => {
         const me = getDeviceId();
-        const now = Date.now();
         const devices: DeviceInfo[] = [];
         let found: RemotePlayback | null = null;
         for (const d of snap.docs) {
           const p = d.data() as DevicePresence;
           const seenAt = seenMillis(p);
-          const online = now - seenAt < FRESH_MS;
+          if (d.id === me && typeof p.progressAt === 'number' && p.seenAt) {
+            const amostra = seenAt - p.progressAt;
+            if (Math.abs(amostra) < 6 * 60 * 60 * 1000) {
+              desvioDoRelogio =
+                desvioDoRelogio === null ? amostra : Math.min(desvioDoRelogio, amostra);
+            }
+          }
+          const online = agoraNoServidor() - seenAt < FRESH_MS;
+          // Entrada morta há mais de um mês (navegador limpo, aparelho trocado):
+          // sai da conta, uma vez por sessão.
+          if (!podado && d.id !== me && agoraNoServidor() - seenAt > PODA_MS) {
+            void deleteDoc(d.ref).catch(() => undefined);
+            continue;
+          }
           devices.push({
+            aparelho: p.aparelho ?? null,
             id: d.id,
             name: p.name,
             isSelf: d.id === me,
@@ -696,6 +933,28 @@ function start(user: User): void {
               isPlaying: true,
             };
           }
+        }
+        podado = true;
+        // O MESMO APARELHO NÃO APARECE DUAS VEZES OFFLINE. Id novo a cada
+        // navegador limpo/reinstalado deixava fantasmas: "Galaxy S8", "Galaxy
+        // S8", "Galaxy S8". Entrada offline some quando há outra do mesmo
+        // aparelho (mesma impressão, ou mesmo nome nas entradas antigas sem
+        // impressão) mais recente ou online.
+        const chave = (d: DeviceInfo) => d.aparelho ?? `nome:${d.name}`;
+        const melhorPorChave = new Map<string, DeviceInfo>();
+        for (const d of devices) {
+          const atual = melhorPorChave.get(chave(d));
+          const melhor =
+            !atual ||
+            Number(d.isSelf) - Number(atual.isSelf) > 0 ||
+            (d.isSelf === atual.isSelf &&
+              (Number(d.online) - Number(atual.online) > 0 ||
+                (d.online === atual.online && d.seenAt > atual.seenAt)));
+          if (melhor) melhorPorChave.set(chave(d), d);
+        }
+        for (let i = devices.length - 1; i >= 0; i--) {
+          const d = devices[i]!;
+          if (!d.online && !d.isSelf && melhorPorChave.get(chave(d)) !== d) devices.splice(i, 1);
         }
         // Online primeiro, depois quem está tocando, depois nome.
         devices.sort(
@@ -840,6 +1099,8 @@ export function initPresence(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
   instalarDiagnosticoDeAparelhos();
+  // O modelo real (Client Hints) chega depois; a próxima publicação já leva.
+  void descobrirModelo().then(() => publish(true));
   subscribeAuth((user) => {
     stop();
     if (user) start(user);
