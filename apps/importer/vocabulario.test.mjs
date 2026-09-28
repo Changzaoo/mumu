@@ -9,6 +9,7 @@ import path from 'node:path';
 import {
   construirPrompt,
   criarVocabulario,
+  MAX_ARTISTAS,
   mesclarCorrecao,
   normalizarArtista,
 } from './vocabulario.mjs';
@@ -96,6 +97,28 @@ test('criarVocabulario: artista sem correção nenhuma devolve prompt vazio, nun
     const v = criarVocabulario({ arquivo, log: () => {} });
     assert.equal(await v.promptPara('Ninguém'), '');
     await assert.doesNotReject(v.registrar('', []));
+  } finally {
+    await rm(dir, { recursive: true, force: true });
+  }
+});
+
+test('criarVocabulario: rota pública não faz o dicionário crescer sem fim', async () => {
+  const dir = await mkdtemp(path.join(tmpdir(), 'vocab-'));
+  const arquivo = path.join(dir, 'vocabulario.json');
+  try {
+    const v = criarVocabulario({ arquivo, log: () => {} });
+    const par = [
+      { ouvido: 'x', real: 'y' },
+      { ouvido: 'x', real: 'y' },
+    ];
+    // Nome gigante é recusado de cara.
+    await v.registrar('a'.repeat(500), par);
+    assert.equal(await v.promptPara('a'.repeat(500)), '');
+    for (let i = 0; i < MAX_ARTISTAS; i++) await v.registrar(`artista ${i}`, par);
+    // Cheio: artista novo fica de fora, quem já está continua aprendendo.
+    await v.registrar('artista novo', par);
+    assert.equal(await v.promptPara('artista novo'), '');
+    assert.equal(await v.promptPara('artista 0'), 'y');
   } finally {
     await rm(dir, { recursive: true, force: true });
   }

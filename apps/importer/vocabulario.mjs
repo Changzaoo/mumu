@@ -28,6 +28,12 @@ const TETO_PROMPT_CHARS = 200;
 /** Quantas correções guardar por artista — o objetivo é o vocabulário
  *  RECORRENTE, não um dicionário enciclopédico crescendo sem fim. */
 const MAX_CORRECOES_POR_ARTISTA = 200;
+/** `/letra/aprendizado` é rota pública (sem login): sem teto de artistas, um
+ *  script mandando um nome inventado por pedido faz o JSON — que é lido
+ *  inteiro na memória e regravado a cada lote — crescer sem fim. O teto por
+ *  artista não protege disso; estes dois protegem. */
+export const MAX_ARTISTAS = 5000;
+const MAX_CHARS_ARTISTA = 120;
 
 /** Espelha a normalização de artista já usada em outrasFontesDeLetra.mjs —
  *  duplicada de propósito (módulos independentes, função pequena). */
@@ -126,8 +132,13 @@ export function criarVocabulario({ arquivo, log }) {
     try {
       const chaveArtista = normalizarArtista(artista);
       if (!chaveArtista || !Array.isArray(correcoes) || correcoes.length === 0) return;
+      if (chaveArtista.length > MAX_CHARS_ARTISTA) return;
       const base = await carregar();
       let entrada = base[chaveArtista];
+      // Artista NOVO com o dicionário cheio fica de fora: quem já está lá é o
+      // vocabulário que realmente se repete, e não vale expulsá-lo por um nome
+      // que pode ser lixo.
+      if (!entrada && Object.keys(base).length >= MAX_ARTISTAS) return;
       let mudou = false;
       for (const par of correcoes.slice(0, 50)) {
         const ouvido = String(par?.ouvido ?? '')
