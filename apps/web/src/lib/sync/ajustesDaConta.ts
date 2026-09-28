@@ -20,8 +20,8 @@ import { useSettingsStore } from '@/stores/settingsStore';
 let logado = false;
 let aplicandoDaConta = false;
 
-function enviar(pesquisadorAtivo: boolean): void {
-  void api.patch<MeDto>('/me', { settings: { pesquisadorAtivo } }).catch(() => undefined);
+function enviar(settings: { pesquisadorAtivo?: boolean; dataNascimento?: string | null }): void {
+  void api.patch<MeDto>('/me', { settings }).catch(() => undefined);
 }
 
 export function initAjustesDaConta(): () => void {
@@ -32,19 +32,28 @@ export function initAjustesDaConta(): () => void {
       .get<MeDto>('/me')
       .then(({ data }) => {
         const daConta = data.settings?.pesquisadorAtivo;
-        if (typeof daConta === 'boolean') {
-          aplicandoDaConta = true;
-          useSettingsStore.getState().setPesquisadorAtivo(daConta);
-          aplicandoDaConta = false;
-        } else if (useSettingsStore.getState().pesquisadorAtivo) {
-          enviar(true); // ligado aqui antes de a conta guardar: leva para a conta
+        const local = useSettingsStore.getState();
+        aplicandoDaConta = true;
+        if (typeof daConta === 'boolean') local.setPesquisadorAtivo(daConta);
+        // A IDADE da conta vale para todos os aparelhos; se a conta ainda não
+        // sabe e este aparelho sabe, leva para lá.
+        const nascimento = data.settings?.dataNascimento;
+        if (typeof nascimento === 'string') local.setDataNascimento(nascimento);
+        aplicandoDaConta = false;
+        if (typeof daConta !== 'boolean' && local.pesquisadorAtivo) {
+          enviar({ pesquisadorAtivo: true }); // ligado aqui antes de a conta guardar
+        }
+        if (typeof nascimento !== 'string' && local.dataNascimento) {
+          enviar({ dataNascimento: local.dataNascimento });
         }
       })
       .catch(() => undefined);
   });
   const pararAjustes = useSettingsStore.subscribe((s, antes) => {
-    if (s.pesquisadorAtivo === antes.pesquisadorAtivo || aplicandoDaConta || !logado) return;
-    enviar(s.pesquisadorAtivo);
+    if (aplicandoDaConta || !logado) return;
+    if (s.pesquisadorAtivo !== antes.pesquisadorAtivo)
+      enviar({ pesquisadorAtivo: s.pesquisadorAtivo });
+    if (s.dataNascimento !== antes.dataNascimento) enviar({ dataNascimento: s.dataNascimento });
   });
   return () => {
     pararAuth();

@@ -39,6 +39,12 @@ export const meSchema = userSchema.extend({
       /** Agente pesquisador: busca e baixa sozinho música do gosto da pessoa
        *  (roda no servidor, 24/7). Vale para a CONTA, em todos os aparelhos. */
       pesquisadorAtivo: z.boolean().default(false),
+      /** Mês/ano de nascimento ("AAAA-MM") — decide o que a pessoa pode ouvir. */
+      dataNascimento: z
+        .string()
+        .regex(/^\d{4}-\d{2}$/)
+        .nullable()
+        .optional(),
     })
     .partial()
     .nullable(),

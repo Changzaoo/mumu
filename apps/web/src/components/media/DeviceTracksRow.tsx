@@ -39,6 +39,7 @@ export function DeviceTracksRow({
       {shown.map((track, index) => (
         <MediaCard
           key={track.id}
+          trackId={track.id}
           title={track.title}
           subtitle={track.artists[0]?.name ?? 'Desconhecido'}
           imageUrl={track.coverUrl}

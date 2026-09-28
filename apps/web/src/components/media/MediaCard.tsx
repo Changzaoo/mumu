@@ -1,3 +1,4 @@
+import { usePodeOuvir } from '@/lib/conteudo/faixaEtaria';
 import { useEffect, useState } from 'react';
 import type { ComponentProps, KeyboardEvent, ReactNode } from 'react';
 import { Link } from 'react-router';
@@ -52,6 +53,9 @@ export function MediaCard({
     trackId ? st.isPlaying && st.currentTrack?.id === trackId : false,
   );
   const playing = trackId ? tocandoEste : playingProp;
+  // Cartão de FAIXA que esta pessoa não pode ouvir (idade × conteúdo) não
+  // aparece — em qualquer página que desenhe o cartão direto.
+  const permitida = usePodeOuvir(trackId ? { id: trackId, title } : null);
   const rounded = shape === 'round' ? 'rounded-full' : 'rounded-xl';
   // A play-only card (no route) plays when tapped anywhere — no hunting for the
   // little corner button.
@@ -137,6 +141,7 @@ export function MediaCard({
     </>
   );
 
+  if (trackId && !permitida) return null;
   return (
     <div
       data-giro="item"

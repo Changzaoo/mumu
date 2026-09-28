@@ -85,7 +85,7 @@ export interface ConteudoDaFaixa extends AnaliseDeConteudo {
  *    consultar qualquer coisa quando a faixa não tinha duração — e 1.677 das
  *    5.058 não têm. Era essa, e não o casamento, a causa dos 77% sem veredito.
  */
-export const VERSAO_DO_LEXICO = 3;
+export const VERSAO_DO_LEXICO = 4;
 
 function textoDaLetra(corpo: {
   plainLyrics?: string | null;

@@ -1,3 +1,4 @@
+import { podeOuvir } from '@/lib/conteudo/faixaEtaria';
 /**
  * RÁDIO DE UMA FAIXA — quando você põe UMA música pra tocar, a fila não morre
  * depois dela.
@@ -83,6 +84,8 @@ export function construirRadio(seed: TrackDto, limite = 40): TrackDto[] {
       if (vistos.has(t.id)) continue;
       vistos.add(t.id);
       if (!podemConviver(semente, paraConvivencia(t))) continue;
+      // Idade × conteúdo: a rádio nunca sugere o que esta pessoa não pode ouvir.
+      if (!podeOuvir(t)) continue;
       pool.push(t);
     }
   }

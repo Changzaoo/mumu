@@ -139,6 +139,9 @@ export default function App() {
       // pesquisador.worker.ts) — aqui só a escolha da pessoa, que mora na
       // CONTA para valer em todos os aparelhos e com o app fechado.
       pararPesquisador = ajustesDaConta.initAjustesDaConta();
+      // Filtro de idade: julga as letras já guardadas no aparelho (só quem tem
+      // restrição; em pedaços, fora da primeira tela).
+      void import('@/lib/conteudo/faixaEtaria').then((m) => m.julgarLetrasGuardadas());
       // Reparador: LIGADO, e a diferença para o pesquisador é o consentimento.
       // O pesquisador sai atrás de música que ninguém pediu; este só rebaixa de
       // novo faixa que a pessoa mandou tocar e que falhou na cara dela. Poucas

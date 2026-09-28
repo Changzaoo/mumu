@@ -37,6 +37,22 @@ export default defineConfig({
   use: {
     baseURL,
     trace: 'on-first-retry',
+    // Idade já informada (adulto): a pergunta de idade não cobre a tela das
+    // specs que testam outra coisa. O filtro de idade tem spec própria.
+    storageState: {
+      cookies: [],
+      origins: [
+        {
+          origin: new URL(baseURL).origin,
+          localStorage: [
+            {
+              name: 'aurial:settings',
+              value: JSON.stringify({ state: { dataNascimento: '1990-01' }, version: 0 }),
+            },
+          ],
+        },
+      ],
+    },
   },
   projects: [{ name: 'chromium', use: { ...devices['Desktop Chrome'] } }],
   webServer: {

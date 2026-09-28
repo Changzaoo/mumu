@@ -1,3 +1,4 @@
+import { usePodeOuvir } from '@/lib/conteudo/faixaEtaria';
 import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import {
   ContextMenu,
@@ -241,6 +242,9 @@ export function TrackRow({
   // a alça da capa pode ter sido despejada pelo orçamento de memória, e este
   // gancho a reabre quando a linha volta à tela. Ver `useLocalCover`.
   const coverUrl = useLocalCover(track);
+  // FAIXA QUE ESTA PESSOA NÃO PODE OUVIR (idade × conteúdo) NEM APARECE —
+  // ver lib/conteudo/faixaEtaria.ts.
+  const permitida = usePodeOuvir(track);
   const toggle = usePlayerStore((s) => s.toggle);
 
   const handlePlay = (): void => {
@@ -258,6 +262,7 @@ export function TrackRow({
 
   const itensDoMenu = useItensDaFaixa(track, onAddToPlaylist);
 
+  if (!permitida) return null;
   return (
     <ContextMenu
       onOpenChange={(aberto) => {

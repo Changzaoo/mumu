@@ -137,6 +137,16 @@ const LEXICO: readonly Termo[] = [
   l('shit', 'palavrao'),
   l('damn', 'palavrao'),
 
+  // ── palavrão, espanhol (reggaeton, trap latino) ───────────────────────
+  f('pendejo', 'palavrao'),
+  f('cabron', 'palavrao'),
+  f('joder', 'palavrao'),
+  f('chingar', 'palavrao'),
+  f('chingada', 'palavrao'),
+  f('verga', 'palavrao'),
+  f('cono', 'palavrao'),
+  l('mierda', 'palavrao'),
+
   // ── drogas ────────────────────────────────────────────────────────────
   // Só o que não tem uso inocente, ou expressões inteiras. `po`, `bala`,
   // `erva`, `seda`, `coca` e `seda` estão FORA: o custo de errar é alto.
@@ -221,6 +231,30 @@ export function normalizarParaAnalise(texto: string): string {
     .trim();
 }
 
+/**
+ * PALAVRÃO EM COREANO — para quem ouve K-pop (as versões explícitas de rap
+ * coreano usam estes). Por trecho, não por palavra (ver `classificarTexto`).
+ *
+ * De fora DE PROPÓSITO, pelo falso positivo: `보지` e `자지` são também formas
+ * de verbo comuníssimas ("보지 않아" = "não ver", "자지 마" = "não durma").
+ * `시발` só conta quando não é `시발점` ("ponto de partida").
+ */
+const LEXICO_COREANO: Array<{ termo: string; padrao: RegExp; categoria: CategoriaDeConteudo }> = [
+  { termo: '씨발', padrao: /씨발|씨빨|씨바|씨팔|쉬발/, categoria: 'palavrao' },
+  { termo: '시발', padrao: /시발(?!점)/, categoria: 'palavrao' },
+  { termo: 'ㅅㅂ', padrao: /ㅅㅂ|ㅆㅂ/, categoria: 'palavrao' },
+  { termo: '개새끼', padrao: /개새끼|개새기|개색기|개색히/, categoria: 'palavrao' },
+  { termo: '좆', padrao: /좆/, categoria: 'palavrao' },
+  { termo: '병신', padrao: /병신|ㅂㅅ/, categoria: 'palavrao' },
+  { termo: '지랄', padrao: /지랄/, categoria: 'palavrao' },
+  { termo: '존나', padrao: /존나|졸라|존내/, categoria: 'palavrao' },
+  { termo: '썅', padrao: /썅/, categoria: 'palavrao' },
+  { termo: '미친년', padrao: /미친년|미친놈/, categoria: 'palavrao' },
+  { termo: '니미', padrao: /니미럴|니애미|느금마/, categoria: 'palavrao' },
+  { termo: '섹스', padrao: /섹스/, categoria: 'sexo' },
+  { termo: '대마초', padrao: /대마초|마약/, categoria: 'drogas' },
+];
+
 /** Achou o termo como PALAVRA, não como pedaço de outra palavra. */
 function contem(texto: string, termo: string): boolean {
   const escapado = termo.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
@@ -251,6 +285,16 @@ export function classificarTexto(texto: string | null | undefined): AnaliseDeCon
   const achados: string[] = [];
   const categorias = new Set<CategoriaDeConteudo>();
   let fortes = 0;
+
+  // COREANO (K-pop): a normalização acima apaga o hangul, e o coreano gruda
+  // partícula na palavra ("씨발놈아") — então a busca é por TRECHO no texto
+  // original, com guardas para as palavras que são outra coisa em frase comum.
+  for (const { termo, padrao, categoria } of LEXICO_COREANO) {
+    if (!padrao.test(texto)) continue;
+    achados.push(termo);
+    categorias.add(categoria);
+    fortes += 1;
+  }
 
   for (const item of LEXICO) {
     if (!contem(normal, item.termo)) continue;

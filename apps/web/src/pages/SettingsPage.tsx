@@ -1,3 +1,5 @@
+import { PerguntaDeIdade } from '@/components/media/PerguntaDeIdade';
+import { faixaEtariaDe } from '@/lib/conteudo/faixaEtaria';
 /**
  * /settings — preferences in cards. Local settings persist instantly via
  * settingsStore; account-side settings (notificações, sessão privada) go to
@@ -14,6 +16,7 @@ import {
   Loader2,
   Lock,
   Search,
+  ShieldCheck,
   LogOut,
   Monitor,
   Moon,
@@ -180,6 +183,7 @@ export default function SettingsPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const settings = useSettingsStore();
+  const [idadeAberta, setIdadeAberta] = useState(false);
   const setRate = usePlayerStore((s) => s.setRate);
   const playbackRate = usePlayerStore((s) => s.playbackRate);
   const setActiveModal = useUiStore((s) => s.setActiveModal);
@@ -440,6 +444,27 @@ export default function SettingsPage() {
             Permitir push
           </Button>
         </Row>
+      </SettingsCard>
+
+      {/* Idade: decide o que a pessoa pode ouvir (lib/conteudo/faixaEtaria). */}
+      <SettingsCard icon={ShieldCheck} title="Idade e conteúdo">
+        <Row
+          label="Faixa etária"
+          hint={
+            {
+              crianca:
+                'Menor de 13: só músicas comprovadamente sem palavrão ou conteúdo explícito.',
+              adolescente: '13 a 17 anos: músicas explícitas ficam de fora.',
+              adulto: '18 anos ou mais: todo o acervo.',
+              desconhecida: 'Não informada: músicas explícitas ficam de fora até você informar.',
+            }[faixaEtariaDe(settings.dataNascimento)]
+          }
+        >
+          <Button variant="outline" size="sm" onClick={() => setIdadeAberta(true)}>
+            {settings.dataNascimento ? 'Alterar' : 'Informar'}
+          </Button>
+        </Row>
+        <PerguntaDeIdade aberta={idadeAberta} aoFechar={() => setIdadeAberta(false)} />
       </SettingsCard>
 
       {/* Agente pesquisador — desligado por padrão: ele gasta internet e disco

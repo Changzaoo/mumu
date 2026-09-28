@@ -245,6 +245,7 @@ function PrateleiraDeFaixas({
       {tracks.map((track, index) => (
         <MediaCard
           key={track.id}
+          trackId={track.id}
           title={track.title}
           subtitle={trackArtistNames(track)}
           imageUrl={track.coverUrl}

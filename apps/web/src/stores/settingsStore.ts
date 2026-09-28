@@ -48,6 +48,13 @@ export interface SettingsState {
    * escolha explícita, não surpresa.
    */
   pesquisadorAtivo: boolean;
+  /**
+   * Mês/ano de nascimento ("AAAA-MM"), ou null enquanto a pessoa não disse.
+   * Decide o que ela pode ouvir (ver lib/conteudo/faixaEtaria.ts). Mora também
+   * na conta (ajustesDaConta) para valer em todos os aparelhos.
+   */
+  dataNascimento: string | null;
+  setDataNascimento: (valor: string | null) => void;
 
   setTheme: (theme: ThemeSetting) => void;
   setLanguage: (language: string) => void;
@@ -114,6 +121,7 @@ export const useSettingsStore = create<SettingsState>()(
       language: 'pt-BR',
       audioQuality: 'high',
       pesquisadorAtivo: false,
+      dataNascimento: null,
       crossfadeSeconds: 0,
       gapless: true,
       normalizeVolume: true,
@@ -131,6 +139,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
       setLanguage: (language) => set({ language }),
       setPesquisadorAtivo: (pesquisadorAtivo) => set({ pesquisadorAtivo }),
+      setDataNascimento: (dataNascimento) => set({ dataNascimento }),
       setAudioQuality: (audioQuality) => set({ audioQuality }),
       setCrossfadeSeconds: (seconds) => set({ crossfadeSeconds: clamp(seconds, 0, 12) }),
       setGapless: (gapless) => set({ gapless }),

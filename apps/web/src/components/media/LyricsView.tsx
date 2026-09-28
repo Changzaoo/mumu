@@ -177,18 +177,29 @@ export function LyricsView({ track, className }: LyricsViewProps) {
     // música deixava este rAF girando a 60/s para sempre, recalculando a
     // mesma linha/palavra sem nada de novo para mostrar. O mesmo desperdício
     // que `SpectrumVisualizer` já evita.
-    if (!synced || !lyrics || !isPlaying) {
-      if (!synced || !lyrics) setAtiva({ linha: -1, palavra: -1 });
+    if (!synced || !lyrics) {
+      setAtiva({ linha: -1, palavra: -1 });
       return;
     }
-    let raf = 0;
-    const tick = (): void => {
+    const medir = (): void => {
       const posMs = audioEngine.getPosition() * 1000 + LEAD_MS;
       const linha = linhaAtiva(lyrics.lines, posMs);
       const palavra = linha >= 0 ? palavraAtiva(palavrasPorLinha[linha] ?? [], posMs) : -1;
       setAtiva((atual) =>
         atual.linha === linha && atual.palavra === palavra ? atual : { linha, palavra },
       );
+    };
+    // Pausado: sem laço de quadros, mas o destaque acompanha quando a posição
+    // MUDA (clicar numa palavra, arrastar a barra) — o progresso da store avisa.
+    if (!isPlaying) {
+      medir();
+      return usePlayerStore.subscribe((s, antes) => {
+        if (s.progress !== antes.progress) medir();
+      });
+    }
+    let raf = 0;
+    const tick = (): void => {
+      medir();
       raf = requestAnimationFrame(tick);
     };
     raf = requestAnimationFrame(tick);

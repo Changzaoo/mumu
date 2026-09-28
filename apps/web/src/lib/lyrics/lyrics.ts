@@ -286,7 +286,20 @@ export function cachedLyrics(trackId: string): Lyrics | null {
  * Grava (ou substitui) a letra de uma faixa no cache — usado quando ganhamos
  * uma versão MELHOR da mesma letra, como a sincronizada a partir do áudio.
  */
+/**
+ * A letra de uma faixa passou por aqui: o filtro de idade a julga já (import
+ * dinâmico — o filtro depende da biblioteca, que depende daqui).
+ */
+function julgarConteudo(trackId: string, titulo: string, lyrics: Lyrics | null): void {
+  if (!lyrics || lyrics.lines.length === 0) return;
+  const texto = lyrics.lines.map((l) => l.text).join(String.fromCharCode(10));
+  void import('@/lib/conteudo/faixaEtaria')
+    .then((m) => m.registrarLetra(trackId, titulo, texto))
+    .catch(() => undefined);
+}
+
 export function writeLyrics(trackId: string, lyrics: Lyrics): void {
+  julgarConteudo(trackId, '', lyrics);
   const current = readCache()[trackId];
   const fingerprint = current && 'lyrics' in current ? current.fingerprint : '';
   writeCache({
@@ -533,6 +546,7 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
           const vazioEm = rawCached.vazioEm ?? 0;
           if (Date.now() - vazioEm < VALIDADE_DO_VAZIO_MS) return null;
         } else {
+          julgarConteudo(track.id, track.title ?? '', rawCached.lyrics);
           return rawCached.lyrics;
         }
       }
@@ -570,6 +584,7 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
       if (outra?.synced) lyrics = outra;
       else if (!lyrics) lyrics = outra;
     }
+    julgarConteudo(track.id, track.title ?? '', lyrics);
     writeCache({
       ...readCache(),
       [track.id]: lyrics

@@ -5,6 +5,7 @@
  * to the engine directly (except read-only visualizer access to `analyser`).
  * Bootstrap once with `initPlayerEngine()` from App.
  */
+import { assinar as assinarFiltroDeIdade, podeOuvir } from '@/lib/conteudo/faixaEtaria';
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { PlaySource, RecordPlayInput, RepeatMode, TrackDto } from '@radinho/shared';
@@ -988,6 +989,16 @@ function pularFaixaMorta(message: string): void {
   pararComErro(message);
 }
 
+/** Avisa (uma vez a cada tanto) que uma faixa foi pulada pela idade. */
+let ultimoAvisoDeIdade = 0;
+function avisarBloqueio(): void {
+  if (Date.now() - ultimoAvisoDeIdade < 8000) return;
+  ultimoAvisoDeIdade = Date.now();
+  void import('sonner').then(({ toast }) =>
+    toast('Pulamos uma música que não é para a sua idade.'),
+  );
+}
+
 function pararComErro(message: string): void {
   querTocar = false; // fim da linha: uma carga atrasada não pode ressuscitar o som
   usePlayerStore.setState({ isPlaying: false, isBuffering: false, carga: null });
@@ -1422,6 +1433,20 @@ export const usePlayerStore = create<PlayerState>()(
       function loadIndex(index: number, autoplay: boolean, crossfadeSeconds = 0): void {
         const track = get().queue[index];
         if (!track) return;
+        // ÚLTIMA PORTA: o veredito pode ter mudado depois que a fila foi montada
+        // (a letra chegou e era explícita). Pula para a próxima permitida.
+        if (!podeOuvir(track)) {
+          avisarBloqueio();
+          const fila = get().queue;
+          const proxima = fila.findIndex((t, i) => i > index && podeOuvir(t));
+          if (proxima >= 0) loadIndex(proxima, autoplay, crossfadeSeconds);
+          else {
+            querTocar = false;
+            audioEngine.pause();
+            set({ isPlaying: false });
+          }
+          return;
+        }
         const geracao = novaGeracao(autoplay);
         playRecorded = false;
         preloadRequested = false;
@@ -1681,6 +1706,10 @@ export const usePlayerStore = create<PlayerState>()(
         context: null,
 
         playTrack: (track, context) => {
+          if (!podeOuvir(track)) {
+            avisarBloqueio();
+            return;
+          }
           if (mandarParaQuemToca(get, [track], 0)) return;
           const ctx = context ?? { source: 'queue' };
           set({ queue: [track], originalQueue: [track], context: ctx });
@@ -1713,9 +1742,25 @@ export const usePlayerStore = create<PlayerState>()(
             .catch(() => undefined);
         },
 
-        playQueue: (tracks, startIndex = 0, context) => {
-          if (tracks.length === 0) return;
-          const index = clamp(startIndex, 0, tracks.length - 1);
+        playQueue: (todas, startIndex = 0, context) => {
+          // A FILA NASCE FILTRADA pela idade × conteúdo (lib/conteudo/faixaEtaria):
+          // o que a pessoa não pode ouvir nem entra; o índice acompanha a faixa
+          // pedida (ou a próxima permitida depois dela).
+          const pedida = todas[clamp(startIndex, 0, Math.max(0, todas.length - 1))];
+          const tracks = todas.filter((t) => podeOuvir(t));
+          if (tracks.length === 0) {
+            if (todas.length > 0) avisarBloqueio();
+            return;
+          }
+          if (pedida && !podeOuvir(pedida)) avisarBloqueio();
+          let inicio = pedida ? tracks.indexOf(pedida) : 0;
+          if (inicio < 0) {
+            const depois = todas
+              .slice(clamp(startIndex, 0, todas.length - 1))
+              .find((t) => podeOuvir(t));
+            inicio = depois ? tracks.indexOf(depois) : 0;
+          }
+          const index = clamp(inicio, 0, tracks.length - 1);
           if (mandarParaQuemToca(get, tracks, index)) return;
           const { shuffle } = get();
           const queue = shuffle ? shuffleKeepingFirst(tracks, index) : [...tracks];
@@ -1881,7 +1926,7 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         addToQueue: (tracks) => {
-          const items = toArray(tracks);
+          const items = toArray(tracks).filter((t) => podeOuvir(t));
           if (items.length === 0) return;
           set((state) => ({
             queue: [...state.queue, ...items],
@@ -1891,7 +1936,7 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         playNext: (tracks) => {
-          const items = toArray(tracks);
+          const items = toArray(tracks).filter((t) => podeOuvir(t));
           if (items.length === 0) return;
           set((state) => {
             const queue = [...state.queue];
@@ -2633,6 +2678,21 @@ export function initPlayerEngine(): void {
    * Sem este ouvinte a store nunca saberia, e ficaria presa dizendo "pausado"
    * com som saindo — o mesmo defeito do spinner eterno, espelhado no play.
    */
+  // IDADE × CONTEÚDO, EM QUALQUER CAMINHO: se a faixa atual não pode ser
+  // ouvida por esta pessoa — trocada pelo crossfade/troca antecipada (que não
+  // passam por `loadIndex`), ou porque a letra dela acabou de chegar e é
+  // explícita, ou porque a idade mudou —, pula na hora.
+  const conferirIdade = (): void => {
+    const s = store.getState();
+    if (!s.currentTrack || podeOuvir(s.currentTrack)) return;
+    avisarBloqueio();
+    s.next();
+  };
+  assinarFiltroDeIdade(conferirIdade);
+  store.subscribe((s, antes) => {
+    if (s.currentTrack?.id !== antes.currentTrack?.id) queueMicrotask(conferirIdade);
+  });
+
   audioEngine.on('unlocked', ({ track }) => {
     const s = store.getState();
     if (!track || s.currentTrack?.id !== track.id) return;

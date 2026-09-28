@@ -122,3 +122,21 @@ describe('classificarFaixa — as três respostas', () => {
     expect(r.achados).toContain('caralho');
   });
 });
+
+describe('coreano e espanhol (K-pop, reggaeton)', () => {
+  it('palavrão coreano, mesmo grudado em partícula', () => {
+    expect(classificarTexto('이 씨발놈아 꺼져').veredicto).toBe('explicito');
+    expect(classificarTexto('존나 좋아').veredicto).toBe('explicito');
+    expect(classificarTexto('개새끼들').veredicto).toBe('explicito');
+  });
+  it('coreano comum não é palavrão (falsos positivos conhecidos)', () => {
+    expect(classificarTexto('너를 보지 않아').veredicto).toBe('limpo');
+    expect(classificarTexto('오늘은 자지 마').veredicto).toBe('limpo');
+    expect(classificarTexto('여기가 우리의 시발점이야').veredicto).toBe('limpo');
+    expect(classificarTexto('사랑해 너만을 영원히').veredicto).toBe('limpo');
+  });
+  it('espanhol', () => {
+    expect(classificarTexto('no seas pendejo').veredicto).toBe('explicito');
+    expect(classificarTexto('te quiero mucho mi amor').veredicto).toBe('limpo');
+  });
+});
