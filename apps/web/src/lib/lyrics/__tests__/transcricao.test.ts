@@ -36,8 +36,8 @@ describe('palavrasEmLinhas', () => {
       p('volto', 3200),
     ]);
     expect(linhas).toMatchObject([
-      { timeMs: 1000, text: 'eu vou embora' },
-      { timeMs: 3000, text: 'mas volto' },
+      { timeMs: 1000, text: 'Eu vou embora' },
+      { timeMs: 3000, text: 'Mas volto' },
     ]);
   });
 
@@ -46,7 +46,7 @@ describe('palavrasEmLinhas', () => {
     // mais precisa que o app consegue.
     const linhas = palavrasEmLinhas([p('eu', 1000), p('vou', 1200), p('embora', 1400)]);
     expect(linhas[0]!.words).toEqual([
-      { text: 'eu', timeMs: 1000 },
+      { text: 'Eu', timeMs: 1000 },
       { text: 'vou', timeMs: 1200 },
       { text: 'embora', timeMs: 1400 },
     ]);
@@ -55,7 +55,7 @@ describe('palavrasEmLinhas', () => {
   it('não corta em pausa curta — cantar tem respiro pequeno o tempo todo', () => {
     const linhas = palavrasEmLinhas([p('nao', 0), p('me', 200), p('deixa', 500)]);
     expect(linhas).toHaveLength(1);
-    expect(linhas[0]!.text).toBe('nao me deixa');
+    expect(linhas[0]!.text).toBe('Nao me deixa');
   });
 
   it('corta por tamanho quando ninguém respira (canto contínuo)', () => {
@@ -73,7 +73,35 @@ describe('palavrasEmLinhas', () => {
 
   it('descarta palavra vazia sem deixar espaço duplo', () => {
     const linhas = palavrasEmLinhas([p('oi', 0), p('   ', 100), p('mundo', 200)]);
-    expect(linhas[0]!.text).toBe('oi mundo');
+    expect(linhas[0]!.text).toBe('Oi mundo');
+  });
+
+  it('FRASES como a letra publicada, não cacos — com o que o reconhecedor ouviu de verdade', () => {
+    // "Lembrei de Tu": palavras, pontuação e tempos reais do importador.
+    const w = (text: string, startMs: number, endMs: number) => ({ text, startMs, endMs });
+    const linhas = palavrasEmLinhas([
+      w('Lembrei', 780, 1440),
+      w('de', 1440, 1600),
+      w('tu,', 1600, 1940),
+      w('confesso,', 2020, 2800),
+      w('não', 2980, 3120),
+      w('esqueci', 3120, 3540),
+      w('nunca,', 3540, 4060),
+      w('a', 4280, 4360),
+      w('vida', 4360, 4460),
+      w('mudou', 4460, 5080),
+      w('a', 5080, 5400),
+      w('ful', 5400, 5920),
+      w('Eu', 5920, 6140),
+      w('sigo', 6140, 6440),
+    ]);
+    expect(linhas.map((l) => l.text)).toEqual([
+      'Lembrei de tu, confesso, não esqueci nunca',
+      'A vida mudou a ful',
+      'Eu sigo',
+    ]);
+    // O karaokê desenha as palavras: elas seguem a mesma limpeza da linha.
+    expect(linhas[1]!.words![0]).toEqual({ text: 'A', timeMs: 4280 });
   });
 
   it('devolve lista vazia para entrada vazia em vez de uma linha em branco', () => {

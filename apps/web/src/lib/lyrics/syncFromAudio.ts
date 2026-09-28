@@ -115,36 +115,84 @@ async function localAudio(track: TrackDto): Promise<Blob | null> {
 }
 
 /**
- * Agrupa as palavras transcritas em LINHAS de letra.
+ * Agrupa as palavras transcritas em LINHAS de letra — FRASES, como a letra
+ * publicada, e não pedaços.
  *
- * O ASR devolve palavra a palavra com carimbo de tempo; letra se lê em versos.
- * O corte é por respiro: pausa longa entre palavras é onde o verso acaba de
- * verdade. O limite de palavras existe para o caso de canto contínuo, em que
- * ninguém respira e a linha viraria um parágrafo.
+ * O corte antigo media o respiro de INÍCIO a início de palavra (≥ 0,7 s): no
+ * canto isso acontece o tempo todo, e a letra saía picada em cacos de 2–3
+ * palavras. Agora, na ordem:
+ *   • RESPIRO de verdade: do FIM de uma palavra ao começo da seguinte (o
+ *     reconhecedor dá os dois); sem o fim, cai no critério antigo;
+ *   • PONTUAÇÃO que o reconhecedor já põe: ponto/interrogação/exclamação
+ *     fecham a frase; vírgula fecha só linha já comprida (vírgula no meio de
+ *     verso é comum: "Lembrei de tu, confesso…");
+ *   • MAIÚSCULA de começo de frase ("…a vida mudou afu | Eu sigo…"), quando a
+ *     linha já tem corpo;
+ *   • TAMANHO: canto contínuo sem respiro vira no máximo 9 palavras / ~6 s.
+ * Linha com poucas palavras só fecha em respiro longo — senão sobra caco.
+ * O texto sai como letra: primeira letra maiúscula, sem vírgula ou ponto
+ * pendurado no fim (ficam ? e !).
  */
-export function palavrasEmLinhas(words: TranscribedWord[]): LyricLine[] {
-  const PAUSA_MS = 700;
+export function palavrasEmLinhas(words: Array<TranscribedWord & { endMs?: number }>): LyricLine[] {
+  const PAUSA_SEM_FIM_MS = 700; // entre inícios, quando não há o fim da palavra
+  const RESPIRO_MS = 380; // do fim de uma ao começo da outra
+  const RESPIRO_LONGO_MS = 1200;
+  const MIN_PALAVRAS = 3;
   const MAX_PALAVRAS = 9;
+  const MAX_DURACAO_MS = 6000;
   const linhas: LyricLine[] = [];
-  let atual: TranscribedWord[] = [];
+  let atual: Array<TranscribedWord & { endMs?: number }> = [];
+
+  const limparLinha = (texto: string): string => {
+    const t = texto.replace(/[,.;:]+$/u, '').trim();
+    return t ? t.charAt(0).toLocaleUpperCase('pt-BR') + t.slice(1) : t;
+  };
 
   const fechar = (): void => {
     if (atual.length === 0) return;
     const palavras = atual
       .map((w) => ({ text: w.text.trim(), timeMs: w.startMs }))
       .filter((w) => w.text.length > 0);
-    const texto = palavras.map((w) => w.text).join(' ');
-    // Na transcrição o tempo por palavra é EXATO — veio direto do ASR, não de
-    // interpolação. É a fonte mais precisa de sincronia que o app tem.
-    if (texto) linhas.push({ timeMs: palavras[0]!.timeMs, text: texto, words: palavras });
+    if (palavras.length > 0) {
+      // A palavra guarda o texto do jeito que o karaokê desenha: a primeira
+      // capitalizada, a última sem pontuação pendurada — igual à linha.
+      palavras[0] = { ...palavras[0]!, text: limparLinha(palavras[0]!.text) };
+      const ultima = palavras.length - 1;
+      palavras[ultima] = {
+        ...palavras[ultima]!,
+        text: palavras[ultima]!.text.replace(/[,.;:]+$/u, '') || palavras[ultima]!.text,
+      };
+      const texto = limparLinha(palavras.map((w) => w.text).join(' '));
+      // Na transcrição o tempo por palavra é EXATO — veio direto do ASR, não de
+      // interpolação. É a fonte mais precisa de sincronia que o app tem.
+      if (texto) linhas.push({ timeMs: palavras[0]!.timeMs, text: texto, words: palavras });
+    }
     atual = [];
   };
 
   for (let i = 0; i < words.length; i += 1) {
     const w = words[i]!;
     const anterior = words[i - 1];
-    const respiro = anterior ? w.startMs - anterior.startMs : 0;
-    if (atual.length >= MAX_PALAVRAS || (anterior && respiro >= PAUSA_MS)) fechar();
+    if (anterior && atual.length > 0) {
+      const n = atual.length;
+      const respiro =
+        typeof anterior.endMs === 'number'
+          ? w.startMs - anterior.endMs
+          : w.startMs - anterior.startMs - (PAUSA_SEM_FIM_MS - RESPIRO_MS);
+      const fimAnterior = anterior.text.trim();
+      const pontoFinal = /[.?!…]["')\]]*$/u.test(fimAnterior);
+      const virgula = /[,;:]$/u.test(fimAnterior);
+      const maiuscula =
+        /^[A-ZÀ-Ý]/u.test(w.text.trim()) && !/^(?:I|I'm|I'll|I've|I'd)$/.test(w.text.trim());
+      const duracao = w.startMs - atual[0]!.startMs;
+      const corta =
+        n >= MAX_PALAVRAS ||
+        duracao >= MAX_DURACAO_MS ||
+        respiro >= RESPIRO_LONGO_MS ||
+        (n >= MIN_PALAVRAS && (pontoFinal || respiro >= RESPIRO_MS || maiuscula)) ||
+        (n >= 5 && virgula);
+      if (corta) fechar();
+    }
     atual.push(w);
   }
   fechar();

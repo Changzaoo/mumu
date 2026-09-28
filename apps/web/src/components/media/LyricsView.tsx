@@ -10,6 +10,7 @@ import {
   ehTranscricao,
   pedirCalibracao,
   TRANSCRICAO_ANTIGA,
+  TRANSCRICAO_AUTOMATICA,
   type LetraAlinhada,
 } from '@/lib/lyrics/calibragem';
 import { LetraSendoFeita, useLetraAoVivo } from '@/components/media/LetraSendoFeita';
@@ -20,13 +21,16 @@ import {
   palavrasDeFundo,
   trechosDaLinha,
 } from '@/lib/lyrics/karaoke';
-import { cn } from '@/lib/utils';
+import { cn, formatDuration } from '@/lib/utils';
+import { palavrasEmLinhas } from '@/lib/lyrics/recalibrar';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /** Sem antecipação artificial: evita letra "adiantada" perceptivelmente. */
 const LEAD_MS = 0;
 /** Clicar numa palavra entra este tanto antes dela (o ataque da sílaba). */
 const INICIO_DA_PALAVRA_MS = 60;
+/** Confiança mínima para a palavra ouvida entrar na letra ao vivo. */
+const CONFIANCA_AO_VIVO = 0.6;
 
 /**
  * Escala, opacidade e desfoque por DISTÂNCIA da linha cantada. Transform e
@@ -84,7 +88,27 @@ export function LyricsView({ track, className }: LyricsViewProps) {
   const vivo = useLetraAoVivo(track.id);
   // A letra de verdade que a voz acabou de confirmar aparece JÁ, enquanto é
   // alinhada ao áudio — no lugar do vazio ou da transcrição.
-  const lyrics = vivo?.letra && (!publicada || ehTranscricao(publicada)) ? vivo.letra : publicada;
+  // A LETRA SENDO FEITA É LETRA DE VERDADE NA TELA: as palavras que o
+  // importador já ouviu (com confiança) viram FRASES sincronizadas — a mesma
+  // tela da letra publicada, com a linha e a palavra acendendo no tempo da
+  // música. Antes era uma lista à parte, sem sincronia, e quando a
+  // transcrição passava à frente da música nada acompanhava o que tocava.
+  const parcial = vivo?.parcial;
+  const letraAoVivo = useMemo<Lyrics | null>(() => {
+    if (!parcial || parcial.words.length === 0) return null;
+    const ouvidas = parcial.words.filter(
+      (w) => w.prob === undefined || w.prob >= CONFIANCA_AO_VIVO,
+    );
+    const lines = palavrasEmLinhas(ouvidas);
+    return lines.length > 0 ? { synced: true, lines, source: TRANSCRICAO_AUTOMATICA } : null;
+  }, [parcial]);
+  const transcrevendo = Boolean(letraAoVivo) && (!publicada || ehTranscricao(publicada));
+  const lyrics =
+    vivo?.letra && (!publicada || ehTranscricao(publicada))
+      ? vivo.letra
+      : transcrevendo
+        ? letraAoVivo
+        : publicada;
 
   const terminouBusca = !isLoading;
   // O CAMINHO ANTIGO FOI DESLIGADO: transcrever pelo aparelho (reconhecimento
@@ -201,6 +225,20 @@ export function LyricsView({ track, className }: LyricsViewProps) {
       className={cn('no-scrollbar h-full space-y-1 overflow-y-auto py-8', className)}
       aria-label="Letra da música"
     >
+      {transcrevendo && !vivo?.letra && (
+        <div className="px-3 pb-3" aria-live="polite">
+          <p className="text-sm font-semibold text-fg">
+            <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-fg/70 align-middle" />
+            Nosso time está transcrevendo a letra agora
+          </p>
+          {parcial && parcial.ouvidoMs > 0 && (
+            <p className="text-xs text-fg-muted">
+              Ouvindo a música… {formatDuration(parcial.ouvidoMs)} de{' '}
+              {formatDuration(track.durationMs)}
+            </p>
+          )}
+        </div>
+      )}
       {vivo?.fase === 'alinhando' && (
         <p className="px-3 pb-2 text-xs text-fg-muted" aria-live="polite">
           <span className="mr-1.5 inline-block size-1.5 animate-pulse rounded-full bg-fg/70 align-middle" />
@@ -299,6 +337,12 @@ export function LyricsView({ track, className }: LyricsViewProps) {
           </button>
         );
       })}
+      {transcrevendo && !vivo?.letra && (
+        // O que ainda não foi ouvido: a letra continua chegando aqui.
+        <p className="px-3 py-2 text-2xl font-bold tracking-tight text-fg-muted/60 sm:text-3xl">
+          <span className="inline-block animate-pulse">…</span>
+        </p>
+      )}
       {lyrics.source && (
         <p className="px-3 pt-6 text-[11px] text-fg-subtle">Fonte: {lyrics.source}</p>
       )}
