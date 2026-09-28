@@ -49,6 +49,30 @@ export function registrar(url: string, forcePlaylist = false): void {
   nuvem.push(id, item);
 }
 
+/**
+ * O aparelho está TRABALHANDO neste link agora — adia a carência do servidor.
+ *
+ * Sem isto, `atualizadoEm` fica parado no instante em que o link foi colado.
+ * Numa fila ocupada (playlist grande, poucas vagas de download por vez — ver
+ * `importQueue`) um item pode continuar "pendente" por mais de 8 minutos SÓ
+ * ESPERANDO a vez, sem ninguém ter desistido dele. O worker do servidor
+ * (`CARENCIA_MIN` em importacoes.worker.ts) não distingue "esperando" de
+ * "abandonado" e baixa a MESMA faixa de novo, com outro id — duplicata na
+ * biblioteca. Chamado quando o item começa a baixar, e de novo em intervalos
+ * enquanto durar (arquivo grande, rede lenta), para o registro nunca
+ * envelhecer 8 minutos enquanto o aparelho ainda está nele.
+ */
+export function tocar(url: string): void {
+  const id = idDaImportacao(url);
+  const atual = conhecidos.get(id);
+  // Só adia o que ainda é NOSSO trabalho em aberto; nunca ressuscita um link já
+  // fechado (feito/erro/expandida) por engano.
+  if (!atual || atual.estado !== 'pendente') return;
+  const item: ImportacaoNaConta = { ...atual, atualizadoEm: new Date().toISOString() };
+  conhecidos.set(id, item);
+  nuvem.push(id, item);
+}
+
 /** O aparelho terminou (ou desistiu de) um link. */
 export function marcar(url: string, estado: EstadoDaImportacao, titulo?: string): void {
   const id = idDaImportacao(url);

@@ -34,6 +34,15 @@ vi.mock('@/stores/notificationsStore', () => ({
   pushNotification: (...a: unknown[]) => pushNotification(...a),
 }));
 
+const naContaRegistrar = vi.fn();
+const naContaMarcar = vi.fn();
+const naContaTocar = vi.fn();
+vi.mock('@/lib/local/importacoesNaConta', () => ({
+  registrar: (...a: unknown[]) => naContaRegistrar(...a),
+  marcar: (...a: unknown[]) => naContaMarcar(...a),
+  tocar: (...a: unknown[]) => naContaTocar(...a),
+}));
+
 async function carregar() {
   vi.resetModules();
   window.localStorage.clear();
@@ -53,6 +62,9 @@ describe('importQueue', () => {
     isPlaylistUrl.mockReturnValue(false);
     fetchPlaylistEntries.mockReset();
     pushNotification.mockClear();
+    naContaRegistrar.mockClear();
+    naContaMarcar.mockClear();
+    naContaTocar.mockClear();
   });
 
   it('forcePlaylist expande mesmo quando isPlaylistUrl diz que é uma faixa só', async () => {
@@ -72,9 +84,7 @@ describe('importQueue', () => {
     q.enqueue('https://www.youtube.com/watch?v=x&list=y', { forcePlaylist: true });
     await assentar();
 
-    expect(fetchPlaylistEntries).toHaveBeenCalledWith(
-      'https://www.youtube.com/watch?v=x&list=y',
-    );
+    expect(fetchPlaylistEntries).toHaveBeenCalledWith('https://www.youtube.com/watch?v=x&list=y');
     const urls = q.list().map((i) => i.url);
     expect(urls).toContain('https://youtu.be/a');
     expect(urls).toContain('https://youtu.be/b');
@@ -130,5 +140,20 @@ describe('importQueue', () => {
 
     expect(q.list()[0]?.status).toBe('done');
     expect(pushNotification).not.toHaveBeenCalled();
+  });
+
+  it('item ganhando a vez avisa a conta (tocar) — sem isso o servidor rouba a faixa de uma fila ocupada', async () => {
+    // Regressão: `atualizadoEm` do registro na conta ficava parado no instante
+    // em que o link foi colado. Numa fila ocupada (poucas vagas de download) um
+    // item podia continuar "pendente" por mais de 8 minutos só ESPERANDO a vez,
+    // e o worker do servidor (CARENCIA_MIN) baixava a mesma faixa de novo com
+    // outro id — duplicata. `tocar` precisa ser chamado assim que o item começa
+    // a processar, antes de qualquer await.
+    addByUrl.mockResolvedValue({ title: 'Faixa boa' });
+    const q = await carregar();
+    q.enqueue('https://youtu.be/boa');
+    await assentar();
+
+    expect(naContaTocar).toHaveBeenCalledWith('https://youtu.be/boa');
   });
 });

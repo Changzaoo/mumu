@@ -408,8 +408,17 @@ export function init(): void {
   if (items.some((i) => i.status === 'pending')) pump();
 }
 
+/** A cada quanto tempo o item em download avisa o servidor "ainda aqui" —
+ *  bem abaixo da carência de 8min do servidor (CARENCIA_MIN), com folga para
+ *  não deixar o registro envelhecer enquanto o aparelho ainda trabalha nele. */
+const HEARTBEAT_MS = 3 * 60_000;
+
 async function process(item: ImportItem): Promise<void> {
   const gen = generation;
+  // Ganhou a vez agora: adia a carência antes de tudo. Downloads longos (link
+  // grande, rede lenta) renovam sozinhos enquanto durar.
+  naConta.tocar(item.url);
+  const heartbeat = setInterval(() => naConta.tocar(item.url), HEARTBEAT_MS);
   try {
     // Already in the library (e.g. auto-download of a list) → nothing to fetch.
     const existing = localLibrary.findBySource(item.url);
@@ -517,6 +526,8 @@ async function process(item: ImportItem): Promise<void> {
         });
       }
     }
+  } finally {
+    clearInterval(heartbeat);
   }
 }
 
