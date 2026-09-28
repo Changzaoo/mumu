@@ -20,6 +20,7 @@
  */
 import * as localLibrary from '@/lib/local/localLibrary';
 import { fetchPlaylistEntries, isPlaylistUrl } from '@/lib/local/importerHelper';
+import * as naConta from '@/lib/local/importacoesNaConta';
 import { subscribeAuth } from '@/lib/firebase';
 import { pushNotification } from '@/stores/notificationsStore';
 
@@ -295,6 +296,8 @@ export function enqueue(urls: string | string[], opts: { forcePlaylist?: boolean
   for (const url of incoming) {
     if (busyUrls.has(url)) continue; // already queued / in progress
     busyUrls.add(url);
+    // E na CONTA: se este aparelho fechar antes de terminar, o servidor termina.
+    naConta.registrar(url, Boolean(opts.forcePlaylist));
     items = [
       ...items,
       {
@@ -412,6 +415,7 @@ async function process(item: ImportItem): Promise<void> {
     const existing = localLibrary.findBySource(item.url);
     if (existing) {
       update(item.id, { status: 'done', title: existing.title });
+      naConta.marcar(item.url, 'feito', existing.title);
       return;
     }
     if (item.forcePlaylist || isPlaylistUrl(item.url)) {
@@ -422,12 +426,14 @@ async function process(item: ImportItem): Promise<void> {
       consecutiveFailures = 0; // sucesso fecha o circuito
       enqueue(entries.map((e) => e.url));
       update(item.id, { status: 'done', title: `Playlist · ${entries.length} faixas` });
+      naConta.marcar(item.url, 'expandida');
       return;
     }
     const track = await localLibrary.addByUrl(item.url, { silent: true });
     if (gen !== generation) return; // fila cancelada — não re-insere estado
     consecutiveFailures = 0; // sucesso fecha o circuito
     update(item.id, { status: 'done', title: track.title });
+    naConta.marcar(item.url, 'feito', track.title);
   } catch (err) {
     if (gen !== generation) return; // fila cancelada — sem retry fantasma
     const message = err instanceof Error ? err.message : 'Falha ao baixar';
@@ -451,6 +457,7 @@ async function process(item: ImportItem): Promise<void> {
         permanent: true, // fora da recuperação automática: nunca vai funcionar
         error: message,
       });
+      naConta.marcar(item.url, 'erro');
       // Definitivo e silencioso não combinam: quem colou o link pelo "+" da
       // barra (qualquer usuário, sem o painel da fila à vista) já fechou o
       // diálogo — sem isto o link simplesmente nunca aparece e a pessoa nem

@@ -189,9 +189,20 @@ async function esperar(ms: number): Promise<void> {
   await new Promise((r) => setTimeout(r, ms));
 }
 
-interface ResultadoDoDownload {
+export interface MetaDoDownload {
+  title?: string | null;
+  artist?: string | null;
+  track?: string | null;
+  album?: string | null;
+  uploader?: string | null;
+  coverUrl?: string | null;
+}
+
+export interface ResultadoDoDownload {
   bytes: Buffer;
   tipo: string;
+  /** O que o importador leu do vídeo (título, artista, capa…). */
+  meta?: MetaDoDownload | null;
 }
 
 /** Baixa a faixa pelo importador. `null` = falhou; `permanent` = nunca mais. */
@@ -217,7 +228,11 @@ export async function baixar(
       headers: cabecalhos(),
     });
     if (!res.ok) return { ok: null, permanente: false };
-    const job = (await res.json()) as { status?: string; permanent?: boolean };
+    const job = (await res.json()) as {
+      status?: string;
+      permanent?: boolean;
+      meta?: MetaDoDownload | null;
+    };
     if (job.status === 'error') return { ok: null, permanente: Boolean(job.permanent) };
     if (job.status !== 'done') continue;
 
@@ -228,7 +243,11 @@ export async function baixar(
     const bytes = Buffer.from(await arquivo.arrayBuffer());
     if (bytes.length === 0) return { ok: null, permanente: false };
     return {
-      ok: { bytes, tipo: arquivo.headers.get('content-type') ?? 'audio/mpeg' },
+      ok: {
+        bytes,
+        tipo: arquivo.headers.get('content-type') ?? 'audio/mpeg',
+        meta: job.meta ?? null,
+      },
       permanente: false,
     };
   }

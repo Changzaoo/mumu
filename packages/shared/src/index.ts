@@ -21,3 +21,4 @@ export * from './ai/agents.js';
 export * from './ai/duplicatas.js';
 export * from './ai/gravadoraComoArtista.js';
 export * from './ai/tituloDeVideo.js';
+export * from './utils/importacao.js';

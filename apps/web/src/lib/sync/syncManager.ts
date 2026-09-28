@@ -4,6 +4,7 @@
  */
 import { subscribeAuth } from '@/lib/firebase';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
+import * as importacoesNaConta from '@/lib/local/importacoesNaConta';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLikes from '@/lib/local/localLikes';
 import * as localHistory from '@/lib/local/localHistory';
@@ -33,5 +34,6 @@ export function initCloudSync(): void {
     localLibrary.setUser(uid);
     gostoInicial.setUser(uid);
     faixasQueFalharam.setUser(uid);
+    importacoesNaConta.setUser(uid);
   });
 }

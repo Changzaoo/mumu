@@ -32,6 +32,9 @@ const COLECOES = new Set([
   // para cá porque uma falha que morre no aparelho de quem ouviu não vira
   // conserto — ver apps/web/src/lib/local/faixasQueFalharam.ts.
   'falhas',
+  // 'importacoes': cada link colado, com o estado — o que o aparelho não
+  // terminar o servidor termina (ver workers/importacoes.worker.ts).
+  'importacoes',
 ]);
 
 function nomeDaColecao(bruto: unknown): string {
