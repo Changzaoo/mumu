@@ -10,6 +10,14 @@ const config: CapacitorConfig = {
   android: {
     backgroundColor: '#000000',
   },
+  plugins: {
+    // As barras do sistema são respeitadas no nativo (MainActivity afasta o
+    // WebView delas). Deixar o Capacitor também injetar --safe-area-inset-*
+    // reservaria o espaço duas vezes.
+    SystemBars: {
+      insetsHandling: 'disable',
+    },
+  },
 };
 
 export default config;
