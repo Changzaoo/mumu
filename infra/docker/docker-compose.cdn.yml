@@ -1,0 +1,66 @@
+# ──────────────────────────────────────────────────────────────
+# radinho.online — CDN de áudio (um "PoP": balanceador + N nós de borda).
+#
+# Sobe em qualquer máquina com Docker — a mesma da origem ou outras (VPS
+# perto dos ouvintes). Cada máquina é um PoP; o app escolhe o PoP pela lista
+# VITE_AUDIO_CDN (hash consistente + failover, ver apps/web/src/lib/audio/cdn.ts).
+#
+#   docker compose -f infra/docker/docker-compose.cdn.yml up -d --scale edge=3
+#   # mudou o número de réplicas? o balanceador relê os IPs:
+#   docker compose -f infra/docker/docker-compose.cdn.yml restart lb
+#
+# Variáveis (no .env ao lado ou no ambiente):
+#   ORIGIN_IMPORTER   https://importer.nexusholding.xyz
+#   ORIGIN_API        http://host.docker.internal:4000
+#   EDGE_CACHE_SIZE   20g   (POR nó — o total do PoP é a soma, graças ao hash)
+#   CDN_PORT          8088
+# ──────────────────────────────────────────────────────────────
+name: radinho-cdn
+
+services:
+  edge:
+    image: nginx:alpine
+    restart: unless-stopped
+    extra_hosts:
+      - 'host.docker.internal:host-gateway'
+    environment:
+      ORIGIN_IMPORTER: ${ORIGIN_IMPORTER:-https://importer.nexusholding.xyz}
+      ORIGIN_API: ${ORIGIN_API:-http://host.docker.internal:4000}
+      EDGE_CACHE_SIZE: ${EDGE_CACHE_SIZE:-20g}
+      CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-^(https://([a-z0-9-]+\.)*(radinho\.online|vercel\.app)|https?://(localhost|127\.0\.0\.1)(:[0-9]+)?|capacitor://localhost)$$}
+    volumes:
+      - ../cdn/edge:/etc/nginx/templates:ro
+      # Volume anônimo = um disco de cache POR réplica. Dois nginx no mesmo
+      # diretório de cache brigariam pela limpeza (cada um conta o todo).
+      - /var/cache/nginx/audio
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/edge-health']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256m
+
+  lb:
+    image: nginx:alpine
+    restart: unless-stopped
+    ports:
+      - '${CDN_PORT:-8088}:80'
+    volumes:
+      - ../cdn/lb:/etc/nginx/templates:ro
+    depends_on:
+      edge:
+        condition: service_healthy
+    healthcheck:
+      test: ['CMD', 'wget', '-q', '--spider', 'http://127.0.0.1/lb-health']
+      interval: 15s
+      timeout: 3s
+      retries: 3
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 128m
