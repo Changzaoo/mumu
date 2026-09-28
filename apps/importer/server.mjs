@@ -54,6 +54,13 @@ import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
 import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
+import {
+  ARGS_DE_SEGURANCA,
+  criarLimiteDeImport,
+  ehUrlDiretaSegura,
+  limparLinkDeImport,
+  pareceAudio,
+} from './seguranca.mjs';
 
 const PORT = Number(process.env.PORT ?? 8787);
 // Bind address. Default localhost (safest). Set HOST=0.0.0.0 to reach it from
@@ -167,8 +174,10 @@ async function verifyFirebaseToken(idToken) {
   if (!p.sub) throw new Error('no subject');
   return p;
 }
-const MAX_MINUTES = Number(process.env.AURIAL_MAX_MINUTES ?? 90);
-const MAX_BYTES = 600 * 1024 * 1024;
+// Limites de quem baixa pelo site (qualquer conta): uma MÚSICA, não um show
+// de hora e meia. Quem precisar de mais ajusta por variável de ambiente.
+const MAX_MINUTES = Number(process.env.AURIAL_MAX_MINUTES ?? 20);
+const MAX_BYTES = Number(process.env.AURIAL_MAX_BYTES ?? 150 * 1024 * 1024);
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 // Commit do checkout em que ESTE processo subiu — /health devolve, e o
 // deploy-api.sh compara com o HEAD para pegar importador rodando código velho.
@@ -223,15 +232,23 @@ function originAllowed(origin) {
   });
 }
 
+/**
+ * O link passa pelo PORTÃO (seguranca.mjs): só formatos conhecidos de música,
+ * reconstruídos a partir do id. A lista `HOSTS` acima continua documentando os
+ * sites; quem decide é `limparLinkDeImport`.
+ */
 function hostSupported(rawUrl) {
-  try {
-    const u = new URL(rawUrl);
-    if (u.protocol !== 'http:' && u.protocol !== 'https:') return false;
-    const host = u.hostname.toLowerCase().replace(/^www\./, '');
-    return HOSTS.some((h) => host === h || host.endsWith(`.${h}`));
-  } catch {
-    return false;
-  }
+  return limparLinkDeImport(rawUrl).ok;
+}
+
+/**
+ * O link que o yt-dlp recebe: SEMPRE o canônico (nunca o colado), e sempre
+ * depois de `--` — nada que alguém cole vira opção da linha de comando.
+ */
+function linkParaYtdlp(rawUrl) {
+  const r = limparLinkDeImport(rawUrl);
+  if (!r.ok) throw new Error('Link não suportado.');
+  return r.url;
 }
 
 // ── yt-dlp resolution (auto-download the standalone binary if absent) ────────
@@ -369,9 +386,11 @@ const kbpsFor = (quality) => QUALITY_KBPS[quality] ?? 320;
  * para trocar o cliente sem republicar o serviço.
  */
 function extractorArgs() {
+  // As regras de segurança vão em TODA chamada (todas passam por aqui): sem o
+  // extrator genérico, que baixaria qualquer endereço (ver seguranca.mjs).
   const clientes = process.env.YTDLP_PLAYER_CLIENT ?? 'web_embedded,default';
-  if (!clientes.trim()) return [];
-  return ['--extractor-args', `youtube:player_client=${clientes.trim()}`];
+  if (!clientes.trim()) return [...ARGS_DE_SEGURANCA];
+  return [...ARGS_DE_SEGURANCA, '--extractor-args', `youtube:player_client=${clientes.trim()}`];
 }
 
 function cookieArgs() {
@@ -475,7 +494,8 @@ async function resolverUrlDireta(sourceUrl) {
       ...cookieArgs(),
       ...extractorArgs(),
       '-g',
-      sourceUrl,
+      '--',
+      linkParaYtdlp(sourceUrl),
     ];
     const direta = await new Promise((resolve) => {
       const p = spawn(binario, args, { windowsHide: true });
@@ -563,6 +583,12 @@ const TIMEOUT_URL_DIRETA_MS = Number(process.env.TIMEOUT_URL_DIRETA_MS ?? 20_000
 
 function abrirUrlDireta(url, restantes = 5) {
   return new Promise((resolve, reject) => {
+    // Só CDN de áudio conhecido — inclusive a cada redirecionamento (ver
+    // `ehUrlDiretaSegura`): nunca um endereço da rede de casa.
+    if (!ehUrlDiretaSegura(url)) {
+      reject(new Error('url direta fora dos CDNs de áudio'));
+      return;
+    }
     const req = https.get(url, (res) => {
       const status = res.statusCode ?? 0;
       const destino = res.headers.location;
@@ -636,7 +662,7 @@ async function importToMp3(ytdlp, url, quality) {
     path.join(dir, 'audio.%(ext)s'),
   ];
   if (process.env.FFMPEG_PATH) args.push('--ffmpeg-location', process.env.FFMPEG_PATH);
-  args.push(url);
+  args.push('--', linkParaYtdlp(url));
 
   await new Promise((resolve, reject) => {
     let stderr = '';
@@ -654,6 +680,17 @@ async function importToMp3(ytdlp, url, quality) {
   if (!mp3) {
     await rm(dir, { recursive: true, force: true }).catch(() => undefined);
     throw new Error(`Sem áudio, ou vídeo maior que ${MAX_MINUTES} min.`);
+  }
+  // O ARQUIVO TEM QUE SER ÁUDIO DE VERDADE (pelos primeiros bytes): nada que
+  // não seja música entra no cofre nem chega ao aparelho de alguém.
+  {
+    const fh = await open(path.join(dir, mp3), 'r');
+    const cabeca = Buffer.alloc(16);
+    await fh.read(cabeca, 0, 16, 0).finally(() => fh.close());
+    if (!pareceAudio(cabeca)) {
+      await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+      throw new Error('O arquivo baixado não é áudio.');
+    }
   }
   let title = 'faixa';
   let thumbnail = '';
@@ -728,7 +765,7 @@ function isPermanentImportError(message) {
 const importJobs = new Map(); // id → job
 const JOB_TTL_MS = 60 * 60_000; // 1h — igual ao sweep de /tmp
 
-function startImportJob(url, quality) {
+function startImportJob(url, quality, quem = null) {
   const id = crypto.randomUUID();
   const job = {
     status: 'running', // 'running' | 'done' | 'error'
@@ -764,6 +801,9 @@ function startImportJob(url, quality) {
       job.error = message;
       job.permanent = isPermanentImportError(message);
       log('job error:', message);
+    })
+    .finally(() => {
+      if (quem) limiteDeImport.terminou(quem);
     });
   return id;
 }
@@ -789,7 +829,7 @@ let ytdlpBin = 'yt-dlp';
 // Max playlist entries returned in one enumeration (0 = unlimited). Flat
 // enumeration is cheap (no per-video extraction), so the cap is generous —
 // the old default (200) silently truncated big playlists (1132 → 200).
-const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 5000);
+const MAX_PLAYLIST = Number(process.env.AURIAL_MAX_PLAYLIST ?? 300);
 
 // ── NVIDIA AI proxy (key stays server-side) ─────────────────────────────────
 const NVIDIA_API_KEY = (process.env.NVIDIA_API_KEY ?? '').trim();
@@ -1171,7 +1211,8 @@ async function reconstruirBlob(id, meta) {
             ...extractorArgs(),
             '-o',
             '-',
-            meta.sourceUrl,
+            '--',
+            linkParaYtdlp(meta.sourceUrl),
           ],
           { windowsHide: true },
         );
@@ -1500,7 +1541,8 @@ async function dumpJson(ytdlp, url) {
     // de metadados falha primeiro que o download, que é o inverso do esperado.
     ...cookieArgs(),
     ...extractorArgs(),
-    url,
+    '--',
+    linkParaYtdlp(url),
   ];
   const out = await new Promise((resolve, reject) => {
     let stdout = '';
@@ -1533,7 +1575,8 @@ async function listPlaylist(ytdlp, url) {
     ...(MAX_PLAYLIST > 0 ? ['--playlist-end', String(MAX_PLAYLIST)] : []),
     ...cookieArgs(),
     ...extractorArgs(),
-    url,
+    '--',
+    linkParaYtdlp(url),
   ];
   const stdout = await new Promise((resolve, reject) => {
     let out = '';
@@ -1639,6 +1682,40 @@ const log = (...a) => console.log('[radinho-importer]', ...a);
  * left clients in a permanent 403 retry loop.
  * Else falls back to the shared token; else open.
  */
+/**
+ * LIMITE POR CONTA para baixar (ver `criarLimiteDeImport`): 60 por hora, 3 ao
+ * mesmo tempo. O crachá de serviço (workers do servidor) não conta — ele já
+ * tem os próprios freios.
+ */
+const limiteDeImport = criarLimiteDeImport();
+
+/** Quem está pedindo: a conta (do token já verificado) ou o IP; null = serviço. */
+function quemPede(req) {
+  const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  if (ehTokenDeServico(bearer) || ehTokenDeServico(req.headers['x-aurial-service'])) return null;
+  try {
+    const partes = bearer.split('.');
+    if (partes.length === 3) {
+      const sub = String(b64urlJson(partes[1]).sub ?? '');
+      if (sub) return `conta:${sub}`;
+    }
+  } catch {
+    /* token que não é JWT: vai pelo IP */
+  }
+  const ip = String(req.headers['x-forwarded-for'] ?? '').split(',')[0].trim();
+  return `ip:${ip || req.socket.remoteAddress || '?'}`;
+}
+
+/** Responde 429 e devolve false quando a conta estourou o limite. */
+function dentroDoLimite(req, res, quem) {
+  if (!quem) return true;
+  const r = limiteDeImport.podeComecar(quem);
+  if (r.ok) return true;
+  res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(r.esperarSeg) });
+  res.end(JSON.stringify({ error: r.motivo }));
+  return false;
+}
+
 async function authorize(req) {
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
   // Ver `ehTokenDeServico`: crachá de máquina, opt-in, antes do portão de gente.
@@ -3095,7 +3172,8 @@ async function main() {
               ...extractorArgs(),
               '-o',
               '-',
-              url,
+              '--',
+              linkParaYtdlp(url),
             ],
             { windowsHide: true },
           );
@@ -3140,8 +3218,12 @@ async function main() {
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
           }
+          const quem = quemPede(req);
+          if (!dentroDoLimite(req, res, quem)) return;
           log('playlist:', url);
-          const result = await listPlaylist(ytdlp, url);
+          const result = await listPlaylist(ytdlp, url).finally(() => {
+            if (quem) limiteDeImport.terminou(quem);
+          });
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify(result));
         } catch (err) {
@@ -3469,7 +3551,9 @@ async function main() {
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
           }
-          const id = startImportJob(url, quality);
+          const quem = quemPede(req);
+          if (!dentroDoLimite(req, res, quem)) return;
+          const id = startImportJob(url, quality, quem);
           res.writeHead(200, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ id }));
         } catch {
@@ -3552,8 +3636,12 @@ async function main() {
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
             return;
           }
+          const quem = quemPede(req);
+          if (!dentroDoLimite(req, res, quem)) return;
           log('import:', url, `${kbpsFor(quality)}k`);
-          job = await importToMp3(ytdlp, url, quality);
+          job = await importToMp3(ytdlp, url, quality).finally(() => {
+            if (quem) limiteDeImport.terminou(quem);
+          });
           const { size } = await stat(job.file);
           res.writeHead(200, {
             'Content-Type': 'audio/mpeg',
