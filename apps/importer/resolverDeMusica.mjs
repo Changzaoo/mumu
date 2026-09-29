@@ -219,7 +219,9 @@ export function criarResolvedorDeMusica({
     const meta = metaConhecida ?? (await metadadosDaFaixa(link));
     if (!meta) {
       if (link.servico === 'tidal') {
-        throw new NaoAchei('Link do Tidal ainda não dá para importar. Cole o do Spotify ou YouTube.');
+        throw new NaoAchei(
+          'Link do Tidal ainda não dá para importar. Cole o do Spotify ou YouTube.',
+        );
       }
       throw new NaoAchei('Não consegui ler essa música no serviço.');
     }
@@ -274,11 +276,77 @@ export function criarResolvedorDeMusica({
    * seguro aparece com erro na fila. Os metadados já lidos ficam em memória
    * para o job não pedir de novo.
    */
+  /**
+   * ARTISTA → AS MÚSICAS DELE. O embed do Spotify dá o nome e as mais
+   * tocadas (umas 10); o Deezer, pela API pública, completa com até 100 — é o
+   * "mundaréu" de quem cola o link do artista querendo a discografia dele.
+   */
+  async function listarArtista(link) {
+    let nome = null;
+    const faixas = [];
+    const vistas = new Set();
+    const juntar = (lista) => {
+      for (const f of lista) {
+        const chave = `${f.titulo}`
+          .toLowerCase()
+          .replace(/\s*[([].*$/, '')
+          .trim();
+        if (!chave || vistas.has(chave)) continue;
+        vistas.add(chave);
+        faixas.push(f);
+      }
+    };
+    let idDeezer = link.servico === 'deezer' ? link.id : null;
+    if (link.servico === 'spotify') {
+      const r = await buscarNaLista(`https://open.spotify.com/embed/artist/${link.id}`, {
+        fetch: f,
+        json: false,
+      }).catch(() => null);
+      const doSpotify = r?.status === 200 ? listaDoSpotify(r.corpo) : null;
+      if (doSpotify) {
+        nome = doSpotify.titulo;
+        juntar(doSpotify.faixas);
+      }
+      if (nome) {
+        const busca = await buscarNaLista(
+          `https://api.deezer.com/search/artist?q=${encodeURIComponent(nome)}&limit=5`,
+          { fetch: f },
+        ).catch(() => null);
+        const achados = busca?.status === 200 ? (comoJson(busca.corpo)?.data ?? []) : [];
+        const norm = (t) =>
+          String(t ?? '')
+            .toLowerCase()
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .trim();
+        const exato = achados.find((a) => norm(a?.name) === norm(nome));
+        idDeezer = String((exato ?? achados[0])?.id ?? '') || null;
+      }
+    }
+    if (idDeezer && /^\d+$/.test(idDeezer)) {
+      if (!nome) {
+        const a = await buscarNaLista(`https://api.deezer.com/artist/${idDeezer}`, {
+          fetch: f,
+        }).catch(() => null);
+        nome = a?.status === 200 ? (comoJson(a.corpo)?.name ?? null) : null;
+      }
+      const top = await buscarNaLista(
+        `https://api.deezer.com/artist/${idDeezer}/top?limit=${Math.min(100, maxLista)}`,
+        { fetch: f },
+      ).catch(() => null);
+      juntar(faixasDaPaginaDoDeezer(top?.status === 200 ? comoJson(top.corpo) : null));
+    }
+    if (!nome && faixas.length === 0) return null;
+    return { titulo: `${nome ?? 'Artista'} · mais tocadas`, faixas };
+  }
+
   async function listar(bruto) {
     const link = typeof bruto === 'string' ? analisarLinkDeMusica(bruto) : bruto;
     if (!link?.ok || link.tipo === 'faixa') throw new NaoAchei('Link de álbum/playlist inválido.');
     let lista = null;
-    if (link.servico === 'spotify') {
+    if (link.tipo === 'artista') {
+      lista = await listarArtista(link);
+    } else if (link.servico === 'spotify') {
       const r = await buscarNaLista(
         `https://open.spotify.com/embed/${link.tipo === 'album' ? 'album' : 'playlist'}/${link.id}`,
         { fetch: f, json: false },

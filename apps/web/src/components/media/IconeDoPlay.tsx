@@ -1,12 +1,12 @@
 /**
- * O ÍCONE DO PLAY QUE SE TRANSFORMA — play ↔ pausa ↔ disco, sem trocar de
+ * O ÍCONE DO PLAY QUE SE TRANSFORMA — play ↔ pausa ↔ seta de download, sem trocar de
  * figura "do nada".
  *
  * Cada estado é desenhado por DUAS metades (esquerda e direita), e cada metade
  * é um polígono reamostrado para o mesmo número de pontos, na mesma ordem
  * (horária, a partir do canto de cima à esquerda). Assim qualquer estado vira
  * qualquer outro interpolando ponto a ponto: o triângulo do play se parte nas
- * duas barras da pausa, que se arredondam nas duas metades do disco.
+ * duas barras da pausa, que se juntam na seta de download enquanto a música vem.
  *
  * Custo: 2 × 24 pontos, escritos direto no atributo `d` por um laço de quadros
  * que SÓ roda durante a transição (~240 ms) — nenhum re-render do React por
@@ -47,15 +47,6 @@ function reamostrar(vertices: readonly Ponto[], n = PONTOS): Ponto[] {
   return out;
 }
 
-/** Arco da circunferência (centro 12,12) de `de` a `ate` graus, em `passos` pontos. */
-function arco(r: number, de: number, ate: number, passos: number): Ponto[] {
-  return Array.from({ length: passos + 1 }, (_, i) => {
-    const a = ((de + ((ate - de) * i) / passos) * Math.PI) / 180;
-    return [12 + r * Math.cos(a), 12 + r * Math.sin(a)] as const;
-  });
-}
-
-const R = 9;
 const FORMAS: Record<EstadoDoPlay, Forma> = {
   // Triângulo partido ao meio (deslocado meio ponto à direita, como o ícone
   // original: o peso visual do triângulo fica à esquerda).
@@ -87,10 +78,23 @@ const FORMAS: Record<EstadoDoPlay, Forma> = {
       [14, 19],
     ]),
   ],
-  // O disco: duas metades de círculo, na mesma ordem dos outros polígonos.
+  // A SETA DE DOWNLOAD — a música está vindo. Mesma altura da pausa (4→20),
+  // partida ao meio no eixo: haste + metade da ponta de cada lado.
   carregando: [
-    reamostrar([...arco(R, -120, -90, 4), [12, 21], ...arco(R, 90, 240, 16)]),
-    reamostrar([...arco(R, -90, 90, 20), [12, 21]]),
+    reamostrar([
+      [10.5, 4],
+      [12, 4],
+      [12, 20],
+      [5, 12.5],
+      [10.5, 12.5],
+    ]),
+    reamostrar([
+      [12, 4],
+      [13.5, 4],
+      [13.5, 12.5],
+      [19, 12.5],
+      [12, 20],
+    ]),
   ],
 };
 
@@ -149,23 +153,17 @@ export function IconeDoPlay({ estado, className }: { estado: EstadoDoPlay; class
       strokeWidth={1.4}
       strokeLinejoin="round"
     >
-      <path ref={esquerda} d={caminho(inicial[0])} />
-      <path ref={direita} d={caminho(inicial[1])} />
-      {/* Os sulcos do disco: só aparecem quando ele se forma, e giram a 33⅓. */}
+      {/* Carregando, a seta DESCE de leve, como quem baixa: diz "está vindo".
+          Chegando o som, ela se transforma na pausa (e a fumaça aparece). */}
       <g
         className={cn(
-          'origin-center transition-opacity duration-200',
-          estado === 'carregando' ? 'opacity-100' : 'opacity-0',
-          estado === 'carregando' && !semMovimento && 'animate-[disco-gira_1.8s_linear_infinite]',
+          estado === 'carregando' &&
+            !semMovimento &&
+            'animate-[seta-desce_1.1s_ease-in-out_infinite]',
         )}
-        fill="none"
-        stroke="hsl(var(--accent))"
-        strokeWidth={0.9}
-        strokeLinecap="round"
       >
-        <circle cx="12" cy="12" r="6.2" strokeOpacity={0.45} />
-        <path d="M12 5.2a6.8 6.8 0 0 1 6.8 6.8" strokeOpacity={0.9} />
-        <circle cx="12" cy="12" r="1.7" fill="hsl(var(--accent))" stroke="none" />
+        <path ref={esquerda} d={caminho(inicial[0])} />
+        <path ref={direita} d={caminho(inicial[1])} />
       </g>
     </svg>
   );

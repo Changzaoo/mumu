@@ -58,6 +58,9 @@ export default function App() {
     // O player é o único que sobe na hora: ele restaura "de onde parou" e
     // precisa estar de pé antes de qualquer toque no botão de play.
     initPlayerEngine();
+    // No app de Android: serviço de reprodução enquanto toca — é o que impede o
+    // sistema de matar o app com a tela desligada (ver lib/android/tocadorNativo).
+    void import('@/lib/android/tocadorNativo').then((m) => m.iniciarTocadorNativo());
 
     // O RESTO ENTRA POR IMPORT DINÂMICO — sincronia, fila de importação,
     // telemetria, presença, agente de gênero e pesquisador. Nada disso é

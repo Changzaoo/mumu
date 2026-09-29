@@ -490,12 +490,31 @@ export class AudioEngine {
     const promotedLoaded = preloaded && to.loaded;
     const esperarCarregar = inicio !== null && this.posicionarAntesDeTocar(to, inicio);
 
+    const querMisturar = crossfadeSeconds > 0 && this.playing && from.track !== null;
+    /**
+     * O CROSSFADE NO CELULAR ERA UM CORTE. Sem grafo Web Audio (todo celular,
+     * pela reprodução em segundo plano), `canCrossfade` dava falso e o motor
+     * caía na troca seca: a música atual era CORTADA `crossfadeSeconds` antes
+     * do fim e a próxima entrava sem mistura nenhuma — a pessoa perdia o final
+     * de toda faixa e não ouvia crossfade algum.
+     *
+     * Agora: com grafo, ganho; sem grafo no Android, o fade de volume do
+     * Howler; no iPhone — onde o Safari ignora o volume do elemento — a que sai
+     * TOCA ATÉ O FIM por baixo da que entra (`deixarTerminar`). Nunca corta.
+     */
     const canCrossfade =
-      crossfadeSeconds > 0 && this.ctx !== null && this.playing && from.track !== null;
+      querMisturar && (this.ctx !== null || (!IS_IOS && from.source?.kind === 'howl'));
+    const sobrepor = querMisturar && !canCrossfade;
 
     this.activeIndex = toIndex;
 
-    if (canCrossfade) {
+    if (sobrepor) {
+      if (autoplay && !esperarCarregar) this.startSlot(to);
+      this.playing = autoplay;
+      this.desejaTocar = autoplay;
+      this.deixarTerminar(from, crossfadeSeconds);
+    } else if (canCrossfade) {
+      if (!this.ctx && to.source?.kind === 'howl') to.source.howl.volume(0);
       this.setFade(to, 0);
       this.startSlot(to);
       this.rampFade(to, 1, crossfadeSeconds);
@@ -614,6 +633,29 @@ export class AudioEngine {
     // tags — daí passar TAMBÉM pelo filtro, e não só dividir por mil.
     if (!duration) duration = duracaoValida((slot.track?.durationMs ?? 0) / 1000);
     return duration;
+  }
+
+  /**
+   * A DURAÇÃO É A DE VERDADE? Só então dá para começar a próxima ANTES do fim
+   * (crossfade, troca com a tela apagada). Vale quando o arquivo já foi todo
+   * baixado — aí o elemento sabe o tamanho exato — ou quando a duração medida
+   * bate com a do catálogo. Estimativa do Safari para MP3 transmitido, sozinha,
+   * não conta: ela costuma vir menor e fazia a música ser trocada no meio.
+   */
+  duracaoConfiavel(): boolean {
+    const slot = this.active;
+    const el = slot.el;
+    if (!el) return false;
+    const medida = duracaoValida(el.duration);
+    if (!medida) return false;
+    try {
+      const b = el.buffered;
+      if (b.length > 0 && b.end(b.length - 1) >= medida - 0.5) return true;
+    } catch {
+      /* buffered instável no meio da carga */
+    }
+    const catalogo = duracaoValida((slot.track?.durationMs ?? 0) / 1000);
+    return catalogo > 0 && Math.abs(catalogo - medida) <= 2;
   }
 
   /** True when the underlying media element reached EOF. */
@@ -1131,6 +1173,27 @@ export class AudioEngine {
    * entrar no grafo) também: lá o elemento É a saída, e calá-lo sem pausar é
    * impossível — deixar tocando seriam DUAS faixas ao mesmo tempo.
    */
+  /**
+   * A faixa que sai segue tocando ATÉ O FIM NATURAL dela (ou até um teto de
+   * segurança), e só então é desmontada. É a mistura possível onde não dá para
+   * mexer no volume (iPhone): as duas soam juntas no fim, e ninguém perde o
+   * final da música.
+   */
+  private deixarTerminar(from: Slot, segundos: number): void {
+    if (!from.source) return;
+    const fromSeq = from.seq;
+    const el = from.el;
+    const teto = setTimeout(() => desmontar(), (segundos + 4) * 1000);
+    const desmontar = (): void => {
+      clearTimeout(teto);
+      el?.removeEventListener('ended', desmontar);
+      this.retireCancels.delete(desmontar);
+      if (from.seq === fromSeq) this.resetSlot(from);
+    };
+    el?.addEventListener('ended', desmontar, { once: true });
+    this.retireCancels.add(desmontar);
+  }
+
   private retireSlot(from: Slot, to: Slot, keepAlive: boolean): void {
     if (!from.source) return;
     if (!keepAlive || !this.ctx || !from.mediaSource) {

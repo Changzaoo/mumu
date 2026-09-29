@@ -277,7 +277,7 @@ describe('a fila atravessa faixa podada e faixa que estagna', () => {
     expect(avisos.some((a) => a.startsWith('ERRO:'))).toBe(true);
   });
 
-  it('travamento NO MEIO da faixa também derruba para a próxima', async () => {
+  it('travamento NO MEIO da faixa NÃO pula: espera a rede no mesmo ponto', async () => {
     const fila = [faixa('t1'), faixa('t2')];
     usePlayerStore.getState().playQueue(fila, 0, { source: 'queue' });
     await vi.waitFor(() => expect(ultimaCarregada()).toBe('t1'));
@@ -302,10 +302,14 @@ describe('a fila atravessa faixa podada e faixa que estagna', () => {
     await assentar();
     expect(audioEngine.seek).toHaveBeenCalledWith(42);
 
-    // Terceira: nem a cutucada resolveu. Aí sim a fonte é dada por perdida.
+    // Terceira: nem a cutucada resolveu. Antes, a faixa era dada por perdida
+    // e a fila PULAVA — a pessoa perdia o resto da música sem pedir. Agora ela
+    // fica esperando a rede no mesmo ponto: só a pessoa passa para a próxima.
     await vi.advanceTimersByTimeAsync(11_000);
     await assentar();
 
-    await vi.waitFor(() => expect(ultimaCarregada()).toBe('t2'));
+    expect(ultimaCarregada()).toBe('t1');
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('t1');
+    expect(usePlayerStore.getState().carga?.fase).toBe('esperandoRede');
   });
 });

@@ -724,3 +724,15 @@
 :root.tema-tinta::view-transition-new(root) {
   z-index: 2;
 }
+
+/* A seta de download do play enquanto a música vem (IconeDoPlay): desce um
+   pouco e volta. Só `transform`. */
+@keyframes seta-desce {
+  0%,
+  100% {
+    transform: translateY(-1.5px);
+  }
+  50% {
+    transform: translateY(1.5px);
+  }
+}

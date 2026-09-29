@@ -9,7 +9,7 @@ export interface PlayButtonProps extends Omit<ComponentProps<'button'>, 'childre
   size?: 'sm' | 'md' | 'lg';
   /** Aura viva em volta do botão (tela cheia, barra do player). */
   aura?: boolean;
-  /** A música está sendo trazida: o botão vira o disco girando. */
+  /** A música está sendo trazida: o ícone vira a seta de download. */
   carregando?: boolean;
 }
 

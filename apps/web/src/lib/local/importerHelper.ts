@@ -27,11 +27,14 @@ import { qualidadeEfetiva } from '@/lib/perf/adaptacao';
 export class HelperError extends Error {
   /** Status HTTP devolvido pelo helper (ex.: 401, 403, 500). */
   status: number;
+  /** 429: quantos segundos o importador pediu para esperar (`Retry-After`). */
+  esperarSeg: number | null;
 
-  constructor(message: string, status: number) {
+  constructor(message: string, status: number, esperarSeg: number | null = null) {
     super(message);
     this.name = 'HelperError';
     this.status = status;
+    this.esperarSeg = esperarSeg;
   }
 }
 
@@ -112,7 +115,8 @@ function ehListaDeServico(u: URL): boolean {
     if (partes.includes('playlist')) return true;
     return partes.includes('album') && !u.searchParams.has('i');
   }
-  return partes.includes('album') || partes.includes('playlist');
+  // ARTISTA também é lista: vira as músicas mais tocadas dele (ver listar()).
+  return partes.includes('album') || partes.includes('playlist') || partes.includes('artist');
 }
 
 /**
@@ -1181,7 +1185,7 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
     } catch {
       /* keep default */
     }
-    throw new HelperError(message, res.status);
+    throw new HelperError(message, res.status, Number(res.headers.get('Retry-After')) || null);
   }
   const data = (await res.json()) as Partial<PlaylistResult>;
   const entries = Array.isArray(data.entries)
@@ -1242,7 +1246,7 @@ async function importViaJob(url: string): Promise<HelperImport> {
     } catch {
       /* keep default */
     }
-    throw new HelperError(message, start.status);
+    throw new HelperError(message, start.status, Number(start.headers.get('Retry-After')) || null);
   }
   const { id } = (await start.json()) as { id?: string };
   if (!id) throw new Error('O importador não abriu o download.');
@@ -1318,7 +1322,7 @@ export async function importViaHelper(url: string): Promise<HelperImport> {
     } catch {
       /* keep default */
     }
-    throw new HelperError(message, res.status);
+    throw new HelperError(message, res.status, Number(res.headers.get('Retry-After')) || null);
   }
   const decode = (h: string): string | null => {
     const v = res.headers.get(h);

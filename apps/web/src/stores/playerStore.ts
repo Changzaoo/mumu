@@ -1395,7 +1395,15 @@ function armLoadWatchdog(trackId: string, delayMs = LOAD_WATCHDOG_MS): void {
       }
       void (async () => {
         if (await attemptSourceFallback(current)) return;
-        failCurrentTrack('A reprodução travou — tentando a próxima faixa.');
+        // TRAVOU NO MEIO NÃO É MOTIVO PARA PULAR. A pessoa ouve a música
+        // inteira; só ela passa para a próxima. Sem outra fonte, fica esperando
+        // a rede no MESMO ponto e cutucando o elemento de tempos em tempos.
+        if (usePlayerStore.getState().currentTrack?.id !== trackId) return;
+        marcarCarga('esperandoRede');
+        stallStrikes = 0;
+        audioEngine.seek(pos);
+        audioEngine.play();
+        armLoadWatchdog(trackId, STALL_CHECK_MS * 2);
       })();
       return;
     }
@@ -2450,9 +2458,14 @@ export function initPlayerEngine(): void {
     }
 
     // Crossfade: start the next track early and blend.
+    // SÓ COM A DURAÇÃO CONFIRMADA. No iPhone o Safari estima a duração de MP3
+    // transmitido PARA MENOS; com o número errado, "faltam 2 s" acontecia no
+    // meio da música e ela era trocada antes do fim. Sem confirmação, a faixa
+    // toca até o fim de verdade e a próxima entra pelo 'ended'.
     if (
       crossfadeSeconds > 0 &&
       !crossfadeTriggered &&
+      audioEngine.duracaoConfiavel() &&
       state.repeat !== 'one' &&
       duration > crossfadeSeconds * 2 &&
       remaining <= crossfadeSeconds
@@ -2566,6 +2579,13 @@ export function initPlayerEngine(): void {
     const restante = audioEngine.getDuration() - audioEngine.getPosition();
     if (restante > bgHandoffLeadMs() / 1000 + 2) {
       armHandoffTimer();
+      return;
+    }
+    // Duração ainda estimada (arquivo não terminou de baixar e não bate com o
+    // catálogo): trocar agora podia cortar a música no meio. Confere de novo
+    // daqui a pouco — perto do fim o arquivo já está inteiro e a conta fecha.
+    if (!audioEngine.duracaoConfiavel()) {
+      handoffTimer = setTimeout(doHandoff, 1000);
       return;
     }
 

@@ -40,6 +40,8 @@ const engineState = {
   duration: 0,
   comecouEm: 0,
   currentTrack: null as TrackDto | null,
+  /** A duração é a de verdade (arquivo inteiro baixado / bate com o catálogo)? */
+  duracaoConfiavel: true,
 };
 
 function posicaoAtual(): number {
@@ -72,6 +74,7 @@ vi.mock('@/lib/audio/AudioEngine', () => {
     getDuration: vi.fn(() => engineState.duration),
     getBufferedEnd: vi.fn(() => 1),
     isTrackEnded: vi.fn(() => false),
+    duracaoConfiavel: vi.fn(() => engineState.duracaoConfiavel),
     on: vi.fn((event: string, handler: Handler) => {
       const list = engineHandlers.get(event) ?? [];
       list.push(handler);
@@ -198,6 +201,7 @@ beforeEach(() => {
   engineState.duration = 0;
   engineState.comecouEm = 0;
   engineState.currentTrack = null;
+  engineState.duracaoConfiavel = true;
   telaApagada(false);
 });
 
@@ -231,6 +235,20 @@ describe('avanço de faixa com a tela apagada', () => {
     await vi.advanceTimersByTimeAsync((DURACAO - 0.8) * 1000);
 
     expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:1');
+  });
+
+  it('duração só ESTIMADA: não troca antes do fim (a música não é cortada no meio)', async () => {
+    // O caso do iPhone: o Safari estima a duração de MP3 transmitido para
+    // menos. Com ela, "faltam 0,9 s" chegava no meio da música e a troca
+    // antecipada cortava a faixa. Sem duração confirmada, não se antecipa nada.
+    engineState.duracaoConfiavel = false;
+    telaApagada(true);
+    const tracks = fila(2);
+    await comecarAtocar(tracks);
+
+    await vi.advanceTimersByTimeAsync((DURACAO - 0.5) * 1000);
+
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('cat:0');
   });
 
   it('com crossfade configurado a fila TAMBÉM anda', async () => {
