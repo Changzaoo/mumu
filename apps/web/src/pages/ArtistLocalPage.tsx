@@ -198,18 +198,6 @@ export default function ArtistLocalPage() {
           imageUrl={photo ?? bio.imageUrl ?? cover}
           stat={fans !== null && fans > 0 ? `${fans.toLocaleString('pt-BR')} fãs` : null}
           text={bio.text}
-          fonte={
-            bio.url && (
-              <a
-                href={bio.url}
-                target="_blank"
-                rel="noreferrer noopener"
-                className="text-fg-muted hover:text-fg"
-              >
-                Fonte: Wikipédia ({bio.lang.toUpperCase()})
-              </a>
-            )
-          }
         >
           {label && <GravadoraLink label={label} />}
         </SobreOArtista>
