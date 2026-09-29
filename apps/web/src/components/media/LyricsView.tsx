@@ -76,7 +76,16 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
   const isPlaying = remoto ? remoto.tocando : isPlayingLocal;
   const seek = remoto ? remoto.buscar : seekLocal;
   const relogioRef = useRef<() => number>(() => audioEngine.getPosition());
-  relogioRef.current = remoto ? remoto.posicao : () => audioEngine.getPosition();
+  relogioRef.current = remoto
+    ? remoto.posicao
+    : () => {
+        // RETOMADA: a faixa volta PAUSADA no ponto salvo, mas o motor ainda
+        // está em 0 até terminar de carregar (e a posição só é aplicada no
+        // 'loaded'). A store já sabe o ponto — é ela que vale até o motor
+        // alcançar, senão a letra ficava no começo com a música no meio.
+        const doMotor = audioEngine.currentTrack?.id === track.id ? audioEngine.getPosition() : 0;
+        return doMotor > 0 ? doMotor : usePlayerStore.getState().progress;
+      };
 
   const queryClient = useQueryClient();
   // A LETRA APARECE COM O QUE JÁ EXISTE. Antes a consulta só terminava depois
@@ -202,9 +211,16 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
     // MUDA (clicar numa palavra, arrastar a barra) — o progresso da store avisa.
     if (!isPlaying) {
       medir();
-      return usePlayerStore.subscribe((s, antes) => {
-        if (s.progress !== antes.progress) medir();
+      const soltarStore = usePlayerStore.subscribe((s, antes) => {
+        if (s.progress !== antes.progress || s.currentTrack !== antes.currentTrack) medir();
       });
+      // O salto da retomada acontece no 'loaded' do motor — e a store pode não
+      // mudar (já estava no ponto salvo). Medir também quando o motor carrega.
+      const soltarMotor = audioEngine.on('loaded', () => medir());
+      return () => {
+        soltarStore();
+        soltarMotor();
+      };
     }
     let raf = 0;
     const tick = (): void => {
@@ -217,9 +233,20 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
   const activeIndex = ativa.linha;
 
   const activeRef = useRef<HTMLButtonElement>(null);
+  // A primeira rolagem é um SALTO (a letra acabou de abrir ou de chegar e tem
+  // de aparecer já na linha certa); as seguintes deslizam acompanhando o canto.
+  const jaRolou = useRef(false);
   useEffect(() => {
-    activeRef.current?.scrollIntoView({ behavior: 'smooth', block: 'center' });
-  }, [activeIndex]);
+    jaRolou.current = false;
+  }, [track.id, lyrics]);
+  useEffect(() => {
+    if (!activeRef.current) return;
+    activeRef.current.scrollIntoView({
+      behavior: jaRolou.current ? 'smooth' : 'auto',
+      block: 'center',
+    });
+    jaRolou.current = true;
+  }, [activeIndex, lyrics]);
 
   if (isLoading) {
     return (
