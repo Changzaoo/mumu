@@ -14,6 +14,7 @@ import { MediaCard } from '@/components/media/MediaCard';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { PlayButton } from '@/components/media/PlayButton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
+import { SobreOArtista } from '@/components/media/SobreOArtista';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { Button } from '@/components/ui/button';
 import {
@@ -220,11 +221,19 @@ export default function ArtistPage() {
         </SectionCarousel>
       )}
 
+      {/* A bio aqui é a que o PRÓPRIO artista escreveu no perfil do catálogo —
+          não há busca por nome, então não há homônimo possível. */}
       {info.bio && (
-        <section aria-label="Sobre" className="max-w-3xl">
-          <h2 className="mb-3 text-xl font-semibold tracking-tight text-fg">Sobre</h2>
-          <p className="whitespace-pre-line text-sm leading-relaxed text-fg-muted">{info.bio}</p>
-        </section>
+        <SobreOArtista
+          name={info.name}
+          imageUrl={info.imageUrl ?? info.bannerUrl}
+          stat={
+            info.monthlyListeners > 0
+              ? `${formatCompactNumber(info.monthlyListeners)} ouvintes mensais`
+              : null
+          }
+          text={info.bio}
+        />
       )}
     </div>
   );
