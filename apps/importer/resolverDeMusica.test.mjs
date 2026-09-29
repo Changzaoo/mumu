@@ -13,9 +13,12 @@ const AQUI = path.dirname(fileURLToPath(import.meta.url));
 const fx = (n) => readFileSync(path.join(AQUI, '__fixtures__', n), 'utf8');
 
 const ROTAS = {
-  'https://open.spotify.com/embed/track/0VjIjW4GlUZAMYd2vXMi3b': 'sp-track-0VjIjW4GlUZAMYd2vXMi3b.html',
-  'https://open.spotify.com/embed/album/4yP0hdKOZPNshxUOjY0cZj': 'sp-album-4yP0hdKOZPNshxUOjY0cZj.html',
-  'https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M': 'sp-playlist-37i9dQZF1DXcBWIGoYBM5M.html',
+  'https://open.spotify.com/embed/track/0VjIjW4GlUZAMYd2vXMi3b':
+    'sp-track-0VjIjW4GlUZAMYd2vXMi3b.html',
+  'https://open.spotify.com/embed/album/4yP0hdKOZPNshxUOjY0cZj':
+    'sp-album-4yP0hdKOZPNshxUOjY0cZj.html',
+  'https://open.spotify.com/embed/playlist/37i9dQZF1DXcBWIGoYBM5M':
+    'sp-playlist-37i9dQZF1DXcBWIGoYBM5M.html',
   'https://api.deezer.com/track/3135556': 'dz-track-3135556.json',
   'https://api.deezer.com/album/302127': 'dz-album-302127.json',
   'https://api.deezer.com/playlist/908622995': 'dz-playlist-908622995.json',
@@ -59,7 +62,9 @@ test('faixa do Spotify: song.link recusa (401) → embed → busca → vídeo ca
       ];
     },
   });
-  const r = await res.resolverFaixa('https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=z');
+  const r = await res.resolverFaixa(
+    'https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=z',
+  );
   assert.equal(r.url, 'https://www.youtube.com/watch?v=4NRXx6U8ABQ');
   assert.equal(r.meta.titulo, 'Blinding Lights');
   assert.deepEqual(termos, ['The Weeknd Blinding Lights']);
@@ -77,12 +82,14 @@ test('song.link 401 desliga o atalho por horas (não martela a API)', async () =
   const { f, pedidos } = redeGravada();
   const res = criarResolvedorDeMusica({
     fetch: f,
-    buscar: async () => [video('Harder, Better, Faster, Stronger', 'Daft Punk', 226, 'gAjR4_CbPpQ')],
+    buscar: async () => [
+      video('Harder, Better, Faster, Stronger', 'Daft Punk', 226, 'gAjR4_CbPpQ'),
+    ],
   });
   await res.resolverFaixa('https://www.deezer.com/track/3135556');
-  await res.resolverFaixa('https://music.apple.com/br/album/after-hours/1499378108?i=1499378615').catch(
-    () => null,
-  );
+  await res
+    .resolverFaixa('https://music.apple.com/br/album/after-hours/1499378108?i=1499378615')
+    .catch(() => null);
   assert.equal(pedidos.filter((p) => p.includes('api.song.link')).length, 1);
 });
 
@@ -130,7 +137,9 @@ test('song.link devolvendo link que não é vídeo do YouTube: portão recusa', 
     url.startsWith('https://api.song.link/')
       ? new Response(
           JSON.stringify({
-            linksByPlatform: { youtube: { url: 'https://www.youtube.com/redirect?q=http://10.0.0.1' } },
+            linksByPlatform: {
+              youtube: { url: 'https://www.youtube.com/redirect?q=http://10.0.0.1' },
+            },
           }),
           { status: 200 },
         )
@@ -146,7 +155,11 @@ test('link curto sem song.link: pede o endereço completo, sem abrir o curto', a
   const { f, pedidos } = redeGravada();
   const res = criarResolvedorDeMusica({ fetch: f, buscar: async () => [] });
   await assert.rejects(res.resolverFaixa('https://spotify.link/AbCd1234'), /endereço completo/);
-  assert.ok(pedidos.every((p) => !p.includes('spotify.link/AbCd')|| p.startsWith('https://api.song.link/')));
+  assert.ok(
+    pedidos.every(
+      (p) => !p.includes('spotify.link/AbCd') || p.startsWith('https://api.song.link/'),
+    ),
+  );
 });
 
 test('álbum/playlist → links de FAIXA do serviço, com teto e metadados guardados', async () => {
@@ -179,7 +192,10 @@ test('álbum/playlist → links de FAIXA do serviço, com teto e metadados guard
 
 test('Apple playlist e Tidal álbum: erro claro', async () => {
   const res = criarResolvedorDeMusica({ fetch: redeGravada().f, buscar: async () => [] });
-  await assert.rejects(res.listar('https://music.apple.com/br/playlist/x/pl.f4d106fed2bd41149aaacabb233eb5eb'), NaoAchei);
+  await assert.rejects(
+    res.listar('https://music.apple.com/br/playlist/x/pl.f4d106fed2bd41149aaacabb233eb5eb'),
+    NaoAchei,
+  );
   await assert.rejects(res.listar('https://tidal.com/browse/album/77646164'), NaoAchei);
   await assert.rejects(res.resolverFaixa('https://tidal.com/browse/track/77646168'), /Tidal/);
 });
@@ -187,6 +203,59 @@ test('Apple playlist e Tidal álbum: erro claro', async () => {
 test('buscarNaLista recusa host fora da lista e http', async () => {
   const f = async () => assert.fail('não devia pedir');
   await assert.rejects(buscarNaLista('https://evil.com/x', { fetch: f }), /fora da lista/);
-  await assert.rejects(buscarNaLista('http://api.deezer.com/track/1', { fetch: f }), /fora da lista/);
+  await assert.rejects(
+    buscarNaLista('http://api.deezer.com/track/1', { fetch: f }),
+    /fora da lista/,
+  );
   await assert.rejects(buscarNaLista('https://spotify.link/abc', { fetch: f }), /fora da lista/);
+});
+
+test('artista do Spotify (link intl-pt): mais tocadas do embed + as do Deezer, sem repetir', async () => {
+  const embed = (entidade) =>
+    `<html><script id="__NEXT_DATA__" type="application/json">${JSON.stringify({
+      props: { pageProps: { state: { data: { entity: entidade } } } },
+    })}</script></html>`;
+  const trackUri = (n) => `spotify:track:${String(n).padStart(22, 'A')}`;
+  const respostas = {
+    'https://open.spotify.com/embed/artist/2q9wk5fkeU2C9CgCKdh4AN': embed({
+      type: 'artist',
+      name: 'MC Exemplo',
+      trackList: [
+        { uri: trackUri(1), title: 'Hit Um', subtitle: 'MC Exemplo', duration: 180000 },
+        { uri: trackUri(2), title: 'Hit Dois', subtitle: 'MC Exemplo', duration: 190000 },
+      ],
+    }),
+    'https://api.deezer.com/search/artist?q=MC%20Exemplo&limit=5': JSON.stringify({
+      data: [
+        { id: 999, name: 'Outro' },
+        { id: 123, name: 'MC Exemplo' },
+      ],
+    }),
+    'https://api.deezer.com/artist/123/top?limit=100': JSON.stringify({
+      data: [
+        { id: 11, title: 'Hit Um', duration: 180, artist: { name: 'MC Exemplo' }, album: {} },
+        { id: 12, title: 'Faixa Três', duration: 200, artist: { name: 'MC Exemplo' }, album: {} },
+      ],
+    }),
+  };
+  const pedidos = [];
+  const f = async (url) => {
+    pedidos.push(url);
+    const corpo = respostas[url];
+    return {
+      status: corpo ? 200 : 404,
+      headers: new Headers(),
+      text: async () => corpo ?? '',
+    };
+  };
+  const res = criarResolvedorDeMusica({ fetch: f, buscar: async () => [] });
+  const r = await res.listar('https://open.spotify.com/intl-pt/artist/2q9wk5fkeU2C9CgCKdh4AN');
+  assert.equal(r.title, 'MC Exemplo · mais tocadas');
+  assert.deepEqual(
+    r.entries.map((e) => e.title),
+    ['MC Exemplo - Hit Um', 'MC Exemplo - Hit Dois', 'MC Exemplo - Faixa Três'],
+  );
+  for (const p of pedidos) {
+    assert.ok(['open.spotify.com', 'api.deezer.com'].includes(new URL(p).hostname), p);
+  }
 });

@@ -19,7 +19,7 @@ const ID_NUMERICO = /^\d{1,15}$/;
 const ID_PLAYLIST_APPLE = /^pl\.[A-Za-z0-9-]{8,64}$/;
 const ID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 const CODIGO_CURTO = /^[A-Za-z0-9_-]{4,64}$/;
-const TIPOS_SPOTIFY = { track: 'faixa', album: 'album', playlist: 'playlist' };
+const TIPOS_SPOTIFY = { track: 'faixa', album: 'album', playlist: 'playlist', artist: 'artista' };
 
 function recusa(motivo) {
   return { ok: false, motivo };
@@ -77,9 +77,9 @@ export function analisarLinkDeMusica(bruto) {
   if (host === 'www.deezer.com' || host === 'deezer.com') {
     let p = partes;
     if (p[0] && /^[a-z]{2}(?:-[a-z]{2})?$/i.test(p[0])) p = p.slice(1);
-    const tipo = { track: 'faixa', album: 'album', playlist: 'playlist' }[p[0]];
+    const tipo = { track: 'faixa', album: 'album', playlist: 'playlist', artist: 'artista' }[p[0]];
     if (!tipo || p.length !== 2 || !ID_NUMERICO.test(p[1])) {
-      return recusa('link do Deezer que não é música, álbum nem playlist');
+      return recusa('link do Deezer que não é música, álbum, playlist nem artista');
     }
     return { ok: true, servico: 'deezer', tipo, id: p[1] };
   }
@@ -151,7 +151,9 @@ export function analisarLinkDeMusica(bruto) {
 /** Link de volta ao serviço (canônico, remontado do id) — chave de cache e song.link. */
 export function linkCanonicoDoServico(l) {
   if (l.curto) return l.url;
-  const tipoEn = { faixa: 'track', album: 'album', playlist: 'playlist' }[l.tipo];
+  const tipoEn = { faixa: 'track', album: 'album', playlist: 'playlist', artista: 'artist' }[
+    l.tipo
+  ];
   switch (l.servico) {
     case 'spotify':
       return `https://open.spotify.com/${tipoEn}/${l.id}`;
@@ -232,8 +234,11 @@ export function faixaDoSpotify(html) {
  */
 export function listaDoSpotify(html) {
   const e = extrairNextData(html)?.props?.pageProps?.state?.data?.entity;
-  if (!e || (e.type !== 'album' && e.type !== 'playlist') || !Array.isArray(e.trackList)) {
-    return null;
+  if (!e || !['album', 'playlist', 'artist'].includes(e.type)) return null;
+  // Artista: o embed traz o NOME e as mais tocadas; sem lista, ainda vale o
+  // nome — é por ele que o Deezer completa (ver `listar`).
+  if (!Array.isArray(e.trackList)) {
+    return e.type === 'artist' && texto(e.name) ? { titulo: texto(e.name), faixas: [] } : null;
   }
   const capaDaLista = maiorImagem(e.visualIdentity?.image);
   const faixas = [];
@@ -300,7 +305,9 @@ function capaDoItunes(r) {
 
 function faixaDoItemItunes(r) {
   if (r?.wrapperType !== 'track' || r.kind !== 'song') return null;
-  const pais = String(r.country ?? 'BRA').slice(0, 2).toLowerCase();
+  const pais = String(r.country ?? 'BRA')
+    .slice(0, 2)
+    .toLowerCase();
   return faixa({
     titulo: r.trackName,
     artistas: [r.artistName],

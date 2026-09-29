@@ -463,6 +463,19 @@ async function process(item: ImportItem): Promise<void> {
       pause('auth');
       return;
     }
+    // 429 = o importador pediu PARA ESPERAR (limite por hora / downloads em
+    // andamento). Não é falha de nada: contar como erro fazia uma playlist
+    // grande queimar tentativas e pausar a fila inteira a cada 3 recusas. O
+    // item só espera o tempo pedido e segue — sem tentativa gasta, sem pausa.
+    if (status === 429) {
+      const esperarSeg = (err as { esperarSeg?: number | null }).esperarSeg ?? 60;
+      update(item.id, {
+        status: 'pending',
+        notBefore: Date.now() + Math.min(3600, Math.max(5, esperarSeg)) * 1000,
+        error: 'Aguardando a vez no servidor — continua sozinho',
+      });
+      return;
+    }
     // 422/404 = defeito permanente DA FAIXA (vídeo removido/privado/não
     // suportado): re-tentar nunca resolve, e a falha não é do sistema — marca
     // erro definitivo, NÃO conta no breaker e a fila segue para a próxima.

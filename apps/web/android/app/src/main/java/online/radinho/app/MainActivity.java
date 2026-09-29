@@ -1,8 +1,11 @@
 package online.radinho.app;
 
+import android.Manifest;
 import android.content.Intent;
+import android.content.pm.PackageManager;
 import android.graphics.Color;
 import android.net.Uri;
+import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.WebView;
@@ -30,7 +33,15 @@ import com.getcapacitor.BridgeActivity;
 public class MainActivity extends BridgeActivity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
+        // A ponte para o serviço de reprodução — antes do super, que monta o bridge.
+        registerPlugin(TocadorPlugin.class);
         super.onCreate(savedInstanceState);
+        // Android 13+: sem esta permissão a notificação "Tocando" fica escondida
+        // (o serviço funciona igual, mas a pessoa perde o atalho de volta).
+        if (Build.VERSION.SDK_INT >= 33
+            && checkSelfPermission(Manifest.permission.POST_NOTIFICATIONS) != PackageManager.PERMISSION_GRANTED) {
+            requestPermissions(new String[] { Manifest.permission.POST_NOTIFICATIONS }, 1);
+        }
         // O vão das barras mostra o fundo da janela: preto, como o app, com
         // ícones claros por cima (senão ficariam brancos no branco).
         getWindow().getDecorView().setBackgroundColor(Color.BLACK);

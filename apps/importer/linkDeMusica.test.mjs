@@ -35,11 +35,36 @@ function ok(link, servico, tipo, id) {
 }
 
 test('Spotify: faixa, álbum, playlist, /intl-xx/, embed e ?si=', () => {
-  ok('https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b', 'spotify', 'faixa', '0VjIjW4GlUZAMYd2vXMi3b');
-  ok('https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=abc', 'spotify', 'faixa', '0VjIjW4GlUZAMYd2vXMi3b');
-  ok('https://open.spotify.com/album/4yP0hdKOZPNshxUOjY0cZj', 'spotify', 'album', '4yP0hdKOZPNshxUOjY0cZj');
-  ok('https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M', 'spotify', 'playlist', '37i9dQZF1DXcBWIGoYBM5M');
-  ok('https://open.spotify.com/embed/track/0VjIjW4GlUZAMYd2vXMi3b', 'spotify', 'faixa', '0VjIjW4GlUZAMYd2vXMi3b');
+  ok(
+    'https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b',
+    'spotify',
+    'faixa',
+    '0VjIjW4GlUZAMYd2vXMi3b',
+  );
+  ok(
+    'https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=abc',
+    'spotify',
+    'faixa',
+    '0VjIjW4GlUZAMYd2vXMi3b',
+  );
+  ok(
+    'https://open.spotify.com/album/4yP0hdKOZPNshxUOjY0cZj',
+    'spotify',
+    'album',
+    '4yP0hdKOZPNshxUOjY0cZj',
+  );
+  ok(
+    'https://open.spotify.com/playlist/37i9dQZF1DXcBWIGoYBM5M',
+    'spotify',
+    'playlist',
+    '37i9dQZF1DXcBWIGoYBM5M',
+  );
+  ok(
+    'https://open.spotify.com/embed/track/0VjIjW4GlUZAMYd2vXMi3b',
+    'spotify',
+    'faixa',
+    '0VjIjW4GlUZAMYd2vXMi3b',
+  );
   const curto = ok('https://spotify.link/AbCd1234', 'spotify', 'faixa', 'AbCd1234');
   assert.equal(curto.curto, true);
 });
@@ -58,14 +83,18 @@ test('Deezer, Apple Music e Tidal', () => {
   assert.equal(a.pais, 'US');
   ok('https://music.apple.com/br/album/after-hours/1499378108', 'apple', 'album', '1499378108');
   ok('https://music.apple.com/br/song/blinding-lights/1499378615', 'apple', 'faixa', '1499378615');
-  ok('https://music.apple.com/br/playlist/x/pl.f4d106fed2bd41149aaacabb233eb5eb', 'apple', 'playlist', 'pl.f4d106fed2bd41149aaacabb233eb5eb');
+  ok(
+    'https://music.apple.com/br/playlist/x/pl.f4d106fed2bd41149aaacabb233eb5eb',
+    'apple',
+    'playlist',
+    'pl.f4d106fed2bd41149aaacabb233eb5eb',
+  );
   ok('https://tidal.com/browse/track/77646168/u', 'tidal', 'faixa', '77646168');
   ok('https://listen.tidal.com/album/77646164', 'tidal', 'album', '77646164');
 });
 
 test('recusa o que não é link de música, sem abrir nada', () => {
   for (const ruim of [
-    'https://open.spotify.com/artist/1Xyo4u8uXC1ZmMpatF05PJ',
     'https://open.spotify.com/track/curto',
     'https://open.spotify.com.evil.com/track/0VjIjW4GlUZAMYd2vXMi3b',
     'https://evil.com/open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b',
@@ -73,7 +102,6 @@ test('recusa o que não é link de música, sem abrir nada', () => {
     'https://open.spotify.com:8443/track/0VjIjW4GlUZAMYd2vXMi3b',
     'ftp://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b',
     'https://www.deezer.com/track/abc',
-    'https://www.deezer.com/artist/27',
     'https://music.apple.com/br/artist/the-weeknd/479756766',
     'https://tidal.com/browse/playlist/nao-uuid',
     'https://spotify.link/../../etc',
@@ -86,7 +114,9 @@ test('recusa o que não é link de música, sem abrir nada', () => {
 });
 
 test('link canônico remontado a partir do id', () => {
-  const l = analisarLinkDeMusica('https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=x');
+  const l = analisarLinkDeMusica(
+    'https://open.spotify.com/intl-pt/track/0VjIjW4GlUZAMYd2vXMi3b?si=x',
+  );
   assert.equal(linkCanonicoDoServico(l), 'https://open.spotify.com/track/0VjIjW4GlUZAMYd2vXMi3b');
 });
 
@@ -106,7 +136,10 @@ test('embed do Spotify (gravado): faixa, álbum e playlist', () => {
 
   const pl = listaDoSpotify(fx('sp-playlist-37i9dQZF1DXcBWIGoYBM5M.html'));
   assert.equal(pl.faixas.length, 50);
-  assert.ok(pl.faixas.some((x) => x.artistas.length > 1), 'subtitle com vírgula vira vários artistas');
+  assert.ok(
+    pl.faixas.some((x) => x.artistas.length > 1),
+    'subtitle com vírgula vira vários artistas',
+  );
 });
 
 test('Deezer e iTunes (gravados)', () => {
@@ -159,26 +192,47 @@ const r = (titulo, canal, duracaoSeg, id = 'aaaaaaaaaaa') => ({
 });
 
 test('escolha estrita: título + (artista ou duração), sem versão mexida', () => {
-  assert.ok(notaDoResultado(blinding, r('The Weeknd - Blinding Lights (Official Audio)', 'The Weeknd', 202)) > 0);
+  assert.ok(
+    notaDoResultado(
+      blinding,
+      r('The Weeknd - Blinding Lights (Official Audio)', 'The Weeknd', 202),
+    ) > 0,
+  );
   assert.ok(notaDoResultado(blinding, r('Blinding Lights', 'The Weeknd - Topic', 200)) > 0);
   assert.equal(notaDoResultado(blinding, r('Blinding Lights (sped up)', 'The Weeknd', 170)), 0);
   assert.equal(notaDoResultado(blinding, r('Blinding Lights - 8D Audio', 'x', 200)), 0);
   assert.equal(notaDoResultado(blinding, r('Blinding Lights (Karaokê)', 'x', 200)), 0);
   assert.equal(notaDoResultado(blinding, r('The Weeknd - Blinding Lights (Remix)', 'x', 200)), 0);
-  assert.equal(notaDoResultado(blinding, r('The Weeknd - Blinding Lights (Live at SNL)', 'x', 200)), 0);
+  assert.equal(
+    notaDoResultado(blinding, r('The Weeknd - Blinding Lights (Live at SNL)', 'x', 200)),
+    0,
+  );
   assert.equal(notaDoResultado(blinding, r('Blinding Lights cover', 'Fulano', 200)), 0);
   // Nem artista nem duração: outra música com o mesmo nome.
   assert.equal(notaDoResultado(blinding, r('Blinding Lights', 'Outra Banda', 260)), 0);
   // Título diferente: não é.
   assert.equal(notaDoResultado(blinding, r('The Weeknd - Save Your Tears', 'The Weeknd', 200)), 0);
   // Álbum inteiro de 1 h com o nome da faixa no título.
-  assert.equal(notaDoResultado(blinding, r('The Weeknd Blinding Lights full album', 'The Weeknd', 900)), 0);
+  assert.equal(
+    notaDoResultado(blinding, r('The Weeknd Blinding Lights full album', 'The Weeknd', 900)),
+    0,
+  );
 });
 
 test('versão que a PRÓPRIA faixa já é passa; sufixo " - Remastered" é ignorado', () => {
-  const aoVivo = { titulo: 'Evidências - Ao Vivo', artistas: ['Chitãozinho & Xororó'], duracaoMs: 280000 };
-  assert.ok(notaDoResultado(aoVivo, r('Chitãozinho & Xororó - Evidências (Ao Vivo)', 'x', 282)) > 0);
-  const remaster = { titulo: 'Hey Jude - Remastered 2015', artistas: ['The Beatles'], duracaoMs: 429000 };
+  const aoVivo = {
+    titulo: 'Evidências - Ao Vivo',
+    artistas: ['Chitãozinho & Xororó'],
+    duracaoMs: 280000,
+  };
+  assert.ok(
+    notaDoResultado(aoVivo, r('Chitãozinho & Xororó - Evidências (Ao Vivo)', 'x', 282)) > 0,
+  );
+  const remaster = {
+    titulo: 'Hey Jude - Remastered 2015',
+    artistas: ['The Beatles'],
+    duracaoMs: 429000,
+  };
   assert.ok(notaDoResultado(remaster, r('The Beatles - Hey Jude', 'The Beatles', 431)) > 0);
   assert.equal(termoDeBusca(remaster), 'The Beatles Hey Jude');
 });
@@ -192,4 +246,16 @@ test('melhorResultado: o mais certo, ou nenhum (nunca palpite)', () => {
   assert.equal(melhorResultado(blinding, lista).url, 'https://www.youtube.com/watch?v=c3333333333');
   assert.equal(melhorResultado(blinding, [lista[0]]), null);
   assert.equal(melhorResultado(blinding, []), null);
+});
+
+test('link de ARTISTA do Spotify e do Deezer vira lista (as mais tocadas)', () => {
+  const sp = analisarLinkDeMusica('https://open.spotify.com/intl-pt/artist/2q9wk5fkeU2C9CgCKdh4AN');
+  assert.deepEqual(sp, {
+    ok: true,
+    servico: 'spotify',
+    tipo: 'artista',
+    id: '2q9wk5fkeU2C9CgCKdh4AN',
+  });
+  const dz = analisarLinkDeMusica('https://www.deezer.com/br/artist/123');
+  assert.deepEqual(dz, { ok: true, servico: 'deezer', tipo: 'artista', id: '123' });
 });

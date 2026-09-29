@@ -1777,7 +1777,11 @@ const log = (...a) => console.log('[radinho-importer]', ...a);
  * mesmo tempo. O crachá de serviço (workers do servidor) não conta — ele já
  * tem os próprios freios.
  */
-const limiteDeImport = criarLimiteDeImport();
+// 600 por hora por conta: o teto existe contra conta desconhecida martelando o
+// servidor, não contra quem baixa uma playlist grande (60/h travava na 61ª).
+const limiteDeImport = criarLimiteDeImport({
+  maxPorJanela: Math.max(1, Number(process.env.IMPORT_MAX_POR_HORA ?? 600)),
+});
 
 /** Quem está pedindo: a conta (do token já verificado) ou o IP; null = serviço. */
 function quemPede(req) {
