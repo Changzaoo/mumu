@@ -89,7 +89,8 @@ interface Slot {
 type SlotIndex = 0 | 1;
 
 interface HowlInternals {
-  _sounds: Array<{ _node?: HTMLAudioElement }>;
+  _sounds: Array<{ _node?: HTMLAudioElement; _volume?: number }>;
+  _volume?: number;
 }
 
 /** Elementos destravados mantidos no estoque do Howler (ver `abastecerEstoque`). */
@@ -345,6 +346,8 @@ export class AudioEngine {
   private rafId: number | null = null;
   private hiddenTicker: ReturnType<typeof setInterval> | null = null;
   private fadeTimers = new Set<ReturnType<typeof setTimeout>>();
+  /** Rampas de volume próprias (sem grafo) por slot — ver `rampFade`. */
+  private rampasDeVolume = new Map<Slot, ReturnType<typeof setInterval>>();
   /** Cancela as esperas de `retireSlot` ainda pendentes. */
   private retireCancels = new Set<() => void>();
   private destroyed = false;
@@ -514,9 +517,11 @@ export class AudioEngine {
       this.desejaTocar = autoplay;
       this.deixarTerminar(from, crossfadeSeconds);
     } else if (canCrossfade) {
-      if (!this.ctx && to.source?.kind === 'howl') to.source.howl.volume(0);
       this.setFade(to, 0);
       this.startSlot(to);
+      // Sem grafo: a que entra nasce em 0 no próprio elemento (o `play()` do
+      // Howler regrava `_volume` no elemento, por isso vem DEPOIS do startSlot).
+      if (!this.ctx) this.gravarVolume(to, 0);
       this.rampFade(to, 1, crossfadeSeconds);
       this.rampFade(from, 0, crossfadeSeconds);
       const fromSeq = from.seq; // guard: skip cleanup if the slot was reused meanwhile
@@ -731,6 +736,7 @@ export class AudioEngine {
     this.destroyed = true;
     for (const timer of this.fadeTimers) clearTimeout(timer);
     this.fadeTimers.clear();
+    for (const slot of [...this.rampasDeVolume.keys()]) this.pararRampaDeVolume(slot);
     for (const cancel of [...this.retireCancels]) cancel();
     for (const slot of this.slots) this.resetSlot(slot);
     this.stopTicker();
@@ -1238,6 +1244,7 @@ export class AudioEngine {
         /* already gone */
       }
     }
+    this.pararRampaDeVolume(slot);
     slot.mediaSource?.disconnect();
     slot.mediaSource = null;
     slot.source = null;
@@ -1266,14 +1273,19 @@ export class AudioEngine {
       return;
     }
     for (const slot of this.slots) {
-      if (slot.source?.kind === 'howl') slot.source.howl.volume(this.effectiveVolume());
-      else if (slot.source) slot.source.el.volume = this.effectiveVolume();
+      // Slot no meio de uma mistura: a rampa relê o volume a cada passo.
+      if (slot.source && !this.rampasDeVolume.has(slot)) {
+        this.gravarVolume(slot, this.effectiveVolume());
+      }
     }
   }
 
   private applyRate(slot: Slot): void {
     if (slot.source?.kind === 'howl') {
-      slot.source.howl.rate(this.rate);
+      // Só quando muda: `rate()` com o play pendente vira tarefa que fica presa
+      // na cabeça da fila do Howler e trava tudo que for enfileirado depois
+      // (volume, seek) — ver `gravarVolume`.
+      if (slot.source.howl.rate() !== this.rate) slot.source.howl.rate(this.rate);
     } else if (slot.source) {
       slot.source.el.playbackRate = this.rate;
     }
@@ -1306,20 +1318,84 @@ export class AudioEngine {
   private rampFade(slot: Slot, target: number, seconds: number): void {
     const nodes = this.slotNodes(slot);
     if (!nodes || !this.ctx) {
-      // Fallback without Web Audio: Howler's own fade.
-      if (slot.source?.kind === 'howl') {
-        slot.source.howl.fade(
-          slot.source.howl.volume(),
-          target * this.effectiveVolume(),
-          seconds * 1000,
-        );
-      }
+      this.rampaDeVolumeSemGrafo(slot, target, seconds);
       return;
     }
     const now = this.ctx.currentTime;
     nodes.fade.gain.cancelScheduledValues(now);
     nodes.fade.gain.setValueAtTime(nodes.fade.gain.value, now);
     nodes.fade.gain.linearRampToValueAtTime(target, now + seconds);
+  }
+
+  /** O elemento que de fato sai no alto-falante (Howl HTML5 ou elemento HLS). */
+  private elementoDeSaida(slot: Slot): HTMLAudioElement | null {
+    if (slot.source?.kind === 'howl') {
+      return (slot.source.howl as unknown as HowlInternals)._sounds?.[0]?._node ?? null;
+    }
+    return slot.source?.el ?? null;
+  }
+
+  /**
+   * Volume gravado SEM passar pela API do Howler, no elemento E no Howl.
+   *
+   * `howl.volume(v)` com o `play()` HTML5 pendente (`_playLock`) vira tarefa na
+   * fila interna — e essa fila só anda quando a cabeça dela casa com o evento
+   * emitido; depois de um 'play' comum, uma tarefa 'volume'/'fade' fica presa
+   * até algo chamar a fila sem evento (é o que o `seek` faz: por isso tocar na
+   * letra "destravava" o som). O Howl precisa conhecer o valor (`_volume`)
+   * porque todo `play()` o regrava no elemento.
+   */
+  private gravarVolume(slot: Slot, volume: number): void {
+    const v = clamp(volume, 0, 1);
+    const el = this.elementoDeSaida(slot);
+    if (el) el.volume = v;
+    if (slot.source?.kind === 'howl') {
+      const interno = slot.source.howl as unknown as HowlInternals;
+      if (interno._sounds?.[0]) interno._sounds[0]._volume = v;
+      interno._volume = v;
+    }
+  }
+
+  private pararRampaDeVolume(slot: Slot): void {
+    const id = this.rampasDeVolume.get(slot);
+    if (id === undefined) return;
+    clearInterval(id);
+    this.rampasDeVolume.delete(slot);
+  }
+
+  /**
+   * Fade de volume SEM grafo (Android) feito por nós, direto no elemento.
+   *
+   * O `howl.fade()` do Howler caía na mesma fila travada de `gravarVolume`: a
+   * faixa que entra nascia em 0, o fade nunca rodava e ela tocava MUDA até um
+   * seek. A rampa própria não depende de fila nenhuma e mede o tempo pelo
+   * relógio — com a tela apagada o intervalo é espaçado pelo sistema, mas o
+   * próximo passo já cai no ponto certo (e o último grava o alvo no Howl).
+   */
+  private rampaDeVolumeSemGrafo(slot: Slot, alvo: number, segundos: number): void {
+    this.pararRampaDeVolume(slot);
+    const el = this.elementoDeSaida(slot);
+    if (!el || segundos <= 0) {
+      this.gravarVolume(slot, alvo * this.effectiveVolume());
+      return;
+    }
+    const efetivo = this.effectiveVolume();
+    const inicio = efetivo > 0 ? clamp(el.volume / efetivo, 0, 1) : alvo === 0 ? 1 : 0;
+    const t0 = Date.now();
+    const ms = segundos * 1000;
+    const id = setInterval(() => {
+      const p = Math.min(1, (Date.now() - t0) / ms);
+      if (p >= 1) {
+        this.pararRampaDeVolume(slot);
+        this.gravarVolume(slot, alvo * this.effectiveVolume());
+        return;
+      }
+      // Lido a cada passo: o volume/mudo pode mudar no meio da mistura. Só o
+      // elemento — um `play()` tardio regrava `_volume` (0) e o passo seguinte
+      // corrige; o alvo final vai para o Howl no último passo.
+      el.volume = clamp((inicio + (alvo - inicio) * p) * this.effectiveVolume(), 0, 1);
+    }, 40);
+    this.rampasDeVolume.set(slot, id);
   }
 
   // ── Ticker ─────────────────────────────────────────────────────
