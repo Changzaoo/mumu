@@ -20,6 +20,7 @@
  */
 import * as localLibrary from '@/lib/local/localLibrary';
 import { fetchPlaylistEntries, isPlaylistUrl } from '@/lib/local/importerHelper';
+import { chaveDaOrigem, separarRepetidas } from '@/lib/local/duplicadas';
 import * as naConta from '@/lib/local/importacoesNaConta';
 import { subscribeAuth } from '@/lib/firebase';
 import { pushNotification } from '@/stores/notificationsStore';
@@ -287,15 +288,25 @@ function update(id: string, patch: Partial<ImportItem>): void {
 }
 
 /** Add one or more links to the queue and start (or keep) processing. */
-export function enqueue(urls: string | string[], opts: { forcePlaylist?: boolean } = {}): void {
-  const incoming = (Array.isArray(urls) ? urls : [urls]).map((u) => u.trim()).filter(Boolean);
+export function enqueue(
+  urls: string | Array<string | { url: string; title?: string }>,
+  opts: { forcePlaylist?: boolean } = {},
+): void {
+  const incoming = (Array.isArray(urls) ? urls : [urls])
+    .map((u) => (typeof u === 'string' ? { url: u.trim() } : { ...u, url: u.url.trim() }))
+    .filter((u) => u.url);
   if (incoming.length === 0) return;
+  // Pelo id do vídeo, não pela string: o mesmo vídeo com `&list=`/`?si=` era
+  // "outro link" e entrava duas vezes na fila.
+  const origem = (url: string): string => chaveDaOrigem(url) ?? url;
   const busyUrls = new Set(
-    items.filter((i) => i.status === 'pending' || i.status === 'downloading').map((i) => i.url),
+    items
+      .filter((i) => i.status === 'pending' || i.status === 'downloading')
+      .map((i) => origem(i.url)),
   );
-  for (const url of incoming) {
-    if (busyUrls.has(url)) continue; // already queued / in progress
-    busyUrls.add(url);
+  for (const { url, title } of incoming) {
+    if (busyUrls.has(origem(url))) continue; // already queued / in progress
+    busyUrls.add(origem(url));
     // E na CONTA: se este aparelho fechar antes de terminar, o servidor termina.
     naConta.registrar(url, Boolean(opts.forcePlaylist));
     items = [
@@ -304,6 +315,9 @@ export function enqueue(urls: string | string[], opts: { forcePlaylist?: boolean
         id: `q${++seq}`,
         url,
         status: 'pending',
+        // O título da lista já vem aqui: é ele que deixa a PRÓXIMA playlist
+        // reconhecer esta música ainda na fila (ver `separarRepetidas`).
+        ...(title ? { title } : {}),
         ...(opts.forcePlaylist ? { forcePlaylist: true } : {}),
       },
     ];
@@ -433,15 +447,25 @@ async function process(item: ImportItem): Promise<void> {
       const { entries, foraDoCanal } = await fetchPlaylistEntries(item.url);
       if (gen !== generation) return; // fila cancelada no meio — descarta
       consecutiveFailures = 0; // sucesso fecha o circuito
-      enqueue(entries.map((e) => e.url));
+      // ANTES DE BAIXAR: fora o que já está na biblioteca/acervo, o que já está
+      // na fila e a mesma música repetida na própria lista (clipe e áudio,
+      // "ft." e "feat."). Baixar para descartar depois gastava banda, cota do
+      // importador e minutos de fila. O próprio item fica de fora da conta: o
+      // link `watch?v=X&list=…` É o vídeo X, e X não é repetido de si mesmo.
+      const naFila = items.filter(
+        (i) => i.id !== item.id && (i.status === 'pending' || i.status === 'downloading'),
+      );
+      const { novas, repetidas } = separarRepetidas(entries, localLibrary.list(), naFila);
+      enqueue(novas.map((e) => ({ url: e.url, title: e.title })));
       // Canal: diz quantos vídeos ficaram de fora por não serem música.
       const fora = foraDoCanal?.length ?? 0;
+      const jaTinha = repetidas.length > 0 ? ` · ${repetidas.length} já na biblioteca/fila` : '';
       update(item.id, {
         status: 'done',
         title:
-          fora > 0
-            ? `Canal · ${entries.length} músicas (${fora} vídeos não eram música)`
-            : `Playlist · ${entries.length} faixas`,
+          (fora > 0
+            ? `Canal · ${novas.length} músicas (${fora} vídeos não eram música)`
+            : `Playlist · ${novas.length} faixas`) + jaTinha,
       });
       naConta.marcar(item.url, 'expandida');
       return;
@@ -480,7 +504,9 @@ async function process(item: ImportItem): Promise<void> {
     // suportado): re-tentar nunca resolve, e a falha não é do sistema — marca
     // erro definitivo, NÃO conta no breaker e a fila segue para a próxima.
     // (Sem isto, 3 vídeos mortos seguidos numa playlist grande pausavam tudo.)
-    if (status === 422 || status === 404) {
+    // 400 = o importador recusou o LINK em si ("Link não suportado."): o mesmo
+    // link recusado de novo 5 vezes só atrasa a resposta e queima o breaker.
+    if (status === 422 || status === 404 || status === 400) {
       update(item.id, {
         status: 'error',
         attempts: MAX_ATTEMPTS,

@@ -26,7 +26,13 @@ import { idDaImportacao, lerTituloDoAcervo, type ImportacaoNaConta } from '@radi
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
-import { baixar, baseInterna, cabecalhos, guardarNoCofre } from './varreduraNoturna.worker.js';
+import {
+  baixar,
+  baseInterna,
+  cabecalhos,
+  duracaoDoDownload,
+  guardarNoCofre,
+} from './varreduraNoturna.worker.js';
 import { env } from '../config/index.js';
 
 const log = logger.child({ worker: 'importacoes' });
@@ -203,8 +209,10 @@ async function baixarFaixa(r: Registro): Promise<void> {
       explicit: false,
       streamUrl: guardada.remoteUrl,
       discNumber: null,
-      // A duração o aparelho mede na primeira vez que tocar (setTrackDuration).
-      durationMs: 0,
+      // MEDIDA AQUI, nos bytes que acabaram de chegar. Antes nascia `0` com a
+      // promessa de "o aparelho mede quando tocar" — e faixa que ninguém tocou
+      // (a playlist inteira importada de uma vez) ficava "0:00" para sempre.
+      durationMs: duracaoDoDownload(ok) ?? 0,
       playsCount: 0,
       downloadUrl: null,
       releaseYear: null,

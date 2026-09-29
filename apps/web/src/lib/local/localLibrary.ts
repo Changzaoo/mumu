@@ -11,6 +11,7 @@
  * Works fully offline and, on secure origins, survives reloads via Cache Storage.
  */
 import type { SharedTrackMeta, TrackDto } from '@radinho/shared';
+import { duracaoDoMp3, tamanhoDoId3 } from '@radinho/shared';
 import {
   allAudioIds,
   allCoverIds,
@@ -50,6 +51,14 @@ import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
 import { parseTrackFileName } from '@/lib/local/enrich';
 import { readAudioTags } from '@/lib/local/audioTags';
 import { artistFromSource } from '@/lib/local/sourceArtist';
+import { gravarLocal } from '@/lib/local/cofreLocal';
+import {
+  acharMesmaMusica,
+  artistaPrincipal,
+  paresPelaLetra,
+  tituloCanonico,
+  versoesDoTitulo,
+} from '@/lib/local/duplicadas';
 import { appleArtwork, searchSongsForArtwork } from '@/lib/catalog/itunes';
 import {
   candidateArtists,
@@ -81,6 +90,8 @@ import {
   helperSupportsMetaTeam,
   importerHostLabel,
   importViaHelper,
+  MENSAGEM_CURTIDAS_SPOTIFY,
+  ehColecaoDoSpotify,
   servicoDeMusicaLabel,
   uploadTrackBlob,
 } from '@/lib/local/importerHelper';
@@ -945,8 +956,35 @@ async function hashBlob(blob: Blob): Promise<string | null> {
 }
 
 // ── duration probing ────────────────────────────────────────────
+/**
+ * A duração de um arquivo recém-importado — nunca `0` se o arquivo sabe dizer.
+ *
+ * O elemento de áudio é o primeiro a ser perguntado, mas ele falha calado em
+ * casos comuns: importação correndo com o app em segundo plano (o navegador
+ * não carrega mídia em aba escondida e o `loadedmetadata` nunca vem), codec que
+ * este navegador não decodifica. Nesses casos a faixa nascia "0:00". Para MP3
+ * (tudo que vem do importador) a resposta está no cabeçalho do arquivo, e lê-lo
+ * não depende de decodificar nada.
+ */
+async function probeDurationMs(file: Blob): Promise<number> {
+  const pelaMidia = await probeDurationMsPelaMidia(file);
+  if (pelaMidia > 0) return pelaMidia;
+  return (await duracaoPeloCabecalho(file).catch(() => null)) ?? 0;
+}
+
+/** Lê a duração no cabeçalho do MP3 (ms), pulando a capa embutida se preciso. */
+async function duracaoPeloCabecalho(file: Blob): Promise<number | null> {
+  const cabeca = new Uint8Array(await file.slice(0, 128 * 1024).arrayBuffer());
+  const ms = duracaoDoMp3(cabeca, file.size);
+  if (ms) return ms;
+  const id3 = tamanhoDoId3(cabeca);
+  if (id3 <= cabeca.length || id3 >= file.size) return null;
+  const corpo = new Uint8Array(await file.slice(id3, id3 + 16 * 1024).arrayBuffer());
+  return duracaoDoMp3(corpo, file.size, id3);
+}
+
 /** Read an audio blob's duration via a metadata-only decode probe (ms). */
-function probeDurationMs(file: Blob): Promise<number> {
+function probeDurationMsPelaMidia(file: Blob): Promise<number> {
   return new Promise((resolve) => {
     let settled = false;
     const url = URL.createObjectURL(file);
@@ -1275,7 +1313,15 @@ export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
     if (e.origem !== 'catalogo') return e; // do usuário: intocada
     const nova = doCatalogo.get(e.track.id);
     if (!nova) return e;
-    const candidata = { ...nova, origem: 'catalogo' as const };
+    let candidata: LibraryEntry = { ...nova, origem: 'catalogo' as const };
+    // A DURAÇÃO MEDIDA AQUI NÃO SOME NO PRÓXIMO SNAPSHOT. A faixa emprestada
+    // não sobe para o servidor (ver `patchEntry`), então o tempo que este
+    // aparelho mediu ao tocar só existe aqui — e trocar a entrada inteira pela
+    // do acervo, que ainda diz `0`, devolvia a lista ao "0:00" a cada revalidação.
+    const medida = e.track.durationMs;
+    if (!duracaoConhecida(nova.track.durationMs) && duracaoConhecida(medida)) {
+      candidata = { ...candidata, track: { ...candidata.track, durationMs: medida } };
+    }
     if (JSON.stringify(candidata) === JSON.stringify(e)) return e;
     alterou = true;
     return candidata;
@@ -1520,6 +1566,20 @@ export function setTrackGenre(id: string, genre: string | null): void {
   patchEntry(id, { ...cur, track: { ...cur.track, genre } });
 }
 
+/** Duração que vale como tempo: número finito e positivo (ms). */
+function duracaoConhecida(ms: number | null | undefined): ms is number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0;
+}
+
+/**
+ * A duração gravada está ausente ou longe da medida? Tolerância de 5 s ou 10%:
+ * arredondamento e o silêncio do fim do encoder não são divergência.
+ */
+export function duracaoDiverge(gravada: number | null | undefined, medida: number): boolean {
+  if (!duracaoConhecida(gravada)) return true;
+  return Math.abs(gravada - medida) > Math.max(5000, medida * 0.1);
+}
+
 /**
  * DEVOLVE A DURAÇÃO QUE FALTAVA — medida no áudio, não adivinhada.
  *
@@ -1537,15 +1597,19 @@ export function setTrackGenre(id: string, genre: string | null): void {
  * E o dado estava disponível de graça o tempo todo: o elemento de áudio sabe a
  * duração exata no instante em que carrega. Só faltava alguém escrever de volta.
  *
- * NUNCA SOBRESCREVE DURAÇÃO BOA: só preenche o que está zerado. Uma medição do
- * navegador em stream parcial pode vir menor que a real, e trocar um valor
- * correto por um medido seria piorar o que já estava certo.
+ * NUNCA SOBRESCREVE DURAÇÃO BOA: preenche o que está zerado e só troca um valor
+ * gravado quando ele está LONGE do medido (mais de 5 s e de 10%) — é o "0:14"
+ * numa faixa de quatro minutos, palpite de stream parcial que algum aparelho
+ * gravou. Quem chama garante que a medida é confiável (arquivo inteiro no
+ * buffer; ver `anotarDuracaoMedida` no playerStore): uma medição do navegador
+ * no meio do stream pode vir menor que a real, e trocar um valor correto por
+ * ela seria piorar o que já estava certo.
  */
 export function setTrackDuration(id: string, durationMs: number): void {
   if (!Number.isFinite(durationMs) || durationMs < 1000) return;
   const cur = porId(id);
   if (!cur) return;
-  if ((cur.track.durationMs ?? 0) > 0) return; // já tinha: não se mexe
+  if (!duracaoDiverge(cur.track.durationMs, durationMs)) return; // já estava certa
   const track = { ...cur.track, durationMs: Math.round(durationMs) };
   patchEntry(id, { ...cur, track });
   // Com a duração no lugar, a letra passa a ter o caminho exato disponível —
@@ -1623,6 +1687,10 @@ export function validateImportUrl(url: string): { ok: true } | { ok: false; mess
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
     return { ok: false, message: 'Cole um link válido (que comece com http:// ou https://).' };
   }
+  // Curtidas do Spotify: privadas, nenhum servidor lê sem o login da pessoa.
+  // Barrar aqui (e não deixar o importador recusar) poupa a ida e volta e
+  // entrega a saída na hora, em vez de "Link não suportado".
+  if (ehColecaoDoSpotify(parsed)) return { ok: false, message: MENSAGEM_CURTIDAS_SPOTIFY };
   const host = parsed.hostname.toLowerCase();
   if (
     !importerHostLabel(host) &&
@@ -1692,6 +1760,12 @@ async function saveBlobAsLocalTrack(
     albumVer?.album ?? credito.album,
     albumVer?.coverUrl ?? opts.coverUrl ?? null,
   );
+  // MESMA MÚSICA, OUTRO VÍDEO: o clipe já está aqui e agora chegou o áudio (ou
+  // o reupload de outro canal). Link e bytes diferentes, então as duas checagens
+  // acima não pegam — mas artista, título canônico, versão e duração (±3 s)
+  // batem. Fica a que já existe: é ela que está em playlists e curtidas.
+  const mesma = mesmaMusicaTocavel(track);
+  if (mesma) return mesma.track;
   await putBlob(id, blob); // falha aqui PRECISA subir: sem bytes não há faixa
   addEntry(
     {
@@ -1836,7 +1910,11 @@ export function has(id: string): boolean {
 
 /** A locally-stored track imported from the same source URL, if any. */
 export function findBySource(sourceUrl: string): TrackDto | null {
-  return read().find((e) => e.sourceUrl === sourceUrl)?.track ?? null;
+  // Pelo ID do vídeo/faixa, não pela string: `youtu.be/X` e
+  // `youtube.com/watch?v=X&list=…` são o mesmo vídeo e baixavam duas vezes.
+  const exata = read().find((e) => e.sourceUrl === sourceUrl);
+  if (exata) return exata.track;
+  return acharMesmaMusica(read(), { url: sourceUrl, titulo: '' })?.track ?? null;
 }
 
 /** A locally-stored track with byte-identical audio, if any. */
@@ -2424,15 +2502,20 @@ export async function removeMany(ids: Iterable<string>): Promise<void> {
 /** Normalized identity: the same song collapses to one key even under a
  *  slightly different title (title + primary artist + 3s duration bucket). */
 function dedupeParts(track: TrackDto): { base: string; balde: number } | null {
-  const title = normName(track.title);
+  // Faixa que a pessoa trouxe de volta da lixeira de duplicadas: ela disse que
+  // NÃO é a mesma música. Sem chave, nunca mais colide com nada.
+  if (separadasPeloUsuario().has(track.id)) return null;
+  // Título CANÔNICO (sem "(Official Video)", "ft. Fulano", remaster…) e as
+  // marcas de versão à parte: com `normName` puro, "Música (Official Video)" e
+  // "Música (Audio)" eram duas chaves e nunca se juntavam. Ver duplicadas.ts.
+  const title = tituloCanonico(track.title) || normName(track.title);
   if (!title || title === 'faixa') return null; // too generic to dedup safely
-  const artist = normName(track.artists[0]?.name ?? '');
-  return { base: `${title}|${artist}`, balde: Math.round((track.durationMs || 0) / 3000) };
-}
-
-function dedupeKey(track: TrackDto): string | null {
-  const p = dedupeParts(track);
-  return p && `${p.base}|${p.balde}`;
+  const versoes = versoesDoTitulo(track.title).join('+');
+  const artist = artistaPrincipal(track.artists[0]?.name ?? '');
+  return {
+    base: `${title}|${versoes}|${artist}`,
+    balde: Math.round((track.durationMs || 0) / 3000),
+  };
 }
 
 /**
@@ -2495,6 +2578,7 @@ export function artistaEhDesconhecido(track: TrackDto): boolean {
  * sai, pelo mesmo motivo.
  */
 export function tituloDuracaoKey(track: TrackDto): string | null {
+  if (separadasPeloUsuario().has(track.id)) return null; // ver `dedupeParts`
   let title = tituloLimpoMemo.get(track.title);
   if (title === undefined) {
     const semNumero = track.title.replace(/^\s*\d{1,2}\s*[-–—.]\s*/, '');
@@ -2505,7 +2589,13 @@ export function tituloDuracaoKey(track: TrackDto): string | null {
   if (!title || title === 'faixa') return null;
   const dur = track.durationMs || 0;
   if (dur <= 0) return null; // sem duração não há evidência suficiente para apagar
-  return `${title}|${Math.round(dur / 3000)}`;
+  // A limpeza de busca acima tira TODO parêntese, inclusive "(Ao Vivo)" e
+  // "(Sped Up)": sem as marcas de versão na chave, a versão ao vivo anônima
+  // casava com a de estúdio creditada.
+  const versoes = versoesDoTitulo(track.title);
+  return versoes.length
+    ? `${title}|${versoes.join('+')}|${Math.round(dur / 3000)}`
+    : `${title}|${Math.round(dur / 3000)}`;
 }
 
 /** Which duplicate to keep: local audio > uploaded copy > has cover > older. */
@@ -2624,12 +2714,16 @@ function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
  * uploaded copy + synced entry). Returns how many were removed.
  */
 export async function dedupeLibrary(): Promise<number> {
+  esvaziarLixeiraVencida();
   const winners = new Map<string, LibraryEntry>();
   const losers: string[] = [];
   const replacements = new Map<string, string>();
   for (const e of read()) {
-    const key = dedupeKey(e.track);
-    if (!key) continue;
+    const p = dedupeParts(e.track);
+    if (!p) continue;
+    // Baldes vizinhos também, como na tela (ver `chavesCompativeis`): 187,4 s e
+    // 188,6 s são a mesma música e caíam em baldes diferentes.
+    const key = chavesCompativeis(p).find((k) => winners.has(k)) ?? `${p.base}|${p.balde}`;
     const prev = winners.get(key);
     if (!prev) {
       winners.set(key, e);
@@ -2667,13 +2761,45 @@ export async function dedupeLibrary(): Promise<number> {
     replacements.set(loser, keep.track.id);
   }
 
+  // ── 3ª passada: OUTRO NOME, MESMA LETRA ──
+  //
+  // O que as chaves acima não pegam: o reupload com o título errado, a faixa
+  // que se chama "333" num canal e "Três Três Três" no outro. A letra já está
+  // em cache para boa parte da biblioteca (LRCLIB ou transcrição), então isto
+  // não custa rede nenhuma. Os portões (mesmo artista, mesma versão, duração
+  // próxima, letra ≥ 0.8) estão em `paresPelaLetra`.
+  const jaPerdeu = new Set(losers);
+  const sobreviventes = read().filter((e) => !jaPerdeu.has(e.track.id));
+  for (const [a, b] of await paresPelaLetraNaBiblioteca(sobreviventes)) {
+    const ea = porId(representante(a, replacements));
+    const eb = porId(representante(b, replacements));
+    if (!ea || !eb || ea === eb) continue;
+    const keep = preferredEntry(ea, eb);
+    const loser = (keep === ea ? eb : ea).track.id;
+    losers.push(loser);
+    replacements.set(loser, keep.track.id);
+  }
+
   if (losers.length === 0) return 0;
+  // Cadeias (A perdeu para B, depois B para C) apontam direto para quem ficou:
+  // senão a playlist trocaria A por B, que acabou de sumir.
+  for (const [perdeu] of replacements) {
+    replacements.set(perdeu, representante(perdeu, replacements));
+  }
   const drop = new Set(losers);
+  const removidas = read().filter((e) => drop.has(e.track.id));
   write(read().filter((e) => !drop.has(e.track.id)));
+  // Os bytes só saem quando a lixeira vence (ver `LIXEIRA_DIAS`): até lá dá
+  // para desfazer. Se nem a lixeira coube, o comportamento antigo — apagar já.
+  const guardadas = guardarNaLixeira(removidas, replacements);
   for (const id of losers) {
     soltar('audio', id);
     soltar('capa', id);
     comCapa.delete(id);
+    if (guardadas) {
+      audioLocal.delete(id);
+      continue;
+    }
     // SÓ o armazenamento DESTE aparelho. A cópia no importador e a entrada na
     // nuvem são compartilhadas com todos os outros, e apagá-las daqui foi um
     // estrago real: no celular não há alça de áudio aberta para nada (lá as
@@ -2692,7 +2818,210 @@ export async function dedupeLibrary(): Promise<number> {
   } catch {
     /* playlist remap is best-effort */
   }
+  // Curtidas e histórico migram para a que ficou: a curtida da cópia apagada
+  // não pode sumir junto, e o histórico que alimenta a recomendação não pode
+  // apontar para uma faixa que não existe mais.
+  const ficaram = new Map<string, TrackDto>();
+  for (const id of new Set(replacements.values())) {
+    const t = porId(id)?.track;
+    if (t) ficaram.set(id, t);
+  }
+  try {
+    const [likes, historico] = await Promise.all([
+      import('@/lib/local/localLikes'),
+      import('@/lib/local/localHistory'),
+    ]);
+    likes.remapTrackIds(replacements, ficaram);
+    historico.remapTrackIds(replacements, ficaram);
+  } catch {
+    /* best-effort, como as playlists */
+  }
   return losers.length;
+}
+
+/** Quem representa `id` depois das fusões (segue a cadeia perdeu → ficou). */
+function representante(id: string, replacements: ReadonlyMap<string, string>): string {
+  let atual = id;
+  for (let passos = 0; passos < 50; passos += 1) {
+    const prox = replacements.get(atual);
+    if (!prox || prox === atual) break;
+    atual = prox;
+  }
+  return atual;
+}
+
+/** Liga a biblioteca às letras em cache e devolve os pares de mesma letra. */
+async function paresPelaLetraNaBiblioteca(
+  entradas: readonly LibraryEntry[],
+): Promise<Array<[string, string]>> {
+  let letras: Map<string, string>;
+  try {
+    // Import dinâmico: lyrics.ts depende (indiretamente) daqui.
+    const { lyricsCacheEntries } = await import('@/lib/lyrics/lyrics');
+    letras = new Map(
+      lyricsCacheEntries().map(([id, l]) => [id, l.lines.map((x) => x.text).join('\n')]),
+    );
+  } catch {
+    return [];
+  }
+  if (letras.size === 0) return [];
+  const candidatas = [];
+  for (const e of entradas) {
+    const letra = letras.get(e.track.id);
+    if (!letra || separadasPeloUsuario().has(e.track.id)) continue;
+    candidatas.push({
+      id: e.track.id,
+      titulo: e.track.title,
+      artistas: e.track.artists.map((a) => a.name),
+      durationMs: e.track.durationMs || 0,
+      letra,
+    });
+  }
+  return paresPelaLetra(candidatas);
+}
+
+// ── lixeira de duplicadas ───────────────────────────────────────
+/**
+ * A LIMPEZA DE DUPLICADAS É REVERSÍVEL.
+ *
+ * Ela roda sozinha no boot e agora junta por letra e por título canônico — um
+ * falso positivo aqui é música da pessoa sumindo sem ela ver. Então quem sai
+ * vai para uma lixeira: a entrada (metadados, links) fica guardada e os bytes
+ * continuam no cofre por `LIXEIRA_DIAS`. `restaurarDuplicadas` traz tudo de
+ * volta e marca as restauradas como "separadas pelo usuário", para nenhuma
+ * passada futura (nem a da tela) juntá-las de novo.
+ */
+const LIXEIRA_KEY = 'aurial:duplicadas-lixeira';
+const SEPARADAS_KEY = 'aurial:duplicadas-separadas';
+const LIXEIRA_DIAS = 7;
+const LIXEIRA_TETO = 500;
+
+interface NaLixeira {
+  entry: LibraryEntry;
+  /** Id da faixa que ficou no lugar desta. */
+  ficou: string;
+  em: number;
+}
+
+function lerLixeira(): NaLixeira[] {
+  try {
+    const bruto: unknown = JSON.parse(window.localStorage.getItem(LIXEIRA_KEY) ?? '[]');
+    return Array.isArray(bruto) ? (bruto as NaLixeira[]) : [];
+  } catch {
+    return [];
+  }
+}
+
+function gravarLixeira(itens: NaLixeira[]): boolean {
+  if (itens.length === 0) {
+    try {
+      window.localStorage.removeItem(LIXEIRA_KEY);
+    } catch {
+      /* nada a liberar */
+    }
+    return true;
+  }
+  return gravarLocal(LIXEIRA_KEY, JSON.stringify(itens.slice(-LIXEIRA_TETO)));
+}
+
+/** Guarda as removidas. `false` = não coube: quem chama apaga os bytes já. */
+function guardarNaLixeira(
+  removidas: readonly LibraryEntry[],
+  replacements: ReadonlyMap<string, string>,
+): boolean {
+  // A entrada emprestada do acervo volta sozinha com o próximo snapshot do
+  // servidor; guardá-la só encheria a lixeira com a mesma faixa a cada boot.
+  const minhas = removidas.filter((e) => e.origem !== 'catalogo');
+  if (minhas.length === 0) return true;
+  const agora = Date.now();
+  const ids = new Set(minhas.map((e) => e.track.id));
+  const antes = lerLixeira().filter((i) => !ids.has(i.entry.track.id));
+  const novas = minhas.map((e) => ({
+    entry: storableEntry(e),
+    ficou: replacements.get(e.track.id) ?? '',
+    em: agora,
+  }));
+  return gravarLixeira([...antes, ...novas]);
+}
+
+/** Apaga os bytes do que ficou na lixeira além do prazo. */
+function esvaziarLixeiraVencida(): void {
+  const itens = lerLixeira();
+  if (itens.length === 0) return;
+  const limite = Date.now() - LIXEIRA_DIAS * 24 * 60 * 60 * 1000;
+  const vencidas = itens.filter((i) => i.em < limite);
+  if (vencidas.length === 0) return;
+  for (const i of vencidas) {
+    // Voltou para a biblioteca por outro caminho (sincronia): os bytes são dela.
+    if (porId(i.entry.track.id)) continue;
+    void deleteBlob(i.entry.track.id).catch(() => undefined);
+  }
+  gravarLixeira(itens.filter((i) => i.em >= limite));
+}
+
+let separadasMemo: Set<string> | null = null;
+function separadasPeloUsuario(): Set<string> {
+  if (separadasMemo) return separadasMemo;
+  try {
+    const bruto: unknown = JSON.parse(window.localStorage.getItem(SEPARADAS_KEY) ?? '[]');
+    separadasMemo = new Set(Array.isArray(bruto) ? (bruto as string[]) : []);
+  } catch {
+    separadasMemo = new Set();
+  }
+  return separadasMemo;
+}
+
+/** Quantas faixas a limpeza de duplicadas tirou e ainda dá para trazer de volta. */
+export function duplicadasNaLixeira(): number {
+  return lerLixeira().length;
+}
+
+/**
+ * Desfaz a limpeza: as faixas da lixeira voltam para a biblioteca (com o áudio,
+ * se os bytes ainda estão no cofre) e ficam marcadas para nunca mais serem
+ * juntadas. Curtidas e playlists continuam na faixa que ficou — mover de volta
+ * adivinharia qual das duas a pessoa queria em cada lugar.
+ */
+export async function restaurarDuplicadas(): Promise<number> {
+  const itens = lerLixeira();
+  if (itens.length === 0) return 0;
+  const presentes = new Set(read().map((e) => e.track.id));
+  const voltam = itens.map((i) => i.entry).filter((e) => !presentes.has(e.track.id));
+  const separadas = separadasPeloUsuario();
+  for (const i of itens) {
+    separadas.add(i.entry.track.id);
+    if (i.ficou) separadas.add(i.ficou); // o par inteiro: senão a que ficou engole de novo
+  }
+  gravarLocal(SEPARADAS_KEY, JSON.stringify([...separadas]));
+  write([...read(), ...voltam]);
+  gravarLixeira([]);
+  for (const e of voltam) {
+    const blob = await getBlob(e.track.id).catch(() => null);
+    if (blob && blob.size > 0) audioLocal.add(e.track.id);
+  }
+  emit();
+  return voltam.length;
+}
+
+/**
+ * A mesma música que já está na biblioteca E toca (aqui, no cofre ou pela
+ * origem) — para não gravar a segunda cópia logo depois de baixar. Entrada que
+ * não toca não conta: trocar um download que funciona por um card mudo seria
+ * pior que a repetição.
+ */
+function mesmaMusicaTocavel(track: TrackDto): LibraryEntry | null {
+  const achada = acharMesmaMusica(read(), {
+    titulo: track.title,
+    artistas: track.artists.map((a) => a.name),
+    durationMs: track.durationMs,
+  });
+  if (!achada || separadasPeloUsuario().has(achada.track.id)) return null;
+  const toca =
+    hasLocalAudio(achada.track.id) ||
+    Boolean(achada.remoteUrl && achada.remoteUrl !== achada.remoteMorta) ||
+    achada.tocavel === true ||
+    Boolean(achada.sourceUrl);
+  return toca ? achada : null;
 }
 
 export interface DedupeSummary {

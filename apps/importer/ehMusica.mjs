@@ -62,16 +62,41 @@ export function classificar({ titulo, duracaoSeg }) {
   return { veredito: 'duvida', motivo: 'título sem formato de faixa' };
 }
 
-/** "Matuê - 333 (Clipe Oficial)" e "Matuê - 333" são a mesma música. */
+/**
+ * Marcas de VERSÃO: a mesma letra, outra faixa. "333 (Ao Vivo)" e "333 (Sped
+ * Up)" não são repetidas de "333" — a chave antiga apagava todo parêntese e
+ * jogava fora exatamente a versão que o canal publicou de propósito. Espelha
+ * `versoesDoTitulo` do app (apps/web/src/lib/local/duplicadas.ts).
+ */
+const VERSOES = [
+  ['ao vivo', /\b(?:ao vivo|en vivo|live at|live from|live session)\b/],
+  ['ao vivo', /[([][^)\]]*\blive\b[^)\]]*[)\]]|\s-\s+live\s*$/],
+  ['acustico', /\b(?:acustic[oa]|acoustic|unplugged|voz e violao)\b/],
+  ['remix', /\b(?:remix|rmx|remixed|mashup|bootleg)\b/],
+  ['sped up', /\b(?:sped ?up|speed ?up|nightcore)\b/],
+  ['slowed', /\b(?:slowed|reverb)\b/],
+  ['instrumental', /\b(?:instrumental|karaoke)\b/],
+  ['cover', /[([][^)\]]*\bcover\b[^)\]]*[)\]]/],
+  ['8d', /\b8d\b/],
+];
+
+/** "Matuê - 333 (Clipe Oficial)", "Matuê - 333 ft. Teto" e "Matuê - 333" são
+ *  a mesma música; "Matuê - 333 (Ao Vivo)" não. */
 export function chaveDaMusica(titulo) {
-  return norm(titulo)
+  const t = norm(titulo);
+  const versoes = [...new Set(VERSOES.filter(([, re]) => re.test(t)).map(([v]) => v))].sort();
+  const base = t
     .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
+    // Participação e produção não fazem parte do nome: "ft." × "feat." × nada.
+    .replace(/\s(?:feat\.?|ft\.?|featuring|part\.|prod\.)\s.*$/, ' ')
     .replace(
-      /\b(?:clipe|videoclipe|video|oficial|official|audio|visualizer|lyrics?|letra|hd|4k)\b/g,
+      /\b(?:clipe|videoclipe|video|oficial|official|audio|visualizer|lyrics?|letra|hd|4k|ao vivo|sped ?up|slowed|reverb|nightcore)\b/g,
       ' ',
     )
     .replace(/[^a-z0-9]+/g, ' ')
     .trim();
+  if (!base) return '';
+  return versoes.length ? `${base} [${versoes.join('+')}]` : base;
 }
 
 /** Nota da versão: áudio/visualizer > sem marca > clipe; curta ganha empate. */
@@ -116,7 +141,10 @@ export function semRepetidas(entradas) {
  * (injetável: testes sem rede; quem chama cuida de cache e de limite).
  */
 export async function confirmarNoCatalogo({ titulo, duracaoSeg, artista }, buscar) {
-  const nome = chaveDaMusica(String(titulo).split(SEPARADOR).pop() ?? titulo);
+  // Aqui a pergunta é "existe essa música?", não "é a mesma versão?": a marca
+  // de versão da chave fica de fora da busca e da comparação, como antes.
+  const semVersao = (s) => chaveDaMusica(s).replace(/\s*\[[^\]]*\]$/, '');
+  const nome = semVersao(String(titulo).split(SEPARADOR).pop() ?? titulo);
   if (!nome) return false;
   const termo = [artista, nome].filter(Boolean).join(' ');
   const resposta = await buscar(termo).catch(() => null);
@@ -124,7 +152,7 @@ export async function confirmarNoCatalogo({ titulo, duracaoSeg, artista }, busca
   const d = Number(duracaoSeg) || 0;
   return resultados.some((r) => {
     if (r.wrapperType !== 'track' || r.kind !== 'song') return false;
-    const nomeDaFaixa = chaveDaMusica(r.trackName ?? '');
+    const nomeDaFaixa = semVersao(r.trackName ?? '');
     if (!nomeDaFaixa || !(nomeDaFaixa.includes(nome) || nome.includes(nomeDaFaixa))) return false;
     const dur = (Number(r.trackTimeMillis) || 0) / 1000;
     return !d || !dur || Math.abs(dur - d) <= Math.max(10, d * 0.12);

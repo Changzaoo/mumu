@@ -200,6 +200,27 @@ export function montarContinuidadeOffline(inputs: ContinuidadeOfflineInputs): Tr
   return comVariedade(pontuados, limite);
 }
 
+/**
+ * O QUE VEM DEPOIS DA ATUAL, SEM REDE: primeiro a FILA DA PESSOA (só o que toca
+ * aqui, na ordem dela), depois a continuação por parecença.
+ *
+ * Antes a continuação SUBSTITUÍA tudo o que vinha depois: uma playlist baixada
+ * com uma faixa não baixada no meio virava, na queda da rede, uma lista de
+ * "parecidas" da biblioteca inteira — as baixadas da própria playlist iam
+ * parar espalhadas (ou fora) dela. A regra é continuar a fila pelas baixadas e
+ * só pular as que não estão aqui; a continuação entra quando a fila acaba.
+ * Pura: recebe o que resta da fila e o teste de disponibilidade.
+ */
+export function emendarNaFila(
+  restanteDaFila: readonly TrackDto[],
+  continuacao: readonly TrackDto[],
+  tocaSemRede: (id: string) => boolean,
+): TrackDto[] {
+  const daFila = restanteDaFila.filter((t) => tocaSemRede(t.id));
+  const naFila = new Set(daFila.map((t) => t.id));
+  return [...daFila, ...continuacao.filter((t) => !naFila.has(t.id))];
+}
+
 // ── orquestração (o lado que lê módulos e mexe no player) ─────────────────
 
 /** Áudio desta faixa existe NESTE aparelho — biblioteca própria OU download. */
@@ -282,13 +303,26 @@ async function aplicarContinuidade(atual: TrackDto | null): Promise<void> {
     curtidas,
     parecidos,
   });
-  if (continuacao.length === 0) return;
+  const estado = usePlayerStore.getState();
+  // A fila pode ter andado enquanto os vetores carregavam.
+  if (estado.currentTrack?.id !== atual?.id) return;
+  const aSeguir = emendarNaFila(
+    estado.queue.slice(estado.queueIndex + 1),
+    continuacao,
+    disponivelOffline,
+  );
+  if (aSeguir.length === 0) return;
 
-  usePlayerStore.getState().setUpNext(continuacao);
+  estado.setUpNext(aSeguir);
   avisar();
 
-  if (!disponivelOffline(atual?.id ?? '')) {
-    usePlayerStore.getState().next();
+  // Só avança se a pessoa está OUVINDO. Ao abrir o app já sem rede, a faixa
+  // restaurada vem pausada: avançar aqui dava play sozinho (sem gesto — o
+  // navegador recusa e sobra um erro na tela) e ainda jogava fora a faixa que
+  // ela ia retomar. Pausada, o play dela cai no caminho normal do player, que
+  // sem rede já segue para a próxima baixada.
+  if (!disponivelOffline(atual?.id ?? '') && estado.isPlaying) {
+    estado.next();
   }
 }
 

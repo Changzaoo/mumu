@@ -41,6 +41,7 @@ import {
   registroPronto,
   reportDeadRemote,
   setTrackDuration,
+  duracaoDiverge,
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
 import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
@@ -48,6 +49,7 @@ import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 import { candidatosDaCopia, marcarBordaFora, viaCdn } from '@/lib/audio/cdn';
 import { antecedenciaDoPreload } from '@/lib/perf/adaptacao';
+import { confirmarRedeMorta, redeSabidamenteMorta } from '@/lib/offline/redeMorta';
 
 /** Faixas cuja duração já foi escrita de volta nesta sessão — o 'timeupdate'
  *  dispara várias vezes por segundo e a gravação é em disco. */
@@ -80,10 +82,21 @@ function anotarDuracaoMedida(duration: number): void {
   if (!Number.isFinite(duration) || duration <= 1) return;
   const atual = usePlayerStore.getState().currentTrack;
   if (!atual || duracaoJaAnotada.has(atual.id)) return;
-  if ((atual.durationMs ?? 0) > 0) return;
-  duracaoJaAnotada.add(atual.id);
+  // SÓ A MEDIDA CONFIÁVEL É ANOTADA. O número que chega aqui pode ser o palpite
+  // do navegador no meio de um stream (o fim do trecho já baixado, a estimativa
+  // do Safari para MP3 transmitido) — foi assim que faixas de quatro minutos
+  // ficaram gravadas como "0:14". `duracaoConfiavel` só diz sim com o arquivo
+  // inteiro no buffer (ou batendo com o catálogo); até lá, espera o próximo
+  // `timeupdate`, que chega sozinho. E a medida tem que ser DESTA faixa: na
+  // virada do crossfade o motor pode já estar em outra.
   try {
-    setTrackDuration(atual.id, duration * 1000);
+    if (audioEngine.currentTrack?.id !== atual.id || !audioEngine.duracaoConfiavel()) return;
+    // Daqui em diante a faixa está resolvida nesta sessão: ou a duração já
+    // estava certa, ou a medida vence (ausente ou "0:14") — ver setTrackDuration.
+    duracaoJaAnotada.add(atual.id);
+    if (duracaoDiverge(atual.durationMs, duration * 1000)) {
+      setTrackDuration(atual.id, duration * 1000);
+    }
   } catch {
     /* metadata nunca interrompe a reprodução */
   }
@@ -648,6 +661,8 @@ function initialWatchdogMs(trackId: string): number {
     : CATALOG_LOAD_WATCHDOG_MS;
 }
 let loadWatchdog: ReturnType<typeof setTimeout> | null = null;
+/** Faixa cuja rede já foi conferida perto do fim (uma sonda por faixa). */
+let sondaDoFimPara: string | null = null;
 let lastWatchdogPos = -1;
 let stallStrikes = 0;
 
@@ -896,7 +911,8 @@ async function veredictoDasFontes(urls: string[]): Promise<Veredito> {
 function failCurrentTrack(message: string): void {
   const s = usePlayerStore.getState();
   const track = s.currentTrack;
-  const offline = typeof navigator !== 'undefined' && !navigator.onLine;
+  // "Sem rede" inclui a rede que o navegador diz existir e a sonda desmentiu.
+  const offline = redeSabidamenteMorta();
   const rapida = Date.now() - cargaIniciadaEm < FALHA_RAPIDA_MS;
   // Sem rede ou sem intenção de tocar, esperar não muda nada; e quem já foi
   // tentado por tempo de sobra (ver FALHA_RAPIDA_MS) não ganha mais espera.
@@ -955,6 +971,97 @@ function failCurrentTrack(message: string): void {
   });
 }
 
+// ── SEM REDE, A FILA ANDA PELO QUE ESTÁ NO APARELHO ──────────────
+//
+// Regra do produto: offline, TUDO o que está baixado toca — a fila continua
+// pelas baixadas e pula as que não estão aqui, sem travar. O player sabia
+// preferir a cópia local da faixa pedida, mas não sabia PROCURAR a próxima
+// cópia local: sem rede, ou ele parava na primeira faixa não baixada
+// (`pararComErro`), ou — com `navigator.onLine` mentindo, que é o normal no
+// Android sem sinal — tentava cada faixa da rede até o watchdog e, se ela
+// travasse no meio, esperava a rede para sempre no mesmo ponto.
+
+/** Esta faixa toca sem rede? (biblioteca própria, download, ou alça já aberta) */
+function temCopiaNoAparelho(track: TrackDto | undefined): boolean {
+  if (!track) return false;
+  return (
+    hasLocalAudio(track.id) ||
+    hasDownloadedAudio(track.id) ||
+    Boolean(localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id))
+  );
+}
+
+type PosicaoNaFila = Pick<PlayerState, 'queue' | 'queueIndex' | 'repeat'>;
+
+/** A seguinte na ordem normal da fila, ou -1 no fim. */
+function seguinteNaFila(s: PosicaoNaFila): number {
+  if (s.queueIndex + 1 < s.queue.length) return s.queueIndex + 1;
+  return s.repeat === 'all' && s.queue.length > 0 ? 0 : -1;
+}
+
+/** A próxima faixa DA FILA que toca sem rede (dá a volta em repetir-todas), ou -1. */
+function proximaNoAparelho(s: PosicaoNaFila): number {
+  const n = s.queue.length;
+  for (let passo = 1; passo < n; passo++) {
+    let i = s.queueIndex + passo;
+    if (i >= n) {
+      if (s.repeat !== 'all') break;
+      i -= n;
+    }
+    const t = s.queue[i];
+    if (t && podeOuvir(t) && temCopiaNoAparelho(t)) return i;
+  }
+  return -1;
+}
+
+/**
+ * Quem vem depois da atual. Com a rede sabidamente morta, a próxima que TOCA
+ * sem ela — em vez de gastar um watchdog inteiro numa faixa que não vai vir.
+ * Com a rede boa (ou sem nada baixado adiante) é a ordem normal, igual a antes.
+ */
+function indiceSeguinte(s: PosicaoNaFila): number {
+  const normal = seguinteNaFila(s);
+  if (normal < 0 || !redeSabidamenteMorta() || temCopiaNoAparelho(s.queue[normal])) return normal;
+  const noAparelho = proximaNoAparelho(s);
+  return noAparelho >= 0 ? noAparelho : normal;
+}
+
+/** Pulo feito pela fila (não pela pessoa) direto para uma faixa do aparelho. */
+function tocarDoAparelho(indice: number): void {
+  avancoAutomatico = true;
+  try {
+    usePlayerStore.getState().playAt(indice);
+  } finally {
+    avancoAutomatico = false;
+  }
+}
+
+/**
+ * Espera no máximo `ms`; passou disso (ou rejeitou), `null`.
+ *
+ * Rede morta que o navegador diz viva não responde NEM erra: um `fetch` sem
+ * teto fica pendurado minutos. No caminho do play isso acontece ANTES de o
+ * watchdog existir (ele só é armado quando o motor recebe a faixa), e a carga
+ * ficava "preparando" para sempre — sem pular, sem chegar nas baixadas.
+ */
+function comTeto<T>(promessa: Promise<T>, ms: number): Promise<T | null> {
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => resolve(null), ms);
+    promessa.then(
+      (valor) => {
+        clearTimeout(timer);
+        resolve(valor);
+      },
+      () => {
+        clearTimeout(timer);
+        resolve(null);
+      },
+    );
+  });
+}
+/** Teto para descobrir a fonte de uma faixa (detalhe no acervo, token, busca). */
+const TETO_RESOLUCAO_MS = 20_000;
+
 /**
  * A faixa está morta de verdade: se a fila tem próxima e estávamos tocando,
  * PULA para ela em vez de parar tudo.
@@ -965,24 +1072,66 @@ function failCurrentTrack(message: string): void {
  */
 function pularFaixaMorta(message: string): void {
   const s = usePlayerStore.getState();
-  registrarNoMapa(s.currentTrack);
+  const semRede = redeSabidamenteMorta();
+  // Faixa que só não tocou por falta de rede não está quebrada: anotá-la no
+  // mapa de falhas mandaria o reparador "consertar" o que não tem defeito.
+  if (!semRede) registrarNoMapa(s.currentTrack);
   consecutiveDeadTracks++;
   if (deadRunStartedAt === 0) deadRunStartedAt = Date.now();
 
   const hasNext = s.queueIndex + 1 < s.queue.length || (s.repeat === 'all' && s.queue.length > 1);
-  // SEM REDE não é sequência ruim, é queda geral: parar na primeira é honesto e
-  // poupa a fila inteira de tentativas que já se sabe que vão falhar.
   const online = typeof navigator === 'undefined' || navigator.onLine;
   const dentroDoOrcamento =
     Date.now() - deadRunStartedAt < DEAD_RUN_BUDGET_MS &&
     consecutiveDeadTracks <= MAX_DEAD_TRACK_SKIPS;
 
-  if (s.isPlaying && online && dentroDoOrcamento) {
+  // SEM REDE A FILA NÃO PARA: vai direto para a próxima faixa que está no
+  // aparelho, sem tentar as que dependem da rede no caminho. Antes, sem rede,
+  // o player parava aqui mesmo com músicas baixadas logo adiante.
+  if (s.isPlaying && semRede) {
+    const alvo = proximaNoAparelho(s);
+    if (alvo >= 0) {
+      if (consecutiveDeadTracks === 1) {
+        void import('sonner').then(({ toast }) =>
+          toast('Sem internet — seguindo pelas músicas baixadas.'),
+        );
+      }
+      tocarDoAparelho(alvo);
+      return;
+    }
+  }
+
+  if (s.isPlaying && online && !semRede && dentroDoOrcamento) {
     if (consecutiveDeadTracks === 1) {
       const title = s.currentTrack?.title ?? 'faixa';
       void import('sonner').then(({ toast }) => toast(`"${title}" indisponível — pulando.`));
     }
     if (hasNext) {
+      const normal = seguinteNaFila(s);
+      const alvo = proximaNoAparelho(s);
+      // HÁ BAIXADA ADIANTE, MAS A PRÓXIMA DEPENDE DA REDE — que o navegador diz
+      // existir e pode estar mentindo. Uma sonda curta decide: rede morta vai
+      // direto para a baixada; rede viva segue a fila como sempre.
+      if (alvo >= 0 && alvo !== normal && !temCopiaNoAparelho(s.queue[normal])) {
+        const faixa = s.currentTrack?.id;
+        const indice = s.queueIndex;
+        void confirmarRedeMorta().then((morta) => {
+          const agora = usePlayerStore.getState();
+          if (agora.currentTrack?.id !== faixa || agora.queueIndex !== indice) return;
+          const destino = morta ? proximaNoAparelho(agora) : -1;
+          if (destino >= 0) {
+            tocarDoAparelho(destino);
+            return;
+          }
+          avancoAutomatico = true;
+          try {
+            agora.next();
+          } finally {
+            avancoAutomatico = false;
+          }
+        });
+        return;
+      }
       // Quem pula aqui é o player, não a pessoa: não conta como pulo.
       avancoAutomatico = true;
       try {
@@ -1000,7 +1149,16 @@ function pularFaixaMorta(message: string): void {
     void continuarNumaParecida(s.currentTrack, message);
     return;
   }
-  pararComErro(message);
+  // ORÇAMENTO ESTOURADO sem sair som é a assinatura da queda geral — e é
+  // justamente quando a cópia do aparelho é a única que ainda toca.
+  if (s.isPlaying && !semRede) {
+    const alvo = proximaNoAparelho(s);
+    if (alvo >= 0) {
+      tocarDoAparelho(alvo);
+      return;
+    }
+  }
+  pararComErro(semRede ? 'Sem conexão — não há músicas baixadas adiante na fila.' : message);
 }
 
 /** Avisa (uma vez a cada tanto) que uma faixa foi pulada pela idade. */
@@ -1317,6 +1475,40 @@ function firePreviewGate(): void {
  * mudou no meio do caminho e não há nada a fazer).
  */
 async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
+  // A CÓPIA DO APARELHO ANTES DE QUALQUER FONTE DA REDE.
+  //
+  // O motor escolhe a fonte com um resolvedor SÍNCRONO, que só enxerga alças já
+  // abertas. Quem carrega a faixa por fora de `loadIndex` — o crossfade, a
+  // troca antecipada com a tela apagada, o elemento pré-carregado — pode ter
+  // mandado para a rede uma faixa que está baixada, só porque a alça dela não
+  // estava aberta naquele instante. Offline isso falha na hora, e a cadeia
+  // abaixo (toda de rede) declarava morta a música que estava no aparelho.
+  // Uma vez por carga: se a própria cópia local falhar, segue a cadeia normal.
+  const marcaDoAparelho = `aparelho:${track.id}`;
+  if (
+    !fallbackTried.has(marcaDoAparelho) &&
+    (hasLocalAudio(track.id) || hasDownloadedAudio(track.id))
+  ) {
+    fallbackTried.add(marcaDoAparelho);
+    const geracaoDaCopia = geracaoDeCarga;
+    const local =
+      (await ensureLocalAudioUrl(track.id).catch(() => null)) ??
+      (await ensureDownloadedAudioUrl(track.id).catch(() => null));
+    if (local) {
+      if (geracaoDaCopia !== geracaoDeCarga) return true;
+      if (usePlayerStore.getState().currentTrack?.id !== track.id) return true;
+      // Travou no meio: a cópia local continua do ponto onde a rede parou.
+      const posicao = audioEngine.getPosition();
+      if (posicao > 1) audioEngine.iniciarEm(posicao);
+      marcarCarga('carregando');
+      usePlayerStore.setState({ isBuffering: true });
+      const geracao = novaGeracao(querTocar);
+      audioEngine.load(track, { autoplay: querTocar });
+      reconciliarIntencao(geracao);
+      armLoadWatchdog(track.id, STALL_CHECK_MS * 2);
+      return true;
+    }
+  }
   if (track.streamUrl) {
     fallbackTried.add(track.streamUrl);
     // Se a URL morta era a cópia do cofre, limpa da biblioteca (todos os
@@ -1330,7 +1522,9 @@ async function attemptSourceFallback(track: TrackDto): Promise<boolean> {
   // meio-tempo começou OUTRA carga — mesmo da mesma faixa, tocada de novo —,
   // esta resposta é velha: não pode trocar a fonte nem declarar a faixa morta.
   const geracaoDaBusca = geracaoDeCarga;
-  const resolved = await resolveNextSource(track, fallbackTried);
+  // Com teto: sem ele, uma rede morta que não erra deixava a faixa pendurada
+  // aqui e o player nunca chegava a pular (ver `comTeto`).
+  const resolved = await comTeto(resolveNextSource(track, fallbackTried), TETO_RESOLUCAO_MS);
   if (geracaoDaBusca !== geracaoDeCarga) return true;
   const s = usePlayerStore.getState();
   if (s.currentTrack?.id !== track.id) return true; // trocou de faixa — encerra
@@ -1395,6 +1589,23 @@ function armLoadWatchdog(trackId: string, delayMs = LOAD_WATCHDOG_MS): void {
       }
       void (async () => {
         if (await attemptSourceFallback(current)) return;
+        if (usePlayerStore.getState().currentTrack?.id !== trackId) return;
+        // ...A NÃO SER QUE A REDE TENHA MORRIDO. Esperar no mesmo ponto só faz
+        // sentido se a rede pode voltar a entregar esta faixa; sem rede (e o
+        // `onLine` do Android mente, por isso a sonda), é silêncio sem prazo
+        // com músicas baixadas logo adiante. Aí a fila segue por elas.
+        if (proximaNoAparelho(usePlayerStore.getState()) >= 0 && (await confirmarRedeMorta())) {
+          const agora = usePlayerStore.getState();
+          if (agora.currentTrack?.id !== trackId || !agora.isPlaying) return;
+          const alvo = proximaNoAparelho(agora);
+          if (alvo >= 0) {
+            void import('sonner').then(({ toast }) =>
+              toast('Sem internet — seguindo pelas músicas baixadas.'),
+            );
+            tocarDoAparelho(alvo);
+            return;
+          }
+        }
         // TRAVOU NO MEIO NÃO É MOTIVO PARA PULAR. A pessoa ouve a música
         // inteira; só ela passa para a próxima. Sem outra fonte, fica esperando
         // a rede no MESMO ponto e cutucando o elemento de tempos em tempos.
@@ -1645,7 +1856,9 @@ export const usePlayerStore = create<PlayerState>()(
 
           // OFFLINE without a local copy: no network attempts — skip to the
           // next queue track (it may be downloaded) or stop honestly.
-          if (typeof navigator !== 'undefined' && !navigator.onLine) {
+          // "Offline" também é a rede que a sonda acabou de desmentir: o
+          // `onLine` do Android fica `true` sem internet nenhuma.
+          if (redeSabidamenteMorta()) {
             failCurrentTrack('Sem conexão — essa faixa não está baixada neste dispositivo.');
             return;
           }
@@ -1683,8 +1896,12 @@ export const usePlayerStore = create<PlayerState>()(
           // Sem cópia no servidor, o caminho é extrair da origem: é a espera
           // longa, e dizer isso antes de começar evita o "travou?".
           marcarCarga(remoteUrlFor(track.id) ? 'carregando' : 'buscandoOrigem');
-          const resolved = await ensurePlayableSource(track);
+          const resolved = await comTeto(ensurePlayableSource(track), TETO_RESOLUCAO_MS);
           if (geracao !== geracaoDeCarga) return;
+          if (!resolved) {
+            failCurrentTrack('Não foi possível carregar esta faixa agora.');
+            return;
+          }
           marcarCarga(ehExtracaoAoVivo(resolved.streamUrl) ? 'buscandoOrigem' : 'carregando');
           if (resolved !== track && resolved.streamUrl) {
             set((s) => ({
@@ -2290,13 +2507,9 @@ export function initPlayerEngine(): void {
       store.setState({ progress: 0, isPlaying: true });
       return;
     }
-    const nextIndex = state.queueIndex + 1;
-    const alvo =
-      nextIndex < state.queue.length
-        ? nextIndex
-        : state.repeat === 'all' && state.queue.length > 0
-          ? 0
-          : null;
+    // Sem rede, a seguinte é a próxima que está no aparelho (ver `indiceSeguinte`).
+    const seguinte = indiceSeguinte(state);
+    const alvo = seguinte >= 0 ? seguinte : null;
     if (alvo !== null) {
       anotarAvanco(via, state.currentTrack, state.queue[alvo]);
       // `playAt` decide de forma síncrona se desvia — a marca só precisa
@@ -2410,6 +2623,29 @@ export function initPlayerEngine(): void {
       return;
     }
 
+    // PERTO DO FIM, CONFERE A REDE — só quando há escolha a fazer: a seguinte
+    // depende da rede e existe uma baixada mais adiante. Assim o fim da faixa
+    // (e a troca com a tela apagada, e o preload logo abaixo) já sabem se a
+    // rede chega, em vez de descobrir gastando um watchdog inteiro na faixa
+    // errada. A folga de 8s dá tempo de a sonda (teto de 4s) voltar antes do
+    // preload.
+    if (
+      state.currentTrack &&
+      sondaDoFimPara !== state.currentTrack.id &&
+      duration > 0 &&
+      remaining <= antecedenciaDoPreload() + 8
+    ) {
+      sondaDoFimPara = state.currentTrack.id;
+      const normal = seguinteNaFila(state);
+      if (
+        normal >= 0 &&
+        !temCopiaNoAparelho(state.queue[normal]) &&
+        proximaNoAparelho(state) >= 0
+      ) {
+        void confirmarRedeMorta();
+      }
+    }
+
     // Gapless: preload the upcoming track near the end.
     //
     // Com a tela apagada preload SEMPRE, mesmo com gapless desligado: a troca em
@@ -2425,8 +2661,8 @@ export function initPlayerEngine(): void {
       remaining <= antecedenciaDoPreload()
     ) {
       preloadRequested = true;
-      const upcoming =
-        state.queue[state.queueIndex + 1] ?? (state.repeat === 'all' ? state.queue[0] : undefined);
+      // A mesma escolha que o fim da faixa vai fazer — sem rede, a baixada.
+      const upcoming = state.queue[indiceSeguinte(state)];
       if (!upcoming) {
         audioEngine.preloadNext(null);
       } else {
@@ -2449,9 +2685,7 @@ export function initPlayerEngine(): void {
           // A fila pode ter mudado durante o await (pular, trocar de playlist);
           // preload da faixa errada desperdiça rede e ocupa o elemento reserva.
           const agora = store.getState();
-          const aindaEhAProxima =
-            (agora.queue[agora.queueIndex + 1] ?? (agora.repeat === 'all' ? agora.queue[0] : null))
-              ?.id === upcoming.id;
+          const aindaEhAProxima = agora.queue[indiceSeguinte(agora)]?.id === upcoming.id;
           if (aindaEhAProxima) audioEngine.preloadNext(upcoming);
         })();
       }
@@ -2470,12 +2704,7 @@ export function initPlayerEngine(): void {
       duration > crossfadeSeconds * 2 &&
       remaining <= crossfadeSeconds
     ) {
-      const nextIndex =
-        state.queueIndex + 1 < state.queue.length
-          ? state.queueIndex + 1
-          : state.repeat === 'all' && state.queue.length > 0
-            ? 0
-            : -1;
+      const nextIndex = indiceSeguinte(state);
       if (nextIndex >= 0) {
         crossfadeTriggered = true;
         const track = state.queue[nextIndex];
@@ -2561,12 +2790,9 @@ export function initPlayerEngine(): void {
     if (handoffDoneTrackId === track.id) return;
     if (s.repeat === 'one') return; // repetir-uma: o 'ended' re-busca a posição 0
 
-    const nextIndex =
-      s.queueIndex + 1 < s.queue.length
-        ? s.queueIndex + 1
-        : s.repeat === 'all' && s.queue.length > 0
-          ? 0
-          : -1;
+    // Tela apagada é o caso do celular no bolso: sem rede, a troca já mira a
+    // próxima faixa baixada em vez de uma que vai falhar no escuro.
+    const nextIndex = indiceSeguinte(s);
     if (nextIndex < 0) return; // fim da fila: deixa a atual terminar de verdade
     const next = s.queue[nextIndex];
     if (!next) return;

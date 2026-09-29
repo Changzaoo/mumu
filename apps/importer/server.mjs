@@ -708,8 +708,14 @@ async function importToMp3(ytdlp, url, quality) {
   let track = '';
   let album = '';
   let uploader = '';
+  let durationMs = 0;
   try {
     const info = JSON.parse(await readFile(path.join(dir, 'audio.info.json'), 'utf8'));
+    // A duração da ORIGEM desce junto: sem ela a faixa importada pelo servidor
+    // nascia com "0:00" e só ganhava tempo se alguém a tocasse.
+    if (Number.isFinite(info.duration) && info.duration > 0) {
+      durationMs = Math.round(info.duration * 1000);
+    }
     if (typeof info.title === 'string' && info.title.trim()) title = info.title.trim();
     if (typeof info.thumbnail === 'string' && info.thumbnail.trim())
       thumbnail = info.thumbnail.trim();
@@ -728,7 +734,17 @@ async function importToMp3(ytdlp, url, quality) {
   } catch {
     /* keep default */
   }
-  return { dir, file: path.join(dir, mp3), title, thumbnail, artist, track, album, uploader };
+  return {
+    dir,
+    file: path.join(dir, mp3),
+    title,
+    thumbnail,
+    artist,
+    track,
+    album,
+    uploader,
+    durationMs,
+  };
 }
 
 function interpret(stderr) {
@@ -787,6 +803,17 @@ function linkDeMusica(url) {
   return l.ok ? l : null;
 }
 
+/**
+ * Link de serviço que existe mas é PRIVADO (curtidas do Spotify): a mensagem
+ * que explica a saída, ou null. Responder 422 com ela — e não o 400 "Link não
+ * suportado." — diz ao app que é definitivo e diz à pessoa o que fazer.
+ */
+function motivoDeLinkPrivado(url) {
+  if (typeof url !== 'string') return null;
+  const l = analisarLinkDeMusica(url);
+  return !l.ok && l.privado ? l.motivo : null;
+}
+
 function startImportJob(url, quality, quem = null, musica = null) {
   const id = crypto.randomUUID();
   const job = {
@@ -820,6 +847,7 @@ function startImportJob(url, quality, quem = null, musica = null) {
         track: r.track || null,
         album: r.album || null,
         uploader: r.uploader || null,
+        durationMs: r.durationMs || null,
         size,
       };
       if (achado) {
@@ -3320,6 +3348,12 @@ async function main() {
           const { url } = JSON.parse((await readBody(req)) || '{}');
           const musica = linkDeMusica(url);
           const listaDeServico = musica && musica.tipo !== 'faixa';
+          const privado = motivoDeLinkPrivado(url);
+          if (privado) {
+            res.writeHead(422, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: privado }));
+            return;
+          }
           if (typeof url !== 'string' || (!hostSupported(url) && !listaDeServico)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
@@ -3664,6 +3698,12 @@ async function main() {
           const { url, quality } = JSON.parse((await readBody(req)) || '{}');
           const musica = linkDeMusica(url);
           const faixaDeServico = musica && musica.tipo === 'faixa' ? musica : null;
+          const privado = motivoDeLinkPrivado(url);
+          if (privado) {
+            res.writeHead(422, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: privado }));
+            return;
+          }
           if (typeof url !== 'string' || (!hostSupported(url) && !faixaDeServico)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));

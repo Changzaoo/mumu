@@ -92,7 +92,19 @@ export function normTitle(value: string): string {
  */
 export function rankTracks(tracks: TrackDto[], rankedTitles: string[]): TrackDto[] {
   if (rankedTitles.length === 0) return tracks;
+  const rankOf = rankingDe(rankedTitles);
+  return tracks
+    .map((track, index) => ({ track, index, rank: rankOf(track) }))
+    .sort((a, b) => (a.rank === b.rank ? a.index - b.index : a.rank - b.rank))
+    .map((row) => row.track);
+}
 
+/**
+ * A posição de cada faixa no ranking (`Infinity` = fora dele). Separada de
+ * `rankTracks` porque o "melhores do artista" (lib/reco/melhoresDoArtista)
+ * mistura a posição com os plays da pessoa e precisa do número, não da ordem.
+ */
+export function rankingDe(rankedTitles: readonly string[]): (track: TrackDto) => number {
   const position = new Map<string, number>();
   rankedTitles.forEach((title, i) => {
     const key = normTitle(title);
@@ -100,7 +112,7 @@ export function rankTracks(tracks: TrackDto[], rankedTitles: string[]): TrackDto
     if (key && !position.has(key)) position.set(key, i);
   });
 
-  const rankOf = (track: TrackDto): number => {
+  return (track: TrackDto): number => {
     const key = normTitle(track.title);
     if (!key) return Infinity;
     const exact = position.get(key);
@@ -111,11 +123,6 @@ export function rankTracks(tracks: TrackDto[], rankedTitles: string[]): TrackDto
     }
     return Infinity;
   };
-
-  return tracks
-    .map((track, index) => ({ track, index, rank: rankOf(track) }))
-    .sort((a, b) => (a.rank === b.rank ? a.index - b.index : a.rank - b.rank))
-    .map((row) => row.track);
 }
 
 interface ArtistTopState {
@@ -146,6 +153,15 @@ function lookup(name: string): ArtistTopState {
       .finally(() => inflight.delete(key));
   }
   return hit ? { titles: hit.titles, fans: hit.fans } : EMPTY_STATE;
+}
+
+/**
+ * O ranking mundial que JÁ está em mãos (cache), sem esperar a rede. Se não
+ * houver, a busca começa por baixo e a próxima chamada já o encontra — quem
+ * toca na hora não pode ficar esperando o catálogo responder.
+ */
+export function rankingDoArtista(name: string): string[] {
+  return lookup(name).titles;
 }
 
 /**

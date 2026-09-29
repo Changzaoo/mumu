@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { classificar, semRepetidas, soMusicas } from './ehMusica.mjs';
+import { chaveDaMusica, classificar, semRepetidas, soMusicas } from './ehMusica.mjs';
 
 // Canal real da 30PRAUM (200 vídeos, lista plana: título + duração).
 const canal = JSON.parse(
@@ -59,6 +59,29 @@ test('classificar: marcas de não-música e de música', () => {
   );
   assert.equal(classificar({ titulo: 'Kenny G #shorts', duracaoSeg: 30 }).veredito, 'nao');
   assert.equal(classificar({ titulo: 'Matuê reagindo a fãs', duracaoSeg: 400 }).veredito, 'nao');
+});
+
+test('chaveDaMusica: ruído e participação juntam; versão de verdade separa', () => {
+  const base = chaveDaMusica('Matuê - 333');
+  assert.equal(chaveDaMusica('Matuê - 333 (Clipe Oficial)'), base);
+  assert.equal(chaveDaMusica('Matuê - 333 ft. Teto'), base);
+  assert.equal(chaveDaMusica('Matuê - 333 (feat. Teto) [Official Video]'), base);
+  assert.notEqual(chaveDaMusica('Matuê - 333 (Ao Vivo)'), base);
+  assert.notEqual(chaveDaMusica('Matuê - 333 (Sped Up)'), base);
+  assert.notEqual(chaveDaMusica('Matuê - 333 (Remix)'), base);
+  assert.equal(chaveDaMusica('Matuê - 333 (Live)'), chaveDaMusica('Matuê - 333 (Ao Vivo)'));
+  // "Live Forever" é nome de música, não versão.
+  assert.equal(chaveDaMusica('Oasis - Live Forever'), 'oasis live forever');
+});
+
+test('repetidas: ao vivo e sped up NÃO são repetidas da original', () => {
+  const { unicas, repetidas } = semRepetidas([
+    { titulo: 'Teto - TEMPORAL', duracaoSeg: 189 },
+    { titulo: 'Teto - Temporal (Ao Vivo)', duracaoSeg: 201 },
+    { titulo: 'Teto - Temporal (Sped Up)', duracaoSeg: 160 },
+  ]);
+  assert.equal(unicas.length, 3);
+  assert.equal(repetidas.length, 0);
 });
 
 test('repetidas: fica a versão de áudio', () => {

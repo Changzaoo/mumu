@@ -404,8 +404,35 @@ export default function DevicePage() {
                   <Button
                     variant="ghost"
                     size="sm"
-                    onClick={() =>
-                      void toast.promise(localLibrary.dedupeLibraryDeep(), {
+                    onClick={() => {
+                      const limpeza = localLibrary.dedupeLibraryDeep();
+                      // A limpeza junta por título canônico e por letra: um
+                      // engano é música sumindo. Tudo que saiu (nesta e nas
+                      // passadas automáticas) pode voltar pela lixeira.
+                      void limpeza
+                        .then(() => {
+                          const n = localLibrary.duplicadasNaLixeira();
+                          if (n === 0) return;
+                          toast(
+                            `${n} ${n === 1 ? 'faixa repetida guardada' : 'faixas repetidas guardadas'} por 7 dias`,
+                            {
+                              duration: 12_000,
+                              action: {
+                                label: 'Desfazer',
+                                onClick: () =>
+                                  void localLibrary
+                                    .restaurarDuplicadas()
+                                    .then((v) =>
+                                      toast.success(
+                                        `${v} ${v === 1 ? 'faixa restaurada' : 'faixas restauradas'}`,
+                                      ),
+                                    ),
+                              },
+                            },
+                          );
+                        })
+                        .catch(() => undefined);
+                      void toast.promise(limpeza, {
                         loading: 'Limpando duplicadas (faixas, artistas e álbuns)…',
                         success: (summary) => {
                           const actions = [
@@ -441,8 +468,8 @@ export default function DevicePage() {
                           return actions.length > 0 ? actions.join(' · ') : 'Nenhuma duplicada';
                         },
                         error: 'Falha ao limpar',
-                      })
-                    }
+                      });
+                    }}
                   >
                     Remover duplicadas
                   </Button>

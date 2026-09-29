@@ -259,3 +259,18 @@ test('link de ARTISTA do Spotify e do Deezer vira lista (as mais tocadas)', () =
   const dz = analisarLinkDeMusica('https://www.deezer.com/br/artist/123');
   assert.deepEqual(dz, { ok: true, servico: 'deezer', tipo: 'artista', id: '123' });
 });
+
+test('curtidas do Spotify (/collection/tracks): recusa PRIVADA com a saída explicada', () => {
+  for (const url of [
+    'https://open.spotify.com/collection/tracks',
+    'https://open.spotify.com/intl-pt/collection/tracks',
+    'https://open.spotify.com/collection/playlists',
+  ]) {
+    const r = analisarLinkDeMusica(url);
+    assert.equal(r.ok, false, url);
+    assert.equal(r.privado, true, url);
+    assert.match(r.motivo, /Adicionar à playlist/);
+  }
+  // Link inválido comum continua sendo recusa seca (sem `privado`).
+  assert.equal(analisarLinkDeMusica('https://open.spotify.com/show/abc').privado, undefined);
+});

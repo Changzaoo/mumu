@@ -277,16 +277,38 @@ export function criarResolvedorDeMusica({
    * para o job não pedir de novo.
    */
   /**
-   * ARTISTA → AS MÚSICAS DELE. O embed do Spotify dá o nome e as mais
-   * tocadas (umas 10); o Deezer, pela API pública, completa com até 100 — é o
-   * "mundaréu" de quem cola o link do artista querendo a discografia dele.
+   * ARTISTA → TODAS AS MÚSICAS DELE. O embed do Spotify dá o nome e as mais
+   * tocadas (umas 10); o Deezer completa com as mais tocadas dele (até 100) e
+   * depois com a DISCOGRAFIA (álbuns, EPs e singles), até o teto `maxLista` —
+   * quem cola o link do artista quer tudo dele, não um top 10.
+   *
+   * Falha de rede não é "artista sem música": se nada veio E alguma fonte
+   * caiu, o erro é comum (500 → a fila tenta de novo); só a resposta vazia de
+   * fontes que responderam vira `NaoAchei` (422 → erro definitivo).
    */
   async function listarArtista(link) {
     let nome = null;
+    let fonteCaiu = false;
+    // Discografia grande = dezenas de pedidos; a resposta do /playlist precisa
+    // sair antes dos ~100 s do túnel do Cloudflare. Estourou o prazo, devolve
+    // o que já juntou (as mais tocadas vêm primeiro, então o essencial entra).
+    const prazo = agora() + 45_000;
+    const pedir = (url, opcoes = {}) =>
+      buscarNaLista(url, { fetch: f, ...opcoes }).then(
+        (r) => {
+          if (r.status >= 500 || r.status === 429) fonteCaiu = true;
+          return r;
+        },
+        () => {
+          fonteCaiu = true;
+          return null;
+        },
+      );
     const faixas = [];
     const vistas = new Set();
     const juntar = (lista) => {
       for (const f of lista) {
+        if (faixas.length >= maxLista) return;
         const chave = `${f.titulo}`
           .toLowerCase()
           .replace(/\s*[([].*$/, '')
@@ -298,20 +320,16 @@ export function criarResolvedorDeMusica({
     };
     let idDeezer = link.servico === 'deezer' ? link.id : null;
     if (link.servico === 'spotify') {
-      const r = await buscarNaLista(`https://open.spotify.com/embed/artist/${link.id}`, {
-        fetch: f,
-        json: false,
-      }).catch(() => null);
+      const r = await pedir(`https://open.spotify.com/embed/artist/${link.id}`, { json: false });
       const doSpotify = r?.status === 200 ? listaDoSpotify(r.corpo) : null;
       if (doSpotify) {
         nome = doSpotify.titulo;
         juntar(doSpotify.faixas);
       }
       if (nome) {
-        const busca = await buscarNaLista(
+        const busca = await pedir(
           `https://api.deezer.com/search/artist?q=${encodeURIComponent(nome)}&limit=5`,
-          { fetch: f },
-        ).catch(() => null);
+        );
         const achados = busca?.status === 200 ? (comoJson(busca.corpo)?.data ?? []) : [];
         const norm = (t) =>
           String(t ?? '')
@@ -325,19 +343,55 @@ export function criarResolvedorDeMusica({
     }
     if (idDeezer && /^\d+$/.test(idDeezer)) {
       if (!nome) {
-        const a = await buscarNaLista(`https://api.deezer.com/artist/${idDeezer}`, {
-          fetch: f,
-        }).catch(() => null);
+        const a = await pedir(`https://api.deezer.com/artist/${idDeezer}`);
         nome = a?.status === 200 ? (comoJson(a.corpo)?.name ?? null) : null;
       }
-      const top = await buscarNaLista(
+      const top = await pedir(
         `https://api.deezer.com/artist/${idDeezer}/top?limit=${Math.min(100, maxLista)}`,
-        { fetch: f },
-      ).catch(() => null);
+      );
       juntar(faixasDaPaginaDoDeezer(top?.status === 200 ? comoJson(top.corpo) : null));
+
+      // Discografia: todos os lançamentos do artista, página a página.
+      // Coletânea ('compile') fica de fora — é disco de vários artistas, e as
+      // faixas dele que estão lá já vêm pelos álbuns próprios.
+      const albuns = [];
+      for (let index = 0; faixas.length < maxLista && agora() < prazo && index < 1000;) {
+        const p = await pedir(
+          `https://api.deezer.com/artist/${idDeezer}/albums?index=${index}&limit=100`,
+        );
+        const pagina = p?.status === 200 ? comoJson(p.corpo) : null;
+        const itens = Array.isArray(pagina?.data) ? pagina.data : [];
+        for (const a of itens) {
+          if (/^\d{1,15}$/.test(String(a?.id ?? '')) && a.record_type !== 'compile') albuns.push(a);
+        }
+        if (itens.length === 0 || !pagina.next) break;
+        index += itens.length;
+      }
+      // 4 álbuns por vez: rápido o bastante para caber no prazo sem martelar
+      // a API pública do Deezer (que devolve 429 para rajada).
+      for (let i = 0; i < albuns.length && faixas.length < maxLista && agora() < prazo; i += 4) {
+        const lote = await Promise.all(
+          albuns
+            .slice(i, i + 4)
+            .map((a) => pedir(`https://api.deezer.com/album/${a.id}/tracks?limit=100`)),
+        );
+        lote.forEach((r, k) => {
+          const json = r?.status === 200 ? comoJson(r.corpo) : null;
+          // Só as faixas em que ELE é o artista principal: participação num
+          // disco alheio não é "música do artista" que a pessoa pediu.
+          const doArtista = Array.isArray(json?.data)
+            ? json.data.filter((t) => !t?.artist?.id || String(t.artist.id) === idDeezer)
+            : [];
+          juntar(faixasDaPaginaDoDeezer({ data: doArtista }, albuns[i + k]));
+        });
+      }
     }
-    if (!nome && faixas.length === 0) return null;
-    return { titulo: `${nome ?? 'Artista'} · mais tocadas`, faixas };
+    if (faixas.length === 0) {
+      if (fonteCaiu) throw new Error('Spotify/Deezer não responderam agora. Tente de novo.');
+      if (nome) throw new NaoAchei(`Não achei músicas de ${nome}.`);
+      return null;
+    }
+    return { titulo: `${nome ?? 'Artista'} · discografia`, faixas };
   }
 
   async function listar(bruto) {

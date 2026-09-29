@@ -16,6 +16,7 @@ import { startVarreduraNoturnaWorker } from './varreduraNoturna.worker.js';
 import { startPesquisadorWorker } from './pesquisador.worker.js';
 import { startImportacoesWorker } from './importacoes.worker.js';
 import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
+import { startDuracoesWorker } from './duracoes.worker.js';
 
 const connection = createBullConnection();
 
@@ -70,6 +71,11 @@ const stopImportacoes = startImportacoesWorker();
 // conteudoDaFaixa.worker.
 const stopConteudo = startConteudoDaFaixaWorker();
 
+// Um terço do acervo nasceu com `durationMs: 0` e mostrava "0:00" na lista.
+// Este agente lê a duração no cabeçalho da cópia do cofre (sem baixar a música)
+// e a leva ao acervo e às bibliotecas. Ver duracoes.worker.
+const stopDuracoes = startDuracoesWorker();
+
 logger.info(
   {
     queues: workers.map((w) => w.name),
@@ -97,6 +103,7 @@ async function shutdown(signal: string): Promise<void> {
   stopPesquisador();
   stopImportacoes();
   stopConteudo();
+  stopDuracoes();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

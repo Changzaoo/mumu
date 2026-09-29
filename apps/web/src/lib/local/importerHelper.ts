@@ -105,6 +105,22 @@ function hostOf(url: string): string {
   }
 }
 
+/**
+ * `open.spotify.com/(intl-xx/)collection/...` — curtidas/biblioteca da conta.
+ * Só abre logado: não há embed nem API pública, então nenhum importador lê.
+ */
+export function ehColecaoDoSpotify(u: URL): boolean {
+  if (u.hostname.toLowerCase() !== 'open.spotify.com') return false;
+  const partes = u.pathname.split('/').filter(Boolean);
+  const p =
+    partes[0] && /^intl-[a-z]{2}(?:-[a-z]{2})?$/i.test(partes[0]) ? partes.slice(1) : partes;
+  return p[0] === 'collection';
+}
+
+export const MENSAGEM_CURTIDAS_SPOTIFY =
+  'As curtidas do Spotify são privadas. Use "Conectar Spotify" em Adicionar música, ou no ' +
+  'Spotify selecione as curtidas → "Adicionar à playlist" → nova playlist pública e cole o link dela.';
+
 /** Álbum ou playlist de Spotify/Apple Music/Deezer/Tidal (não uma faixa só). */
 function ehListaDeServico(u: URL): boolean {
   const host = u.hostname.toLowerCase();

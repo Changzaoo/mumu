@@ -34,6 +34,7 @@ import {
 import type { LucideIcon } from 'lucide-react';
 import type { TrackDto } from '@radinho/shared';
 import { createPlaylistSchema, type CreatePlaylistInput } from '@radinho/shared';
+import { ArtistasSeguidosRow } from '@/components/media/ArtistasSeguidosRow';
 import { DeviceTracksRow } from '@/components/media/DeviceTracksRow';
 import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
@@ -416,6 +417,10 @@ export default function LibraryPage() {
           ))}
         </SectionCarousel>
       )}
+
+      {/* 2b. OS ARTISTAS SEGUIDOS — no celular não há lateral onde eles
+          apareçam em círculo; aqui é o lugar deles. */}
+      <ArtistasSeguidosRow />
 
       {/* 3. AS CURTIDAS, as faixas em si — o atalho acima leva à lista inteira. */}
       <PrateleiraDeFaixas

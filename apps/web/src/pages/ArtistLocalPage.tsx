@@ -3,11 +3,13 @@
  * most POPULAR tracks first (ranking do mundo real, via Deezer), a bio da
  * Wikipédia, a gravadora e depois os álbuns.
  */
+import { SeguirArtistaButton } from '@/components/media/SeguirArtista';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Link, useParams } from 'react-router';
 import { Disc3, Flame, MicVocal, Play, Share2 } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
+import { SobreOArtista } from '@/components/media/SobreOArtista';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { VirtualList } from '@/components/media/VirtualList';
@@ -24,8 +26,19 @@ const EMPTY: localLibrary.LibraryEntry[] = [];
 
 /** Quantas faixas o bloco "Populares" mostra antes do "ver mais" (padrão Spotify). */
 const POPULAR_PREVIEW = 5;
-/** Caracteres de bio exibidos antes do "ler mais" — verbete inteiro empurra tudo. */
-const BIO_PREVIEW = 320;
+
+function GravadoraLink({ label }: { label: string }) {
+  return (
+    <dl>
+      <dt className="uppercase tracking-[0.14em] text-fg-subtle">Gravadora</dt>
+      <dd className="mt-0.5">
+        <Link to={`/gravadora/${encodeURIComponent(label)}`} className="text-fg hover:text-accent">
+          {label}
+        </Link>
+      </dd>
+    </dl>
+  );
+}
 
 export default function ArtistLocalPage() {
   const { name = '' } = useParams<{ name: string }>();
@@ -38,11 +51,16 @@ export default function ArtistLocalPage() {
   // Ordem por popularidade REAL. Sem rede o hook devolve a ordem local intacta,
   // então a página nunca fica vazia por causa do ranking.
   const { tracks, ranked, fans } = useArtistTopTracks(artist, localTracks);
-  const bio = useArtistBio(artist);
+  // Faixas e álbuns do acervo são a pista para separar homônimos: o verbete
+  // certo cita a obra que o usuário TEM desse artista.
+  const bioHints = useMemo(
+    () => ({ titles: [...albums.map((a) => a.title), ...localTracks.map((t) => t.title)] }),
+    [albums, localTracks],
+  );
+  const bio = useArtistBio(artist, bioHints);
   const label = useMemo(() => dominantLabel(tracks.map((t) => t.label)), [tracks]);
 
   const [showAllPopular, setShowAllPopular] = useState(false);
-  const [bioOpen, setBioOpen] = useState(false);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
@@ -112,6 +130,9 @@ export default function ArtistLocalPage() {
             >
               <Play className="size-4 fill-current" /> Tocar
             </button>
+            {/* Seguir põe o artista na lateral (como no Spotify), com o play
+                das melhores dele — ver components/media/SeguirArtista. */}
+            <SeguirArtistaButton nome={artist} capaUrl={cover} />
             <button
               type="button"
               aria-label="Compartilhar artista"
@@ -167,61 +188,37 @@ export default function ArtistLocalPage() {
         )}
       </section>
 
-      {/* Sobre — bio real + gravadora */}
-      {(bio || label) && (
-        <section className="space-y-3">
-          <h2 className="text-lg font-semibold tracking-tight text-fg">Sobre</h2>
-          <div className="rounded-2xl border border-border bg-fg/[0.03] p-4">
-            {bio && (
-              <>
-                <p className="whitespace-pre-line text-sm leading-relaxed text-fg-muted">
-                  {bioOpen || bio.text.length <= BIO_PREVIEW
-                    ? bio.text
-                    : `${bio.text.slice(0, BIO_PREVIEW).trimEnd()}…`}
-                </p>
-                {bio.text.length > BIO_PREVIEW && (
-                  <button
-                    type="button"
-                    onClick={() => setBioOpen((v) => !v)}
-                    className="mt-2 text-[13px] font-semibold text-fg transition-colors hover:text-accent"
-                  >
-                    {bioOpen ? 'ler menos' : 'ler mais'}
-                  </button>
-                )}
-              </>
-            )}
-            <dl className="mt-4 flex flex-wrap gap-x-8 gap-y-2 text-[12px]">
-              {label && (
-                <div>
-                  <dt className="uppercase tracking-[0.14em] text-fg-subtle">Gravadora</dt>
-                  <dd className="mt-0.5">
-                    <Link
-                      to={`/gravadora/${encodeURIComponent(label)}`}
-                      className="text-fg hover:text-accent"
-                    >
-                      {label}
-                    </Link>
-                  </dd>
-                </div>
-              )}
-              {bio?.url && (
-                <div>
-                  <dt className="uppercase tracking-[0.14em] text-fg-subtle">Fonte</dt>
-                  <dd className="mt-0.5">
-                    <a
-                      href={bio.url}
-                      target="_blank"
-                      rel="noreferrer noopener"
-                      className="text-fg hover:text-accent"
-                    >
-                      Fonte ({bio.lang.toUpperCase()})
-                    </a>
-                  </dd>
-                </div>
-              )}
-            </dl>
-          </div>
-        </section>
+      {/* Sobre o artista — foto grande + bio conferida (lib/artistBio.ts). Sem
+          bio com identidade provada, o card não aparece: vazio é melhor que a
+          pessoa errada. A gravadora continua aparecendo sozinha. */}
+      {bio ? (
+        <SobreOArtista
+          name={artist}
+          // A foto do catálogo (Deezer) primeiro; a do verbete só na falta dela.
+          imageUrl={photo ?? bio.imageUrl ?? cover}
+          stat={fans !== null && fans > 0 ? `${fans.toLocaleString('pt-BR')} fãs` : null}
+          text={bio.text}
+          fonte={
+            bio.url && (
+              <a
+                href={bio.url}
+                target="_blank"
+                rel="noreferrer noopener"
+                className="text-fg-muted hover:text-fg"
+              >
+                Fonte: Wikipédia ({bio.lang.toUpperCase()})
+              </a>
+            )
+          }
+        >
+          {label && <GravadoraLink label={label} />}
+        </SobreOArtista>
+      ) : (
+        label && (
+          <section className="text-[12px]">
+            <GravadoraLink label={label} />
+          </section>
+        )
       )}
 
       {/* Albums */}

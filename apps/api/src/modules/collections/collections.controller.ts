@@ -35,6 +35,9 @@ const COLECOES = new Set([
   // 'importacoes': cada link colado, com o estado — o que o aparelho não
   // terminar o servidor termina (ver workers/importacoes.worker.ts).
   'importacoes',
+  // 'artistas': quem a pessoa segue, um documento por artista (id = chave de
+  // identidade do nome) — ver apps/web/src/lib/local/artistasSeguidos.ts.
+  'artistas',
 ]);
 
 function nomeDaColecao(bruto: unknown): string {

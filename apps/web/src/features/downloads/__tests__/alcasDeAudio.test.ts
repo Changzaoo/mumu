@@ -25,12 +25,22 @@ import type { TrackDto } from '@radinho/shared';
 /** Cofre de bytes de mentira (o IndexedDB real). */
 const cofre = new Map<string, Blob>();
 
+/** Quantas leituras seguidas do IndexedDB vão FALHAR (não "não achar"). */
+const leituraQuebrada = { restantes: 0 };
+
 /** Registro de mentira — no app é localStorage, síncrono. */
 const registro = new Map<string, { track: TrackDto; sizeBytes: number }>();
 
 vi.mock('@/lib/offline/audioCache', () => ({
   cacheSupported: () => true,
   getAudioBlob: vi.fn(async (id: string) => cofre.get(id) ?? null),
+  lerAudio: vi.fn(async (id: string) => {
+    if (leituraQuebrada.restantes > 0) {
+      leituraQuebrada.restantes -= 1;
+      throw new DOMException('conexão fechada', 'InvalidStateError');
+    }
+    return cofre.get(id) ?? null;
+  }),
   putAudio: vi.fn(async (id: string, blob: Blob) => {
     cofre.set(id, blob);
   }),
@@ -71,6 +81,7 @@ const alcas = { abertas: new Set<string>(), criadas: 0 };
 beforeEach(() => {
   cofre.clear();
   registro.clear();
+  leituraQuebrada.restantes = 0;
   alcas.abertas.clear();
   alcas.criadas = 0;
   vi.stubGlobal('URL', {
@@ -187,6 +198,32 @@ describe('alças de áudio dos downloads', () => {
     // faixa pedida, no momento em que a verdade importa.
     expect(dm.hasDownloadedAudio('t0')).toBe(false);
     expect(dm.downloadStateOf('t0').status).toBe('idle');
+  });
+
+  it('leitura que FALHA não é despejo: o registro fica, e a faixa volta a tocar', async () => {
+    jaBaixadas(1);
+    const dm = await import('@/features/downloads/downloadManager');
+
+    // O IndexedDB tropeçou duas vezes seguidas (conexão derrubada pelo
+    // sistema). Os bytes continuam no cofre — só não deu para ler agora.
+    leituraQuebrada.restantes = 2;
+    expect(await dm.ensureDownloadedAudioUrl('t0')).toBeNull();
+
+    // Antes, este `null` podava o registro e a faixa baixada deixava de existir
+    // para o app — sem rede, ela nunca mais tocava.
+    expect(dm.hasDownloadedAudio('t0')).toBe(true);
+    expect(dm.downloadStateOf('t0').status).toBe('downloaded');
+
+    // Passado o tropeço, a mesma faixa abre normalmente.
+    expect(await dm.ensureDownloadedAudioUrl('t0')).not.toBeNull();
+  });
+
+  it('um tropeço só de leitura é absorvido pela segunda tentativa', async () => {
+    jaBaixadas(1);
+    const dm = await import('@/features/downloads/downloadManager');
+
+    leituraQuebrada.restantes = 1;
+    expect(await dm.ensureDownloadedAudioUrl('t0')).not.toBeNull();
   });
 
   it('faixa que nunca foi baixada não abre alça nem inventa URL', async () => {

@@ -16,7 +16,7 @@ import { pushNotification } from '@/stores/notificationsStore';
 import {
   cacheSupported,
   deleteAudio,
-  getAudioBlob,
+  lerAudio,
   putAudio,
   requestPersistentStorage,
 } from '@/lib/offline/audioCache';
@@ -126,7 +126,20 @@ export async function ensureDownloadedAudioUrl(trackId: string): Promise<string 
   if (aberta) return aberta;
   if (!isDownloaded(trackId) || !cacheSupported()) return null;
 
-  const blob = await getAudioBlob(trackId).catch(() => null);
+  // FALHA DE LEITURA NÃO É DESPEJO. O IndexedDB tropeçou (conexão derrubada
+  // pelo sistema, banco ocupado): os bytes continuam no aparelho. Podar o
+  // registro nesse caso apagava para sempre uma faixa baixada que só não abriu
+  // desta vez — e ela sumia da lista justamente de quem está sem internet.
+  // Uma segunda tentativa cobre o tropeço passageiro (a conexão é reaberta);
+  // se ela também falhar, a faixa fica como está e só não toca AGORA.
+  const leitura = await lerAudio(trackId)
+    .catch(() => lerAudio(trackId))
+    .then(
+      (blob) => ({ ok: true as const, blob }),
+      () => ({ ok: false as const, blob: null }),
+    );
+  if (!leitura.ok) return null;
+  const blob = leitura.blob;
   if (!blob) {
     removeDownload(trackId);
     emit();

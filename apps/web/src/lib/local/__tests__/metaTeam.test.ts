@@ -147,3 +147,17 @@ describe('VERIFICADOR — lente de álbum (prova dupla)', () => {
     expect(mockAlbum).not.toHaveBeenCalled();
   });
 });
+
+describe('JUIZ — a versão sobrevive à limpeza do título', () => {
+  // A limpeza de busca tira "(Ao Vivo)"/"(Sped Up)"; gravado sem a marca, o ao
+  // vivo ficava igual ao de estúdio e a deduplicação engolia um no outro.
+  it('devolve "(Ao Vivo)" e "(Sped Up)" ao título, e só eles', () => {
+    expect(
+      juizDecideCredito(extrator({ title: 'Matuê - 333 (Ao Vivo) [Official Video]' })).title,
+    ).toBe('333 (Ao Vivo)');
+    expect(juizDecideCredito(extrator({ title: 'Matuê - 333 (Sped Up)' })).title).toBe(
+      '333 (Sped Up)',
+    );
+    expect(juizDecideCredito(extrator({ title: 'Matuê - 333 (Clipe Oficial)' })).title).toBe('333');
+  });
+});

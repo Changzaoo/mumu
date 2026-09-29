@@ -19,6 +19,31 @@ import type {
 } from '@radinho/shared';
 import { api } from '@/lib/api';
 import * as localPlaylists from '@/lib/local/localPlaylists';
+import { entryFor } from '@/lib/local/localLibrary';
+
+/**
+ * A LISTA MOSTRA A DURAÇÃO QUE A BIBLIOTECA SABE HOJE.
+ *
+ * A playlist do aparelho guarda uma FOTO de cada faixa, tirada quando ela foi
+ * adicionada — e muitas foram adicionadas logo depois de importar, com o
+ * `durationMs: 0` de então. Quando a duração é medida depois (ao tocar, ou pela
+ * varredura do servidor), ela chega à biblioteca, não à foto: a lista ficava
+ * em "0:00" para sempre. A biblioteca é quem recebe as correções; aqui ela
+ * vence a foto.
+ */
+function comDuracoesDaBiblioteca(dto: PlaylistWithTracksDto): PlaylistWithTracksDto {
+  let mudou = false;
+  const tracks = dto.tracks.map((e) => {
+    const atual = entryFor(e.track.id)?.track.durationMs;
+    if (!(typeof atual === 'number' && Number.isFinite(atual) && atual > 0)) return e;
+    if (atual === e.track.durationMs) return e;
+    mudou = true;
+    return { ...e, track: { ...e.track, durationMs: atual } };
+  });
+  if (!mudou) return dto;
+  const durationMs = tracks.reduce((soma, e) => soma + (e.track.durationMs || 0), 0);
+  return { ...dto, durationMs, tracks };
+}
 
 export function usePlaylist(id: string): UseQueryResult<PlaylistWithTracksDto> {
   return useQuery({
@@ -29,7 +54,7 @@ export function usePlaylist(id: string): UseQueryResult<PlaylistWithTracksDto> {
       if (localPlaylists.isLocalPlaylistId(id)) {
         const playlist = localPlaylists.get(id);
         if (!playlist) throw new Error('Playlist não encontrada.');
-        return localPlaylists.toPlaylistWithTracksDto(playlist);
+        return comDuracoesDaBiblioteca(localPlaylists.toPlaylistWithTracksDto(playlist));
       }
       return (await api.get<PlaylistWithTracksDto>(`/playlists/${id}`)).data;
     },
