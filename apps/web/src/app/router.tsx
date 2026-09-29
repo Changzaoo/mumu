@@ -17,6 +17,8 @@ import { AuthorizedRoute } from '@/components/AuthorizedRoute';
 import { ErrorBoundary, RouteErrorBoundary } from '@/app/RouteErrorBoundary';
 import { RootLayout } from '@/app/RootLayout';
 
+const RetornoDoSpotify = lazy(() => import('@/components/media/RetornoDoSpotify'));
+
 const pageModules = import.meta.glob<{ default: ComponentType }>('/src/pages/*.tsx');
 
 /**
@@ -180,6 +182,16 @@ export const router = createBrowserRouter([
       { path: '/onboarding', element: page('OnboardingPage') },
       // Destino do "Compartilhar → radinho" (share_target em vite.config.ts).
       { path: '/receber', element: page('ReceberLinkPage') },
+      // Volta do login do Spotify (curtidas → fila). Fora da casca como o
+      // /receber: tela de um propósito só. Ver components/media/RetornoDoSpotify.
+      {
+        path: '/conectar-spotify',
+        element: (
+          <Suspense fallback={<PageSkeleton variant="list" />}>
+            <RetornoDoSpotify />
+          </Suspense>
+        ),
+      },
       {
         element: <AppShell />,
         children: [

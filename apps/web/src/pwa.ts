@@ -15,8 +15,8 @@
  * ponto exato assim que a página sobe de novo.
  */
 import { registerSW } from 'virtual:pwa-register';
-import { prepararRetomadaTocando, usePlayerStore } from '@/stores/playerStore';
-import { guardarTelaParaRecarregar } from '@/stores/uiStore';
+import { recarregarPreservandoMusica } from '@/lib/recarregar';
+import { usePlayerStore } from '@/stores/playerStore';
 
 export function initPwaUpdater(): void {
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
@@ -28,11 +28,8 @@ export function initPwaUpdater(): void {
     const recarregar = (): void => {
       if (recarregando) return;
       recarregando = true;
-      // A música volta de onde estava.
-      if (usePlayerStore.getState().isPlaying) prepararRetomadaTocando();
-      // E a tela volta como estava: expandida, com a letra aberta.
-      guardarTelaParaRecarregar();
-      window.location.reload();
+      // A música volta de onde estava, e a tela como estava (lib/recarregar).
+      recarregarPreservandoMusica();
     };
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (recarregando || !tinhaControle) return;

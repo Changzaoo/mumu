@@ -112,6 +112,27 @@ export function clear(): void {
 }
 
 /**
+ * A limpeza de duplicadas juntou `perdeu → ficou`: as reproduções da cópia
+ * apagada passam a contar para a que ficou. O histórico alimenta o gosto e a
+ * recomendação — reprodução de uma faixa que não existe mais é gosto perdido.
+ */
+export function remapTrackIds(
+  replace: ReadonlyMap<string, string>,
+  ficaram: ReadonlyMap<string, TrackDto>,
+): number {
+  let mudou = 0;
+  const next = read().map((e) => {
+    const alvo = replace.get(e.track.id);
+    const dto = alvo ? ficaram.get(alvo) : undefined;
+    if (!dto) return e;
+    mudou += 1;
+    return { ...e, track: dto };
+  });
+  if (mudou > 0) write(next);
+  return mudou;
+}
+
+/**
  * Limpa do histórico o que veio do catálogo grátis (audius:/itunes:/prévia de
  * 30s). O histórico é lido como "o que EU ouço" — e alimenta a recomendação
  * como se fosse acervo — então faixa de catálogo guardada aqui empurrava o

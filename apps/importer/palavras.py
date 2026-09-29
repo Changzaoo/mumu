@@ -18,14 +18,17 @@ Dois modos:
       Último recurso, quando não existe letra publicada em lugar nenhum. Cada
       palavra sai com a confiança do modelo (`prob`), para quem consome
       descartar o que ele não ouviu direito em vez de mostrar texto inventado.
-      `prompt`, quando presente, é o vocabulário já aprendido deste artista
-      (ver vocabulario.mjs) — primeira o decodificador com a gíria/palavra
-      certa em vez de deixar o modelo "adivinhar" de novo o que já errou antes.
-      Saída: {"language", "words": [{"text", "startMs", "endMs", "prob"}]}
+      `prompt`, quando presente, é título + artista + o vocabulário já
+      aprendido deste artista (ver tempoDasPalavras.mjs/montarPrompt) — prima o
+      decodificador com o nome da música e a gíria certa em vez de deixar o
+      modelo "adivinhar" de novo o que já errou antes. Modelo padrão:
+      `large-v3-turbo` (o `small` de antes errava demais em pt-BR cantado).
+      Saída: {"language", "modelo", "words": [{"text", "startMs", "endMs", "prob"}]}
 
 Compatível com a chamada antiga (sem modo): trata como `transcrever`.
 """
 import json
+import os
 import sys
 import time
 
@@ -34,25 +37,99 @@ def ms(s):
     return round(float(s) * 1000)
 
 
-def transcrever(audio, saida, idioma, modelo, prompt=None):
+# Idioma de quem ninguém sabe o idioma: o acervo é majoritariamente brasileiro
+# (funk, trap, rap). Deixar o whisper detectar sozinho numa faixa com autotune
+# e batida pesada fazia ele "ouvir" inglês e devolver lixo ("proprietary Passe
+# Passe…" em "Mantém"). A detecção agora só é aceita quando cai num idioma
+# esperado com confiança; senão vale o padrão.
+IDIOMA_PADRAO = os.environ.get("WHISPER_IDIOMA_PADRAO", "pt").strip() or "pt"
+IDIOMAS_ACEITOS = [
+    i.strip() for i in os.environ.get("WHISPER_IDIOMAS_ACEITOS", "pt,en").split(",") if i.strip()
+]
+CONFIANCA_DO_IDIOMA = 0.6
+THREADS = int(os.environ.get("WHISPER_THREADS", "3") or 3)
+# Quando o modelo pedido não existe NESTA instalação (faster-whisper antigo
+# não conhece "large-v3-turbo") ou não baixa (sem rede), cai para o próximo —
+# e a saída diz qual rodou de verdade (`modelo`), para o importador não gravar
+# uma transcrição fraca achando que é forte.
+RESERVAS = ["large-v3-turbo", "large-v3", "medium", "small"]
+
+
+def carregar_modelo(modelo):
     from faster_whisper import WhisperModel
 
-    model = WhisperModel(modelo, device="cpu", compute_type="int8", cpu_threads=3)
-    segmentos, info = model.transcribe(
-        audio,
-        language=idioma or None,
+    # Só desce na lista (nunca "sobe" para um modelo mais pesado que o pedido).
+    abaixo = RESERVAS[RESERVAS.index(modelo) + 1 :] if modelo in RESERVAS else RESERVAS
+    tentativas = [modelo] + abaixo
+    ultimo_erro = None
+    for nome in tentativas:
+        try:
+            return WhisperModel(nome, device="cpu", compute_type="int8", cpu_threads=THREADS), nome
+        except Exception as e:  # modelo desconhecido/sem rede: tenta o próximo
+            ultimo_erro = e
+            print(f"modelo {nome} indisponível: {e}", file=sys.stderr)
+    raise ultimo_erro
+
+
+def escolher_idioma(detectado, probabilidade, pedido):
+    """Idioma a usar de verdade. Pura, para testar sem modelo."""
+    if pedido:
+        return pedido
+    if detectado in IDIOMAS_ACEITOS and (probabilidade or 0) >= CONFIANCA_DO_IDIOMA:
+        return detectado
+    return IDIOMA_PADRAO
+
+
+def parametros_de_qualidade(idioma, prompt):
+    """Decodificação cuidadosa: música é o pior caso do reconhecimento livre."""
+    return dict(
+        language=idioma,
         word_timestamps=True,
+        # Busca em feixe + reamostragem: o "chute guloso" é o que mais erra
+        # gíria e palavra encoberta pela batida.
+        beam_size=5,
+        best_of=5,
+        patience=1.0,
+        # Temperatura 0 primeiro; só esquenta quando a saída degenera (laço
+        # repetido, probabilidade baixa demais) — o fallback clássico do whisper.
+        temperature=[0.0, 0.2, 0.4, 0.6, 0.8, 1.0],
+        compression_ratio_threshold=2.4,
+        log_prob_threshold=-1.0,
+        no_speech_threshold=0.6,
         # Música tem refrão: condicionar no texto anterior faz o modelo entrar
         # em laço repetindo o mesmo verso por minutos.
         condition_on_previous_text=False,
         vad_filter=False,
-        beam_size=5,
-        # Vocabulário aprendido deste artista (ver vocabulario.mjs) — só um
-        # empurrão de contexto no INÍCIO da decodificação; não repete a cada
-        # segmento (isso é `condition_on_previous_text`, que fica desligado
-        # de propósito acima).
+        # Título + artista + vocabulário aprendido do artista (ver
+        # tempoDasPalavras.mjs/montarPrompt) — só um empurrão de contexto no
+        # INÍCIO; não se repete a cada trecho (isso seria o
+        # `condition_on_previous_text`, desligado acima).
         initial_prompt=prompt or None,
+        # Introdução instrumental longa é onde o whisper alucina texto (muitas
+        # vezes repetindo o próprio prompt): trecho mudo suspeito é pulado.
+        hallucination_silence_threshold=2.0,
     )
+
+
+def transcrever(audio, saida, idioma, modelo, prompt=None):
+    from faster_whisper import decode_audio
+
+    model, modelo_usado = carregar_modelo(modelo)
+    # Decodifica UMA vez: a detecção de idioma e a transcrição usam o mesmo sinal.
+    audio = decode_audio(audio, sampling_rate=16000)
+    if not idioma:
+        # A detecção roda na abertura do `transcribe` (o gerador de trechos
+        # ainda não foi consumido) — descartar e refazer com o idioma certo
+        # custa só essa detecção.
+        _, info0 = model.transcribe(audio, language=None, beam_size=1)
+        idioma = escolher_idioma(info0.language, info0.language_probability, None)
+    parametros = parametros_de_qualidade(idioma, prompt)
+    try:
+        segmentos, info = model.transcribe(audio, **parametros)
+    except TypeError:
+        # faster-whisper antigo não conhece o corte de alucinação em silêncio.
+        parametros.pop("hallucination_silence_threshold", None)
+        segmentos, info = model.transcribe(audio, **parametros)
     palavras = []
     parcial = saida + ".parcial"
     # AO VIVO: o modelo decodifica a música em trechos, e cada trecho pronto é
@@ -73,12 +150,10 @@ def transcrever(audio, saida, idioma, modelo, prompt=None):
         try:
             with open(parcial + ".tmp", "w", encoding="utf-8") as f:
                 json.dump({"words": palavras, "ouvidoMs": ms(seg.end)}, f, ensure_ascii=False)
-            import os
-
             os.replace(parcial + ".tmp", parcial)
         except OSError:
             pass
-    return {"language": info.language, "words": palavras}
+    return {"language": info.language, "words": palavras, "modelo": modelo_usado}
 
 
 def alinhar(audio, saida, idioma, modelo, arquivo_texto):
@@ -88,7 +163,7 @@ def alinhar(audio, saida, idioma, modelo, arquivo_texto):
         linhas = [l.strip() for l in f.read().split("\n")]
     linhas = [l for l in linhas if l]
     model = stable_whisper.load_faster_whisper(
-        modelo, device="cpu", compute_type="int8", cpu_threads=3
+        modelo, device="cpu", compute_type="int8", cpu_threads=THREADS
     )
     res = model.align(audio, "\n".join(linhas), language=idioma or "pt", original_split=True)
     saida_linhas = []
@@ -127,7 +202,7 @@ def main():
         prompt = args[4] if len(args) > 4 and args[4] else None
         r = transcrever(audio, saida, idioma, modelo, prompt)
     r["segundos"] = round(time.time() - inicio, 1)
-    r["modelo"] = modelo
+    r.setdefault("modelo", modelo)
     with open(saida, "w", encoding="utf-8") as f:
         json.dump(r, f, ensure_ascii=False)
 

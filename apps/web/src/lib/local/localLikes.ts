@@ -138,6 +138,43 @@ export function count(): number {
 }
 
 /**
+ * A limpeza de duplicadas juntou `perdeu → ficou`: a curtida vai junto.
+ *
+ * Sem isto a curtida da cópia apagada virava um card fantasma na página de
+ * Curtidas (o DTO guardado ainda existe) apontando para uma faixa que não está
+ * mais na biblioteca. Mantém a posição da curtida; se as duas estavam curtidas,
+ * fica uma só. Devolve quantas curtidas mudaram.
+ */
+export function remapTrackIds(
+  replace: ReadonlyMap<string, string>,
+  ficaram: ReadonlyMap<string, TrackDto>,
+): number {
+  const ids = readIds();
+  if (!ids.some((id) => replace.has(id))) return 0;
+  const map = { ...readTracks() };
+  const vistos = new Set<string>();
+  const next: string[] = [];
+  let mudou = 0;
+  for (const id of ids) {
+    const alvo = replace.get(id) ?? id;
+    const dto = alvo === id ? map[id] : (ficaram.get(alvo) ?? map[alvo]);
+    if (alvo !== id) {
+      mudou += 1;
+      cloud.remove(id);
+      if (!dto) continue; // sem o DTO da que ficou não há o que mostrar
+      map[alvo] = dto;
+      if (!vistos.has(alvo)) cloud.push(alvo, { track: dto, likedAt: new Date().toISOString() });
+    }
+    if (vistos.has(alvo)) continue;
+    vistos.add(alvo);
+    next.push(alvo);
+  }
+  writeTracks(map);
+  writeIds(next);
+  return mudou;
+}
+
+/**
  * Curtir uma faixa do catálogo continua valendo (é sinal de gosto e alimenta a
  * recomendação) — o que não pode é ela virar acervo. Esta limpeza remove só o
  * que ficou de trás: prévias de 30s, que nunca foram músicas de verdade.

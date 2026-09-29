@@ -250,7 +250,7 @@ test('artista do Spotify (link intl-pt): mais tocadas do embed + as do Deezer, s
   };
   const res = criarResolvedorDeMusica({ fetch: f, buscar: async () => [] });
   const r = await res.listar('https://open.spotify.com/intl-pt/artist/2q9wk5fkeU2C9CgCKdh4AN');
-  assert.equal(r.title, 'MC Exemplo · mais tocadas');
+  assert.equal(r.title, 'MC Exemplo · discografia');
   assert.deepEqual(
     r.entries.map((e) => e.title),
     ['MC Exemplo - Hit Um', 'MC Exemplo - Hit Dois', 'MC Exemplo - Faixa Três'],
@@ -258,4 +258,99 @@ test('artista do Spotify (link intl-pt): mais tocadas do embed + as do Deezer, s
   for (const p of pedidos) {
     assert.ok(['open.spotify.com', 'api.deezer.com'].includes(new URL(p).hostname), p);
   }
+});
+
+/** Rede simulada por tabela url → corpo; `null` na tabela = a fonte caiu. */
+function redeDeTabela(respostas) {
+  const pedidos = [];
+  const f = async (url) => {
+    pedidos.push(url);
+    if (respostas[url] === null) throw new TypeError('fetch failed');
+    const corpo = respostas[url];
+    return {
+      status: corpo ? 200 : 404,
+      headers: new Headers(),
+      text: async () => corpo ?? '',
+    };
+  };
+  return { f, pedidos };
+}
+
+const itemDz = (id, title, artistaId = 123) => ({
+  id,
+  title,
+  duration: 200,
+  artist: { id: artistaId, name: artistaId === 123 ? 'MC Exemplo' : 'Outro' },
+});
+
+test('artista do Deezer: mais tocadas + discografia inteira (álbuns em páginas), sem coletânea, sem repetir, no teto', async () => {
+  const { f, pedidos } = redeDeTabela({
+    'https://api.deezer.com/artist/123': JSON.stringify({ id: 123, name: 'MC Exemplo' }),
+    'https://api.deezer.com/artist/123/top?limit=100': JSON.stringify({
+      data: [{ ...itemDz(11, 'Hit Um'), album: { title: 'Disco A' } }],
+    }),
+    'https://api.deezer.com/artist/123/albums?index=0&limit=100': JSON.stringify({
+      data: [
+        { id: 1, title: 'Disco A', record_type: 'album', cover_xl: 'https://c/a.jpg' },
+        { id: 2, title: 'Coletânea', record_type: 'compile' },
+      ],
+      next: 'https://api.deezer.com/artist/123/albums?index=2',
+    }),
+    'https://api.deezer.com/artist/123/albums?index=2&limit=100': JSON.stringify({
+      data: [{ id: 3, title: 'Single B', record_type: 'single' }],
+    }),
+    'https://api.deezer.com/album/1/tracks?limit=100': JSON.stringify({
+      data: [
+        itemDz(11, 'Hit Um'),
+        itemDz(13, 'Lado B'),
+        itemDz(14, 'Participação', 999), // disco dele, faixa de outro artista
+      ],
+    }),
+    'https://api.deezer.com/album/3/tracks?limit=100': JSON.stringify({
+      data: [itemDz(15, 'Single B (Remix)'), itemDz(16, 'Nova')],
+    }),
+  });
+  const res = criarResolvedorDeMusica({ fetch: f, buscar: async () => [] });
+  const r = await res.listar('https://www.deezer.com/br/artist/123');
+  assert.deepEqual(
+    r.entries.map((e) => e.url),
+    [
+      'https://www.deezer.com/track/11',
+      'https://www.deezer.com/track/13',
+      'https://www.deezer.com/track/15',
+      'https://www.deezer.com/track/16',
+    ],
+  );
+  assert.ok(!pedidos.some((p) => p.includes('/album/2/')), 'coletânea não é pedida');
+
+  // Teto: com maxLista=2 para no meio e nem pede o resto da discografia.
+  const curto = redeDeTabela({
+    'https://api.deezer.com/artist/123': JSON.stringify({ name: 'MC Exemplo' }),
+    'https://api.deezer.com/artist/123/top?limit=2': JSON.stringify({
+      data: [itemDz(11, 'Hit Um'), itemDz(12, 'Hit Dois'), itemDz(13, 'Hit Três')],
+    }),
+  });
+  const res2 = criarResolvedorDeMusica({ fetch: curto.f, buscar: async () => [], maxLista: 2 });
+  const r2 = await res2.listar('https://www.deezer.com/artist/123');
+  assert.equal(r2.entries.length, 2);
+  assert.ok(!curto.pedidos.some((p) => p.includes('/albums')));
+});
+
+test('artista: fonte fora do ar é erro comum (re-tenta); artista sem músicas é NaoAchei', async () => {
+  const caiu = redeDeTabela({
+    'https://open.spotify.com/embed/artist/2q9wk5fkeU2C9CgCKdh4AN': null,
+  });
+  const res = criarResolvedorDeMusica({ fetch: caiu.f, buscar: async () => [] });
+  const erro = await res
+    .listar('https://open.spotify.com/artist/2q9wk5fkeU2C9CgCKdh4AN')
+    .catch((e) => e);
+  assert.ok(erro instanceof Error && !(erro instanceof NaoAchei), String(erro));
+
+  const vazio = redeDeTabela({
+    'https://api.deezer.com/artist/123': JSON.stringify({ name: 'MC Exemplo' }),
+    'https://api.deezer.com/artist/123/top?limit=100': JSON.stringify({ data: [] }),
+    'https://api.deezer.com/artist/123/albums?index=0&limit=100': JSON.stringify({ data: [] }),
+  });
+  const res2 = criarResolvedorDeMusica({ fetch: vazio.f, buscar: async () => [] });
+  await assert.rejects(res2.listar('https://www.deezer.com/artist/123'), NaoAchei);
 });

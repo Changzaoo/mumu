@@ -12,9 +12,11 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 const findBySource = vi.fn<(url: string) => { id: string; title: string } | null>(() => null);
 const addByUrl = vi.fn<(url: string, opts?: { silent?: boolean }) => Promise<{ title: string }>>();
+const biblioteca = vi.fn<() => unknown[]>(() => []);
 vi.mock('@/lib/local/localLibrary', () => ({
   findBySource: (url: string) => findBySource(url),
   addByUrl: (url: string, opts?: { silent?: boolean }) => addByUrl(url, opts),
+  list: () => biblioteca(),
 }));
 
 const isPlaylistUrl = vi.fn<(url: string) => boolean>(() => false);
@@ -90,6 +92,38 @@ describe('importQueue', () => {
     expect(urls).toContain('https://youtu.be/b');
   });
 
+  it('playlist não enfileira o que já está na biblioteca nem a mesma música duas vezes', async () => {
+    // Clipe e áudio da mesma música na lista, mais uma que já foi baixada por
+    // outro vídeo: só a nova de verdade vai para a fila — nada de baixar para
+    // descartar depois.
+    biblioteca.mockReturnValue([
+      { track: { id: 'local:1', title: '333', durationMs: 322_000, artists: [{ name: 'Matuê' }] } },
+    ]);
+    fetchPlaylistEntries.mockResolvedValue({
+      title: 'Lista',
+      entries: [
+        { url: 'https://youtu.be/AAAAAAAAAAA', title: 'Matuê - 333 (Clipe Oficial)' },
+        { url: 'https://youtu.be/BBBBBBBBBBB', title: 'Matuê - Nova (Official Video)' },
+        { url: 'https://youtu.be/CCCCCCCCCCC', title: 'Matuê - Nova ft. Teto (Audio)' },
+        { url: 'https://youtu.be/DDDDDDDDDDD', title: 'Matuê - Nova (Ao Vivo)' },
+      ],
+    });
+    isPlaylistUrl.mockReturnValue(true);
+    addByUrl.mockResolvedValue({ title: 'ok' });
+    const q = await carregar();
+    q.enqueue('https://www.youtube.com/playlist?list=PL1');
+    await assentar();
+
+    const urls = q.list().map((i) => i.url);
+    expect(urls).not.toContain('https://youtu.be/AAAAAAAAAAA');
+    expect(urls).not.toContain('https://youtu.be/CCCCCCCCCCC');
+    expect(urls).toContain('https://youtu.be/BBBBBBBBBBB');
+    expect(urls).toContain('https://youtu.be/DDDDDDDDDDD'); // ao vivo é outra
+    const lista = q.list().find((i) => i.url.includes('PL1'));
+    expect(lista?.title).toContain('2 já na biblioteca/fila');
+    biblioteca.mockReturnValue([]);
+  });
+
   it('sem forcePlaylist, o mesmo link ambíguo baixa só a faixa', async () => {
     isPlaylistUrl.mockReturnValue(false);
     addByUrl.mockResolvedValue({ title: 'Só a faixa' });
@@ -116,6 +150,22 @@ describe('importQueue', () => {
     expect(pushNotification).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'error', title: 'Não deu para baixar' }),
     );
+  });
+
+  it('400 do /playlist ("Link não suportado.") é definitivo — não re-tenta 5 vezes', async () => {
+    isPlaylistUrl.mockReturnValue(true);
+    fetchPlaylistEntries.mockRejectedValue(
+      Object.assign(new Error('Link não suportado.'), { status: 400 }),
+    );
+    const q = await carregar();
+    q.enqueue('https://open.spotify.com/intl-pt/artist/2q9wk5fkeU2C9CgCKdh4AN');
+    await assentar();
+
+    const item = q.list()[0];
+    expect(fetchPlaylistEntries).toHaveBeenCalledTimes(1);
+    expect(item?.status).toBe('error');
+    expect(item?.permanent).toBe(true);
+    expect(item?.error).toBe('Link não suportado.');
   });
 
   it('401/403 pausa a fila inteira por auth e notifica uma vez', async () => {

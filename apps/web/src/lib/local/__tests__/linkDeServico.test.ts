@@ -8,6 +8,7 @@
 import { describe, expect, it } from 'vitest';
 import { isPlaylistUrl, servicoDeMusicaLabel } from '@/lib/local/importerHelper';
 import { validateImportUrl } from '@/lib/local/localLibrary';
+import { prepararLink } from '@/lib/local/linkColado';
 
 describe('links de serviço de música', () => {
   it('reconhece os hosts dos serviços (e só eles)', () => {
@@ -45,5 +46,17 @@ describe('links de serviço de música', () => {
       isPlaylistUrl('https://music.apple.com/br/album/after-hours/1499378108?i=1499378615'),
     ).toBe(false);
     expect(isPlaylistUrl('https://www.deezer.com/track/3135556')).toBe(false);
+  });
+
+  it('link de ARTISTA colado passa por todo o caminho do cliente e vai para o /playlist', () => {
+    // O link exato do relato: se cair no /import (faixa), o importador recusa
+    // com "Link não suportado." — artista só existe como lista.
+    const colado = 'https://open.spotify.com/intl-pt/artist/2q9wk5fkeU2C9CgCKdh4AN?si=abc';
+    const p = prepararLink(colado);
+    expect(p.ok).toBe(true);
+    const url = p.ok ? p.url : '';
+    expect(validateImportUrl(url)).toEqual({ ok: true });
+    expect(isPlaylistUrl(url)).toBe(true);
+    expect(isPlaylistUrl('https://www.deezer.com/br/artist/123')).toBe(true);
   });
 });

@@ -314,3 +314,35 @@ describe('arquivo grande demais para o cofre', () => {
     vi.unstubAllGlobals();
   });
 });
+
+describe('duracaoDoDownload', () => {
+  /** Um MP3 mínimo com cabeçalho Info: MPEG-1 III, 128 kbps, 44,1 kHz. */
+  function mp3(quadros: number): Buffer {
+    const q = () => {
+      const b = Buffer.alloc(417);
+      b.set([0xff, 0xfb, 0x90, 0x00]);
+      return b;
+    };
+    const info = q();
+    info.write('Info', 36, 'latin1');
+    info.writeUInt32BE(0x0f, 40);
+    info.writeUInt32BE(quadros, 44);
+    return Buffer.concat([info, q(), q()]);
+  }
+
+  it('os BYTES mandam; o que a origem disse só vale na falta; 0 nunca sai', async () => {
+    const { duracaoDoDownload } = await import('./varreduraNoturna.worker.js');
+    const medida = Math.round((9188 * 1152 * 1000) / 44100);
+    expect(
+      duracaoDoDownload({ bytes: mp3(9188), tipo: 'audio/mpeg', meta: { durationMs: 1000 } }),
+    ).toBe(medida);
+    const lixo = Buffer.from('não é áudio');
+    expect(
+      duracaoDoDownload({ bytes: lixo, tipo: 'audio/mpeg', meta: { durationMs: 185_400 } }),
+    ).toBe(185_400);
+    expect(
+      duracaoDoDownload({ bytes: lixo, tipo: 'audio/mpeg', meta: { durationMs: 0 } }),
+    ).toBeNull();
+    expect(duracaoDoDownload({ bytes: lixo, tipo: 'audio/mpeg' })).toBeNull();
+  });
+});

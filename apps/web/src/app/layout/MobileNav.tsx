@@ -24,6 +24,7 @@ import {
 import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useIsAuthorized } from '@/lib/auth/roles';
 import { cn } from '@/lib/utils';
+import { useVoltarAoTopo } from '@/app/layout/useVoltarAoTopo';
 
 interface Tab {
   to: string;
@@ -77,6 +78,8 @@ const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const authorized = useIsAuthorized();
+  // "Início" estando na Início: volta ao topo em vez de não fazer nada.
+  const voltarAoTopo = useVoltarAoTopo();
   const menu = authorized
     ? MENU
     : MENU.map((g) => ({ ...g, items: g.items.filter((i) => !ADMIN_ONLY.has(i.to)) })).filter(
@@ -101,7 +104,13 @@ export function MobileNav() {
             minimum touch size; labels readable at arm's length. */}
         <div className="flex h-16 items-stretch justify-around">
           {TABS.map(({ to, label, icon: Icon, iconActive: IconActive }) => (
-            <NavLink key={to} to={to} end={to === '/'} className="flex-1">
+            <NavLink
+              key={to}
+              to={to}
+              end={to === '/'}
+              onClick={(event) => voltarAoTopo(event, to)}
+              className="flex-1"
+            >
               {({ isActive }) => (
                 <span
                   className={cn(

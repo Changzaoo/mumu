@@ -56,8 +56,13 @@ export async function catalogEtag(): Promise<string> {
  * (`PUT /catalogo/:id`, `POST /bulk`) e a gravação substitui o documento
  * inteiro. Sem a preservação abaixo, a primeira republicação zeraria o vetor de
  * volta — a curadoria refaria, o cliente apagaria de novo, para sempre.
+ *
+ * `duracaoMedidaEm` / `duracaoSemMedida` são as marcas da varredura de durações
+ * (ver workers/duracoes.worker.ts): "já medi no arquivo" e "não dá para medir".
+ * Só ela as lê; se o cliente pudesse apagá-las, a mesma faixa seria baixada e
+ * medida de novo a cada batida.
  */
-const CAMPOS_DO_SERVIDOR = ['dna'] as const;
+const CAMPOS_DO_SERVIDOR = ['dna', 'duracaoMedidaEm', 'duracaoSemMedida'] as const;
 
 /**
  * PESO MORTO DENTRO DA FAIXA — campos que descem para todo aparelho e que
@@ -275,8 +280,22 @@ export function comCamposDoServidor(
   if (track && typeof track === 'object' && trackAnterior && typeof trackAnterior === 'object') {
     const devolvida = comOsCamposEnxugados(track as Obj, trackAnterior as Obj);
     if (devolvida !== track) saida = { ...saida, track: devolvida };
+
+    // ZERO NÃO APAGA DURAÇÃO CONHECIDA. O aparelho que republica a faixa pode
+    // ainda ter o `0` da importação (ele nunca a tocou), e a gravação substitui
+    // o documento inteiro: sem isto, a primeira curadoria de capa desfazia a
+    // duração que a varredura de durações acabou de medir no arquivo.
+    const atual = (saida as Obj).track as Obj;
+    if (!duracaoValida(atual.durationMs) && duracaoValida((trackAnterior as Obj).durationMs)) {
+      saida = { ...saida, track: { ...atual, durationMs: (trackAnterior as Obj).durationMs } };
+    }
   }
   return saida;
+}
+
+/** Duração que vale como tempo: número finito e positivo (em ms). */
+export function duracaoValida(ms: unknown): ms is number {
+  return typeof ms === 'number' && Number.isFinite(ms) && ms > 0;
 }
 
 /** Devolve à faixa recebida o que o enxugamento tinha tirado, lendo do que já

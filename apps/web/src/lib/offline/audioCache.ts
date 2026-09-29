@@ -33,16 +33,37 @@ export function cacheStorageSupported(): boolean {
 
 function openDb(): Promise<IDBDatabase> {
   if (dbPromise) return dbPromise;
-  dbPromise = new Promise<IDBDatabase>((resolve, reject) => {
+  const abrindo = new Promise<IDBDatabase>((resolve, reject) => {
     const req = indexedDB.open(DB_NAME, DB_VERSION);
     req.onupgradeneeded = () => {
       const db = req.result;
       if (!db.objectStoreNames.contains(STORE)) db.createObjectStore(STORE);
     };
-    req.onsuccess = () => resolve(req.result);
+    req.onsuccess = () => {
+      const db = req.result;
+      // Conexão fechada pelo navegador (pressão de memória, outra aba
+      // atualizando o banco): a próxima pergunta abre outra, em vez de bater
+      // para sempre numa conexão morta e concluir que o áudio "sumiu".
+      db.onversionchange = () => {
+        db.close();
+        if (dbPromise === abrindo) dbPromise = null;
+      };
+      db.onclose = () => {
+        if (dbPromise === abrindo) dbPromise = null;
+      };
+      resolve(db);
+    };
     req.onerror = () => reject(req.error ?? new Error('IndexedDB open failed'));
   });
-  return dbPromise;
+  // UMA FALHA DE ABERTURA NÃO PODE VIRAR ETERNA. A promessa ficava memoizada
+  // rejeitada: um tropeço no boot (aparelho sem memória, WebView acordando)
+  // fazia toda leitura seguinte da sessão falhar — e as faixas baixadas
+  // passavam a se comportar como se não existissem, justamente offline.
+  abrindo.catch(() => {
+    if (dbPromise === abrindo) dbPromise = null;
+  });
+  dbPromise = abrindo;
+  return abrindo;
 }
 
 function tx<T>(
@@ -52,7 +73,15 @@ function tx<T>(
   return openDb().then(
     (db) =>
       new Promise<T>((resolve, reject) => {
-        const transaction = db.transaction(STORE, mode);
+        let transaction: IDBTransaction;
+        try {
+          transaction = db.transaction(STORE, mode);
+        } catch (err) {
+          // Conexão fechando/fechada: esquece-a para a próxima chamada reabrir.
+          if (dbPromise) dbPromise = null;
+          reject(err);
+          return;
+        }
         const request = run(transaction.objectStore(STORE));
         let result: T;
         request.onsuccess = () => {
@@ -104,6 +133,23 @@ export async function getAudioBlob(trackId: string): Promise<Blob | null> {
   const blob = await tx<Blob | undefined>('readonly', (store) => store.get(trackId)).catch(
     () => undefined,
   );
+  return blob instanceof Blob ? blob : null;
+}
+
+/**
+ * Lê o áudio separando "não existe" de "não consegui ler".
+ *
+ * `getAudioBlob` devolve `null` nos dois casos, e quem PODA o registro com base
+ * nessa resposta não pode confundi-los: um IndexedDB que falhou uma vez (banco
+ * ocupado, conexão derrubada pelo sistema) apagava do registro uma faixa cujos
+ * bytes continuavam no aparelho — e ela nunca mais tocava offline.
+ *
+ * `null` = a leitura funcionou e a chave não está lá (despejo de verdade).
+ * Rejeita = a leitura falhou; não se conclui nada.
+ */
+export async function lerAudio(trackId: string): Promise<Blob | null> {
+  if (!cacheSupported()) return null;
+  const blob = await tx<Blob | undefined>('readonly', (store) => store.get(trackId));
   return blob instanceof Blob ? blob : null;
 }
 

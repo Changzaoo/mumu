@@ -21,6 +21,11 @@ const ID_UUID = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/
 const CODIGO_CURTO = /^[A-Za-z0-9_-]{4,64}$/;
 const TIPOS_SPOTIFY = { track: 'faixa', album: 'album', playlist: 'playlist', artist: 'artista' };
 
+export const MENSAGEM_COLECAO_SPOTIFY =
+  'As músicas curtidas do Spotify são privadas (só abrem com o login da sua conta). ' +
+  'No Spotify, selecione as curtidas → "Adicionar à playlist" → nova playlist pública, ' +
+  'e cole aqui o link dessa playlist.';
+
 function recusa(motivo) {
   return { ok: false, motivo };
 }
@@ -55,6 +60,10 @@ export function analisarLinkDeMusica(bruto) {
     let p = partes;
     if (p[0] && /^intl-[a-z]{2}(?:-[a-z]{2})?$/i.test(p[0])) p = p.slice(1);
     if (p[0] === 'embed') p = p.slice(1);
+    // Curtidas/biblioteca (/collection/tracks…) só abrem com o login da
+    // pessoa: não há embed nem API pública. Recusa marcada como PRIVADA para o
+    // servidor responder 422 com a saída, em vez de um "não suportado" seco.
+    if (p[0] === 'collection') return { ...recusa(MENSAGEM_COLECAO_SPOTIFY), privado: true };
     const tipo = TIPOS_SPOTIFY[p[0]];
     if (!tipo || p.length !== 2 || !ID_SPOTIFY.test(p[1])) {
       return recusa('link do Spotify que não é música, álbum nem playlist');

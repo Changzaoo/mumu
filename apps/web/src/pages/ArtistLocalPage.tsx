@@ -3,6 +3,7 @@
  * most POPULAR tracks first (ranking do mundo real, via Deezer), a bio da
  * Wikipédia, a gravadora e depois os álbuns.
  */
+import { SeguirArtistaButton } from '@/components/media/SeguirArtista';
 import { useMemo, useState, useSyncExternalStore } from 'react';
 import { Link, useParams } from 'react-router';
 import { Disc3, Flame, MicVocal, Play, Share2 } from 'lucide-react';
@@ -129,6 +130,9 @@ export default function ArtistLocalPage() {
             >
               <Play className="size-4 fill-current" /> Tocar
             </button>
+            {/* Seguir põe o artista na lateral (como no Spotify), com o play
+                das melhores dele — ver components/media/SeguirArtista. */}
+            <SeguirArtistaButton nome={artist} capaUrl={cover} />
             <button
               type="button"
               aria-label="Compartilhar artista"

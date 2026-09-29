@@ -16,6 +16,7 @@ import { MiniPlayer } from '@/app/layout/MiniPlayer';
 import { MobileNav } from '@/app/layout/MobileNav';
 import { NowPlaying } from '@/app/layout/NowPlaying';
 import { PlayerBar } from '@/app/layout/PlayerBar';
+import { PuxarParaRecarregar } from '@/app/layout/PuxarParaRecarregar';
 import { QueuePanel } from '@/app/layout/QueuePanel';
 import { ScrollContainerContext } from '@/app/layout/scroll-context';
 import { Sidebar } from '@/app/layout/Sidebar';
@@ -213,6 +214,8 @@ export function AppShell() {
         <PlayerBar />
         <MiniPlayer />
         <MobileNav />
+        {/* Puxar para recarregar (só no toque) — ver PuxarParaRecarregar. */}
+        <PuxarParaRecarregar scrollEl={scrollEl} />
         <NowPlaying />
         <EqualizerPanel />
         <ShareDialogHost />

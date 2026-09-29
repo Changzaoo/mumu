@@ -15,6 +15,7 @@ import * as localLibrary from '@/lib/local/localLibrary';
 import { prepararLink } from '@/lib/local/linkColado';
 import { useIsAuthorized } from '@/lib/auth/roles';
 import { enfileirarLink } from './ColarLink';
+import { BotaoConectarSpotify } from './ConectarSpotify';
 
 /**
  * Common-user "add music" — a hardened way to import by link (incl. YouTube
@@ -144,6 +145,9 @@ export function AddMusicDialog({
               </Button>
             </div>
           )}
+          {/* Curtidas do Spotify não têm link público (collection/tracks é
+              privado): o caminho é a pessoa autorizar e o navegador ler. */}
+          <BotaoConectarSpotify />
           {/* Enviar arquivo é coisa de administrador: o arquivo fica no
               aparelho e é publicado no cofre para os outros, então quem envia
               responde pelo que entrou. Link continua aberto a todo mundo. */}

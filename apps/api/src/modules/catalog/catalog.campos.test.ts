@@ -75,6 +75,21 @@ describe('comCamposDoServidor', () => {
     expect(gravar.dna).toEqual(novo);
   });
 
+  it('ZERO NÃO APAGA DURAÇÃO CONHECIDA — o aparelho que nunca tocou republica 0', () => {
+    const anterior = { track: { id: 'local:1', durationMs: 241_000 }, duracaoMedidaEm: 'ontem' };
+    const gravar = comCamposDoServidor({ track: { id: 'local:1', durationMs: 0 } }, anterior);
+    expect(em(gravar, 'track').durationMs).toBe(241_000);
+    // A marca da varredura de durações é do servidor: sobrevive e não desce.
+    expect(gravar.duracaoMedidaEm).toBe('ontem');
+    expect('duracaoMedidaEm' in semCamposDoServidor(gravar)).toBe(false);
+    // Valor de verdade vindo do cliente continua valendo.
+    const corrigida = comCamposDoServidor(
+      { track: { id: 'local:1', durationMs: 200_000 } },
+      anterior,
+    );
+    expect(em(corrigida, 'track').durationMs).toBe(200_000);
+  });
+
   it('faixa nova (sem anterior) passa intacta', () => {
     const nova = { track: { id: 'local:9' } };
     expect(comCamposDoServidor(nova, null)).toBe(nova);

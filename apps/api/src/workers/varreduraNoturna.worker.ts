@@ -41,6 +41,7 @@
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
+import { duracaoDoMp3 } from '@radinho/shared';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
 
 /** De quanto em quanto tempo o worker acorda para ver se está na janela. */
@@ -196,6 +197,22 @@ export interface MetaDoDownload {
   album?: string | null;
   uploader?: string | null;
   coverUrl?: string | null;
+  /** Duração da ORIGEM (yt-dlp), em ms — importador novo; o antigo não manda. */
+  durationMs?: number | null;
+}
+
+/**
+ * A duração da faixa baixada: medida nos PRÓPRIOS bytes, que são o que vai
+ * tocar; o que o yt-dlp disse do vídeo só vale na falta. `0` nunca sai daqui
+ * como se fosse medida — gravado, ele vira "0:00" na lista para sempre.
+ */
+export function duracaoDoDownload(arquivo: ResultadoDoDownload): number | null {
+  const medida = duracaoDoMp3(arquivo.bytes, arquivo.bytes.length);
+  if (medida) return medida;
+  const daOrigem = arquivo.meta?.durationMs;
+  return typeof daOrigem === 'number' && Number.isFinite(daOrigem) && daOrigem >= 1000
+    ? Math.round(daOrigem)
+    : null;
 }
 
 export interface ResultadoDoDownload {
@@ -304,6 +321,13 @@ async function repararUma(c: Candidata): Promise<'reparada' | 'falhou' | 'imposs
 
   const track = { ...((c.data as { track?: Record<string, unknown> }).track ?? {}) };
   track.streamUrl = remoteUrl;
+  // Os bytes estão na mão: é a hora mais barata de consertar a duração que
+  // tantas faixas antigas nunca tiveram.
+  const atual = track.durationMs;
+  if (!(typeof atual === 'number' && Number.isFinite(atual) && atual > 0)) {
+    const ms = duracaoDoDownload(ok);
+    if (ms) track.durationMs = ms;
+  }
   await upsertCatalogTrack(c.id, { ...c.data, remoteUrl, track } as CatalogEntry);
   return 'reparada';
 }

@@ -29,6 +29,7 @@
  */
 import { cleanQuery, identifyByTitle, verifyIdentity, type EnrichedMeta } from '@/lib/local/enrich';
 import { fetchAlbumInfo } from '@/lib/local/importerHelper';
+import { comVersoesDe } from '@/lib/local/duplicadas';
 
 // ── evidências e veredito ───────────────────────────────────────────────────
 
@@ -137,7 +138,10 @@ function norm(value: string): string {
  */
 export function juizDecideCredito(ev: Evidencia, atual?: { artist?: string | null }): Credito {
   const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle, ev.uploader) : { title: '' };
-  const title = ev.sourceTrack || parsed.title || ev.rawTitle;
+  // A limpeza de busca tira "(Ao Vivo)", "(Sped Up)", "(Slowed)" — o catálogo
+  // cadastra só o nome. Gravado assim, o ao vivo virava indistinguível do de
+  // estúdio e a deduplicação engolia um no outro. A marca volta para o título.
+  const title = comVersoesDe(ev.sourceTrack || parsed.title || ev.rawTitle, ev.rawTitle);
   if (ev.sourceArtist) {
     return { title, artist: ev.sourceArtist, album: ev.sourceAlbum, procedencia: 'fonte' };
   }
