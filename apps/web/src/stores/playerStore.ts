@@ -2541,8 +2541,15 @@ export function initPlayerEngine(): void {
   });
 
   audioEngine.on('timeupdate', ({ position, duration }) => {
-    anotarDuracaoMedida(duration);
     const state = store.getState();
+    // O motor ainda está na faixa ANTERIOR enquanto a fonte da nova é
+    // resolvida: a posição/duração dela não são desta. Aceitá-las fazia o
+    // contador da faixa nova andar (e creditava "saiu som" e o watchdog de
+    // travamento a ela) sem que a nova tivesse começado — o "o tempo conta e a
+    // música não inicia". O 'loaded'/timeupdate da carga de verdade já vêm certos.
+    const doMotor = audioEngine.currentTrack;
+    if (doMotor && state.currentTrack && doMotor.id !== state.currentTrack.id) return;
+    anotarDuracaoMedida(duration);
 
     // Som saindo = fila saudável. Zerar aqui (e não só no 'loaded') cobre a
     // faixa PRÉ-CARREGADA promovida, que não redispara 'loaded'.
@@ -2993,7 +3000,13 @@ export function initPlayerEngine(): void {
     saveResume(true, true); // outro app tomou o som: não é para voltar tocando
   });
 
-  audioEngine.on('ended', () => {
+  audioEngine.on('ended', ({ track }) => {
+    // A store troca de faixa ANTES do áudio (a fonte nova é resolvida com
+    // `await`, e o motor segue com a faixa velha nesse intervalo). Se a velha
+    // acabar nessa janela, o 'ended' dela avançava a fila a partir da faixa
+    // NOVA — que ainda nem carregou — e a pessoa via uma música pulada.
+    const atual = store.getState().currentTrack;
+    if (track && atual && track.id !== atual.id) return;
     clearEndTimer();
     clearHandoffTimer();
     advanceFromTrackEnd('ended');

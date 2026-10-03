@@ -602,7 +602,7 @@ export class AudioEngine {
       // estado da retomada depois de uma atualização com o autoplay recusado e
       // destravado por um toque. A posição virava 0, e a letra ficava parada no
       // começo com a música tocando no meio.
-      const no = (slot.source.howl as unknown as HowlInternals)._sounds[0]?._node;
+      const no = (slot.source.howl as unknown as HowlInternals)._sounds?.[0]?._node;
       if (no && Number.isFinite(no.currentTime)) return no.currentTime;
       const pos = slot.source.howl.seek();
       return typeof pos === 'number' ? pos : 0;
@@ -625,8 +625,15 @@ export class AudioEngine {
   getDuration(): number {
     const slot = this.active;
     let duration = 0;
-    if (slot.source?.kind === 'howl') duration = duracaoValida(slot.source.howl.duration());
-    else if (slot.source) duration = duracaoValida(slot.source.el.duration);
+    if (slot.source?.kind === 'howl') {
+      // O ELEMENTO ANTES DO HOWLER: `howl.duration()` é congelada no
+      // 'canplaythrough' (arredondada, e `Infinity` em stream em chunks). Num
+      // stream cujo total o navegador estima por baixo e corrige depois, ela
+      // ficava MENOR que a faixa — e tudo que decide pelo "quanto falta" (troca
+      // antecipada, crossfade) cortava a música no meio.
+      const no = (slot.source.howl as unknown as HowlInternals)._sounds?.[0]?._node;
+      duration = duracaoValida(no?.duration) || duracaoValida(slot.source.howl.duration());
+    } else if (slot.source) duration = duracaoValida(slot.source.el.duration);
     if (!duration && slot.el && slot.el.seekable.length > 0) {
       try {
         duration = duracaoValida(slot.el.seekable.end(slot.el.seekable.length - 1));
@@ -879,6 +886,8 @@ export class AudioEngine {
         };
         el.addEventListener('durationchange', onDurationChange);
         slot.cleanup.push(() => el.removeEventListener('durationchange', onDurationChange));
+        el.addEventListener('ended', darFim);
+        slot.cleanup.push(() => el.removeEventListener('ended', darFim));
       }
       this.applyRate(slot);
       this.applyTrim(slot);
@@ -897,8 +906,31 @@ export class AudioEngine {
         this.emit('buffering', { buffering: false });
       }
     });
+    // O 'end' do Howler NÃO é prova de fim. Num html5 ele pode vir de um
+    // temporizador próprio (`howl.rate()` troca o ouvinte do 'ended' nativo por
+    // um `setTimeout` calculado com a duração CONGELADA do load), que dispara
+    // com a faixa ainda tocando quando o stream revelou um total maior — e a
+    // fila pulava no meio da música. Só vale se o elemento também acabou; o
+    // 'ended' nativo (ouvido no 'load') cobre o fim de verdade, já que o timer
+    // pode ter apagado o ouvinte do Howler. `fimDado` evita avançar duas vezes
+    // quando os dois caminhos chegam.
+    let fimDado = false;
+    const darFim = (): void => {
+      if (fimDado || slot.seq !== seq || slot !== this.active) return;
+      fimDado = true;
+      this.handleEnded();
+    };
+    howl.on('play', () => {
+      fimDado = false; // repetir-uma / nova rodada na mesma instância
+    });
     howl.on('end', () => {
-      if (slot.seq === seq && slot === this.active) this.handleEnded();
+      const no = (howl as unknown as HowlInternals)._sounds?.[0]?._node;
+      if (no && !no.ended && !no.paused) {
+        const total = no.duration;
+        // Elemento ainda tocando e longe do fim: o 'end' é do timer, ignora.
+        if (!Number.isFinite(total) || total - no.currentTime > 1.5) return;
+      }
+      darFim();
     });
     howl.on('loaderror', () => {
       if (slot.seq === seq && slot === this.active) {

@@ -187,9 +187,21 @@ export function rowMatches(
  * publicado. Tirar aquele rótulo não removeria uma fonte, removeria uma
  * ressalva.
  */
-export function toLyrics(row: LrclibRow | null | undefined): Lyrics | null {
+export function toLyrics(row: LrclibRow | null | undefined, semTempo = false): Lyrics | null {
   if (!row) return null;
-  if (typeof row.syncedLyrics === 'string' && row.syncedLyrics.trim()) {
+  // `semTempo` (preview de 30s): os timestamps do LRC são da música INTEIRA e
+  // sobre um clipe seriam desincronia garantida. A letra vale, o tempo não —
+  // cai para texto puro (o próprio LRC sem as marcas, se não houver plain).
+  if (semTempo && !row.plainLyrics?.trim() && row.syncedLyrics?.trim()) {
+    const texto = row.syncedLyrics
+      .split(/\r?\n/)
+      .map((l) => l.replace(/\[[^\]]*\]|<\d{1,2}:\d{2}(?:[.:]\d{1,3})?>/g, '').trim())
+      .filter(Boolean);
+    return texto.length > 0
+      ? { synced: false, lines: texto.map((text) => ({ timeMs: 0, text })), source: null }
+      : null;
+  }
+  if (!semTempo && typeof row.syncedLyrics === 'string' && row.syncedLyrics.trim()) {
     const lines = parseLrc(row.syncedLyrics);
     if (lines.length > 0) return { synced: true, lines, source: null };
   }
@@ -422,9 +434,9 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
     // duração) — a busca é full-text solta e devolve músicas alheias.
     const synced = rows.find((r) => r.syncedLyrics && rowMatches(r, title, names, durationSec));
-    if (synced) return toLyrics(synced);
+    if (synced) return toLyrics(synced, track.previewOnly);
     const plain = rows.find((r) => rowMatches(r, title, names, durationSec));
-    return plain ? toLyrics(plain) : null;
+    return plain ? toLyrics(plain, track.previewOnly) : null;
   };
 
   const soltos = escolher(

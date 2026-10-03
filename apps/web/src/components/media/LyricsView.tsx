@@ -25,8 +25,13 @@ import { cn, formatDuration } from '@/lib/utils';
 import { palavrasEmLinhas } from '@/lib/lyrics/recalibrar';
 import { usePlayerStore } from '@/stores/playerStore';
 
-/** Sem antecipação artificial: evita letra "adiantada" perceptivelmente. */
-const LEAD_MS = 0;
+/**
+ * Antecipação: a linha tem que acender JUNTO com o vocal. O currentTime do
+ * <audio> está ~100-200 ms atrás do que o ouvido escuta (buffer de saída,
+ * Bluetooth) e ainda há o quadro de render + a troca de estilo; com 0 o
+ * destaque sempre chega depois da voz.
+ */
+const LEAD_MS = 180;
 /** Clicar numa palavra entra este tanto antes dela (o ataque da sílaba). */
 const INICIO_DA_PALAVRA_MS = 60;
 /** Confiança mínima para a palavra ouvida entrar na letra ao vivo. */
