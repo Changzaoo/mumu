@@ -129,3 +129,75 @@ export function avancoFalhou(tipo: 'recusado' | 'erro'): void {
 export function lerAvancos(): Avanco[] {
   return diario.slice();
 }
+
+// ── CORREÇÕES DE SAÍDA ──────────────────────────────────────────────
+//
+// "O tempo anda e não sai som" no computador: o `<audio>` avança e a cadeia do
+// Web Audio (contexto, ganho de fade, mudo) cala o som. O motor confere essa
+// cadeia enquanto toca e CORRIGE o que achar errado — mas uma correção calada
+// esconde a causa. Cada correção vira uma linha aqui, para a próxima ocorrência
+// deixar rastro (mesmo padrão do diário de avanços, e vai junto no `aoVivo`).
+
+export type MotivoDeCorrecao = 'contexto' | 'ganho' | 'mudo' | 'volume';
+
+export interface CorrecaoDeSaida {
+  em: string;
+  motivo: MotivoDeCorrecao;
+  faixa: string | null;
+  /** Segundos de reprodução da faixa quando a correção foi preciso. */
+  pos: number;
+  oculta: boolean;
+  /** Detalhe curto (estado do contexto, valor do ganho). */
+  det?: string;
+}
+
+const CHAVE_CORRECOES = 'aurial:correcoes-de-saida';
+const MAX_CORRECOES = 20;
+
+function carregarCorrecoes(): CorrecaoDeSaida[] {
+  try {
+    const bruto = localStorage.getItem(CHAVE_CORRECOES);
+    const lido: unknown = bruto ? JSON.parse(bruto) : [];
+    return Array.isArray(lido) ? (lido as CorrecaoDeSaida[]).slice(-MAX_CORRECOES) : [];
+  } catch {
+    return [];
+  }
+}
+
+let correcoes: CorrecaoDeSaida[] = carregarCorrecoes();
+
+export function anotarCorrecaoDeSaida(
+  motivo: MotivoDeCorrecao,
+  faixa: string | null | undefined,
+  pos: number,
+  det?: string,
+): void {
+  correcoes.push({
+    em: new Date().toTimeString().slice(0, 8),
+    motivo,
+    faixa: curto(faixa),
+    pos: Math.round(pos * 10) / 10,
+    oculta: oculta(),
+    ...(det ? { det: det.slice(0, 60) } : {}),
+  });
+  if (correcoes.length > MAX_CORRECOES) correcoes = correcoes.slice(-MAX_CORRECOES);
+  try {
+    localStorage.setItem(CHAVE_CORRECOES, JSON.stringify(correcoes));
+  } catch {
+    /* diagnóstico nunca atrapalha o uso */
+  }
+}
+
+export function lerCorrecoesDeSaida(): CorrecaoDeSaida[] {
+  return correcoes.slice();
+}
+
+/** Só para teste. */
+export function zerarCorrecoesDeSaida(): void {
+  correcoes = [];
+  try {
+    localStorage.removeItem(CHAVE_CORRECOES);
+  } catch {
+    /* ignora */
+  }
+}

@@ -25,6 +25,7 @@ import { EQ_BANDS_HZ, dbToLinear, replayGainDb, type TrackDto } from '@radinho/s
 import { resolveMediaUrl } from '@/lib/api';
 import { clamp } from '@/lib/utils';
 import type HlsType from 'hls.js';
+import { anotarCorrecaoDeSaida, type MotivoDeCorrecao } from '@/lib/telemetry/avancoDeFaixa';
 
 /**
  * Why an `error` event fired — the consumer decides what is retryable:
@@ -84,6 +85,12 @@ interface Slot {
    * pendente, o play também espera: sai só depois de posicionado.
    */
   inicioAoCarregar?: number | null;
+  /**
+   * Até quando (ms, relógio de parede) o ganho do fade PODE estar fora de 1 por
+   * causa de uma rampa legítima. Depois disso, ganho < 1 num slot ativo que
+   * toca é ganho preso — ver `garantirSaidaAudivel`.
+   */
+  fadeAte?: number;
 }
 
 type SlotIndex = 0 | 1;
@@ -528,7 +535,11 @@ export class AudioEngine {
       const timer = setTimeout(
         () => {
           this.fadeTimers.delete(timer);
-          if (from.seq === fromSeq) this.resetSlot(from);
+          // `from !== this.active`: voltar para a faixa que ainda está SAINDO
+          // (botão "anterior" no meio da mistura) a promove como pré-carregada
+          // sem mexer no `seq` — e este temporizador, armado contra ela, a
+          // desmontaria já ATIVA: silêncio total com a store achando que toca.
+          if (from.seq === fromSeq && from !== this.active) this.resetSlot(from);
         },
         crossfadeSeconds * 1000 + 120,
       );
@@ -1226,7 +1237,7 @@ export class AudioEngine {
       clearTimeout(teto);
       el?.removeEventListener('ended', desmontar);
       this.retireCancels.delete(desmontar);
-      if (from.seq === fromSeq) this.resetSlot(from);
+      if (from.seq === fromSeq && from !== this.active) this.resetSlot(from);
     };
     el?.addEventListener('ended', desmontar, { once: true });
     this.retireCancels.add(desmontar);
@@ -1250,8 +1261,11 @@ export class AudioEngine {
     };
     const check = (): void => {
       timer = null;
-      if (from.seq !== fromSeq) {
-        this.retireCancels.delete(cancel); // slot já foi reaproveitado por outra carga
+      // Reaproveitado por outra carga — ou PROMOVIDO de volta a ativo (voltar
+      // para a faixa que estava sendo aposentada): desmontá-lo seria calar a
+      // música que a pessoa acabou de pedir.
+      if (from.seq !== fromSeq || from === this.active) {
+        this.retireCancels.delete(cancel);
         return;
       }
       const el = to.el;
@@ -1302,6 +1316,7 @@ export class AudioEngine {
       this.master.gain.cancelScheduledValues(now);
       this.master.gain.setValueAtTime(this.master.gain.value, now);
       this.master.gain.linearRampToValueAtTime(this.effectiveVolume(), now + 0.08);
+      this.masterAte = Date.now() + 400;
       return;
     }
     for (const slot of this.slots) {
@@ -1345,6 +1360,7 @@ export class AudioEngine {
     const now = this.ctx.currentTime;
     nodes.fade.gain.cancelScheduledValues(now);
     nodes.fade.gain.setValueAtTime(value, now);
+    slot.fadeAte = Date.now() + 200;
   }
 
   private rampFade(slot: Slot, target: number, seconds: number): void {
@@ -1357,6 +1373,7 @@ export class AudioEngine {
     nodes.fade.gain.cancelScheduledValues(now);
     nodes.fade.gain.setValueAtTime(nodes.fade.gain.value, now);
     nodes.fade.gain.linearRampToValueAtTime(target, now + seconds);
+    slot.fadeAte = Date.now() + seconds * 1000 + 300;
   }
 
   /** O elemento que de fato sai no alto-falante (Howl HTML5 ou elemento HLS). */
@@ -1436,8 +1453,108 @@ export class AudioEngine {
     this.rafId = null;
     if (!this.playing) return;
     this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
+    this.garantirSaidaAudivel();
     this.rafId = requestAnimationFrame(this.tick);
   };
+
+  private masterAte = 0;
+  private ultimaConferencia = 0;
+  private ultimaPosConferida = -1;
+  private ultimoResumeDoInvariante = 0;
+  private ultimaCorrecaoPorMotivo = new Map<MotivoDeCorrecao, number>();
+
+  /**
+   * SE O TEMPO ANDA, A SAÍDA TEM QUE ESTAR AUDÍVEL — e se não está, conserta.
+   *
+   * No computador o `currentTime` do elemento anda INDEPENDENTE de haver som: o
+   * áudio passa por contexto -> trim -> fade -> master, e qualquer elo pode
+   * calar sem avisar (contexto suspenso por troca de dispositivo de saída ou
+   * política do navegador, ganho de fade preso em 0 por uma rampa cancelada no
+   * meio de uma troca rápida, elemento mudo). Os caminhos que já retomavam o
+   * contexto (`load`, `startSlot`, ticker oculto) só rodam em momentos
+   * específicos; depois deles nada olhava de novo, e o contador seguia
+   * contando em silêncio.
+   *
+   * Roda dentro do tick/ticker que já existem (nenhum temporizador novo) e só
+   * olha quando a posição de fato avançou, no máximo a cada 400 ms. Cada
+   * correção deixa rastro em `correcoesDeSaida` (telemetria `aoVivo`).
+   *
+   * NO CELULAR não há contexto (`SEM_GRAFO_WEB_AUDIO`): as checagens de contexto
+   * e de ganho se desligam sozinhas por `this.ctx === null`, e o que sobra
+   * (mudo e volume do próprio elemento) não toca em Web Audio.
+   */
+  private garantirSaidaAudivel(): void {
+    if (!this.playing || this.destroyed) return;
+    const agora = Date.now();
+    if (agora - this.ultimaConferencia < 400) return;
+    this.ultimaConferencia = agora;
+
+    const slot = this.active;
+    const el = this.elementoDeSaida(slot);
+    if (!el || el.paused || el.ended) return;
+    const pos = el.currentTime;
+    const andou = Number.isFinite(pos) && pos > this.ultimaPosConferida + 0.05;
+    this.ultimaPosConferida = Number.isFinite(pos) ? pos : -1;
+    if (!andou) return;
+
+    const corrigiu = (motivo: MotivoDeCorrecao, det?: string): void => {
+      // Um registro por motivo a cada 10 s: o rastro é para achar a causa, não
+      // para encher o armazenamento enquanto o navegador recusa um resume().
+      const ultimo = this.ultimaCorrecaoPorMotivo.get(motivo) ?? 0;
+      if (agora - ultimo < 10_000) return;
+      this.ultimaCorrecaoPorMotivo.set(motivo, agora);
+      anotarCorrecaoDeSaida(motivo, slot.track?.title, pos, det);
+    };
+
+    // O app nunca silencia o elemento (o mudo do usuário vai no `master` ou no
+    // volume): `muted` aqui é de fora.
+    if (el.muted) {
+      el.muted = false;
+      corrigiu('mudo');
+    }
+
+    const ctx = this.ctx;
+    if (ctx) {
+      if ((ctx.state as string) !== 'running' && (ctx.state as string) !== 'closed') {
+        // Sem laço apertado: se o navegador recusa (sem gesto), tenta de novo em 1 s.
+        if (agora - this.ultimoResumeDoInvariante >= 1000) {
+          this.ultimoResumeDoInvariante = agora;
+          void ctx.resume().catch(() => undefined);
+        }
+        corrigiu('contexto', String(ctx.state));
+        return; // ganho só faz sentido com o contexto andando
+      }
+      if (slot.fade && slot.mediaSource && (slot.fadeAte ?? 0) < agora) {
+        const g = slot.fade.gain.value;
+        if (g < 0.99) {
+          this.setFade(slot, 1);
+          corrigiu('ganho', g.toFixed(2));
+        }
+      }
+      if (this.master && agora > this.masterAte) {
+        const alvo = this.effectiveVolume();
+        if (Math.abs(this.master.gain.value - alvo) > 0.02) {
+          const visto = this.master.gain.value;
+          this.master.gain.cancelScheduledValues(ctx.currentTime);
+          this.master.gain.setValueAtTime(alvo, ctx.currentTime);
+          corrigiu('volume', `master ${visto.toFixed(2)}`);
+        }
+      }
+      // Com grafo o elemento sai sempre a 1; o volume do usuário é do `master`.
+      if (slot.mediaSource && el.volume < 0.99) {
+        const visto = el.volume;
+        el.volume = 1;
+        corrigiu('volume', `el ${visto.toFixed(2)}`);
+      }
+    } else if (!this.rampasDeVolume.has(slot)) {
+      const alvo = this.effectiveVolume();
+      if (Math.abs(el.volume - alvo) > 0.02) {
+        const visto = el.volume;
+        this.gravarVolume(slot, alvo);
+        corrigiu('volume', `el ${visto.toFixed(2)}`);
+      }
+    }
+  }
 
   private syncTicker(): void {
     if (this.playing) {
@@ -1458,6 +1575,7 @@ export class AudioEngine {
             void this.ctx.resume().catch(() => undefined);
           }
           this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
+          this.garantirSaidaAudivel();
         }
       }, 1000);
     } else {

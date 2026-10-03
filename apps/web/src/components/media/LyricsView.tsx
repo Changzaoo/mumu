@@ -23,6 +23,7 @@ import {
 } from '@/lib/lyrics/karaoke';
 import { cn, formatDuration } from '@/lib/utils';
 import { palavrasEmLinhas } from '@/lib/lyrics/recalibrar';
+import { normalizarLetra } from '@/lib/lyrics/grafia';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /**
@@ -126,12 +127,17 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
     return lines.length > 0 ? { synced: true, lines, source: TRANSCRICAO_AUTOMATICA } : null;
   }, [parcial]);
   const transcrevendo = Boolean(letraAoVivo) && (!publicada || ehTranscricao(publicada));
-  const lyrics =
+  const letraEscolhida =
     vivo?.letra && (!publicada || ehTranscricao(publicada))
       ? vivo.letra
       : transcrevendo
         ? letraAoVivo
         : publicada;
+  // GRAFIA CORRIGIDA SÓ NA EXIBIÇÃO: "nóis"/"mermo" viram "nós"/"mesmo" na tela
+  // (letra publicada, cache ou transcrição, tudo passa por aqui), mas o texto
+  // guardado e o que vai para o alinhamento ficam originais — o alinhamento casa
+  // por conteúdo com o que o importador ouviu. Mesmas linhas, tempos e palavras.
+  const lyrics = useMemo(() => normalizarLetra(letraEscolhida), [letraEscolhida]);
 
   const terminouBusca = !isLoading;
   // O CAMINHO ANTIGO FOI DESLIGADO: transcrever pelo aparelho (reconhecimento
