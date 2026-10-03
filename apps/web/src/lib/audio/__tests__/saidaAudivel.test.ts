@@ -24,7 +24,8 @@ let lerCorrecoesDeSaida: typeof import('@/lib/telemetry/avancoDeFaixa').lerCorre
 let zerarCorrecoesDeSaida: typeof import('@/lib/telemetry/avancoDeFaixa').zerarCorrecoesDeSaida;
 
 const { FakeHowl, relogio } = vi.hoisted(() => {
-  const relogio = { agora: 0 };
+  /** `nivel`: o que o analisador no fim da cadeia lê (desvio de 128). */
+  const relogio = { agora: 0, nivel: 60 };
   class FakeHowlImpl {
     static instances: FakeHowlImpl[] = [];
     handlers = new Map<string, () => void>();
@@ -156,8 +157,16 @@ class ContextoFalso {
     frequency: { value: number };
     Q: { value: number };
   } => Object.assign(new NoFalso(), { type: '', frequency: { value: 0 }, Q: { value: 0 } });
-  createAnalyser = (): NoFalso & { fftSize: number; smoothingTimeConstant: number } =>
-    Object.assign(new NoFalso(), { fftSize: 0, smoothingTimeConstant: 0 });
+  createAnalyser = (): NoFalso & {
+    fftSize: number;
+    smoothingTimeConstant: number;
+    getByteTimeDomainData: (a: Uint8Array) => void;
+  } =>
+    Object.assign(new NoFalso(), {
+      fftSize: 32,
+      smoothingTimeConstant: 0,
+      getByteTimeDomainData: (a: Uint8Array) => a.fill(128 + relogio.nivel),
+    });
   createMediaElementSource = (): NoFalso => new NoFalso();
 }
 
@@ -215,6 +224,7 @@ describe('computador: se o tempo anda, o som tem que sair', () => {
   beforeEach(async () => {
     vi.useFakeTimers();
     relogio.agora = 100;
+    relogio.nivel = 60;
     FakeHowl.instances = [];
 
     ctx = new ContextoFalso();
@@ -358,6 +368,54 @@ describe('computador: se o tempo anda, o som tem que sair', () => {
     avancar(1);
     expect(audivel(engine)).toEqual({ ok: true, motivo: '' });
     expect(lerCorrecoesDeSaida().some((c) => c.motivo === 'mudo')).toBe(true);
+  });
+
+  it('tudo confere e o analisador lê zero por 6 s — o slot RENASCE num elemento novo, no mesmo ponto', () => {
+    carregar('a');
+    avancar(3);
+    expect(audivel(engine)).toEqual({ ok: true, motivo: '' });
+    const antes = FakeHowl.instances.length;
+    // O navegador calou o elemento por dentro (mídia sem CORS capturada pelo
+    // grafo): nenhum ganho está errado, e o analisador lê silêncio digital.
+    relogio.nivel = 0;
+    avancar(4);
+    expect(FakeHowl.instances.length).toBe(antes); // ainda não: 6 s de tolerância
+    avancar(3);
+    expect(FakeHowl.instances.length).toBe(antes + 1); // renasceu
+    expect(lerCorrecoesDeSaida().some((c) => c.motivo === 'silencio')).toBe(true);
+    const novo = FakeHowl.instances.at(-1)!;
+    expect(FakeHowl.instances[antes - 1]!.unload).toHaveBeenCalled(); // o mudo foi desmontado
+    novo.node.currentTime = 9.5; // o 'load' posiciona (seek) antes de tocar
+    novo.dispararLoad();
+    expect(novo.play).toHaveBeenCalled();
+    expect(engine.currentTrack?.id).toBe('a');
+    expect(engine.isPlaying).toBe(true);
+    // O som voltou: nada mais a fazer.
+    relogio.nivel = 60;
+    avancar(10);
+    expect(FakeHowl.instances.length).toBe(antes + 1);
+    expect(audivel(engine)).toEqual({ ok: true, motivo: '' });
+  });
+
+  it('renasce UMA vez por carga — se o novo também sair mudo, não vira laço', () => {
+    carregar('a');
+    avancar(2);
+    relogio.nivel = 0;
+    avancar(7);
+    const depoisDoPrimeiro = FakeHowl.instances.length;
+    FakeHowl.instances.at(-1)!.dispararLoad();
+    avancar(30);
+    expect(FakeHowl.instances.length).toBe(depoisDoPrimeiro);
+  });
+
+  it('silêncio com o volume do usuário em zero não é defeito — não renasce', () => {
+    carregar('a');
+    avancar(2);
+    engine.setVolume(0);
+    relogio.nivel = 0;
+    const antes = FakeHowl.instances.length;
+    avancar(12);
+    expect(FakeHowl.instances.length).toBe(antes);
   });
 
   it('o usuário silenciou de propósito — o invariante NÃO desfaz', () => {

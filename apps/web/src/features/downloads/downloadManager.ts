@@ -13,6 +13,7 @@ import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
+import { anotar } from '@/lib/telemetry/diario';
 import {
   cacheSupported,
   deleteAudio,
@@ -279,6 +280,7 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
   // vez de uma barra parada em 0% que parece travamento.
   inFlight.set(track.id, -1);
   emit();
+  anotar('download', 'pedido', track.title);
 
   await pegarVaga();
   try {
@@ -325,10 +327,16 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
       queueLyricsSync(track);
       inFlight.delete(track.id);
       emit();
+      anotar('download', 'concluido', `${track.title} · ${Math.round(blob.size / 1024)} KB`);
       pushNotification({ type: 'download', title: 'Download concluído', body: track.title });
       return;
     } catch (err) {
       lastErr = err;
+      anotar(
+        'download',
+        'falhou',
+        `${track.title} · tentativa ${attempt}/${MAX_DOWNLOAD_TRIES} · ${err instanceof Error ? err.message : String(err)}`,
+      );
       // Sem espaço não adianta tentar de novo — falha direto com aviso claro.
       if (isQuotaError(err)) {
         inFlight.delete(track.id);
@@ -383,6 +391,7 @@ function scheduleAutoRetry(track: TrackDto): void {
 }
 
 export async function removeDownloadedTrack(trackId: string): Promise<void> {
+  anotar('download', 'removido', trackId);
   await deleteAudio(trackId).catch(() => undefined);
   soltar('audio', trackId);
   removeDownload(trackId);

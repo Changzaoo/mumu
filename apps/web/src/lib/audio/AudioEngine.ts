@@ -73,6 +73,10 @@ interface Slot {
   /** Underlying media element once known (Howler node or owned element). */
   el: HTMLAudioElement | null;
   track: TrackDto | null;
+  /** A URL que este slot está tocando — é dela que o slot RENASCE (ver `renascer`). */
+  url: string | null;
+  /** Já renasceu nesta carga: o último recurso roda uma vez, nunca em laço. */
+  renasceu: boolean;
   loaded: boolean;
   fade: GainNode | null;
   trim: GainNode | null;
@@ -91,6 +95,14 @@ interface Slot {
    * toca é ganho preso — ver `garantirSaidaAudivel`.
    */
   fadeAte?: number;
+  /**
+   * A carga FALHOU enquanto o slot era o ocioso (pré-carregado). Os handlers de
+   * erro só falam pelo slot ativo, então a falha se perdia: promovido a ativo,
+   * o slot não tinha 'load' nem 'error' por vir — silêncio até o watchdog (ou
+   * para sempre, nos caminhos de troca que não o armam). `load()` relê isto na
+   * promoção e avisa a store na hora.
+   */
+  falhouAoCarregar?: boolean;
 }
 
 type SlotIndex = 0 | 1;
@@ -200,9 +212,15 @@ const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 /** Teto para o slot de saída seguir vivo (mudo) esperando o novo pegar. */
 const RETIRE_MAX_MS = 10_000;
 const RETIRE_POLL_MS = 200;
+/** Sinal zerado no analisador por tanto, com o tempo andando: o elemento renasce. */
+const SILENCIO_ATE_RENASCER_MS = 6_000;
+/** Abaixo disto (desvio de 128 no domínio do tempo) é silêncio digital. */
+const LIMIAR_DE_SINAL = 2;
 
 function createSlot(): Slot {
   return {
+    url: null,
+    renasceu: false,
     source: null,
     el: null,
     track: null,
@@ -498,6 +516,7 @@ export class AudioEngine {
     // nunca recebeu 'loaded'/'buffering:false' para ele. Sem re-emitir aqui, o
     // isBuffering fica true para sempre: o player parece TRAVADO no spinner.
     const promotedLoaded = preloaded && to.loaded;
+    const promotedFalhou = preloaded && to.falhouAoCarregar === true;
     const esperarCarregar = inicio !== null && this.posicionarAntesDeTocar(to, inicio);
 
     const querMisturar = crossfadeSeconds > 0 && this.playing && from.track !== null;
@@ -515,6 +534,17 @@ export class AudioEngine {
     const canCrossfade =
       querMisturar && (this.ctx !== null || (!IS_IOS && from.source?.kind === 'howl'));
     const sobrepor = querMisturar && !canCrossfade;
+
+    // SEM GRAFO, O VOLUME É DO PRÓPRIO ELEMENTO — e o slot promovido pode estar no
+    // meio de uma rampa de SAÍDA (voltar para a faixa que a mistura ainda
+    // aposentava, o botão "anterior" nos primeiros segundos da seguinte). Sem
+    // parar a rampa, o passo seguinte a leva até 0 e a faixa que a pessoa acabou
+    // de pedir toca MUDA. Com grafo isto é o `setFade` abaixo; o ramo de mistura
+    // (canCrossfade) já reescreve o volume sozinho.
+    if (preloaded && !this.ctx && !canCrossfade) {
+      this.pararRampaDeVolume(to);
+      this.gravarVolume(to, this.effectiveVolume());
+    }
 
     this.activeIndex = toIndex;
 
@@ -563,6 +593,11 @@ export class AudioEngine {
     if (promotedLoaded) {
       this.emit('loaded', { track, duration: this.getDuration() });
       this.emit('buffering', { buffering: false });
+    } else if (promotedFalhou) {
+      // A fonte já tinha morrido quando era só pré-carga e ninguém ficou
+      // sabendo: avisa agora, para a store trocar de fonte em vez de esperar o
+      // watchdog (ou nada, na mistura) diante de um slot que nunca vai tocar.
+      this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
     }
   }
 
@@ -828,6 +863,18 @@ export class AudioEngine {
     slot.el = el;
     const nodes = this.slotNodes(slot);
     if (!this.ctx || !nodes) return;
+    // ELEMENTO SEM CORS NUNCA ENTRA NO GRAFO. `createMediaElementSource` NÃO lança
+    // com mídia de outra origem sem `crossOrigin`: o som passa a sair do contexto
+    // e o navegador o ZERA (saída muda) — enquanto o `currentTime` segue andando.
+    // É o "o tempo passa e não toca": nenhum elo do grafo está errado, o
+    // invariante de saída não vê nada, e entrar no grafo é irreversível para o
+    // elemento. Fora do grafo ele toca direto (sem EQ), com o volume no próprio
+    // elemento — ver `volumeDeElementoForaDoGrafo`.
+    if (!mediaSourceCache.has(el) && this.fonteSemCors(el)) {
+      slot.mediaSource = null;
+      this.volumeDeElementoForaDoGrafo(slot, el);
+      return;
+    }
     try {
       let source = mediaSourceCache.get(el);
       if (!source) {
@@ -843,6 +890,27 @@ export class AudioEngine {
     }
   }
 
+  /** Mídia de OUTRA origem carregada por um elemento sem `crossOrigin`? (muda no grafo) */
+  private fonteSemCors(el: HTMLAudioElement): boolean {
+    if (el.crossOrigin === 'anonymous' || el.crossOrigin === 'use-credentials') return false;
+    const src = el.currentSrc || el.src;
+    if (!src || typeof location === 'undefined') return false; // sem como saber: tenta o grafo
+    try {
+      const url = new URL(src, location.href);
+      return /^https?:$/.test(url.protocol) && url.origin !== location.origin;
+    } catch {
+      return false;
+    }
+  }
+
+  /** O Howl nasce com volume 1 quando há contexto (o `master` cuida do volume): fora do grafo o elemento é a saída. */
+  private volumeDeElementoForaDoGrafo(slot: Slot, el: HTMLAudioElement): void {
+    if (!this.rampasDeVolume.has(slot)) {
+      el.volume = clamp(this.effectiveVolume(), 0, 1);
+      this.gravarVolume(slot, this.effectiveVolume());
+    }
+  }
+
   // ── Slot lifecycle ─────────────────────────────────────────────
 
   private get active(): Slot {
@@ -851,7 +919,9 @@ export class AudioEngine {
 
   private prepareSlot(slot: Slot, track: TrackDto, url: string): void {
     slot.track = track;
+    slot.url = url;
     slot.loaded = false;
+    slot.falhouAoCarregar = false;
     if (isHlsUrl(url)) void this.prepareElementSlot(slot, track, url);
     else this.prepareHowlSlot(slot, track, url);
   }
@@ -859,6 +929,7 @@ export class AudioEngine {
   private prepareHowlSlot(slot: Slot, track: TrackDto, url: string): void {
     const seq = ++slot.seq;
     this.primeHtml5Pool();
+    this.garantirEstoqueComCors();
 
     const extension = /\.([a-z0-9]{2,5})(\?|#|$)/i.exec(url)?.[1]?.toLowerCase();
     const howl = new Howl({
@@ -943,11 +1014,7 @@ export class AudioEngine {
       }
       darFim();
     });
-    howl.on('loaderror', () => {
-      if (slot.seq === seq && slot === this.active) {
-        this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
-      }
-    });
+    howl.on('loaderror', () => this.falhaDeCarga(slot, seq, track));
     howl.on('playerror', () => {
       if (slot.seq !== seq || slot !== this.active) return;
       // O PLAY FOI RECUSADO — e ninguém ficava sabendo. O motor seguia com
@@ -975,6 +1042,22 @@ export class AudioEngine {
       });
     });
     slot.cleanup.push(() => howl.unload());
+  }
+
+  /**
+   * A fonte deste slot não carrega. Slot ativo: avisa a store (que tenta outra
+   * fonte). Slot OCIOSO (pré-carregado): só anota — falar por ele seria a store
+   * reagir a uma faixa que nem começou —, e `load()` entrega o aviso se ele
+   * for promovido. Sem isto, a próxima faixa de uma fonte morta virava
+   * silêncio sem causa nenhuma.
+   */
+  private falhaDeCarga(slot: Slot, seq: number, track: TrackDto): void {
+    if (slot.seq !== seq) return;
+    if (slot === this.active) {
+      this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
+    } else {
+      slot.falhouAoCarregar = true;
+    }
   }
 
   private async prepareElementSlot(slot: Slot, track: TrackDto, url: string): Promise<void> {
@@ -1005,11 +1088,7 @@ export class AudioEngine {
     const onEnded = (): void => {
       if (slot.seq === seq && slot === this.active) this.handleEnded();
     };
-    const onError = (): void => {
-      if (slot.seq === seq && slot === this.active) {
-        this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
-      }
-    };
+    const onError = (): void => this.falhaDeCarga(slot, seq, track);
     // Streams em chunks só revelam a duração real DEPOIS do loadedmetadata
     // (antes é Infinity/NaN) — sem isso a faixa fica em "0:00" para sempre.
     const onDurationChange = (): void => {
@@ -1047,9 +1126,7 @@ export class AudioEngine {
         hls.loadSource(url);
         hls.attachMedia(el);
         hls.on(Hls.Events.ERROR, (_event, data) => {
-          if (data.fatal && slot.seq === seq && slot === this.active) {
-            this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
-          }
+          if (data.fatal) this.falhaDeCarga(slot, seq, track);
         });
         if (slot.source?.kind === 'element') slot.source.hls = hls;
         slot.cleanup.push(() => hls.destroy());
@@ -1296,7 +1373,10 @@ export class AudioEngine {
     slot.source = null;
     slot.el = null;
     slot.track = null;
+    slot.url = null;
+    slot.renasceu = false;
     slot.loaded = false;
+    slot.falhouAoCarregar = false;
     slot.inicioAoCarregar = null;
     if (slot.fade && this.ctx) {
       slot.fade.gain.cancelScheduledValues(this.ctx.currentTime);
@@ -1317,6 +1397,12 @@ export class AudioEngine {
       this.master.gain.setValueAtTime(this.master.gain.value, now);
       this.master.gain.linearRampToValueAtTime(this.effectiveVolume(), now + 0.08);
       this.masterAte = Date.now() + 400;
+      // Slot que ficou FORA do grafo (fonte sem CORS) não passa pelo `master`.
+      for (const slot of this.slots) {
+        if (slot.source && !slot.mediaSource && slot.el && !this.rampasDeVolume.has(slot)) {
+          this.gravarVolume(slot, this.effectiveVolume());
+        }
+      }
       return;
     }
     for (const slot of this.slots) {
@@ -1452,9 +1538,16 @@ export class AudioEngine {
   private tick = (): void => {
     this.rafId = null;
     if (!this.playing) return;
-    this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
-    this.garantirSaidaAudivel();
-    this.rafId = requestAnimationFrame(this.tick);
+    try {
+      this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
+      this.garantirSaidaAudivel();
+    } finally {
+      // O próximo quadro é agendado MESMO se um ouvinte (ou o invariante) lançar:
+      // uma exceção aqui parava o ticker de vez — progresso, temporizador de fim
+      // e preload congelavam com a música ainda tocando, e nada o religava
+      // enquanto `playing` seguisse true.
+      if (this.playing && this.rafId === null) this.rafId = requestAnimationFrame(this.tick);
+    }
   };
 
   private masterAte = 0;
@@ -1546,7 +1639,11 @@ export class AudioEngine {
         el.volume = 1;
         corrigiu('volume', `el ${visto.toFixed(2)}`);
       }
-    } else if (!this.rampasDeVolume.has(slot)) {
+      // A cadeia inteira confere — e o ouvido? O último recurso mede o sinal.
+      this.vigiarSilencio(slot, pos, agora, corrigiu);
+    }
+    // Sem contexto (celular) OU slot fora do grafo: o volume é o do elemento.
+    if ((!ctx || !slot.mediaSource) && !this.rampasDeVolume.has(slot)) {
       const alvo = this.effectiveVolume();
       if (Math.abs(el.volume - alvo) > 0.02) {
         const visto = el.volume;
@@ -1554,6 +1651,99 @@ export class AudioEngine {
         corrigiu('volume', `el ${visto.toFixed(2)}`);
       }
     }
+  }
+
+  private silencioDesde = 0;
+  private silencioSeq = -1;
+  private amostraDeSinal: Uint8Array<ArrayBuffer> | null = null;
+
+  /**
+   * O ÚLTIMO RECURSO: TUDO CONFERE E MESMO ASSIM NÃO SAI SOM.
+   *
+   * Contexto rodando, ganhos em 1, elemento andando — e o analisador no fim da
+   * cadeia lê zero por `SILENCIO_ATE_RENASCER_MS`. É o que acontece com um
+   * elemento que o navegador calou por dentro (mídia de outra origem sem CORS
+   * capturada pelo grafo; elemento preso a um contexto antigo): nenhum ganho
+   * está errado, e nada que se escreva nos nós devolve o som. A única saída é
+   * um elemento NOVO: o slot renasce com a mesma faixa, na mesma posição.
+   *
+   * Uma vez por carga (`renasceu`): se o novo também sair mudo, a causa é outra
+   * e um laço de renascimentos só faria a música gaguejar. Não mede com o
+   * volume do usuário em zero, nem no meio de uma rampa (o fade subindo é zero
+   * legítimo), nem sem grafo — sem analisador não há o que medir.
+   */
+  private vigiarSilencio(
+    slot: Slot,
+    pos: number,
+    agora: number,
+    corrigiu: (motivo: MotivoDeCorrecao, det?: string) => void,
+  ): void {
+    const analisador = this._analyser;
+    if (!analisador || !slot.mediaSource) return;
+    if (typeof analisador.getByteTimeDomainData !== 'function') return;
+    if (this.silencioSeq !== slot.seq) {
+      this.silencioSeq = slot.seq;
+      this.silencioDesde = 0;
+    }
+    if (this.effectiveVolume() < 0.05 || (slot.fadeAte ?? 0) > agora || agora < this.masterAte) {
+      this.silencioDesde = 0;
+      return;
+    }
+    const n = analisador.fftSize || 2048;
+    if (!this.amostraDeSinal || this.amostraDeSinal.length !== n) {
+      this.amostraDeSinal = new Uint8Array(new ArrayBuffer(n));
+    }
+    analisador.getByteTimeDomainData(this.amostraDeSinal);
+    let nivel = 0;
+    for (let i = 0; i < n; i++) {
+      const desvio = Math.abs((this.amostraDeSinal[i] ?? 128) - 128);
+      if (desvio > nivel) nivel = desvio;
+    }
+    if (nivel >= LIMIAR_DE_SINAL) {
+      this.silencioDesde = 0;
+      return;
+    }
+    if (!this.silencioDesde) {
+      this.silencioDesde = agora;
+      return;
+    }
+    if (agora - this.silencioDesde < SILENCIO_ATE_RENASCER_MS || slot.renasceu) return;
+    corrigiu('silencio', `nível ${nivel} por ${Math.round((agora - this.silencioDesde) / 1000)}s`);
+    this.renascer(slot, pos);
+  }
+
+  /** O slot ativo recomeça num elemento novo, com a mesma faixa, no mesmo ponto. */
+  private renascer(slot: Slot, pos: number): void {
+    const track = slot.track;
+    const url = slot.url;
+    if (!track || !url) return;
+    this.silencioDesde = 0;
+    const mudo = this.elementoDeSaida(slot);
+    // `resetSlot` devolve o elemento mudo ao estoque do Howler — que tira sempre
+    // do FIM, ou seja, pegaria o MESMO elemento de volta (medido: o slot
+    // renascia no elemento que acabara de calar). Ele sai do estoque, e um
+    // elemento novo, com CORS, entra no fim: é esse que o próximo Howl pega.
+    this.resetSlot(slot);
+    try {
+      const pool = (Howler as unknown as HowlerInternals)._html5AudioPool;
+      if (Array.isArray(pool)) {
+        const i = mudo ? pool.indexOf(mudo) : -1;
+        if (i >= 0) pool.splice(i, 1);
+        const novo = new Audio() as HTMLAudioElement & { _unlocked?: boolean };
+        novo.crossOrigin = 'anonymous';
+        novo._unlocked = true;
+        pool.push(novo);
+      }
+    } catch {
+      /* sem estoque: o Howler cria um elemento, e `garantirEstoqueComCors` o marca */
+    }
+    // O 'load' do novo Howl posiciona e toca (ver `inicioAoCarregar` em `prepareHowlSlot`).
+    this.prepareSlot(slot, track, url);
+    slot.renasceu = true;
+    slot.inicioAoCarregar = Math.max(0, pos);
+    this.setFade(slot, 1);
+    this.applyRate(slot);
+    this.applyTrim(slot);
   }
 
   private syncTicker(): void {
@@ -1621,7 +1811,37 @@ export class AudioEngine {
    * elementos destravados, e é reabastecido a cada toque (`abastecerEstoque`).
    */
   private primeHtml5Pool(): void {
-    /* ver `abastecerEstoque` */
+    /* ver `abastecerEstoque` e `garantirEstoqueComCors` */
+  }
+
+  /**
+   * NO COMPUTADOR, TODO ELEMENTO QUE O HOWLER PEGAR TEM QUE SER CORS.
+   *
+   * O Howler abastece o estoque sozinho no primeiro toque (`new Audio()` cru,
+   * SEM `crossOrigin`) e tira sempre do FIM — onde o nosso `abastecerEstoque`
+   * não põe nada (ele entra pela frente). Resultado: as faixas de rede nasciam
+   * em elementos sem CORS, entravam no grafo e saíam MUDAS com o tempo
+   * correndo. Marcar o `crossOrigin` num elemento ocioso é seguro (o `src` só é
+   * posto no `new Howl`); e quando o estoque está vazio o Howler cria um cru, então
+   * entra um CORS no lugar. No celular o grafo não existe e o CORS só poderia
+   * quebrar fonte sem cabeçalho: ali não se toca em nada.
+   */
+  private garantirEstoqueComCors(): void {
+    if (SEM_GRAFO_WEB_AUDIO || this.webAudioFailed) return;
+    try {
+      const pool = (Howler as unknown as HowlerInternals)._html5AudioPool;
+      if (!Array.isArray(pool)) return;
+      for (const el of pool) {
+        if (el.crossOrigin !== 'anonymous') el.crossOrigin = 'anonymous';
+      }
+      if (pool.length === 0) {
+        const el = new Audio();
+        el.crossOrigin = 'anonymous';
+        pool.push(el);
+      }
+    } catch {
+      /* no pior caso o guarda de `connectSlotElement` deixa o elemento fora do grafo */
+    }
   }
 
   /**
