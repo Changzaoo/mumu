@@ -28,6 +28,10 @@ const sizes = {
  *
  * PAUSAR NÃO CORTA: a névoa desacelera e esmaece até assentar parada onde
  * estava. Sem movimento pedido, ela continua lá, só sem se mexer.
+ *
+ * BAIXANDO, É SUGADA: com `carregando` (o play virou a seta de download), a
+ * névoa corre para dentro do botão e o anel se contrai na borda — ver "A
+ * SUCÇÃO" em `AuraDoPlay`. O som chegou, ela volta a escorrer para fora.
  */
 function Aura({ playing, carregando }: { playing: boolean; carregando: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');
