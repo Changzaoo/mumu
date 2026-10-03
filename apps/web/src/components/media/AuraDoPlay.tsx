@@ -26,6 +26,13 @@ import { cn } from '@/lib/utils';
  * contínuos nela, e ângulo, forma e deriva do vento são ACUMULADOS — nada
  * recomeça, nada salta, nunca quebra.
  *
+ * E UM TERCEIRO, POR CIMA DOS DOIS — A SUCÇÃO: enquanto a música está sendo
+ * BAIXADA (o play virou a seta de download), a névoa é SUGADA para dentro do
+ * botão. As línguas, que normalmente escorrem para fora, passam a correr para
+ * dentro; o anel se contrai e se cola à borda; e o conjunto gira mais depressa,
+ * como água descendo pelo ralo. Chegando o som, tudo volta a escorrer para
+ * fora — também por uma "sucção" com inércia, contínua: nenhum quadro salta.
+ *
  * Custo: campo pequeno (56×56; 36×36 em aparelho fraco) ampliado com
  * suavização — névoa não tem detalhe fino, e o desfoque do CSS esconde os
  * pixels. Parada (e em aparelho fraco) roda a 30 quadros/s. O laço só roda com
@@ -114,6 +121,13 @@ const DOIS_PI = Math.PI * 2;
 const ESPIRAL = 7;
 /** Comprimento da cauda atrás do braço (rad): a névoa rarefaz depois disso. */
 const CAUDA = 2.2;
+/** A sucção pega em ~0,4 s e solta em ~0,7 s (o som chegou: a névoa volta a sair devagar). */
+const INERCIA_SUGA = 0.4;
+const INERCIA_SOLTA = 0.7;
+/** Quanto as línguas correm PARA DENTRO por segundo, sugadas (unidades da textura). */
+const VEL_SUCAO = 1.7;
+/** O giro extra do redemoinho enquanto suga: mais uma volta a cada 2,4 s. */
+const VEL_REDEMOINHO = (Math.PI * 2) / 2.4;
 
 export function AuraDoPlay({
   playing,
@@ -122,19 +136,26 @@ export function AuraDoPlay({
 }: {
   playing: boolean;
   toque: boolean;
-  /** O disco de carregamento está girando no botão: o rastro sai de cena. */
+  /** A música está sendo baixada: o rastro sai de cena e a névoa é SUGADA
+   *  para dentro do botão. */
   carregando?: boolean;
 }) {
   const semMovimento = useSemMovimento();
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const cdRef = useRef<HTMLSpanElement>(null);
   const tocandoRef = useRef(playing);
+  const carregandoRef = useRef(carregando);
   const acordarRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
     tocandoRef.current = playing;
     acordarRef.current();
   }, [playing]);
+
+  useEffect(() => {
+    carregandoRef.current = carregando;
+    acordarRef.current();
+  }, [carregando]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -226,6 +247,8 @@ export function AuraDoPlay({
     let ventoX = 0;
     let ventoY = 0;
     let viva = tocandoRef.current && !semMovimento ? 1 : 0;
+    /** Quanto a névoa está sendo SUGADA para o botão (0–1, com inércia). */
+    let sucao = carregandoRef.current && !semMovimento ? 1 : 0;
     let raf = 0;
     let ultimo = 0;
     let visivel = true;
@@ -249,12 +272,22 @@ export function AuraDoPlay({
       // rastro não guiava nada).
       const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
       velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
-      anguloCd += dt * sentido * velCd * VEL_CD;
+      // A SUCÇÃO sobe e desce com inércia, como a vivacidade: baixando, vai a
+      // 1; o som chegou, volta a 0 — e tudo o que depende dela é contínuo.
+      const alvoSucao = semMovimento ? 0 : carregandoRef.current ? 1 : 0;
+      const inerciaSucao = alvoSucao > sucao ? INERCIA_SUGA : INERCIA_SOLTA;
+      sucao += (alvoSucao - sucao) * (1 - Math.exp(-dt / inerciaSucao));
+      if (alvoSucao === 0 && sucao < 0.001) sucao = 0;
+      if (alvoSucao === 1 && sucao > 0.999) sucao = 1;
+      // Sugada, a névoa roda mais depressa — o redemoinho do ralo — por cima
+      // do giro do CD (que, baixando, está escondido; ver `data-oculto`).
+      anguloCd += dt * sentido * (velCd * VEL_CD + sucao * VEL_REDEMOINHO);
       // PRESO AO RELÓGIO DA MÚSICA. Tocando, giro, forma e chama convergem para
       // valores que são FUNÇÃO DA POSIÇÃO da faixa — a mesma em todos os
       // aparelhos (a do outro aparelho vem do relógio corrigido pelo servidor).
       // A correção é suave: nada salta, só se acerta em ~1 s.
-      if (!semMovimento && tocandoRef.current && velCd > 0.9) {
+      // Sugando não: a música ainda não anda, e o redemoinho não é dela.
+      if (!semMovimento && tocandoRef.current && velCd > 0.9 && sucao < 0.5) {
         const pos = posicaoDoQueToca(() => audioEngine.getPosition());
         if (pos !== null && Number.isFinite(pos)) {
           const puxao = 1 - Math.exp(-dt / 0.6);
@@ -275,12 +308,19 @@ export function AuraDoPlay({
       // O braço do tornado se firma com o giro; parado, a névoa se espalha.
       const forcaDoBraco = 0.35 + 0.65 * velCd;
       // A forma muda o tempo todo: depressa tocando, devagar parada — e a
-      // rajada a remexe um pouco mais.
-      t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada);
+      // rajada a remexe um pouco mais. Sugada, revira ainda mais.
+      t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada + 0.2 * sucao);
       // Tocando, as línguas saem do botão com força; parada, quase param.
-      fluxo += dt * (0.95 * viva + (0.06 + 0.1 * rajada) * parada);
-      // Tocando brilha mais; parada fica mais tênue, mas não some.
-      const presenca = 0.62 + 0.38 * viva;
+      // SUGADA, o fluxo INVERTE: `fluxo` anda para trás e as línguas correm
+      // para DENTRO do botão (a 3ª coordenada da amostra é `fora − fluxo`).
+      const escorre = 0.95 * viva + (0.06 + 0.1 * rajada) * parada;
+      fluxo += dt * (escorre * (1 - sucao) - VEL_SUCAO * sucao);
+      // Tocando brilha mais; parada fica mais tênue, mas não some. Sugada,
+      // acesa: a névoa toda se junta na borda.
+      const presenca = 0.62 + 0.38 * Math.max(viva, sucao);
+      // A BEIRA DO ANEL: solta, a névoa esgarça até a borda da caixa; sugada,
+      // o anel se CONTRAI e se cola ao botão — o que sobra fora é só fiapo.
+      const beira = 0.98 - 0.22 * sucao;
       const cosA = Math.cos(angulo);
       const senA = Math.sin(angulo);
       const [r, g, b] = cor;
@@ -288,7 +328,7 @@ export function AuraDoPlay({
         const raio = raioDe[k]!;
         // Anel: nasce na borda do botão, esgarça até a beira da caixa.
         const janela =
-          smooth(borda - 0.08, borda + 0.04, raio) * (1 - smooth(borda + 0.05, 0.98, raio));
+          smooth(borda - 0.08, borda + 0.04, raio) * (1 - smooth(borda + 0.05, beira, raio));
         const o = k * 4;
         if (janela <= 0.001) {
           px[o + 3] = 0;
@@ -314,11 +354,13 @@ export function AuraDoPlay({
         const wx = fbm(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
         const wy = fbm(ruido, sx * 0.8 + 5.2, sy * 0.8 + 1.3, sz * 0.5 + t * 0.6 + 3.1);
         const d = fbm(ruido, sx + 1.9 * wx, sy + 1.9 * wy, sz + t);
-        // Parada, a névoa se inclina para o lado para onde o vento sopra.
-        const inclina = 1 + (x * vx + y * vy) * 0.55;
+        // Parada, a névoa se inclina para o lado para onde o vento sopra
+        // (sugada, não: o puxão é para o centro, de todos os lados).
+        const inclina = 1 + (x * vx + y * vy) * 0.55 * (1 - sucao);
         // As línguas afinam conforme se afastam (a ponta da chama), mais
         // compridas tocando; o contraste abre vazios de verdade entre elas.
-        const afina = fora * (0.95 - 0.55 * viva);
+        // Sugadas, afinam depressa: o grosso da névoa já está colado ao botão.
+        const afina = fora * (0.95 - 0.55 * viva + 0.9 * sucao);
         // O TORNADO: a névoa nasce na cabeça do rastro e se enrola para fora
         // numa espiral — quanto mais longe da borda, mais atrás (ESPIRAL rad
         // por unidade de raio). `atras` é o quanto este pixel está atrás do

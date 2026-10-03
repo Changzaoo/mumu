@@ -32,6 +32,7 @@ import {
   MousePointerClick,
   Music2,
   PlayCircle,
+  ScrollText,
   Search,
   SlidersHorizontal,
   Smartphone,
@@ -50,6 +51,7 @@ import { Skeleton } from '@/components/ui/skeleton';
 import { getIdToken } from '@/lib/firebase';
 import { API_BASE_URL } from '@/lib/apiBase';
 import { computeInsights } from '@/lib/telemetry/insights';
+import { SINTOMAS, type Canal, type Linha, type ResumoDoDiario } from '@/lib/telemetry/diario';
 import { cn, formatBytes } from '@/lib/utils';
 import type {
   RecentPlay,
@@ -134,6 +136,8 @@ interface TelemetryDoc {
   };
   accountCreatedAt?: string;
   downloadsCount?: number;
+  /** O diário de bordo do aparelho: a sequência do que aconteceu (ver lib/telemetry/diario). */
+  diario?: { linhas: Linha[]; resumo: ResumoDoDiario };
   // ── agrupamento por conta (preenchido em `agruparPorConta`) ──
   /** Os aparelhos desta conta, quando ela tem mais de um. */
   aparelhos?: AparelhoDaConta[];
@@ -388,6 +392,7 @@ function categorize(t: TelemetryDoc): UserSegment {
   }
   if (t.pwaInstalled) chips.push('App instalado');
   if ((t.jsErrors ?? 0) > 0) chips.push('Com erros');
+  if ((t.diario?.resumo.sintomas ?? 0) > 0) chips.push('Sintomas no diário');
 
   // Proporção de tempo em busca/descobrir → perfil explorador.
   const pageTotal = Object.values(t.pageSeconds ?? {}).reduce((a, b) => a + b, 0);
@@ -693,7 +698,164 @@ function detalhesDaLinha(t: TelemetryDoc): string[] {
   if (t.pwaInstalled) out.push('app instalado');
   if (t.accountCreatedAt) out.push(`conta desde ${formatClock(t.accountCreatedAt).split(',')[0]}`);
   if ((t.jsErrors ?? 0) > 0) out.push(`${t.jsErrors} erros`);
+  const sintoma = t.diario?.resumo.ultimoSintoma;
+  if (sintoma) out.push(`diário: ${sintoma.e} às ${sintoma.em}`);
   return out;
+}
+
+// ── O DIÁRIO DE BORDO ───────────────────────────────────────────────
+// A sequência do que o aparelho fez (ver lib/telemetry/diario.ts): é o que
+// aponta ONDE quebrou. Sintomas (erro, silêncio, travamento, play recusado)
+// em destaque; filtro por canal para ler só o player, só a rede, etc.
+
+const CANAIS: Array<{ value: Canal; label: string }> = [
+  { value: 'player', label: 'Player' },
+  { value: 'motor', label: 'Motor' },
+  { value: 'audio', label: 'Áudio' },
+  { value: 'download', label: 'Downloads' },
+  { value: 'rede', label: 'Rede' },
+  { value: 'erro', label: 'Erros' },
+  { value: 'app', label: 'App' },
+];
+
+const COR_DO_CANAL: Record<Canal, string> = {
+  player: 'bg-accent/15 text-accent',
+  motor: 'bg-fg/8 text-fg',
+  audio: 'bg-fg/8 text-fg',
+  download: 'bg-fg/8 text-fg-muted',
+  rede: 'bg-fg/8 text-fg-muted',
+  erro: 'bg-danger/15 text-danger',
+  app: 'bg-fg/6 text-fg-subtle',
+};
+
+function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDoDiario } }) {
+  const [aberto, setAberto] = useState(false);
+  const [canal, setCanal] = useState<Canal | 'tudo' | 'sintomas'>('tudo');
+  const { linhas, resumo } = diario;
+  const visiveis = [...linhas]
+    .reverse()
+    .filter((l) =>
+      canal === 'tudo' ? true : canal === 'sintomas' ? SINTOMAS.has(l.e) : l.c === canal,
+    );
+  const sintomasTexto = Object.entries(resumo.porSintoma)
+    .sort((a, b) => b[1] - a[1])
+    .map(([e, n]) => `${n}× ${e}`)
+    .join(' · ');
+
+  return (
+    <div>
+      <SectionTitle icon={ScrollText}>Diário de bordo</SectionTitle>
+      <div
+        className={cn(
+          'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-3 py-2 text-[12px]',
+          resumo.sintomas > 0 ? 'bg-danger/10 text-danger' : 'bg-fg/5 text-fg-muted',
+        )}
+      >
+        {resumo.sintomas > 0 ? (
+          <>
+            <AlertTriangle className="size-4 shrink-0" />
+            <span>
+              {resumo.sintomas} sintoma(s): {sintomasTexto}
+              {resumo.ultimoSintoma
+                ? ` — último: ${resumo.ultimoSintoma.e} às ${resumo.ultimoSintoma.em}${resumo.ultimoSintoma.d ? ` (${resumo.ultimoSintoma.d})` : ''}`
+                : ''}
+            </span>
+          </>
+        ) : (
+          <>
+            <CheckCircle2 className="size-4 shrink-0" />
+            <span>Nenhum sintoma nas últimas {linhas.length} linhas.</span>
+          </>
+        )}
+        <button
+          type="button"
+          onClick={() => setAberto((v) => !v)}
+          className="ml-auto font-medium underline-offset-2 hover:underline"
+        >
+          {aberto ? 'Ocultar' : `Ver sequência (${linhas.length})`}
+        </button>
+      </div>
+
+      {aberto && (
+        <div className="mt-2 space-y-2">
+          <div className="flex flex-wrap gap-1">
+            {(
+              [
+                { value: 'tudo', label: 'Tudo' },
+                { value: 'sintomas', label: 'Só sintomas' },
+                ...CANAIS,
+              ] as Array<{ value: Canal | 'tudo' | 'sintomas'; label: string }>
+            ).map((c) => (
+              <button
+                key={c.value}
+                type="button"
+                onClick={() => setCanal(c.value)}
+                className={cn(
+                  'rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors',
+                  canal === c.value
+                    ? 'bg-fg text-bg'
+                    : 'bg-fg/6 text-fg-muted hover:bg-fg/10 hover:text-fg',
+                )}
+              >
+                {c.label}
+              </button>
+            ))}
+          </div>
+          {visiveis.length === 0 ? (
+            <p className="text-[12px] text-fg-subtle">Nada neste filtro.</p>
+          ) : (
+            <ol className="max-h-80 space-y-0.5 overflow-y-auto text-[12px] text-fg-muted">
+              {visiveis.map((l, i) => {
+                const sintoma = SINTOMAS.has(l.e);
+                return (
+                  <li
+                    key={`${l.ms}:${i}`}
+                    className={cn(
+                      'flex items-baseline gap-2 rounded px-1',
+                      sintoma && 'bg-danger/8',
+                    )}
+                  >
+                    <span className="w-16 shrink-0 font-mono text-[11px] tabular-nums text-fg-subtle">
+                      {l.em}
+                    </span>
+                    <span
+                      className={cn(
+                        'w-16 shrink-0 rounded-full px-1.5 text-center text-[10px] font-semibold',
+                        COR_DO_CANAL[l.c] ?? 'bg-fg/8 text-fg',
+                      )}
+                    >
+                      {l.c}
+                    </span>
+                    <span
+                      className={cn('shrink-0 font-medium', sintoma ? 'text-danger' : 'text-fg')}
+                    >
+                      {l.e}
+                    </span>
+                    <span className="min-w-0 truncate" title={l.d}>
+                      {l.d}
+                    </span>
+                    {(l.n ?? 1) > 1 && (
+                      <span className="shrink-0 rounded-full bg-fg/8 px-1.5 py-0.5 text-[10px] font-semibold text-fg">
+                        ×{l.n}
+                      </span>
+                    )}
+                    {l.oculta && (
+                      <span
+                        className="shrink-0 text-[10px] text-fg-subtle"
+                        title="A página estava oculta"
+                      >
+                        oculta
+                      </span>
+                    )}
+                  </li>
+                );
+              })}
+            </ol>
+          )}
+        </div>
+      )}
+    </div>
+  );
 }
 
 /** Sem e-mail = aparelho que nunca fez login. */
@@ -1374,6 +1536,8 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           {t.jsErrors} erro(s) de JavaScript{t.lastError ? ` — último: "${t.lastError}"` : ''}
         </div>
       )}
+
+      {t.diario && t.diario.linhas.length > 0 && <DiarioDeBordo diario={t.diario} />}
 
       {(t.recentPlays?.length ?? 0) > 0 && (
         <div>
