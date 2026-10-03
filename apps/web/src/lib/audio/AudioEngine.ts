@@ -73,6 +73,10 @@ interface Slot {
   /** Underlying media element once known (Howler node or owned element). */
   el: HTMLAudioElement | null;
   track: TrackDto | null;
+  /** A URL que este slot está tocando — é dela que o slot RENASCE (ver `renascer`). */
+  url: string | null;
+  /** Já renasceu nesta carga: o último recurso roda uma vez, nunca em laço. */
+  renasceu: boolean;
   loaded: boolean;
   fade: GainNode | null;
   trim: GainNode | null;
@@ -208,9 +212,15 @@ const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 /** Teto para o slot de saída seguir vivo (mudo) esperando o novo pegar. */
 const RETIRE_MAX_MS = 10_000;
 const RETIRE_POLL_MS = 200;
+/** Sinal zerado no analisador por tanto, com o tempo andando: o elemento renasce. */
+const SILENCIO_ATE_RENASCER_MS = 6_000;
+/** Abaixo disto (desvio de 128 no domínio do tempo) é silêncio digital. */
+const LIMIAR_DE_SINAL = 2;
 
 function createSlot(): Slot {
   return {
+    url: null,
+    renasceu: false,
     source: null,
     el: null,
     track: null,
@@ -909,6 +919,7 @@ export class AudioEngine {
 
   private prepareSlot(slot: Slot, track: TrackDto, url: string): void {
     slot.track = track;
+    slot.url = url;
     slot.loaded = false;
     slot.falhouAoCarregar = false;
     if (isHlsUrl(url)) void this.prepareElementSlot(slot, track, url);
@@ -1362,6 +1373,8 @@ export class AudioEngine {
     slot.source = null;
     slot.el = null;
     slot.track = null;
+    slot.url = null;
+    slot.renasceu = false;
     slot.loaded = false;
     slot.falhouAoCarregar = false;
     slot.inicioAoCarregar = null;
@@ -1626,6 +1639,8 @@ export class AudioEngine {
         el.volume = 1;
         corrigiu('volume', `el ${visto.toFixed(2)}`);
       }
+      // A cadeia inteira confere — e o ouvido? O último recurso mede o sinal.
+      this.vigiarSilencio(slot, pos, agora, corrigiu);
     }
     // Sem contexto (celular) OU slot fora do grafo: o volume é o do elemento.
     if ((!ctx || !slot.mediaSource) && !this.rampasDeVolume.has(slot)) {
@@ -1636,6 +1651,99 @@ export class AudioEngine {
         corrigiu('volume', `el ${visto.toFixed(2)}`);
       }
     }
+  }
+
+  private silencioDesde = 0;
+  private silencioSeq = -1;
+  private amostraDeSinal: Uint8Array<ArrayBuffer> | null = null;
+
+  /**
+   * O ÚLTIMO RECURSO: TUDO CONFERE E MESMO ASSIM NÃO SAI SOM.
+   *
+   * Contexto rodando, ganhos em 1, elemento andando — e o analisador no fim da
+   * cadeia lê zero por `SILENCIO_ATE_RENASCER_MS`. É o que acontece com um
+   * elemento que o navegador calou por dentro (mídia de outra origem sem CORS
+   * capturada pelo grafo; elemento preso a um contexto antigo): nenhum ganho
+   * está errado, e nada que se escreva nos nós devolve o som. A única saída é
+   * um elemento NOVO: o slot renasce com a mesma faixa, na mesma posição.
+   *
+   * Uma vez por carga (`renasceu`): se o novo também sair mudo, a causa é outra
+   * e um laço de renascimentos só faria a música gaguejar. Não mede com o
+   * volume do usuário em zero, nem no meio de uma rampa (o fade subindo é zero
+   * legítimo), nem sem grafo — sem analisador não há o que medir.
+   */
+  private vigiarSilencio(
+    slot: Slot,
+    pos: number,
+    agora: number,
+    corrigiu: (motivo: MotivoDeCorrecao, det?: string) => void,
+  ): void {
+    const analisador = this._analyser;
+    if (!analisador || !slot.mediaSource) return;
+    if (typeof analisador.getByteTimeDomainData !== 'function') return;
+    if (this.silencioSeq !== slot.seq) {
+      this.silencioSeq = slot.seq;
+      this.silencioDesde = 0;
+    }
+    if (this.effectiveVolume() < 0.05 || (slot.fadeAte ?? 0) > agora || agora < this.masterAte) {
+      this.silencioDesde = 0;
+      return;
+    }
+    const n = analisador.fftSize || 2048;
+    if (!this.amostraDeSinal || this.amostraDeSinal.length !== n) {
+      this.amostraDeSinal = new Uint8Array(new ArrayBuffer(n));
+    }
+    analisador.getByteTimeDomainData(this.amostraDeSinal);
+    let nivel = 0;
+    for (let i = 0; i < n; i++) {
+      const desvio = Math.abs((this.amostraDeSinal[i] ?? 128) - 128);
+      if (desvio > nivel) nivel = desvio;
+    }
+    if (nivel >= LIMIAR_DE_SINAL) {
+      this.silencioDesde = 0;
+      return;
+    }
+    if (!this.silencioDesde) {
+      this.silencioDesde = agora;
+      return;
+    }
+    if (agora - this.silencioDesde < SILENCIO_ATE_RENASCER_MS || slot.renasceu) return;
+    corrigiu('silencio', `nível ${nivel} por ${Math.round((agora - this.silencioDesde) / 1000)}s`);
+    this.renascer(slot, pos);
+  }
+
+  /** O slot ativo recomeça num elemento novo, com a mesma faixa, no mesmo ponto. */
+  private renascer(slot: Slot, pos: number): void {
+    const track = slot.track;
+    const url = slot.url;
+    if (!track || !url) return;
+    this.silencioDesde = 0;
+    const mudo = this.elementoDeSaida(slot);
+    // `resetSlot` devolve o elemento mudo ao estoque do Howler — que tira sempre
+    // do FIM, ou seja, pegaria o MESMO elemento de volta (medido: o slot
+    // renascia no elemento que acabara de calar). Ele sai do estoque, e um
+    // elemento novo, com CORS, entra no fim: é esse que o próximo Howl pega.
+    this.resetSlot(slot);
+    try {
+      const pool = (Howler as unknown as HowlerInternals)._html5AudioPool;
+      if (Array.isArray(pool)) {
+        const i = mudo ? pool.indexOf(mudo) : -1;
+        if (i >= 0) pool.splice(i, 1);
+        const novo = new Audio() as HTMLAudioElement & { _unlocked?: boolean };
+        novo.crossOrigin = 'anonymous';
+        novo._unlocked = true;
+        pool.push(novo);
+      }
+    } catch {
+      /* sem estoque: o Howler cria um elemento, e `garantirEstoqueComCors` o marca */
+    }
+    // O 'load' do novo Howl posiciona e toca (ver `inicioAoCarregar` em `prepareHowlSlot`).
+    this.prepareSlot(slot, track, url);
+    slot.renasceu = true;
+    slot.inicioAoCarregar = Math.max(0, pos);
+    this.setFade(slot, 1);
+    this.applyRate(slot);
+    this.applyTrim(slot);
   }
 
   private syncTicker(): void {

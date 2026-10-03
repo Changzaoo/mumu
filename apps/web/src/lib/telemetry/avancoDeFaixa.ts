@@ -146,7 +146,7 @@ export function lerAvancos(): Avanco[] {
 // esconde a causa. Cada correção vira uma linha aqui, para a próxima ocorrência
 // deixar rastro (mesmo padrão do diário de avanços, e vai junto no `aoVivo`).
 
-export type MotivoDeCorrecao = 'contexto' | 'ganho' | 'mudo' | 'volume';
+export type MotivoDeCorrecao = 'contexto' | 'ganho' | 'mudo' | 'volume' | 'silencio';
 
 export interface CorrecaoDeSaida {
   em: string;
