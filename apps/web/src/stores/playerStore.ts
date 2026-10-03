@@ -956,7 +956,14 @@ function failCurrentTrack(message: string): void {
     retentativaTimer = setTimeout(() => {
       retentativaTimer = null;
       const agora = usePlayerStore.getState();
-      if (agora.currentTrack?.id !== track.id || !querTocar) return;
+      if (agora.currentTrack?.id !== track.id) return;
+      if (!querTocar) {
+        // Pausou durante a espera: não há mais nada a tentar, mas o spinner e o
+        // aviso ("tentando de novo…") que esta espera ligou não têm quem os
+        // desligue — ficavam girando num player pausado.
+        usePlayerStore.setState({ isBuffering: false, carga: null });
+        return;
+      }
       // Recarregar a mesma posição é coisa da fila, não da pessoa: não viaja
       // para outro aparelho (ver `avancoAutomatico`).
       avancoAutomatico = true;
@@ -1173,6 +1180,11 @@ function avisarBloqueio(): void {
 
 function pararComErro(message: string): void {
   querTocar = false; // fim da linha: uma carga atrasada não pode ressuscitar o som
+  // A store já trocou de faixa e o motor, que só recebe a nova depois de
+  // resolver a fonte, pode ainda estar TOCANDO a anterior. Desistir sem pausá-lo
+  // deixava `isPlaying: false` com música saindo — e, como o 'timeupdate' da
+  // faixa velha é ignorado, nada na tela acompanhava o que se ouvia.
+  audioEngine.pause();
   usePlayerStore.setState({ isPlaying: false, isBuffering: false, carga: null });
   void import('sonner').then(({ toast }) => toast.error(message));
 }
@@ -2729,6 +2741,12 @@ export function initPlayerEngine(): void {
             buffered: 0,
             duration: segundosConhecidos(track),
           });
+          // TODO CAMINHO QUE CARREGA ARMA O WATCHDOG. Esta troca não passa por
+          // `loadIndex`; o 'loaded' que o motor emite ao promover a pré-carga sai
+          // ANTES do `setState` acima (a faixa da store ainda é a velha) e arma o
+          // watchdog para a faixa errada. Sem isto, uma fonte que pendura sem
+          // erro nenhum deixava a mistura terminar e o player mudo para sempre.
+          armLoadWatchdog(track.id, initialWatchdogMs(track.id));
           crossfadeTriggered = false;
         }
       }
@@ -2848,6 +2866,9 @@ export function initPlayerEngine(): void {
       duration: segundosConhecidos(next),
       carga: { fase: 'carregando', desde: Date.now() },
     });
+    // Mesmo motivo do crossfade: a troca antecipada é um caminho de carga e
+    // precisa da rede de segurança — a faixa nova pode pendurar sem emitir nada.
+    armLoadWatchdog(next.id, initialWatchdogMs(next.id));
   };
 
   /**
