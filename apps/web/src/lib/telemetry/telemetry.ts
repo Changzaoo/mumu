@@ -34,6 +34,7 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
 import { coletarAoVivo, instalarAoVivo } from './aoVivo';
+import { anotar, coletarDiario, instalarConsoleDoDiario } from './diario';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { API_BASE_URL } from '@/lib/apiBase';
 
@@ -98,6 +99,7 @@ function pageKey(pathname: string): string {
  *  linha do tempo do começo da sessão ("o que faz ao abrir o app"). */
 export function recordNavigation(pathname: string): void {
   currentPage = pageKey(pathname);
+  anotar('app', 'rota', pathname);
   if (sessionActions.length < 14) {
     sessionActions.push({
       atMs: sessionStartMs ? Date.now() - sessionStartMs : 0,
@@ -486,6 +488,8 @@ function snapshot(): Record<string, unknown> {
     ...(createdAt ? { accountCreatedAt: createdAt } : {}),
     ...(downloads !== null ? { downloadsCount: downloads } : {}),
     aoVivo: coletarAoVivo(),
+    // A sequência do que aconteceu (ver `diario.ts`): é o que aponta ONDE quebrou.
+    diario: coletarDiario(),
     ...stats,
   };
 }
@@ -579,6 +583,11 @@ function start(user: User | null): void {
   probeBattery();
   probeDeviceModel();
   instalarAoVivo(); // idempotente — memória, erros, latência de play, aba morta
+  // O DIÁRIO DE BORDO: as sondas ouvem store, motor, saída de som, rede e erros.
+  // Carregadas à parte (puxam o motor de áudio) e sem derrubar a telemetria se
+  // falharem — diagnóstico nunca atrapalha o uso.
+  instalarConsoleDoDiario();
+  void import('./diarioSondas').then((m) => m.instalarSondasDoDiario()).catch(() => undefined);
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);

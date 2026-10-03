@@ -18,6 +18,8 @@
  * iria junto) e enviado no `aoVivo` da telemetria. Pequeno de propósito.
  */
 
+import { anotar } from './diario';
+
 export type ViaDeAvanco = 'ended' | 'relogioDeFim' | 'trocaAntecipada' | 'fimSintetico';
 
 export type Desfecho = 'tocou' | 'mudo' | 'recusado' | 'erro';
@@ -84,6 +86,7 @@ export function anotarAvanco(
   if (diario.length > MAX) diario = diario.slice(-MAX);
   pendente = { indice: diario.length - 1, faixaId: para?.id ?? null, desde: Date.now() };
   gravar();
+  anotar('motor', 'avanco', `${via}: ${curto(de?.title) ?? '?'} → ${curto(para?.title) ?? '?'}`);
 
   if (prazo !== null) clearTimeout(prazo);
   // Temporizador único: em segundo plano ele pode atrasar — e tudo bem, o que
@@ -94,6 +97,11 @@ export function anotarAvanco(
     if (linha && !linha.desfecho) {
       linha.desfecho = 'mudo';
       gravar();
+      anotar(
+        'motor',
+        'mudo',
+        `sem som ${PRAZO_MUDO_MS / 1000}s depois do avanço para ${linha.para ?? '?'}`,
+      );
     }
   }, PRAZO_MUDO_MS);
 }
@@ -181,6 +189,11 @@ export function anotarCorrecaoDeSaida(
     ...(det ? { det: det.slice(0, 60) } : {}),
   });
   if (correcoes.length > MAX_CORRECOES) correcoes = correcoes.slice(-MAX_CORRECOES);
+  anotar(
+    'audio',
+    'correcao',
+    `${motivo}${det ? ` (${det})` : ''} · ${curto(faixa) ?? '?'} em ${Math.round(pos)}s`,
+  );
   try {
     localStorage.setItem(CHAVE_CORRECOES, JSON.stringify(correcoes));
   } catch {
