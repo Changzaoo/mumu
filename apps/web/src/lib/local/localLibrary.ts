@@ -514,7 +514,9 @@ async function gravarRegistroNoDisco(
  * no disco entra.
  */
 async function carregarRegistro(): Promise<void> {
-  const doDisco = await lerRegistroDoDisco();
+  const lido = await lerRegistroDoDisco();
+  // Entrada quebrada fica no disco até a próxima regravação; na memória, nunca.
+  const doDisco = lido ? sanearRegistro(lido) : lido;
   const emMemoria = cache ?? [];
 
   if (doDisco) {
@@ -565,6 +567,21 @@ async function carregarRegistro(): Promise<void> {
   })();
 }
 
+/**
+ * O REGISTRO QUE JÁ ESTÁ NO APARELHO também passa pela porta: uma entrada
+ * quebrada gravada por uma versão anterior (acervo sem validação) continuaria
+ * derrubando a vista a cada abertura, mesmo com o servidor já limpo.
+ */
+function sanearRegistro(entradas: unknown): LibraryEntry[] {
+  if (!Array.isArray(entradas)) return [];
+  const saida: LibraryEntry[] = [];
+  for (const bruta of entradas) {
+    const e = sanearEntradaDoAcervo(bruta);
+    if (e) saida.push(e);
+  }
+  return saida;
+}
+
 function read(): LibraryEntry[] {
   if (cache) return cache;
   try {
@@ -572,7 +589,7 @@ function read(): LibraryEntry[] {
     // ainda está aqui. Depois da primeira hidratação esta chave nem existe.
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    cache = Array.isArray(parsed) ? (parsed as LibraryEntry[]) : [];
+    cache = sanearRegistro(parsed);
   } catch {
     cache = [];
   }
@@ -1285,10 +1302,43 @@ function temComoTocar(e: LibraryEntry, mortas: Map<string, string>): boolean {
   return mortas.get(e.track.id) !== fonte;
 }
 
+/**
+ * O ACERVO CHEGA SEM VALIDAÇÃO — e uma entrada quebrada derrubava a tela.
+ *
+ * O servidor guarda a entrada como o cliente a publicou (`Record<string,
+ * unknown>`, "trafega inteira, sem tradução"), então nada garante que toda
+ * faixa tenha `id`, `title` e `artists` do tipo certo. Bastava UMA sem título
+ * para a busca (e qualquer tela que normalize nomes) cair em "Algo deu errado".
+ * Aqui é a porta: entrada sem identidade ou sem título fica de fora; artistas
+ * viram sempre uma lista de nomes de verdade; álbum sem título vira nulo.
+ */
+export function sanearEntradaDoAcervo(bruta: unknown): LibraryEntry | null {
+  if (!bruta || typeof bruta !== 'object') return null;
+  const e = bruta as LibraryEntry;
+  const t = e.track as Partial<TrackDto> | undefined;
+  if (!t || typeof t !== 'object') return null;
+  if (typeof t.id !== 'string' || !t.id || typeof t.title !== 'string' || !t.title.trim()) {
+    return null;
+  }
+  const artists = (Array.isArray(t.artists) ? t.artists : []).filter(
+    (a): a is TrackDto['artists'][number] =>
+      !!a && typeof a === 'object' && typeof a.name === 'string' && a.name.trim() !== '',
+  );
+  const album =
+    t.album && typeof t.album === 'object' && typeof t.album.title === 'string' ? t.album : null;
+  const mudou = artists.length !== (t.artists?.length ?? -1) || album !== (t.album ?? null);
+  return mudou ? { ...e, track: { ...(t as TrackDto), artists, album } } : e;
+}
+
 export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
   const mortas = new Map<string, string>();
   for (const e of read()) if (e.remoteMorta) mortas.set(e.track.id, e.remoteMorta);
-  const entradas = todasAsEntradas.filter((e) => temComoTocar(e, mortas));
+  const saneadas: LibraryEntry[] = [];
+  for (const bruta of todasAsEntradas) {
+    const e = sanearEntradaDoAcervo(bruta);
+    if (e) saneadas.push(e);
+  }
+  const entradas = saneadas.filter((e) => temComoTocar(e, mortas));
   const doCatalogo = new Map(entradas.map((e) => [e.track.id, e]));
   const atuais = read();
   const idsLocais = new Set(atuais.map((e) => e.track.id));

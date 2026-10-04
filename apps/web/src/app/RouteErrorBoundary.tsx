@@ -1,5 +1,6 @@
-import { Component, type ErrorInfo, type ReactNode } from 'react';
+import { Component, useEffect, type ErrorInfo, type ReactNode } from 'react';
 import { Link, isRouteErrorResponse, useRouteError } from 'react-router';
+import { anotar } from '@/lib/telemetry/diario';
 import { RefreshCw, TriangleAlert } from 'lucide-react';
 import { Button, buttonVariants } from '@/components/ui/button';
 
@@ -38,6 +39,16 @@ function ErrorCard({
 /** Route-level errorElement (data router errors: loaders, 404 responses…). */
 export function RouteErrorBoundary() {
   const error = useRouteError();
+  // "Alguma coisa rolou": a tela que caiu, com a rota e a mensagem, no diário
+  // de bordo — antes a queda só ia para o console de quem não estava olhando.
+  useEffect(() => {
+    const texto = isRouteErrorResponse(error)
+      ? `HTTP ${error.status} ${error.statusText}`
+      : error instanceof Error
+        ? error.message
+        : String(error);
+    anotar('erro', 'tela', `${location.pathname}: ${texto}`);
+  }, [error]);
   if (isRouteErrorResponse(error)) {
     return (
       <ErrorCard
@@ -74,8 +85,11 @@ export class ErrorBoundary extends Component<ErrorBoundaryProps, ErrorBoundarySt
   }
 
   override componentDidCatch(error: Error, info: ErrorInfo): void {
-    // Surface in dev tooling; production logging hooks in later.
     console.error('[radinho.online] page crashed:', error, info.componentStack);
+    // A página caiu: rota, mensagem e o componente de cima da pilha, no diário
+    // de bordo — é o que aponta ONDE em vez de só "Algo deu errado".
+    const topo = /\n\s*(?:at|in) (\w+)/.exec(info.componentStack ?? '')?.[1];
+    anotar('erro', 'tela', `${location.pathname}: ${error.message}${topo ? ` em <${topo}>` : ''}`);
   }
 
   override render(): ReactNode {

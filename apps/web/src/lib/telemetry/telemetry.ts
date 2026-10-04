@@ -97,9 +97,14 @@ function pageKey(pathname: string): string {
 
 /** Chamado pelo AppShell a cada navegação — alimenta tempo-por-página e a
  *  linha do tempo do começo da sessão ("o que faz ao abrir o app"). */
+let ultimaRotaAnotada = '';
 export function recordNavigation(pathname: string): void {
   currentPage = pageKey(pathname);
-  anotar('app', 'rota', pathname);
+  // Só o caminho: na busca cada tecla troca o `?q=` e isso não é navegação.
+  if (pathname !== ultimaRotaAnotada) {
+    ultimaRotaAnotada = pathname;
+    anotar('app', 'rota', pathname);
+  }
   if (sessionActions.length < 14) {
     sessionActions.push({
       atMs: sessionStartMs ? Date.now() - sessionStartMs : 0,

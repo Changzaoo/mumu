@@ -26,7 +26,13 @@ export function formatTime(seconds: number): string {
 
 /** "Artist A, Artist B" from a track's artist list. */
 export function trackArtistNames(track: Pick<TrackDto, 'artists'>): string {
-  return track.artists.map((a) => a.name).join(', ');
+  // Entrada do acervo sem validação pode vir sem `artists` ou com nome nulo:
+  // uma linha assim não pode derrubar a tela inteira.
+  const artistas = Array.isArray(track.artists) ? track.artists : [];
+  return artistas
+    .map((a) => (typeof a?.name === 'string' ? a.name : ''))
+    .filter(Boolean)
+    .join(', ');
 }
 
 /** Clamp helper used across player math. */

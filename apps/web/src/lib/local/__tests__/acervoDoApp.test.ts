@@ -105,6 +105,31 @@ describe('acervo do app na biblioteca local', () => {
     expect(atual?.origem).toBe('catalogo');
   });
 
+  it('entrada quebrada do acervo (sem título, artista sem nome) não entra como veio', async () => {
+    const lib = await montar([]);
+    const semTitulo = entrada('local:sem-titulo');
+    semTitulo.track = { ...semTitulo.track, title: undefined as unknown as string };
+    const semId = entrada('x');
+    semId.track = { ...semId.track, id: '' };
+    const artistaSemNome = entrada('local:artista');
+    artistaSemNome.track = {
+      ...artistaSemNome.track,
+      artists: [
+        { id: 'a', name: null as unknown as string, slug: '', imageUrl: null },
+        { id: 'b', name: 'Nome Certo', slug: '', imageUrl: null },
+      ],
+    };
+
+    lib.aplicarCatalogo([semTitulo, semId, artistaSemNome, entrada('local:boa')]);
+
+    const ids = lib.list().map((e) => e.track.id);
+    expect(ids).toEqual(expect.arrayContaining(['local:artista', 'local:boa']));
+    expect(ids).not.toContain('local:sem-titulo');
+    expect(ids).not.toContain('');
+    const artista = lib.list().find((e) => e.track.id === 'local:artista');
+    expect(artista?.track.artists.map((a) => a.name)).toEqual(['Nome Certo']);
+  });
+
   it('snapshot repetido não reescreve a biblioteca', async () => {
     const lib = await montar([entrada('local:a', { origem: 'catalogo' })]);
 

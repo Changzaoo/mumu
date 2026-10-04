@@ -184,6 +184,9 @@ function desmontar(raw: string): Desmontado {
 
 const DESMONTADOS = new Map<string, Desmontado>();
 function desmontado(raw: string): Desmontado {
+  // Título que não é texto (entrada quebrada do acervo) não pode derrubar a
+  // vista inteira da biblioteca: vale como vazio.
+  if (typeof raw !== 'string') raw = '';
   let d = DESMONTADOS.get(raw);
   if (!d) {
     d = desmontar(raw);

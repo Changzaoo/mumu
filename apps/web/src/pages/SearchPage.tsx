@@ -34,8 +34,44 @@ const TABS: Array<{ value: Tab; label: string }> = [
 ];
 
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
-function norm(value: string): string {
-  return value.toLowerCase().normalize('NFD').replace(DIACRITICS, '').trim();
+/**
+ * Nunca lança: o acervo chega do servidor sem validação (`Record<string,
+ * unknown>` do outro lado), e UMA entrada sem título ou com artista sem nome
+ * derrubava a página inteira em "Algo deu errado" — a busca "não pesquisava
+ * nada". Campo que não é texto vale vazio.
+ */
+function norm(value: unknown): string {
+  return typeof value === 'string'
+    ? value.toLowerCase().normalize('NFD').replace(DIACRITICS, '').trim()
+    : '';
+}
+
+/** Uma faixa com o texto já normalizado — calculado UMA vez por biblioteca. */
+interface FaixaIndexada {
+  track: TrackDto;
+  titulo: string;
+  artistas: string;
+}
+
+/**
+ * O ÍNDICE DA BUSCA: normalizar 5 mil títulos e artistas (NFD + regex) a cada
+ * tecla custava dezenas de milissegundos num celular de entrada — era parte do
+ * "travando ao pesquisar". Agora a normalização acontece uma vez por mudança
+ * da biblioteca; cada tecla só faz `includes` em texto pronto.
+ */
+function indexar(entries: readonly localLibrary.LibraryEntry[]): FaixaIndexada[] {
+  const saida: FaixaIndexada[] = [];
+  for (const e of entries) {
+    const track = e?.track;
+    if (!track || typeof track.id !== 'string') continue;
+    const artistas = Array.isArray(track.artists) ? track.artists : [];
+    saida.push({
+      track,
+      titulo: norm(track.title),
+      artistas: artistas.map((a) => norm(a?.name)).join('\u0000'),
+    });
+  }
+  return saida;
 }
 
 const EMPTY_ENTRIES: localLibrary.LibraryEntry[] = [];
@@ -137,13 +173,17 @@ export default function SearchPage() {
   };
 
   // ── your OWN library, searched locally (instant) ──
+  const indice = useMemo(() => indexar(entries), [entries]);
   const local = useMemo(() => {
     const nq = norm(query);
     if (!nq) return { tracks: [], artists: [], albums: [] };
-    const tracks = entries
-      .map((e) => e.track)
-      .filter((t) => norm(t.title).includes(nq) || t.artists.some((a) => norm(a.name).includes(nq)))
-      .slice(0, 10);
+    const tracks: TrackDto[] = [];
+    for (const f of indice) {
+      if (f.titulo.includes(nq) || f.artistas.includes(nq)) {
+        tracks.push(f.track);
+        if (tracks.length >= 10) break;
+      }
+    }
     const artists = localLibrary
       .artists()
       .filter((a) => norm(a.name).includes(nq))
@@ -153,7 +193,7 @@ export default function SearchPage() {
       .filter((al) => norm(al.title).includes(nq) || norm(al.artist).includes(nq))
       .slice(0, 10);
     return { tracks, artists, albums };
-  }, [entries, query]);
+  }, [indice, query]);
 
   // ── busca por TRECHO DE LETRA (digitado ou falado no microfone) ──
   // Assíncrona + fatiada (nunca trava) e cancelável: cada tecla aborta a
@@ -167,7 +207,7 @@ export default function SearchPage() {
     const controller = new AbortController();
     void searchByLyrics(query, 8, controller.signal).then((matches) => {
       if (controller.signal.aborted) return;
-      const byId = new Map(entries.map((e) => [e.track.id, e.track]));
+      const byId = new Map(indice.map((f) => [f.track.id, f.track]));
       setLyricMatches(
         matches.flatMap((m) => {
           const track = byId.get(m.trackId);
@@ -176,12 +216,12 @@ export default function SearchPage() {
       );
     });
     return () => controller.abort();
-  }, [query, entries]);
+  }, [query, indice]);
 
   // Indexador em segundo plano: completa o cache de letras da biblioteca aos
   // poucos (15 por visita, pausado) — cada visita torna mais faixas acháveis.
   useEffect(() => {
-    void indexLyricsInBackground(entries.map((e) => e.track));
+    void indexLyricsInBackground(indexar(entries).map((f) => f.track));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por visita
   }, []);
 
