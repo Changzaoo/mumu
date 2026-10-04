@@ -15,6 +15,7 @@ import { PageSkeleton, type PageSkeletonProps } from '@/components/media/PageSke
 import { AppShell } from '@/app/layout/AppShell';
 import { AuthorizedRoute } from '@/components/AuthorizedRoute';
 import { ErrorBoundary, RouteErrorBoundary } from '@/app/RouteErrorBoundary';
+import { modoLeve, qualidadeDaRede } from '@/lib/perf/dispositivo';
 import { RootLayout } from '@/app/RootLayout';
 
 const RetornoDoSpotify = lazy(() => import('@/components/media/RetornoDoSpotify'));
@@ -139,7 +140,16 @@ if (typeof window !== 'undefined') {
     else setTimeout(proximoLote, 400);
   };
   // 1,5s de folga: tempo de a primeira tela pintar e a biblioteca aparecer.
-  setTimeout(proximoLote, 1_500);
+  //
+  // NO APARELHO FRACO (e com economia de dados pedida), NÃO. Aquecer é
+  // baixar E AVALIAR ~40 chunks de página — parse e compilação na thread
+  // principal, "ociosa" ou não — para uma navegação que talvez nunca venha. No
+  // celular de entrada esse custo é a tela engasgando logo depois de abrir; a
+  // navegação por intenção (acima) continua valendo e cobre o clique real.
+  setTimeout(() => {
+    if (modoLeve() || qualidadeDaRede() === 'lenta') return;
+    proximoLote();
+  }, 1_500);
 }
 
 function Placeholder() {

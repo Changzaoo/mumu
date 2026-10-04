@@ -151,16 +151,30 @@ export function SectionCarousel({
   };
 
   useEffect(() => {
-    medir();
-    updateArrows();
+    // A MEDIÇÃO INICIAL VAI PARA O PRÓXIMO QUADRO, não para o commit.
+    //
+    // Ler `scrollWidth`/`offsetLeft` aqui, logo depois do commit, força um
+    // layout síncrono — e cada prateleira da Home fazia o seu, intercalado com
+    // o `setState` da anterior: dez layouts da página inteira em vez de um
+    // ("layout thrashing"; medido no perfil de CPU do boot, a prateleira era o
+    // maior custo próprio de componente). No `requestAnimationFrame` todas
+    // leem no mesmo quadro, o primeiro paga o layout e as outras reaproveitam;
+    // os `setState` saem juntos, num render só.
+    const quadro = requestAnimationFrame(() => {
+      medir();
+      updateArrows();
+    });
     const el = scrollerRef.current;
-    if (!el) return;
+    if (!el) return () => cancelAnimationFrame(quadro);
     const observer = new ResizeObserver(() => {
       medir();
       updateArrows();
     });
     observer.observe(el);
-    return () => observer.disconnect();
+    return () => {
+      cancelAnimationFrame(quadro);
+      observer.disconnect();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [medir, children]);
 

@@ -104,6 +104,13 @@ function caminho(p: readonly Ponto[]): string {
   return `${d}Z`;
 }
 
+/** O `d` de cada estado, pronto: montar um botão não refaz 48 `toFixed`. */
+const CAMINHOS: Record<EstadoDoPlay, readonly [string, string]> = {
+  play: [caminho(FORMAS.play[0]), caminho(FORMAS.play[1])],
+  pausa: [caminho(FORMAS.pausa[0]), caminho(FORMAS.pausa[1])],
+  carregando: [caminho(FORMAS.carregando[0]), caminho(FORMAS.carregando[1])],
+};
+
 const suave = (t: number) => (t < 0.5 ? 4 * t * t * t : 1 - Math.pow(-2 * t + 2, 3) / 2);
 
 export function IconeDoPlay({ estado, className }: { estado: EstadoDoPlay; className?: string }) {
@@ -122,12 +129,17 @@ export function IconeDoPlay({ estado, className }: { estado: EstadoDoPlay; class
       d.setAttribute('d', caminho(f[1]));
       atual.current = f;
     };
-    if (semMovimento) {
+    // Parte de onde a figura ESTÁ — trocar no meio de uma transição não salta.
+    const de = atual.current;
+    // JÁ ESTÁ LÁ: nada a animar. Sem esta saída, CADA botão de play montado
+    // (dezenas de cards na Home) rodava 240 ms de quadros reescrevendo o mesmo
+    // `d` — medido no perfil de CPU do boot: `caminho` + `setAttribute` eram as
+    // duas maiores fatias de JavaScript do app, para desenhar o que já estava
+    // desenhado.
+    if (semMovimento || de === alvo) {
       pintar(alvo);
       return;
     }
-    // Parte de onde a figura ESTÁ — trocar no meio de uma transição não salta.
-    const de = atual.current;
     const inicio = performance.now();
     let raf = 0;
     const quadro = (agora: number) => {
@@ -142,7 +154,7 @@ export function IconeDoPlay({ estado, className }: { estado: EstadoDoPlay; class
     return () => cancelAnimationFrame(raf);
   }, [estado, semMovimento]);
 
-  const inicial = FORMAS[estado];
+  const inicial = CAMINHOS[estado];
   return (
     <svg
       viewBox="0 0 24 24"
@@ -162,8 +174,8 @@ export function IconeDoPlay({ estado, className }: { estado: EstadoDoPlay; class
             'animate-[seta-desce_1.1s_ease-in-out_infinite]',
         )}
       >
-        <path ref={esquerda} d={caminho(inicial[0])} />
-        <path ref={direita} d={caminho(inicial[1])} />
+        <path ref={esquerda} d={inicial[0]} />
+        <path ref={direita} d={inicial[1]} />
       </g>
     </svg>
   );

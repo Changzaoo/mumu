@@ -104,6 +104,16 @@ function fbm(ruido: (x: number, y: number, z: number) => number, x: number, y: n
   );
 }
 
+/**
+ * Duas oitavas, para a DISTORÇÃO do domínio: o que enrola as línguas é a forma
+ * grande; a terceira oitava ali virava ruído que o desfoque do CSS apaga. Por
+ * pixel são 7 amostras de ruído em vez de 9 — e a aura roda em TODO quadro em
+ * que há música.
+ */
+function fbm2(ruido: (x: number, y: number, z: number) => number, x: number, y: number, z: number) {
+  return ruido(x, y, z) * 0.66 + ruido(x * 2.03 + 17.1, y * 2.03 - 9.3, z * 1.7) * 0.34;
+}
+
 const smooth = (a: number, b: number, x: number) => {
   const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
   return t * t * (3 - 2 * t);
@@ -163,7 +173,9 @@ export function AuraDoPlay({
     if (!canvas || !ctx) return;
 
     const leve = modoLeve();
-    const N = leve ? 36 : 56;
+    // 48 (32 no aparelho fraco): a névoa não tem detalhe fino, o desfoque do
+    // CSS esconde os pixels, e são 27% menos pixels por quadro que os 56 de antes.
+    const N = leve ? 32 : 48;
     canvas.width = N;
     canvas.height = N;
     const imagem = ctx.createImageData(N, N);
@@ -351,8 +363,8 @@ export function AuraDoPlay({
         const sy = sa * 2.3 + oy - ventoY;
         const sz = fora * 4.4 - fluxo;
         // Distorção de domínio: é o que enrola e rasga as línguas.
-        const wx = fbm(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
-        const wy = fbm(ruido, sx * 0.8 + 5.2, sy * 0.8 + 1.3, sz * 0.5 + t * 0.6 + 3.1);
+        const wx = fbm2(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
+        const wy = fbm2(ruido, sx * 0.8 + 5.2, sy * 0.8 + 1.3, sz * 0.5 + t * 0.6 + 3.1);
         const d = fbm(ruido, sx + 1.9 * wx, sy + 1.9 * wy, sz + t);
         // Parada, a névoa se inclina para o lado para onde o vento sopra
         // (sugada, não: o puxão é para o centro, de todos os lados).
@@ -386,9 +398,12 @@ export function AuraDoPlay({
     const quadro = (agora: number) => {
       raf = 0;
       if (!visivel || document.hidden) return;
-      // Parada, o vento é lento: 30 quadros bastam (e poupam bateria).
-      const intervalo = leve || viva < 0.05 ? 32 : 0;
-      if (intervalo && agora - ultimo < intervalo) {
+      // 30 QUADROS POR SEGUNDO, SEMPRE. Névoa desfocada que gira uma volta a
+      // cada 1,8 s não ganha nada com 60 — e a 60 ela custava 27% de um núcleo
+      // no computador (medido com o perfil de CPU), que num celular de entrada
+      // é a interface inteira engasgando enquanto há música.
+      const intervalo = 32;
+      if (agora - ultimo < intervalo) {
         raf = requestAnimationFrame(quadro);
         return;
       }
