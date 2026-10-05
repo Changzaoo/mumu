@@ -95,6 +95,9 @@ export default defineConfig({
           // O botão "Baixar" navega para o APK: sem isto o worker responde com
           // o index.html e o Android baixa uma página no lugar do app.
           /^\/radinho\.apk$/,
+          // Página de login do Firebase servida pelo nosso domínio (vercel.json):
+          // é do Firebase, não do app — o worker não pode responder com o index.
+          /^\/__\//,
         ],
         runtimeCaching: [
           {

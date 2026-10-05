@@ -27,9 +27,33 @@ import type { Auth, User, UserCredential } from 'firebase/auth';
 import type { FirestoreModule } from '@/lib/sync/firestoreLazy';
 import { marcarBoot } from '@/lib/telemetry/bootPerf';
 
+/**
+ * LOGIN NO PRÓPRIO DOMÍNIO — para o Google entrar NA MESMA ABA.
+ *
+ * Com o `authDomain` em `<projeto>.firebaseapp.com`, o login passa por uma
+ * página de OUTRO site. Navegador que particiona o armazenamento por site
+ * (Brave, Safari, Firefox, Chrome recente) não deixa essa página ler o estado
+ * que o app guardou, e ela morre com "Unable to process request due to missing
+ * initial state" — foi o que o dono viu no Brave do Android.
+ *
+ * A saída é servir essa página pelo NOSSO domínio: o `vercel.json` repassa
+ * `/__/auth/*` ao Firebase e o `authDomain` vira o host do app. Aí tudo é o
+ * mesmo site e dá para usar o redirecionamento na própria aba.
+ *
+ * SÓ ENTRA NA LISTA o domínio cujo endereço `https://<host>/__/auth/handler`
+ * já está nos "URIs de redirecionamento autorizados" do cliente OAuth no Google
+ * Cloud — sem isso o Google recusa TODO login com `redirect_uri_mismatch`.
+ */
+const DOMINIOS_COM_LOGIN_PROPRIO: readonly string[] = [];
+
+const loginNoProprioDominio =
+  typeof window !== 'undefined' && DOMINIOS_COM_LOGIN_PROPRIO.includes(window.location.host);
+
 const config = {
   apiKey: import.meta.env.VITE_FIREBASE_API_KEY,
-  authDomain: import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
+  authDomain: loginNoProprioDominio
+    ? window.location.host
+    : import.meta.env.VITE_FIREBASE_AUTH_DOMAIN,
   projectId: import.meta.env.VITE_FIREBASE_PROJECT_ID,
   storageBucket: import.meta.env.VITE_FIREBASE_STORAGE_BUCKET,
   messagingSenderId: import.meta.env.VITE_FIREBASE_MESSAGING_SENDER_ID,
@@ -73,6 +97,16 @@ async function lerSessaoSalva(): Promise<SessaoSalva> {
   // Link de login por e-mail / retorno de OAuth: o SDK precisa processar a URL.
   const url = `${window.location.search}${window.location.hash}`;
   if (/[?&#]oobCode=/.test(url)) return 'sim';
+  // Voltando do Google pelo redirecionamento: o SDK deixou esta marca antes de
+  // sair e é ele quem conclui o login ao subir. Sem carregá-lo aqui, a pessoa
+  // voltaria do Google e continuaria deslogada.
+  try {
+    for (let i = 0; i < window.sessionStorage.length; i++) {
+      if (window.sessionStorage.key(i)?.startsWith('firebase:pendingRedirect:')) return 'sim';
+    }
+  } catch {
+    /* sessionStorage bloqueado: não há redirecionamento a concluir */
+  }
   try {
     for (let i = 0; i < window.localStorage.length; i++) {
       if (window.localStorage.key(i)?.startsWith('firebase:authUser:')) return 'sim';
@@ -277,14 +311,29 @@ export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday
  */
 const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
 
+function telaDeToque(): boolean {
+  try {
+    return window.matchMedia('(pointer: coarse)').matches;
+  } catch {
+    return false;
+  }
+}
+
 /** Login com Google (com o aniversário, se ligado); devolve o token OAuth junto. */
 export async function signInGoogle(): Promise<UserCredential & { accessToken: string | null }> {
-  const [instance, { GoogleAuthProvider, signInWithPopup }] = await Promise.all([
-    requireAuth(),
-    import('firebase/auth'),
-  ]);
+  const [instance, { GoogleAuthProvider, signInWithPopup, signInWithRedirect }] = await Promise.all(
+    [requireAuth(), import('firebase/auth')],
+  );
   const provider = new GoogleAuthProvider();
   if (ANIVERSARIO_NO_LOGIN) provider.addScope(ESCOPO_ANIVERSARIO);
+  // No celular o "popup" é outra aba — a pessoa sai do app e, em navegador que
+  // particiona armazenamento, nem volta. Com o login no próprio domínio, vai e
+  // volta do Google NA MESMA ABA; o SDK conclui o login ao recarregar (ver
+  // `lerSessaoSalva`). A promessa não resolve: a página está saindo.
+  if (loginNoProprioDominio && telaDeToque()) {
+    await signInWithRedirect(instance, provider);
+    return new Promise(() => {});
+  }
   const result = await signInWithPopup(instance, provider);
   const accessToken = GoogleAuthProvider.credentialFromResult(result)?.accessToken ?? null;
   return Object.assign(result, { accessToken });
