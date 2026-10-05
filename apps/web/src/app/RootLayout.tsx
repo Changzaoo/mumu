@@ -4,6 +4,7 @@ import { useKeyboardShortcuts } from '@/hooks/useKeyboardShortcuts';
 import { useMediaSession } from '@/hooks/useMediaSession';
 import { useSleepTimer } from '@/hooks/useSleepTimer';
 import { CommandPalette } from '@/app/CommandPalette';
+import { CamadasDoApp } from '@/app/CamadasDoApp';
 import { aplicarSeo, seoDaRota } from '@/lib/seo';
 
 /**
@@ -22,6 +23,7 @@ export function RootLayout() {
   return (
     <>
       <Outlet />
+      <CamadasDoApp />
       <CommandPalette />
     </>
   );

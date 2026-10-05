@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react';
 import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCamadaRadix } from '@/lib/historico/camadas';
 
 export const Dialog = DialogPrimitive.Root;
 export const DialogTrigger = DialogPrimitive.Trigger;
@@ -26,12 +27,16 @@ export function DialogOverlay({
 export function DialogContent({
   className,
   children,
+  ref,
   ...props
 }: ComponentProps<typeof DialogPrimitive.Content>) {
+  // Aberto = montado: o voltar do sistema fecha o diálogo (ver historico/camadas).
+  const refDaCamada = useCamadaRadix(ref);
   return (
     <DialogPortal>
       <DialogOverlay />
       <DialogPrimitive.Content
+        ref={refDaCamada}
         className={cn(
           'glass fixed left-1/2 top-1/2 z-50 w-full max-w-md -translate-x-1/2 -translate-y-1/2 rounded-xl p-6 shadow-lg',
           'data-[state=open]:animate-scale-in',

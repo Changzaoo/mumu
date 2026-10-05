@@ -66,13 +66,57 @@ interface Politica {
  * onde mostrar o ícone padrão é estritamente melhor que comer um giga de RAM.
  */
 const POLITICAS: Record<Cofre, Politica> = {
-  audio: { tetoBytes: 128_000_000, tetoAlcas: 60, minimoAlcas: 3 },
+  // ÁUDIO: teto de 3 alças (anterior + atual + próxima). Era 60/128 MB e, no
+  // aparelho real (Moto G34, 4 GB), 17 faixas de ~7,5 MB ficaram vivas ao mesmo
+  // tempo — 128 MB exatos, o teto de bytes trabalhando como "o normal". Nada
+  // vazava: a política é que era larga demais. Reabrir uma alça solta é barato
+  // (os bytes seguem no cofre em disco), segurar 17 é o que sufoca o WebView.
+  // As alças que o MOTOR está usando (atual, pré-carga, faixa em fade) ficam
+  // FORA do despejo, mesmo acima do teto — ver `definirEmUso`.
+  audio: { tetoBytes: 128_000_000, tetoAlcas: 3, minimoAlcas: 3 },
   capa: { tetoBytes: 64_000_000, tetoAlcas: 600, minimoAlcas: 32 },
 };
+
+/** Faixa recém-aberta ainda não chegou ao motor (há um `await` no meio). */
+const GRACA_MS = 15_000;
 
 interface Alca {
   url: string;
   bytes: number;
+  /** Último uso (abrir/consultar), para a graça do `aparar`. */
+  usadaEm: number;
+}
+
+/** Contas da sessão por cofre: o que o aparelho real precisa provar depois. */
+interface Contas {
+  criadas: number;
+  revogadas: number;
+  picoAlcas: number;
+  picoBytes: number;
+}
+
+const contas: Record<Cofre, Contas> = {
+  audio: { criadas: 0, revogadas: 0, picoAlcas: 0, picoBytes: 0 },
+  capa: { criadas: 0, revogadas: 0, picoAlcas: 0, picoBytes: 0 },
+};
+
+/**
+ * Quem diz quais URLs estão em uso AGORA (o motor de áudio: slot ativo, slot
+ * pré-carregado e a faixa que ainda sai no crossfade). Revogar uma delas
+ * emudeceria a música ou mataria a pré-carga, então nunca é despejada.
+ */
+const emUso: Record<Cofre, (() => Iterable<string>) | null> = { audio: null, capa: null };
+
+export function definirEmUso(cofre: Cofre, fonte: (() => Iterable<string>) | null): void {
+  emUso[cofre] = fonte;
+}
+
+function urlsEmUso(cofre: Cofre): Set<string> {
+  try {
+    return new Set(emUso[cofre]?.() ?? []);
+  } catch {
+    return new Set();
+  }
 }
 
 const cofres: Record<Cofre, Map<string, Alca>> = {
@@ -100,7 +144,8 @@ export function aoDespejar(cofre: Cofre, ouvinte: (chave: string) => void): () =
   return () => ouvintesDeDespejo[cofre].delete(ouvinte);
 }
 
-function revogar(url: string): void {
+function revogar(cofre: Cofre, url: string): void {
+  contas[cofre].revogadas += 1;
   try {
     URL.revokeObjectURL(url);
   } catch {
@@ -108,20 +153,40 @@ function revogar(url: string): void {
   }
 }
 
-/** Solta as alças mais antigas até caber no orçamento. */
+/** Solta as alças menos usadas até caber no orçamento, poupando as em uso. */
 function despejar(cofre: Cofre): void {
   const { tetoBytes, tetoAlcas, minimoAlcas } = POLITICAS[cofre];
   const mapa = cofres[cofre];
+  if (mapa.size <= minimoAlcas) return;
+  const protegidas = urlsEmUso(cofre);
 
-  while (mapa.size > minimoAlcas && (bytesEmUso[cofre] > tetoBytes || mapa.size > tetoAlcas)) {
-    const maisAntiga = mapa.keys().next();
-    if (maisAntiga.done) break;
-    const chave = maisAntiga.value;
+  // A ordem do Map é menos-usada-primeiro; pula quem o motor está usando.
+  for (const chave of [...mapa.keys()]) {
+    if (mapa.size <= minimoAlcas) break;
+    if (bytesEmUso[cofre] <= tetoBytes && mapa.size <= tetoAlcas) break;
     const alca = mapa.get(chave);
+    if (!alca || protegidas.has(alca.url)) continue;
     mapa.delete(chave);
-    if (!alca) continue;
     bytesEmUso[cofre] -= alca.bytes;
-    revogar(alca.url);
+    revogar(cofre, alca.url);
+    for (const ouvinte of ouvintesDeDespejo[cofre]) ouvinte(chave);
+  }
+}
+
+/**
+ * Solta TUDO que não está em uso pelo motor, sem esperar o teto. É a faxina de
+ * "troca de fila / faixa nova": o que sobrou da sessão anterior não tem mais
+ * quem o toque. Poupa o que o motor usa e o que acabou de ser aberto (a `GRACA_MS`
+ * cobre a janela entre abrir a alça e entregá-la ao motor).
+ */
+export function aparar(cofre: Cofre, agora: number = Date.now()): void {
+  const mapa = cofres[cofre];
+  const protegidas = urlsEmUso(cofre);
+  for (const [chave, alca] of [...mapa.entries()]) {
+    if (protegidas.has(alca.url) || agora - alca.usadaEm < GRACA_MS) continue;
+    mapa.delete(chave);
+    bytesEmUso[cofre] -= alca.bytes;
+    revogar(cofre, alca.url);
     for (const ouvinte of ouvintesDeDespejo[cofre]) ouvinte(chave);
   }
 }
@@ -135,17 +200,21 @@ function lembrar(cofre: Cofre, chave: string, url: string, bytes: number): void 
   if (antiga) {
     bytesEmUso[cofre] -= antiga.bytes;
     // Mesma chave com URL nova: a antiga vira lixo se não for solta agora.
-    if (antiga.url !== url) revogar(antiga.url);
+    if (antiga.url !== url) revogar(cofre, antiga.url);
   }
   cofres[cofre].delete(chave); // reposiciona no fim (mais recente)
-  cofres[cofre].set(chave, { url, bytes });
+  cofres[cofre].set(chave, { url, bytes, usadaEm: Date.now() });
   bytesEmUso[cofre] += bytes;
   despejar(cofre);
+  const c = contas[cofre];
+  c.picoAlcas = Math.max(c.picoAlcas, cofres[cofre].size);
+  c.picoBytes = Math.max(c.picoBytes, bytesEmUso[cofre]);
 }
 
 /** Abre a alça do blob e passa a segurá-la sob o orçamento do cofre. */
 export function abrir(cofre: Cofre, chave: string, blob: Blob): string {
   const url = URL.createObjectURL(blob);
+  contas[cofre].criadas += 1;
   lembrar(cofre, chave, url, blob.size);
   return url;
 }
@@ -161,6 +230,7 @@ export function consultar(cofre: Cofre, chave: string): string | null {
   const alca = cofres[cofre].get(chave);
   if (!alca) return null;
   cofres[cofre].delete(chave);
+  alca.usadaEm = Date.now();
   cofres[cofre].set(chave, alca); // marca como recém-usada
   return alca.url;
 }
@@ -171,7 +241,7 @@ export function soltar(cofre: Cofre, chave: string): void {
   if (!alca) return;
   cofres[cofre].delete(chave);
   bytesEmUso[cofre] -= alca.bytes;
-  revogar(alca.url);
+  revogar(cofre, alca.url);
 }
 
 /**
@@ -189,9 +259,23 @@ export function orcamentoCheio(cofre: Cofre): boolean {
 }
 
 export interface RelatorioDeAlcas {
-  audio: { alcas: number; bytes: number };
-  capa: { alcas: number; bytes: number };
+  /** `alcas`/`bytes` = vivas agora (criadas − revogadas); `pico*` = máximo da sessão. */
+  audio: CofreRelatado;
+  capa: CofreRelatado;
   totalBytes: number;
+}
+
+interface CofreRelatado {
+  alcas: number;
+  bytes: number;
+  criadas: number;
+  revogadas: number;
+  picoAlcas: number;
+  picoBytes: number;
+}
+
+function relatarCofre(cofre: Cofre): CofreRelatado {
+  return { alcas: cofres[cofre].size, bytes: bytesEmUso[cofre], ...contas[cofre] };
 }
 
 /**
@@ -203,8 +287,8 @@ export interface RelatorioDeAlcas {
  */
 export function relatorio(): RelatorioDeAlcas {
   return {
-    audio: { alcas: cofres.audio.size, bytes: bytesEmUso.audio },
-    capa: { alcas: cofres.capa.size, bytes: bytesEmUso.capa },
+    audio: relatarCofre('audio'),
+    capa: relatarCofre('capa'),
     totalBytes: bytesEmUso.audio + bytesEmUso.capa,
   };
 }
@@ -212,7 +296,7 @@ export function relatorio(): RelatorioDeAlcas {
 /** Só para teste: esvazia os dois cofres. */
 export function esquecerTudo(): void {
   for (const cofre of ['audio', 'capa'] as const) {
-    for (const alca of cofres[cofre].values()) revogar(alca.url);
+    for (const alca of cofres[cofre].values()) revogar(cofre, alca.url);
     cofres[cofre].clear();
     bytesEmUso[cofre] = 0;
   }

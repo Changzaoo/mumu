@@ -9,6 +9,7 @@ import android.os.Build;
 import android.os.Bundle;
 import android.view.ViewGroup;
 import android.webkit.WebView;
+import androidx.activity.OnBackPressedCallback;
 import androidx.core.graphics.Insets;
 import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowCompat;
@@ -53,6 +54,22 @@ public class MainActivity extends BridgeActivity {
         controleDasBarras.setAppearanceLightNavigationBars(false);
 
         WebView webView = getBridge().getWebView();
+        // O VOLTAR DO ANDROID ANDA NO HISTORICO DO SITE. Sem isto o sistema
+        // encerrava a tela no primeiro voltar: nao fechava o player aberto,
+        // nao voltava para a pagina anterior, e a musica ia junto. Havendo
+        // historico, quem decide e o site (fecha a camada do topo ou volta de
+        // pagina, na mesma rolagem); sem historico, o app so sai da frente —
+        // como todo player — e a musica continua.
+        getOnBackPressedDispatcher().addCallback(this, new OnBackPressedCallback(true) {
+            @Override
+            public void handleOnBackPressed() {
+                if (webView.canGoBack()) {
+                    webView.goBack();
+                } else {
+                    moveTaskToBack(true);
+                }
+            }
+        });
         // DOWNLOAD SAI PELO NAVEGADOR DO SISTEMA. O WebView não baixa nada
         // sozinho: tocar em "Baixar" no aviso de versão nova do app (o próprio
         // radinho.apk) não fazia nada. O navegador baixa e o Android instala.

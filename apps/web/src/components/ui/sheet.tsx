@@ -3,6 +3,7 @@ import * as DialogPrimitive from '@radix-ui/react-dialog';
 import { cva, type VariantProps } from 'class-variance-authority';
 import { X } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCamadaRadix } from '@/lib/historico/camadas';
 
 export const Sheet = DialogPrimitive.Root;
 export const SheetTrigger = DialogPrimitive.Trigger;
@@ -24,11 +25,17 @@ const sheetVariants = cva('glass fixed z-50 flex flex-col gap-4 p-6 shadow-lg', 
 export interface SheetContentProps
   extends ComponentProps<typeof DialogPrimitive.Content>, VariantProps<typeof sheetVariants> {}
 
-export function SheetContent({ className, children, side, ...props }: SheetContentProps) {
+export function SheetContent({ className, children, side, ref, ...props }: SheetContentProps) {
+  // Aberta = montada: o voltar do sistema fecha a folha (ver historico/camadas).
+  const refDaCamada = useCamadaRadix(ref);
   return (
     <DialogPrimitive.Portal>
       <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/60 backdrop-blur-sm data-[state=open]:animate-fade-in" />
-      <DialogPrimitive.Content className={cn(sheetVariants({ side }), className)} {...props}>
+      <DialogPrimitive.Content
+        ref={refDaCamada}
+        className={cn(sheetVariants({ side }), className)}
+        {...props}
+      >
         {children}
         <DialogPrimitive.Close
           aria-label="Fechar"

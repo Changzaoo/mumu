@@ -6,6 +6,7 @@
  */
 import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
+import { useEstadoNaEntrada } from '@/hooks/useEstadoNaEntrada';
 import { motion } from 'framer-motion';
 import { Mic, MicVocal, Music, Quote, Search, SearchX, X } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
@@ -179,7 +180,7 @@ function VoiceButton({ onResult }: { onResult: (text: string) => void }) {
 export default function SearchPage() {
   const [searchParams, setSearchParams] = useSearchParams();
   const query = (searchParams.get('q') ?? '').trim();
-  const [tab, setTab] = useState<Tab>('all');
+  const [tab, setTab] = useEstadoNaEntrada<Tab>('aba', 'all');
   const { recent, addRecent, removeRecent, clearRecent } = useRecentSearches();
 
   const entries = useSyncExternalStore(

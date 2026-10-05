@@ -14,6 +14,7 @@ import { relatorio as relatorioDeAlcas } from '@/lib/perf/alcasDeBlob';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { usePlayerStore } from '@/stores/playerStore';
 import { lerAvancos, lerCorrecoesDeSaida } from '@/lib/telemetry/avancoDeFaixa';
+import { dadosDeTrocas, instalarSondaDeRotas } from '@/lib/telemetry/trocasDeRota';
 
 const CHAVE_VIVO = 'aurial:aba-viva';
 
@@ -204,6 +205,13 @@ export function instalarAoVivo(): void {
     })
     .catch(() => undefined);
 
+  // QUANTO CADA TROCA DE TELA DEMORA, no aparelho (ver trocasDeRota.ts).
+  try {
+    instalarSondaDeRotas();
+  } catch {
+    /* a sonda nunca derruba o app */
+  }
+
   setInterval(amostrar, 60_000);
   amostrar();
 }
@@ -258,5 +266,8 @@ export function coletarAoVivo(): Record<string, unknown> {
     // Como a fila avançou (ou não) — ver `avancoDeFaixa`.
     avancos: lerAvancos(),
     correcoesDeSaida: lerCorrecoesDeSaida(),
+    // As últimas ~20 trocas de tela (clique → conteúdo pintado), o resumo por
+    // rota de destino (mediana/p95) e o boot até o primeiro conteúdo.
+    trocas: dadosDeTrocas(),
   };
 }

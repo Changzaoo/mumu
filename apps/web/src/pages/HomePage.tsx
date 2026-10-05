@@ -4,7 +4,7 @@
  * artist/genre, albums, genres and artists. No external 30s-preview catalog —
  * only real, user-added songs.
  */
-import { memo, useEffect, useState, useSyncExternalStore } from 'react';
+import { memo, useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import type { IconType } from 'react-icons';
@@ -40,6 +40,15 @@ import { buildSemanticMixes } from '@/lib/reco/semanticMixes';
 import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
+import { cederAThread } from '@/lib/perf/ceder';
+import {
+  faixaDaMini,
+  lerFotoDaHome,
+  miniDaFaixa,
+  salvarFotoDaHome,
+  type FotoSalva,
+  type PrateleiraMini,
+} from '@/lib/perf/fotoDaHome';
 
 function localGreeting(): string {
   const hour = new Date().getHours();
@@ -85,7 +94,7 @@ function capaDaPlaylist(trackIds: string[]): string | null {
 const QuickAccess = memo(function QuickAccess({
   artists,
 }: {
-  artists: localLibrary.LocalArtist[];
+  artists: Pick<localLibrary.LocalArtist, 'name' | 'coverUrl'>[];
 }) {
   const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
@@ -179,9 +188,10 @@ function cnTile(gradient?: boolean): string {
  * biblioteca, do histórico ou das curtidas — e tocar uma música grava no
  * histórico. O resultado era a pessoa ir apertar num álbum e ele trocar de
  * lugar debaixo do dedo, e o celular recalculando recomendação sobre milhares
- * de faixas a cada faixa tocada. Sair e voltar tira uma foto nova.
+ * de faixas a cada faixa tocada. Sair e voltar REAPROVEITA a foto enquanto ela
+ * vale (ver `obterFoto`); biblioteca de outro tamanho ou foto velha, tira nova.
  */
-function montarHome(
+function* passosDaHome(
   entries: localLibrary.LibraryEntry[],
   history: ReturnType<typeof localHistory.listForCurrentUser>,
   semente: ReturnType<typeof gostoInicial.snapshot>,
@@ -189,28 +199,22 @@ function montarHome(
   const liked = localLikes.list();
   const faixas = entries.map((e) => e.track);
   const genres = localLibrary.genreGroups();
+  yield;
   const artistasDoAcervo = localLibrary.artists();
   const albums = localLibrary.albumGroups();
-
-  // Recently played, deduped by track (latest first).
-  const seen = new Set<string>();
-  const recentTracks: TrackDto[] = [];
-  for (const h of history) {
-    if (seen.has(h.track.id)) continue;
-    seen.add(h.track.id);
-    recentTracks.push(h.track);
-    if (recentTracks.length >= 40) break;
-  }
+  yield;
 
   // Artistas DELA para a grade de atalhos — não os maiores do acervo
   // (ver lib/reco/artistasDoUsuario).
   const meusArtistas = artistasDoUsuario(history, liked, semente.artistas, artistasDoAcervo);
+  yield;
 
   // Prateleiras de gênero ordenadas pelo gosto. O primeiro é o TRONCO: sobe
   // para o topo e as ramificações dele vêm logo abaixo (lib/reco/ramificacoes).
   const generosGosto = generosDoGosto(genres, history, liked, { sementes: semente.generos });
   const [generoTronco, ...outrosGeneros] = generosGosto;
 
+  yield;
   const generoDaFaixa = new Map<string, string>();
   for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
   const perfil = perfilDeGosto({
@@ -220,6 +224,7 @@ function montarHome(
     sementesDeGenero: semente.generos,
     sementesDeArtista: semente.artistas,
   });
+  yield;
   const ramos = generoTronco
     ? ramificacoesDoGenero({
         genero: generoTronco.genre,
@@ -235,7 +240,6 @@ function montarHome(
     entriesCount: entries.length,
     artistasDoAcervo,
     albums,
-    recentTracks,
     meusArtistas,
     generoTronco,
     outrosGeneros,
@@ -244,7 +248,231 @@ function montarHome(
   };
 }
 
+/**
+ * A foto montada de uma vez (bibliotecas pequenas, e os testes). Os `yield` de
+ * `passosDaHome` são os pontos em que a versão EM FATIAS (`obterFotoEmFatias`)
+ * devolve a thread ao navegador: o conteúdo é o mesmo.
+ */
+function montarHome(
+  entries: localLibrary.LibraryEntry[],
+  history: ReturnType<typeof localHistory.listForCurrentUser>,
+  semente: ReturnType<typeof gostoInicial.snapshot>,
+) {
+  const passos = passosDaHome(entries, history, semente);
+  let passo = passos.next();
+  while (!passo.done) passo = passos.next();
+  return passo.value;
+}
+
 type FotoDaHome = ReturnType<typeof montarHome>;
+
+/**
+ * "Tocadas recentemente": as últimas 40 faixas distintas (a mais nova primeiro).
+ *
+ * Fica FORA da foto de propósito: é barata (um laço sobre o histórico, que já
+ * está em memória) e é a única prateleira que muda a cada faixa tocada. Com a
+ * foto guardada entre visitas (ver `obterFoto`), calculá-la a cada montagem é
+ * o que mantém "o que acabei de ouvir" aparecendo ao voltar para a Home sem
+ * precisar refazer o resto.
+ */
+function recentesDoHistorico(history: ReturnType<typeof localHistory.listForCurrentUser>) {
+  const seen = new Set<string>();
+  const recentTracks: TrackDto[] = [];
+  for (const h of history) {
+    if (seen.has(h.track.id)) continue;
+    seen.add(h.track.id);
+    recentTracks.push(h.track);
+    if (recentTracks.length >= 40) break;
+  }
+  return recentTracks;
+}
+
+/**
+ * A FOTO SOBREVIVE À SAÍDA DA PÁGINA.
+ *
+ * `HomePage` desmonta ao trocar de aba e monta de novo ao voltar — e a foto era
+ * estado do componente, então CADA volta refazia `montarHome` (agrupamentos,
+ * gostos, ramificações; ~450 ms no g34 emulado, mais no aparelho real, que é a
+ * tela a que o dono mais volta: 26 cliques em "Início" numa sessão), as
+ * prateleiras tardias (recomendações, agentes, mixes semânticos) e remontava ~3,5
+ * mil nós. Agora ela mora aqui, fora do componente.
+ *
+ * Vale enquanto a biblioteca tem o MESMO tamanho, o gosto inicial é o mesmo e a
+ * foto é recente (`FRESCOR_DA_FOTO_MS`): importar música, mudar o gosto ou
+ * passar meia hora tira uma foto nova. O resto (tocar, curtir) NÃO invalida —
+ * é o mesmo contrato de "uma foto por visita" que a Home já tinha, e as
+ * "Tocadas recentemente" seguem vivas (ver `recentesDoHistorico`).
+ */
+const FRESCOR_DA_FOTO_MS = 30 * 60_000;
+
+interface FotoMemorizada {
+  assinatura: string;
+  tiradaEm: number;
+  foto: FotoDaHome;
+  /** As prateleiras tardias desta mesma foto, quando já foram calculadas. */
+  tardia: PrateleirasTardias | null;
+}
+
+let memorizada: FotoMemorizada | null = null;
+
+function assinaturaDaFoto(
+  tamanho: number,
+  semente: ReturnType<typeof gostoInicial.snapshot>,
+): string {
+  return `${tamanho}|${semente.generos.join(',')}|${semente.artistas.join(',')}`;
+}
+
+/** A foto da memória, se ainda vale para esta biblioteca. */
+function fotoDaMemoria(): FotoDaHome | null {
+  const semente = gostoInicial.snapshot();
+  const assinatura = assinaturaDaFoto(localLibrary.list().length, semente);
+  if (
+    memorizada &&
+    memorizada.assinatura === assinatura &&
+    Date.now() - memorizada.tiradaEm < FRESCOR_DA_FOTO_MS
+  ) {
+    return memorizada.foto;
+  }
+  return null;
+}
+
+/** A foto da Home: a da memória se ainda vale; senão tira uma nova e guarda. */
+function obterFoto(): FotoDaHome {
+  const daMemoria = fotoDaMemoria();
+  if (daMemoria) return daMemoria;
+  const entries = localLibrary.list();
+  const semente = gostoInicial.snapshot();
+  const foto = montarHome(entries, localHistory.listForCurrentUser(), semente);
+  memorizada = {
+    assinatura: assinaturaDaFoto(entries.length, semente),
+    tiradaEm: Date.now(),
+    foto,
+    tardia: null,
+  };
+  return foto;
+}
+
+/**
+ * Acima disto a foto NÃO é montada num render só. No Moto G34 emulado (2,5x) o
+ * boot com 5,7 mil faixas tinha UMA tarefa de ~500 ms (`MessagePort.onmessage` do
+ * React) montando agrupamentos, gostos e ramificações dentro do render; no
+ * aparelho real ela foi de 328 ms. Em fatias, cada passo é uma tarefa curta e a
+ * tela (com a foto guardada, ou o esqueleto) segue respondendo ao toque.
+ */
+const LIMITE_PARA_FATIAR = 1_500;
+
+let fotoEmAndamento: Promise<FotoDaHome> | null = null;
+
+/** O mesmo que `obterFoto`, cedendo a thread entre os passos de `passosDaHome`. */
+function obterFotoEmFatias(): Promise<FotoDaHome> {
+  const daMemoria = fotoDaMemoria();
+  if (daMemoria) return Promise.resolve(daMemoria);
+  fotoEmAndamento ??= (async () => {
+    const entries = localLibrary.list();
+    const semente = gostoInicial.snapshot();
+    const assinatura = assinaturaDaFoto(entries.length, semente);
+    await cederAThread();
+    const passos = passosDaHome(entries, localHistory.listForCurrentUser(), semente);
+    let passo = passos.next();
+    while (!passo.done) {
+      await cederAThread();
+      passo = passos.next();
+    }
+    const foto = passo.value;
+    memorizada = { assinatura, tiradaEm: Date.now(), foto, tardia: null };
+    return foto;
+  })().finally(() => {
+    fotoEmAndamento = null;
+  });
+  return fotoEmAndamento;
+}
+
+function tardiaMemorizada(foto: FotoDaHome | null): PrateleirasTardias | null {
+  return foto && memorizada?.foto === foto ? memorizada.tardia : null;
+}
+
+// ── a foto da ÚLTIMA VISITA (disco) — pinta antes de a biblioteca chegar ──
+
+/** O que foi lido do disco (ou gravado agora): evita reler a cada montagem. */
+let fotoSalvaEmMemoria: FotoSalva | null = null;
+let ultimaFotoSalvaChave = '';
+
+function prateleiraMini(
+  key: string,
+  titulo: string,
+  subtitulo: string | undefined,
+  tracks: readonly TrackDto[],
+): PrateleiraMini {
+  return {
+    key,
+    titulo,
+    subtitulo,
+    faixas: tracks.slice(0, CARTOES_INICIAIS).map(miniDaFaixa),
+  };
+}
+
+/** Só a PRIMEIRA DOBRA da foto real: ids, título, artista e capa. */
+function miniDaFoto(foto: FotoDaHome): Omit<FotoSalva, 'formato' | 'em'> {
+  return {
+    tronco: foto.generoTronco
+      ? prateleiraMini(
+          `genre:${foto.generoTronco.genre}`,
+          foto.generoTronco.genre,
+          foto.generoTronco.motivo,
+          foto.generoTronco.tracks,
+        )
+      : null,
+    ramos: foto.ramos.map((r) => prateleiraMini(r.key, r.titulo, r.explicacao, r.tracks)),
+    daSemente: foto.daSemente.slice(0, CARTOES_INICIAIS).map(miniDaFaixa),
+    artistas: foto.meusArtistas.slice(0, 3).map((a) => ({ name: a.name, coverUrl: a.coverUrl })),
+  };
+}
+
+/**
+ * A foto guardada vira uma "foto" no mesmo formato da real — a página desenha
+ * as MESMAS prateleiras pelo mesmo JSX. Álbuns, artistas e os outros gêneros
+ * ficam vazios: dependem da biblioteca completa e entram quando ela chega.
+ */
+function fotoDaSalva(s: FotoSalva): FotoDaHome {
+  const faixas = (p: PrateleiraMini): TrackDto[] => p.faixas.map(faixaDaMini);
+  return {
+    insumos: { entries: [], history: [] },
+    vazia: false,
+    entriesCount: 0,
+    artistasDoAcervo: [],
+    albums: [],
+    meusArtistas: s.artistas.map((a) => ({ ...a, trackCount: 0 })),
+    generoTronco: s.tronco
+      ? { genre: s.tronco.titulo, motivo: s.tronco.subtitulo, tracks: faixas(s.tronco) }
+      : undefined,
+    outrosGeneros: [],
+    ramos: s.ramos.map((r) => ({
+      key: r.key,
+      titulo: r.titulo,
+      explicacao: r.subtitulo ?? '',
+      tracks: faixas(r),
+    })),
+    daSemente: s.daSemente.map(faixaDaMini),
+  } as unknown as FotoDaHome;
+}
+
+/** Espera a faixa de verdade (do registro) existir, com teto — sem ela não há o que tocar. */
+function esperarEntrada(id: string, tetoMs = 5_000): Promise<void> {
+  return new Promise<void>((resolve) => {
+    if (localLibrary.entryFor(id)) return resolve();
+    let parar = (): void => undefined;
+    const timer = setTimeout(() => {
+      parar();
+      resolve();
+    }, tetoMs);
+    parar = localLibrary.subscribe(() => {
+      if (!localLibrary.entryFor(id)) return;
+      clearTimeout(timer);
+      parar();
+      resolve();
+    });
+  });
+}
 
 /**
  * O QUE NÃO É DA PRIMEIRA DOBRA, calculado DEPOIS do primeiro desenho.
@@ -292,6 +520,10 @@ function aoOcioso(fn: () => void): () => void {
   return () => clearTimeout(id);
 }
 
+/** Quando a vetorização de fundo rodou pela última vez (ela é incremental: não repete a cada volta). */
+let vetorizadaEm = 0;
+const REVETORIZAR_APOS_MS = 5 * 60_000;
+
 export default function HomePage() {
   // A página só assina o que decide a FOTO: se a biblioteca assentou e se tem
   // música. Playlists, curtidas e histórico NÃO são dela — a grade de atalhos
@@ -309,31 +541,90 @@ export default function HomePage() {
     () => false,
   );
 
-  const playQueue = usePlayerStore((s) => s.playQueue);
+  const playQueueDaStore = usePlayerStore((s) => s.playQueue);
 
   // A foto só é refeita se foi tirada de uma biblioteca VAZIA e agora há
   // música (primeira abertura): trocar vazio por conteúdo não tira nada de
   // debaixo do dedo de ninguém.
   // Estado derivado no próprio render (e não num efeito): voltando para a Home
   // com a biblioteca já assentada, a foto sai no primeiro quadro, sem piscar
-  // o esqueleto.
-  const [foto, setFoto] = useState<FotoDaHome | null>(null);
-  if (assentada && (foto === null || (foto.vazia && temMusica))) {
-    setFoto(
-      montarHome(localLibrary.list(), localHistory.listForCurrentUser(), gostoInicial.snapshot()),
-    );
+  // o esqueleto — e, voltando, ela vem da memória (ver `obterFoto`), sem
+  // recalcular nada.
+  // Biblioteca grande e foto fora da memória: monta em FATIAS, num efeito
+  // (ver `LIMITE_PARA_FATIAR`). Pequena, ou já em memória: no próprio render.
+  const fatiar = () => localLibrary.list().length >= LIMITE_PARA_FATIAR && !fotoDaMemoria();
+  const [foto, setFoto] = useState<FotoDaHome | null>(() =>
+    assentada && !fatiar() ? obterFoto() : null,
+  );
+  if (assentada && (foto === null || (foto.vazia && temMusica)) && !fatiar()) {
+    setFoto(obterFoto());
   }
+  useEffect(() => {
+    if (!assentada || foto !== null || !fatiar()) return;
+    let vivo = true;
+    void obterFotoEmFatias().then((pronta) => {
+      if (vivo) setFoto(pronta);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [assentada, foto]);
 
-  // As prateleiras de fora da primeira dobra (ver `montarTardia`).
-  const [tardia, setTardia] = useState<PrateleirasTardias | null>(null);
+  // "Tocadas recentemente" é lida na montagem (barata, e é a que muda a cada play).
+  const [recentTracks] = useState(() => recentesDoHistorico(localHistory.listForCurrentUser()));
+
+  // As prateleiras de fora da primeira dobra (ver `montarTardia`). Voltando
+  // para a Home elas já estão calculadas: entram no primeiro quadro.
+  const [tardia, setTardia] = useState<PrateleirasTardias | null>(() => tardiaMemorizada(foto));
   useEffect(() => {
     if (!foto) return;
-    return aoOcioso(() => setTardia(montarTardia(foto)));
+    const pronta = tardiaMemorizada(foto);
+    if (pronta) {
+      setTardia(pronta);
+      return;
+    }
+    return aoOcioso(() => {
+      const calculada = montarTardia(foto);
+      if (memorizada?.foto === foto) memorizada.tardia = calculada;
+      setTardia(calculada);
+    });
+  }, [foto]);
+
+  // A FOTO DA ÚLTIMA VISITA, enquanto a biblioteca não assentou: pinta o que a
+  // pessoa viu da outra vez no primeiro quadro (ver lib/perf/fotoDaHome). Quando
+  // a foto real chega ela assume — as prateleiras são as mesmas, a menos que a
+  // biblioteca tenha mudado de verdade.
+  const [salva, setSalva] = useState<FotoSalva | null>(fotoSalvaEmMemoria);
+  useEffect(() => {
+    if (foto || salva) return;
+    let vivo = true;
+    void lerFotoDaHome().then((lida) => {
+      if (!vivo || !lida) return;
+      fotoSalvaEmMemoria = lida;
+      setSalva(lida);
+    });
+    return () => {
+      vivo = false;
+    };
+  }, [foto, salva]);
+  const fotoSalva = useMemo(() => (salva ? fotoDaSalva(salva) : null), [salva]);
+
+  // Guarda a foto real para a PRÓXIMA abertura — na folga, e só se mudou.
+  useEffect(() => {
+    if (!foto || foto.vazia) return;
+    return aoOcioso(() => {
+      const mini = miniDaFoto(foto);
+      const chave = JSON.stringify(mini);
+      if (chave === ultimaFotoSalvaChave) return;
+      ultimaFotoSalvaChave = chave;
+      void salvarFotoDaHome(mini);
+    });
   }, [foto]);
 
   // Vetorização em segundo plano: alimenta a PRÓXIMA foto, não repinta esta.
   useEffect(() => {
     if (!assentada) return;
+    if (Date.now() - vetorizadaEm < REVETORIZAR_APOS_MS) return;
     let cancelled = false;
     const id = setTimeout(() => {
       void (async () => {
@@ -341,6 +632,7 @@ export default function HomePage() {
         if (cancelled) return;
         const tracks = localLibrary.list().map((e) => e.track);
         if (tracks.length > 0) await ensureVectors(tracks);
+        vetorizadaEm = Date.now();
       })();
     }, 3000);
     return () => {
@@ -349,19 +641,27 @@ export default function HomePage() {
     };
   }, [assentada]);
 
-  if (!foto) return <PageSkeleton variant="home" />;
+  const paraPintar = foto ?? fotoSalva;
+  if (!paraPintar) return <PageSkeleton variant="home" />;
 
-  const {
-    artistasDoAcervo,
-    albums,
-    recentTracks,
-    meusArtistas,
-    generoTronco,
-    outrosGeneros,
-    ramos,
-    daSemente,
-  } = foto;
-  const doTempo = tardia?.deFoto === foto ? tardia : null;
+  // Com a foto GUARDADA na tela as faixas são só para olhar (sem URL de áudio):
+  // tocar espera o registro de verdade e usa as faixas dele.
+  const playQueue: typeof playQueueDaStore = foto
+    ? playQueueDaStore
+    : (tracks, index, contexto) => {
+        const id = tracks[index ?? 0]?.id;
+        void (id ? esperarEntrada(id) : Promise.resolve()).then(() =>
+          playQueueDaStore(
+            tracks.map((t) => localLibrary.entryFor(t.id)?.track ?? t),
+            index,
+            contexto,
+          ),
+        );
+      };
+
+  const { artistasDoAcervo, albums, meusArtistas, generoTronco, outrosGeneros, ramos, daSemente } =
+    paraPintar;
+  const doTempo = foto && tardia?.deFoto === foto ? tardia : null;
   const recos = doTempo?.recos ?? [];
   const albumRecos = doTempo?.albumRecos ?? [];
   const prateleirasDeAgentes = doTempo?.prateleirasDeAgentes ?? [];
@@ -640,7 +940,7 @@ export default function HomePage() {
         </SectionCarousel>
       )}
 
-      {foto.vazia && (
+      {paraPintar.vazia && (
         <div className="px-3">
           <EmptyState
             icon={Music}

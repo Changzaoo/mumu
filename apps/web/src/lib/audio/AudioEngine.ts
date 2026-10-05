@@ -443,6 +443,16 @@ export class AudioEngine {
     this.localResolver = resolver;
   }
 
+  /**
+   * URLs que os slots seguram AGORA (atual, pré-carga, faixa saindo no fade).
+   * É o que `alcasDeBlob` consulta para nunca revogar alça em uso.
+   */
+  urlsEmUso(): string[] {
+    const urls: string[] = [];
+    for (const slot of this.slots) if (slot.url) urls.push(slot.url);
+    return urls;
+  }
+
   /** Local (offline) source if available, else the network stream URL. */
   private sourceFor(track: TrackDto): string | null {
     return this.localResolver?.(track) ?? track.streamUrl ?? null;

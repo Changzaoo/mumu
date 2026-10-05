@@ -61,5 +61,10 @@ if (grupo === 'carga') {
 } else {
   // Grupos livres: imprime todas as colunas numéricas por cenário.
   const chaves = [...new Set(linhas.flatMap((l) => Object.entries(l).filter(([, v]) => typeof v === 'number').map(([k]) => k)))].filter((k) => k !== 'rep');
-  tabela(`${grupo} (mediana (mín-máx))`, (l) => l.cenario ?? l.rota, chaves.map((k) => [k, k]));
+  // `rotulo` separa rodadas comparáveis (ex.: `antes` × `depois` da biblioteca).
+  tabela(
+    `${grupo} (mediana (mín-máx))`,
+    (l) => [l.cenario ?? l.rota, grupo === 'biblioteca' ? l.rotulo : null].filter(Boolean).join(' · '),
+    chaves.map((k) => [k, k]),
+  );
 }

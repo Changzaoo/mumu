@@ -17,6 +17,9 @@ import { AuthorizedRoute } from '@/components/AuthorizedRoute';
 import { ErrorBoundary, RouteErrorBoundary } from '@/app/RouteErrorBoundary';
 import { modoLeve, qualidadeDaRede } from '@/lib/perf/dispositivo';
 import { RootLayout } from '@/app/RootLayout';
+// O gerente de camadas precisa registrar o `popstate` ANTES do router.
+import '@/lib/historico/camadas';
+import { garantirHomePorBaixo } from '@/lib/historico/raiz';
 
 const RetornoDoSpotify = lazy(() => import('@/components/media/RetornoDoSpotify'));
 
@@ -183,6 +186,11 @@ function page(name: string, skeleton: PageSkeletonProps['variant'] = 'home'): Re
     </ErrorBoundary>
   );
 }
+
+// Antes de o router ler a URL: no app, a Home fica por baixo da entrada de
+// abertura (ver lib/historico/raiz).
+
+garantirHomePorBaixo();
 
 export const router = createBrowserRouter([
   {

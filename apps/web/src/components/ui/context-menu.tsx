@@ -1,6 +1,7 @@
 import type { ComponentProps } from 'react';
 import * as ContextMenuPrimitive from '@radix-ui/react-context-menu';
 import { cn } from '@/lib/utils';
+import { useCamadaRadix } from '@/lib/historico/camadas';
 
 export const ContextMenu = ContextMenuPrimitive.Root;
 export const ContextMenuTrigger = ContextMenuPrimitive.Trigger;
@@ -8,11 +9,15 @@ export const ContextMenuGroup = ContextMenuPrimitive.Group;
 
 export function ContextMenuContent({
   className,
+  ref,
   ...props
 }: ComponentProps<typeof ContextMenuPrimitive.Content>) {
+  // Aberto = montado: o voltar do sistema fecha o menu (ver historico/camadas).
+  const refDaCamada = useCamadaRadix(ref);
   return (
     <ContextMenuPrimitive.Portal>
       <ContextMenuPrimitive.Content
+        ref={refDaCamada}
         className={cn(
           'glass z-50 min-w-44 overflow-hidden rounded-lg p-1 shadow-lg animate-scale-in',
           className,

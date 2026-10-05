@@ -2,6 +2,7 @@ import type { ComponentProps } from 'react';
 import * as DropdownMenuPrimitive from '@radix-ui/react-dropdown-menu';
 import { ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
+import { useCamadaRadix } from '@/lib/historico/camadas';
 
 export const DropdownMenu = DropdownMenuPrimitive.Root;
 export const DropdownMenuTrigger = DropdownMenuPrimitive.Trigger;
@@ -11,11 +12,15 @@ export const DropdownMenuSub = DropdownMenuPrimitive.Sub;
 export function DropdownMenuContent({
   className,
   sideOffset = 6,
+  ref,
   ...props
 }: ComponentProps<typeof DropdownMenuPrimitive.Content>) {
+  // Aberto = montado: o voltar do sistema fecha o menu (ver historico/camadas).
+  const refDaCamada = useCamadaRadix(ref);
   return (
     <DropdownMenuPrimitive.Portal>
       <DropdownMenuPrimitive.Content
+        ref={refDaCamada}
         sideOffset={sideOffset}
         className={cn(
           'glass z-50 min-w-44 overflow-hidden rounded-lg p-1 shadow-lg',

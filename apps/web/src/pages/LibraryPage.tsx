@@ -14,6 +14,7 @@
  * (RHF + zod createPlaylistSchema).
  */
 import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEstadoNaEntrada } from '@/hooks/useEstadoNaEntrada';
 import { Link } from 'react-router';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
@@ -278,7 +279,9 @@ export default function LibraryPage() {
   // é estável, e releio a lista quando ela muda.
   const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
   const curtidas = useMemo(() => localLikes.list(), [likedCount]);
-  const [filter, setFilter] = useState('');
+  // Aba, filtro e "mostrar mais" voltam como estavam ao regressar à página.
+  const [filter, setFilter] = useEstadoNaEntrada('filtro', '');
+  const [aba, setAba] = useEstadoNaEntrada('aba', 'genres');
   const [createOpen, setCreateOpen] = useState(false);
   // /dispositivo é rota gateada (AuthorizedRoute): para quem não tem acesso o
   // atalho seria um botão que devolve a pessoa para a Home. Melhor não existir.
@@ -355,7 +358,7 @@ export default function LibraryPage() {
   // biblioteca do usuário é maior. Ninguém lê a centésima capa antes de rolar
   // até ela — 60 cobre várias telas e o botão traz o resto sob demanda.
   const PAGINA = 60;
-  const [mostrar, setMostrar] = useState(PAGINA);
+  const [mostrar, setMostrar] = useEstadoNaEntrada('mostrar', PAGINA);
   const maisBotao = (total: number): React.ReactNode =>
     total > mostrar ? (
       <button
@@ -463,7 +466,7 @@ export default function LibraryPage() {
         />
       </div>
 
-      <Tabs defaultValue="genres">
+      <Tabs value={aba} onValueChange={setAba}>
         <TabsList>
           <TabsTrigger value="genres">Gêneros</TabsTrigger>
           <TabsTrigger value="artists">Artistas</TabsTrigger>

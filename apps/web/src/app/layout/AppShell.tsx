@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
@@ -18,6 +18,7 @@ import { PlayerBar } from '@/app/layout/PlayerBar';
 import { PuxarParaRecarregar } from '@/app/layout/PuxarParaRecarregar';
 import { QueuePanel } from '@/app/layout/QueuePanel';
 import { ScrollContainerContext } from '@/app/layout/scroll-context';
+import { useRolagemPorEntrada } from '@/app/layout/useRolagemPorEntrada';
 import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
 import { avisarAtualizacaoDoApp } from '@/lib/android/conviteApk';
@@ -149,7 +150,9 @@ export function AppShell() {
   const location = useLocation();
   const precisaEscolherGosto = usePrecisaEscolherGosto(location.pathname);
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null);
-  const scrollRef = useRef<HTMLElement | null>(null);
+  // O miolo da página: a altura dele cresce quando a página (lazy, lista
+  // virtual, dados) termina de chegar — é o que a restauração de rolagem espera.
+  const [conteudoEl, setConteudoEl] = useState<HTMLElement | null>(null);
   const queueOpen = useUiStore((s) => s.queueOpen);
   const hasTrack = usePlayerStore((s) => s.currentTrack !== null);
   const isDesktop = useMediaQuery('(min-width: 1024px)');
@@ -160,9 +163,11 @@ export function AppShell() {
   // recorrente da Home.
   const temMenuLateral = useMediaQuery('(min-width: 768px)');
 
-  // Reset page scroll on navigation (keep player untouched) + telemetry.
+  // Rolagem por entrada do histórico: voltar devolve a posição, ir adiante
+  // começa do topo (o player não é tocado).
+  useRolagemPorEntrada(scrollEl, conteudoEl);
+
   useEffect(() => {
-    scrollRef.current?.scrollTo({ top: 0 });
     recordNavigation(location.pathname);
   }, [location.pathname]);
 
@@ -234,10 +239,7 @@ export function AppShell() {
           {temMenuLateral && <Sidebar />}
 
           <main
-            ref={(node) => {
-              scrollRef.current = node;
-              setScrollEl(node);
-            }}
+            ref={setScrollEl}
             // overscroll-y-NONE (não 'contain'): o Chrome Android 12+ estica o
             // conteúdo do scroller ao puxar além do topo — 'contain' só impede
             // o encadeamento ao body, 'none' desliga o efeito por completo.
@@ -245,6 +247,7 @@ export function AppShell() {
           >
             <TopBar />
             <div
+              ref={setConteudoEl}
               className={cn(
                 'mx-auto w-full max-w-[1600px]',
                 // Só o rodapé do CELULAR precisa ser compensado: lá as abas e o

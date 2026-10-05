@@ -139,8 +139,9 @@ describe('alças de áudio dos downloads', () => {
 
     // 200 pedidas, mas o que fica VIVO é o teto — o resto foi revogado.
     expect(alcas.criadas).toBe(200);
-    expect(alcas.abertas.size).toBeLessThanOrEqual(60);
-    expect(alcas.abertas.size).toBe(60);
+    // Teto novo: 3 (anterior + atual + próxima). Eram 60 — no aparelho real
+    // isso virou 17 alças / 128 MB vivas (ver `politicaDeAlcasDeAudio.test`).
+    expect(alcas.abertas.size).toBe(3);
   });
 
   it('a faixa que acabou de tocar nunca é a podada', async () => {

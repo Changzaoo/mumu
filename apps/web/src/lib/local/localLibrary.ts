@@ -45,6 +45,7 @@ import {
   verificadorPorTitulo,
 } from '@/lib/local/metaTeam';
 import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
+import { cederAThread } from '@/lib/perf/ceder';
 import { abrir, aoDespejar, consultar, orcamentoCheio, soltar } from '@/lib/perf/alcasDeBlob';
 import { BYTES_QUE_JA_ESTAO_BONS, miniaturaDeCapa } from '@/lib/local/miniaturaDeCapa';
 import { registrarFalhaDePersistencia } from '@/lib/sync/syncStatus';
@@ -339,7 +340,8 @@ function abrirRegistro(): Promise<IDBDatabase> {
 // sendo lido: quando existe, é a fonte, migra uma vez e é apagado.
 const DB_FAIXAS = 'aurial-registro-faixas';
 const STORE_FAIXAS = 'faixas';
-const LOTE_DE_REGISTRO = 400;
+/** Registros por transação de GRAVAÇÃO: o `put` serializa na thread principal, como a leitura desserializa. */
+const LOTE_DE_GRAVACAO = 100;
 
 let dbFaixas: Promise<IDBDatabase> | null = null;
 
@@ -392,38 +394,85 @@ async function apagarRegistroAntigo(): Promise<void> {
   });
 }
 
-/** Lê o registro por faixa em lotes. `null` quando o banco novo está vazio. */
+/**
+ * LEITURA EM PÁGINAS PEQUENAS, CEDENDO A THREAD ENTRE ELAS.
+ *
+ * O custo de ler `request.result` é a desserialização (structured clone) de
+ * todos os registros da página, e ela roda NA THREAD PRINCIPAL, de uma vez. No
+ * Moto G34 do dono, páginas de 400 registros apareceram na telemetria como
+ * tarefas de 636, 457 e 457 ms em `IDBRequest.onsuccess` — a Home sem
+ * responder ao toque no boot. Registro de ~1,3 kB, 5,7 mil deles.
+ *
+ * Duas regras agora:
+ *  1. página pequena, e que se ADAPTA ao aparelho: mede quanto custou a
+ *     desserialização da página e dimensiona a próxima para ficar perto de
+ *     `LEITURA_ALVO_MS` (um desktop rápido cresce até o teto; um celular fraco
+ *     encolhe até o piso). Nunca passa de `LEITURA_PAGINA_MAX` registros;
+ *  2. entre uma página e outra a thread é CEDIDA (toque, rolagem e pintura
+ *     passam na frente) e nada de `push(...spread)`, que estoura a pilha e
+ *     copia o array inteiro a cada página.
+ *
+ * A ordem e o conteúdo são exatamente os de antes: o IndexedDB entrega por
+ * ordem de chave e cada página recomeça logo depois da última chave da anterior.
+ */
+/** Quanto uma página pode custar de desserialização (ms) — bem abaixo dos 50 ms. */
+export const LEITURA_ALVO_MS = 20;
+export const LEITURA_PAGINA_INICIAL = 40;
+export const LEITURA_PAGINA_MIN = 20;
+/** Teto: nenhuma página lê mais registros que isto, por mais rápido que seja o aparelho. */
+export const LEITURA_PAGINA_MAX = 200;
+
+/** Tamanho da próxima página, dado quanto a anterior custou. Puro (testável). */
+export function tamanhoDaProximaPagina(registros: number, custoMs: number): number {
+  // Custo por registro, com piso: página que "custou 0" (relógio grosso, disco
+  // quente) não pode mandar o tamanho para o infinito.
+  const porRegistro = Math.max(custoMs, 0.5) / Math.max(registros, 1);
+  const ideal = Math.floor(LEITURA_ALVO_MS / porRegistro);
+  return Math.min(LEITURA_PAGINA_MAX, Math.max(LEITURA_PAGINA_MIN, ideal));
+}
+
+/** Lê o registro por faixa em páginas. `null` quando o banco novo está vazio. */
 async function lerFaixas(): Promise<LibraryEntry[] | null> {
   const db = await abrirFaixas();
   const todas: LibraryEntry[] = [];
   let depoisDe: IDBValidKey | null = null;
+  let tamanho = LEITURA_PAGINA_INICIAL;
   for (;;) {
     const faixa: IDBKeyRange | undefined =
       depoisDe === null ? undefined : IDBKeyRange.lowerBound(depoisDe, true);
-    const lote = await new Promise<{ valores: LibraryEntry[]; chaves: IDBValidKey[] }>(
-      (resolve) => {
-        const store = db.transaction(STORE_FAIXAS, 'readonly').objectStore(STORE_FAIXAS);
-        const reqValores = store.getAll(faixa, LOTE_DE_REGISTRO);
-        const reqChaves = store.getAllKeys(faixa, LOTE_DE_REGISTRO);
-        let valores: LibraryEntry[] | null = null;
-        let chaves: IDBValidKey[] | null = null;
-        const talvez = (): void => {
-          if (valores && chaves) resolve({ valores, chaves });
-        };
-        reqValores.onsuccess = () => {
-          valores = (reqValores.result as LibraryEntry[] | undefined) ?? [];
-          talvez();
-        };
-        reqChaves.onsuccess = () => {
-          chaves = reqChaves.result ?? [];
-          talvez();
-        };
-        reqValores.onerror = () => resolve({ valores: [], chaves: [] });
-      },
-    );
-    todas.push(...lote.valores);
-    if (lote.chaves.length < LOTE_DE_REGISTRO) break;
-    depoisDe = lote.chaves[lote.chaves.length - 1]!;
+    const pedidos = tamanho;
+    const pagina = await new Promise<{
+      valores: LibraryEntry[];
+      chaves: IDBValidKey[];
+      custoMs: number;
+    }>((resolve) => {
+      const store = db.transaction(STORE_FAIXAS, 'readonly').objectStore(STORE_FAIXAS);
+      const reqValores = store.getAll(faixa, pedidos);
+      const reqChaves = store.getAllKeys(faixa, pedidos);
+      let valores: LibraryEntry[] | null = null;
+      let chaves: IDBValidKey[] | null = null;
+      let custoMs = 0;
+      const talvez = (): void => {
+        if (valores && chaves) resolve({ valores, chaves, custoMs });
+      };
+      reqValores.onsuccess = () => {
+        // O custo está em LER `.result`: é aí que o clone acontece.
+        const t0 = performance.now();
+        valores = (reqValores.result as LibraryEntry[] | undefined) ?? [];
+        custoMs = performance.now() - t0;
+        talvez();
+      };
+      reqChaves.onsuccess = () => {
+        chaves = reqChaves.result ?? [];
+        talvez();
+      };
+      reqValores.onerror = () => resolve({ valores: [], chaves: [], custoMs: 0 });
+    });
+    for (const valor of pagina.valores) todas.push(valor);
+    if (pagina.chaves.length < pedidos) break;
+    depoisDe = pagina.chaves[pagina.chaves.length - 1]!;
+    tamanho = tamanhoDaProximaPagina(pagina.valores.length, pagina.custoMs);
+    await cederAThread();
   }
   return todas.length > 0 ? todas : null;
 }
@@ -488,12 +537,12 @@ async function gravarRegistroNoDisco(
     });
 
   if (completa) await rodar((store) => store.clear());
-  for (let i = 0; i < gravar.length; i += LOTE_DE_REGISTRO) {
-    const lote = gravar.slice(i, i + LOTE_DE_REGISTRO);
+  for (let i = 0; i < gravar.length; i += LOTE_DE_GRAVACAO) {
+    const lote = gravar.slice(i, i + LOTE_DE_GRAVACAO);
     await rodar((store) => {
       for (const e of lote) store.put(storableEntry(e), e.track.id);
     });
-    if (i + LOTE_DE_REGISTRO < gravar.length) await new Promise((r) => setTimeout(r, 0));
+    if (i + LOTE_DE_GRAVACAO < gravar.length) await cederAThread();
   }
   if (apagar.length > 0) {
     await rodar((store) => {
@@ -1331,6 +1380,33 @@ export function sanearEntradaDoAcervo(bruta: unknown): LibraryEntry | null {
   return mudou ? { ...e, track: { ...(t as TrackDto), artists, album } } : e;
 }
 
+/**
+ * Igualdade estrutural de valores JSON (objetos, arrays, primitivos).
+ *
+ * Substitui `JSON.stringify(a) === JSON.stringify(b)`: sem alocar duas strings
+ * por comparação e sem depender da ORDEM das chaves (o IndexedDB e o servidor
+ * não a garantem). Propriedade `undefined` conta como ausente, como no JSON.
+ */
+export function mesmoConteudo(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  if (typeof a !== 'object' || typeof b !== 'object' || a === null || b === null) return false;
+  if (Array.isArray(a) !== Array.isArray(b)) return false;
+  if (Array.isArray(a) && Array.isArray(b)) {
+    if (a.length !== b.length) return false;
+    for (let i = 0; i < a.length; i++) if (!mesmoConteudo(a[i], b[i])) return false;
+    return true;
+  }
+  const oa = a as Record<string, unknown>;
+  const ob = b as Record<string, unknown>;
+  for (const chave of Object.keys(oa)) {
+    if (!mesmoConteudo(oa[chave], ob[chave])) return false;
+  }
+  for (const chave of Object.keys(ob)) {
+    if (oa[chave] === undefined && ob[chave] !== undefined) return false;
+  }
+  return true;
+}
+
 export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
   const mortas = new Map<string, string>();
   for (const e of read()) if (e.remoteMorta) mortas.set(e.track.id, e.remoteMorta);
@@ -1373,7 +1449,9 @@ export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
     if (!duracaoConhecida(nova.track.durationMs) && duracaoConhecida(medida)) {
       candidata = { ...candidata, track: { ...candidata.track, durationMs: medida } };
     }
-    if (JSON.stringify(candidata) === JSON.stringify(e)) return e;
+    // Comparação estrutural, sem serializar: eram DUAS `JSON.stringify` de ~1,3 kB
+    // por faixa do acervo (5,7 mil) a cada revalidação, só para descobrir que nada mudou.
+    if (mesmoConteudo(candidata, e)) return e;
     alterou = true;
     return candidata;
   });
@@ -3188,7 +3266,13 @@ export function hydrate(): Promise<void> {
     const [, doAcervo] = await medirEtapa('hydrate:carregarRegistro', () =>
       Promise.all([carregarRegistro(), acervoDoDisco().catch(() => [] as LibraryEntry[])]),
     );
+    // UM RESPIRO ENTRE AS FASES. Cada `await` que já estava resolvido continua
+    // NA MESMA TAREFA (microtarefa): o clone do disco, o saneamento do registro,
+    // a fusão do acervo e o `emit` formavam uma tarefa só, e a telemetria a
+    // atribuía ao último `onsuccess` do IndexedDB (350–636 ms no moto g34).
+    await cederAThread();
     if (doAcervo.length > 0) aplicarCatalogo(doAcervo);
+    await cederAThread();
     await medirEtapa('hydrate:emit-1', () => emit());
     marcarBoot('biblioteca-local');
     setTimeout(marcarAssentada, TETO_PARA_ASSENTAR_MS);

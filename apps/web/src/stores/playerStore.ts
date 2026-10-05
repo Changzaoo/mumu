@@ -44,6 +44,7 @@ import {
   duracaoDiverge,
   sourceUrlFor,
 } from '@/lib/local/localLibrary';
+import { aparar, definirEmUso as definirAlcasEmUso } from '@/lib/perf/alcasDeBlob';
 import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
@@ -2606,6 +2607,18 @@ export function initPlayerEngine(): void {
     (track) => localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id),
   );
   void localAudioReady();
+
+  // POLÍTICA ÚNICA DE ALÇAS DE ÁUDIO: só vivem as do motor (atual, pré-carga,
+  // faixa em fade) + o teto de `alcasDeBlob`. Trocou de faixa/fila: solta o resto
+  // (reabrir é barato) — de novo depois da graça, quando o slot velho já morreu.
+  definirAlcasEmUso('audio', () => audioEngine.urlsEmUso());
+  let faxinaDeAlcas: ReturnType<typeof setTimeout> | null = null;
+  store.subscribe((s, antes) => {
+    if (s.currentTrack?.id === antes.currentTrack?.id && s.queue === antes.queue) return;
+    aparar('audio');
+    if (faxinaDeAlcas) clearTimeout(faxinaDeAlcas);
+    faxinaDeAlcas = setTimeout(() => aparar('audio'), 16_000);
+  });
 
   // Retomar de onde parou: a última faixa volta PAUSADA na posição exata —
   // o primeiro play carrega o áudio e busca a posição (ver play()).

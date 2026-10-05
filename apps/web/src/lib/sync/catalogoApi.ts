@@ -28,6 +28,7 @@ import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { getIdToken } from '@/lib/firebase';
 import { registrarErro, registrarSnapshot } from '@/lib/sync/syncStatus';
 import { API_BASE_URL } from '@/lib/apiBase';
+import { cederAThread } from '@/lib/perf/ceder';
 
 const BASE_URL = API_BASE_URL;
 const COLECAO = 'catalogo';
@@ -46,6 +47,53 @@ interface CachePersistido {
   entradas: LibraryEntry[];
 }
 
+/**
+ * O QUE VAI PARA O DISCO É TEXTO, EM BLOCOS — nunca o catálogo inteiro como um
+ * objeto só.
+ *
+ * `objectStore.put(catalogoInteiro)` e `.get()` serializam/desserializam 5,7 mil
+ * faixas (~2,6 MB) NA THREAD PRINCIPAL, de uma vez: 353 ms numa tarefa no Moto
+ * G34 do dono. Clonar uma STRING é só copiar bytes. Então cada bloco de
+ * `FAIXAS_POR_BLOCO` entradas vira um JSON e o valor gravado é a lista desses
+ * textos; quem lê faz o `JSON.parse` bloco a bloco, cedendo a thread entre eles.
+ * O ETag vai no MESMO registro: o par etag+conteúdo é atômico (nunca um etag novo
+ * com blocos velhos), e 304 continua não regravando nada.
+ *
+ * O formato antigo (`{ etag, entradas }`) segue sendo lido e é regravado no novo
+ * formato, uma vez, fora do caminho do boot.
+ */
+export const FAIXAS_POR_BLOCO = 250;
+
+interface CachePersistidoEmTexto {
+  formato: 'blocos-json';
+  etag: string | null;
+  blocos: string[];
+}
+
+function ehEmTexto(bruto: unknown): bruto is CachePersistidoEmTexto {
+  return (
+    typeof bruto === 'object' &&
+    bruto !== null &&
+    (bruto as { formato?: unknown }).formato === 'blocos-json' &&
+    Array.isArray((bruto as { blocos?: unknown }).blocos)
+  );
+}
+
+/** Desempacota cedendo a thread entre os blocos (cada `JSON.parse` é uma tarefa curta). */
+async function desempacotarCache(bruto: unknown): Promise<CachePersistido | null> {
+  if (ehEmTexto(bruto)) {
+    const entradas: LibraryEntry[] = [];
+    for (const bloco of bruto.blocos) {
+      const parte = JSON.parse(bloco) as LibraryEntry[];
+      for (const e of parte) entradas.push(e);
+      await cederAThread();
+    }
+    return { etag: bruto.etag, entradas };
+  }
+  // Formato antigo.
+  return (bruto as CachePersistido | undefined) ?? null;
+}
+
 let dbPromise: Promise<IDBDatabase> | null = null;
 
 function abrirDb(): Promise<IDBDatabase> {
@@ -61,15 +109,20 @@ function abrirDb(): Promise<IDBDatabase> {
   return dbPromise;
 }
 
+/** O disco ainda guarda o formato antigo (um objeto gigante): regravar quando houver folga. */
+let discoNoFormatoAntigo = false;
+
 async function lerCache(): Promise<CachePersistido | null> {
   if (typeof indexedDB === 'undefined') return null;
   try {
     const db = await abrirDb();
-    return await new Promise<CachePersistido | null>((resolve) => {
+    const bruto = await new Promise<unknown>((resolve) => {
       const req = db.transaction(STORE, 'readonly').objectStore(STORE).get(CHAVE);
-      req.onsuccess = () => resolve((req.result as CachePersistido | undefined) ?? null);
+      req.onsuccess = () => resolve(req.result);
       req.onerror = () => resolve(null);
     });
+    discoNoFormatoAntigo = bruto != null && !ehEmTexto(bruto);
+    return await desempacotarCache(bruto);
   } catch {
     return null;
   }
@@ -101,23 +154,64 @@ export async function acervoDoDisco(): Promise<LibraryEntry[]> {
   return (await cacheDoDisco())?.entradas ?? [];
 }
 
-async function gravarCache(valor: CachePersistido): Promise<void> {
-  // O que acabou de ser gravado é o que uma leitura seguinte encontraria: sem
-  // esta linha o memo devolveria para sempre o snapshot com que a sessão abriu.
-  leituraDoDisco = Promise.resolve(valor);
+/** A gravação mais nova ainda não escrita: se outra chegar antes, esta é descartada. */
+let gravacaoPendente: CachePersistido | null = null;
+let gravando: Promise<void> = Promise.resolve();
+
+/** Folga do navegador: `requestIdleCallback`, ou um instante qualquer sem ele. */
+function naFolga(): Promise<void> {
+  return new Promise<void>((resolve) => {
+    const w = globalThis as {
+      requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number;
+    };
+    if (typeof w.requestIdleCallback === 'function')
+      w.requestIdleCallback(() => resolve(), { timeout: 4_000 });
+    else setTimeout(resolve, 250);
+  });
+}
+
+async function escreverNoDisco(valor: CachePersistido): Promise<void> {
   if (typeof indexedDB === 'undefined') return;
   try {
     const db = await abrirDb();
+    // Os blocos são montados AQUI, um por vez com respiro no meio (cada
+    // `JSON.stringify` de 250 faixas é curto; os 5,7 mil de uma vez, não).
+    const blocos: string[] = [];
+    for (let i = 0; i < valor.entradas.length; i += FAIXAS_POR_BLOCO) {
+      blocos.push(JSON.stringify(valor.entradas.slice(i, i + FAIXAS_POR_BLOCO)));
+      await cederAThread();
+    }
+    const empacotado: CachePersistidoEmTexto = { formato: 'blocos-json', etag: valor.etag, blocos };
     await new Promise<void>((resolve) => {
       const tx = db.transaction(STORE, 'readwrite');
-      tx.objectStore(STORE).put(valor, CHAVE);
+      tx.objectStore(STORE).put(empacotado, CHAVE);
       tx.oncomplete = () => resolve();
       tx.onerror = () => resolve(); // cache é conforto, nunca bloqueia
       tx.onabort = () => resolve();
     });
+    discoNoFormatoAntigo = false;
   } catch {
     /* sem IndexedDB o app segue: só perde o acervo offline */
   }
+}
+
+/**
+ * Grava o acervo no disco SEM SEGURAR NADA: devolve já, e a escrita acontece na
+ * folga do navegador, em fatias. Antes, `await gravarCache(...)` ficava ANTES de
+ * entregar o acervo ao app — o tempo de serializar 2,6 MB somava na espera de
+ * quem queria ver a lista. A memória (`leituraDoDisco`) já tem o valor novo, que
+ * é o que uma leitura seguinte da sessão encontraria.
+ */
+function gravarCache(valor: CachePersistido): Promise<void> {
+  leituraDoDisco = Promise.resolve(valor);
+  gravacaoPendente = valor;
+  gravando = gravando.then(async () => {
+    await naFolga();
+    const doVez = gravacaoPendente;
+    gravacaoPendente = null;
+    if (doVez) await escreverNoDisco(doVez);
+  });
+  return gravando;
 }
 
 // ── rede ────────────────────────────────────────────────────────────────────
@@ -170,7 +264,8 @@ export function subscribeCatalogo(
       etag = novo;
       if (cancelado || !entradas) return; // 304: nada mudou
       registrarSnapshot(COLECAO, entradas.length, 'servidor');
-      await gravarCache({ etag, entradas });
+      // Entrega PRIMEIRO, grava depois (na folga): ver `gravarCache`.
+      void gravarCache({ etag, entradas });
       callback(entradas);
     } catch (erro) {
       // Sem rede o app continua com o que já está na tela e no disco.
@@ -194,6 +289,8 @@ export function subscribeCatalogo(
       etag = cache.etag;
       registrarSnapshot(COLECAO, cache.entradas.length, 'cache');
       callback(cache.entradas);
+      // Disco no formato antigo: passa para o novo uma vez, na folga.
+      if (discoNoFormatoAntigo) void gravarCache(cache);
     }
     // 2. Depois a rede, para pegar o que mudou.
     await revalidar();
