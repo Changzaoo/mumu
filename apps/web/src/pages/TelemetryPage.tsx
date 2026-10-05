@@ -76,6 +76,10 @@ interface TelemetryDoc {
   timezone?: string | null;
   screen?: string;
   pwaInstalled?: boolean;
+  /** Por onde usa: app de Android instalado, PWA ou navegador. */
+  canal?: 'app-android' | 'pwa' | 'navegador';
+  /** versionCode do app de Android (só com `canal: 'app-android'`). */
+  appVersao?: number;
   deviceMemoryGb?: number | null;
   cpuCores?: number | null;
   touchDevice?: boolean;
@@ -390,7 +394,9 @@ function categorize(t: TelemetryDoc): UserSegment {
     else if (h < 18) chips.push('Vespertino');
     else chips.push('Noturno');
   }
-  if (t.pwaInstalled) chips.push('App instalado');
+  if (t.canal === 'app-android') chips.push(`App Android v${t.appVersao ?? '?'}`);
+  else if (t.canal === 'pwa' || t.pwaInstalled) chips.push('PWA instalado');
+  else if (t.canal === 'navegador') chips.push('Pelo navegador');
   if ((t.jsErrors ?? 0) > 0) chips.push('Com erros');
   if ((t.diario?.resumo.sintomas ?? 0) > 0) chips.push('Sintomas no diário');
 
@@ -451,6 +457,8 @@ function toCsv(docs: TelemetryDoc[]): string {
     'up_mbps',
     'erros_js',
     'app_instalado',
+    'canal',
+    'app_android_versao',
     'conta_criada',
     'ultimo_acesso',
   ];
@@ -473,6 +481,8 @@ function toCsv(docs: TelemetryDoc[]): string {
       t.netUpMbps,
       t.jsErrors ?? 0,
       t.pwaInstalled == null ? '' : t.pwaInstalled ? 'sim' : 'não',
+      t.canal,
+      t.appVersao,
       t.accountCreatedAt,
       t.lastSeenAt,
     ]

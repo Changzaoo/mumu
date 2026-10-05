@@ -337,6 +337,14 @@ function downloadsCount(): number | null {
   }
 }
 
+/** Canal de uso deste aparelho — pelo user-agent ("RadinhoApp/N") e pelo modo de exibição. */
+function canalDeUso(): { canal: 'app-android' | 'pwa' | 'navegador'; appVersao?: number } {
+  const app = /RadinhoApp\/(\d+)/.exec(navigator.userAgent);
+  if (app) return { canal: 'app-android', appVersao: Number(app[1]) };
+  const pwa = window.matchMedia?.('(display-mode: standalone)').matches ?? false;
+  return { canal: pwa ? 'pwa' : 'navegador' };
+}
+
 function platformInfo(): string {
   const ua = navigator.userAgent;
   if (/iP(hone|od)/.test(ua)) return 'iPhone';
@@ -472,6 +480,9 @@ function snapshot(): Record<string, unknown> {
     timezone: timezoneInfo() || null,
     screen: `${window.screen.width}×${window.screen.height}`,
     pwaInstalled: window.matchMedia?.('(display-mode: standalone)').matches ?? false,
+    // POR ONDE a pessoa usa: o app de Android instalado (com a versão nativa
+    // dele), o site instalado como PWA, ou o navegador comum.
+    ...canalDeUso(),
     deviceMemoryGb: (navigator as Navigator & { deviceMemory?: number }).deviceMemory ?? null,
     cpuCores: navigator.hardwareConcurrency ?? null,
     touchDevice: (navigator.maxTouchPoints ?? 0) > 0,

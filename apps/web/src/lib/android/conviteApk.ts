@@ -47,18 +47,34 @@ export function versaoDoApp(userAgent: string): number | null {
  * pessoa instalar. O Android não deixa um app de fora da loja se atualizar
  * sozinho: o máximo é levar ao download com um toque.
  */
-export async function appDesatualizado(): Promise<boolean> {
-  if (typeof window === 'undefined') return false;
+export interface VersaoNova {
+  /** versionCode deste app instalado. */
+  instalada: number;
+  /** versionCode do APK publicado. */
+  publicada: number;
+  /** Nome da versão publicada ("1.0.6"), quando o arquivo informa. */
+  nome: string;
+}
+
+/** A versão nova publicada, ou null (em dia, fora do app, ou sem como saber). */
+export async function versaoNovaDoApp(): Promise<VersaoNova | null> {
+  if (typeof window === 'undefined') return null;
   const instalada = versaoDoApp(navigator.userAgent);
-  if (instalada === null) return false;
+  if (instalada === null) return null;
   try {
     const r = await fetch('/radinho-apk.json', { cache: 'no-store' });
-    if (!r.ok) return false;
-    const publicada = Number(((await r.json()) as { versionCode?: number }).versionCode) || 0;
-    return publicada > instalada;
+    if (!r.ok) return null;
+    const dito = (await r.json()) as { versionCode?: number; versionName?: string };
+    const publicada = Number(dito.versionCode) || 0;
+    if (publicada <= instalada) return null;
+    return { instalada, publicada, nome: String(dito.versionName ?? '') };
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function appDesatualizado(): Promise<boolean> {
+  return (await versaoNovaDoApp()) !== null;
 }
 
 /** Endereço completo do APK: dentro do app o download sai pelo navegador do sistema. */

@@ -59,6 +59,7 @@ describe('ConviteApkBar', () => {
     render(<ConviteApkBar />);
     const link = await screen.findByRole('link', { name: 'Atualizar' });
     expect(link.getAttribute('href')).toBe(new URL(APK_URL, window.location.origin).toString());
+    expect(screen.getByText(/a sua é a 4/)).toBeTruthy();
     expect(screen.queryByRole('button')).toBeNull();
     vi.unstubAllGlobals();
   });

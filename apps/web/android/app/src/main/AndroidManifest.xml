@@ -32,6 +32,8 @@
             android:exported="false"
             android:foregroundServiceType="mediaPlayback" />
 
+        <receiver android:name=".AtualizacaoReceiver" android:exported="false" />
+
         <provider
             android:name="androidx.core.content.FileProvider"
             android:authorities="${applicationId}.fileprovider"
@@ -50,4 +52,8 @@
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK" />
     <uses-permission android:name="android.permission.WAKE_LOCK" />
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <!-- O app se atualiza sozinho (AtualizadorPlugin): instala o próprio APK novo,
+         e no Android 12+ sem a tela de confirmação. -->
+    <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.UPDATE_PACKAGES_WITHOUT_USER_ACTION" />
 </manifest>
