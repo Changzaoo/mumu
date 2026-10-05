@@ -11,6 +11,8 @@ import { preencherNascimentoDoLogin } from '@/lib/auth/nascimentoGoogle';
 const AUTH_ERRORS: Record<string, string> = {
   'auth/too-many-requests': 'Muitas tentativas. Aguarde um pouco.',
   'auth/popup-closed-by-user': 'Janela fechada antes de concluir.',
+  // Login nativo do app de Android (LoginGooglePlugin): a pessoa fechou a folha.
+  cancelado: 'Login cancelado.',
   'auth/network-request-failed': 'Falha de rede. Verifique sua conexão.',
   // Sem estes, o erro virava um texto técnico em inglês que passava batido — e o
   // login "não fazia nada". `unauthorized-domain` é o mais comum quando o app

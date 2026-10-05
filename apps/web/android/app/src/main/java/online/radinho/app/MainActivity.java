@@ -35,6 +35,7 @@ public class MainActivity extends BridgeActivity {
     protected void onCreate(Bundle savedInstanceState) {
         // A ponte para o serviço de reprodução — antes do super, que monta o bridge.
         registerPlugin(TocadorPlugin.class);
+        registerPlugin(LoginGooglePlugin.class);
         super.onCreate(savedInstanceState);
         // Android 13+: sem esta permissão a notificação "Tocando" fica escondida
         // (o serviço funciona igual, mas a pessoa perde o atalho de volta).

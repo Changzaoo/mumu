@@ -311,6 +311,24 @@ export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday
  */
 const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
 
+interface LoginGoogleNativo {
+  entrar(): Promise<{ idToken: string }>;
+}
+
+/** O plugin de login do app de Android, ou null (navegador, ou APK anterior a ele). */
+function loginGoogleNativo(): LoginGoogleNativo | null {
+  const cap = (
+    window as Window & {
+      Capacitor?: {
+        isNativePlatform?: () => boolean;
+        Plugins?: { LoginGoogle?: LoginGoogleNativo };
+      };
+    }
+  ).Capacitor;
+  if (!cap?.isNativePlatform?.()) return null;
+  return cap.Plugins?.LoginGoogle ?? null;
+}
+
 function dentroDoAppNativo(): boolean {
   const cap = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
   return Boolean(cap?.isNativePlatform?.()) || /RadinhoApp\//.test(navigator.userAgent);
@@ -329,6 +347,16 @@ export async function signInGoogle(): Promise<UserCredential & { accessToken: st
   const [instance, { GoogleAuthProvider, signInWithPopup, signInWithRedirect }] = await Promise.all(
     [requireAuth(), import('firebase/auth')],
   );
+  // DENTRO DO APP: a folha de contas do próprio Android (LoginGooglePlugin)
+  // devolve um ID token e a sessão nasce aqui, sem sair do app. APK antigo, sem
+  // o plugin, segue pelo caminho de baixo.
+  const nativo = loginGoogleNativo();
+  if (nativo) {
+    const { signInWithCredential } = await import('firebase/auth');
+    const { idToken } = await nativo.entrar();
+    const result = await signInWithCredential(instance, GoogleAuthProvider.credential(idToken));
+    return Object.assign(result, { accessToken: null });
+  }
   const provider = new GoogleAuthProvider();
   if (ANIVERSARIO_NO_LOGIN) provider.addScope(ESCOPO_ANIVERSARIO);
   // No celular o "popup" é outra aba — a pessoa sai do app e, em navegador que
