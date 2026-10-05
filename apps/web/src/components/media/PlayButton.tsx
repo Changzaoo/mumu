@@ -3,6 +3,7 @@ import { AuraDoPlay } from '@/components/media/AuraDoPlay';
 import { IconeDoPlay } from '@/components/media/IconeDoPlay';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { cn } from '@/lib/utils';
+import { usePlayerStore } from '@/stores/playerStore';
 
 export interface PlayButtonProps extends Omit<ComponentProps<'button'>, 'children'> {
   playing?: boolean;
@@ -35,7 +36,9 @@ const sizes = {
  */
 function Aura({ playing, carregando }: { playing: boolean; carregando: boolean }) {
   const toque = useMediaQuery('(pointer: coarse)');
-  return <AuraDoPlay playing={playing} toque={toque} carregando={carregando} />;
+  // A semente da névoa: cada faixa tem a sua forma (e a troca de faixa a reúne de novo).
+  const faixa = usePlayerStore((s) => s.currentTrack?.id ?? '');
+  return <AuraDoPlay playing={playing} toque={toque} carregando={carregando} faixa={faixa} />;
 }
 
 /** Accent circle play/pause — transform/opacity-only animations. */

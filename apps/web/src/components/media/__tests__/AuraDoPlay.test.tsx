@@ -105,6 +105,49 @@ describe('AuraDoPlay — o laço só roda quando há o que animar', () => {
   });
 });
 
+describe('AuraDoPlay — nova máquina: leve, movimento reduzido, troca de faixa', () => {
+  it('modo leve: 4 camadas pintadas, sem rAF, e a fase vai para o CSS', () => {
+    document.documentElement.setAttribute('data-perf', 'baixo');
+    const { container, rerender, unmount } = render(
+      <AuraDoPlay playing toque faixa="a" carregando />,
+    );
+    const raiz = container.querySelector<HTMLElement>('.aura-play-leve')!;
+    expect(raiz.querySelectorAll('canvas').length).toBe(4);
+    expect(raiz.dataset.fase).toBe('reunindo');
+    rerender(<AuraDoPlay playing toque faixa="a" />);
+    expect(raiz.dataset.fase).toBe('girando'); // fade por CSS, sem JS por quadro
+    expect(fila.length).toBe(0);
+    unmount(); // limpa os timers sem erro
+  });
+
+  it('movimento reduzido: quadro estático, sem laço, mesmo tocando e baixando', async () => {
+    const { useSettingsStore } = await import('@/stores/settingsStore');
+    useSettingsStore.setState({ reducedMotion: 'on' });
+    try {
+      render(<AuraDoPlay playing toque={false} carregando faixa="a" />);
+      expect(fila.length).toBe(0);
+    } finally {
+      useSettingsStore.setState({ reducedMotion: 'system' });
+    }
+  });
+
+  it('trocar a faixa acorda o laço (dissipa e reúne) e depois dorme', () => {
+    const { rerender } = render(<AuraDoPlay playing={false} toque={false} faixa="a" />);
+    expect(fila.length).toBe(0);
+    rerender(<AuraDoPlay playing={false} toque={false} faixa="b" />);
+    expect(fila.length).toBe(1);
+    andar(1000);
+    expect(fila.length).toBe(0);
+  });
+
+  it('desmontar cancela o rAF pendente', () => {
+    const { unmount } = render(<AuraDoPlay playing toque={false} faixa="a" />);
+    expect(fila.length).toBe(1);
+    unmount();
+    expect(fila.length).toBe(0);
+  });
+});
+
 describe('cartões da Home não montam aura', () => {
   it('MediaCard com onPlay não tem canvas de névoa (só os players têm)', () => {
     const { container } = render(

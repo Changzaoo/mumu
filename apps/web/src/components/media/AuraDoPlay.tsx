@@ -4,483 +4,421 @@ import { posicaoDoQueToca } from '@/lib/devices/presence';
 import { audioEngine } from '@/lib/audio/AudioEngine';
 import { modoLeve } from '@/lib/perf/dispositivo';
 import { cn } from '@/lib/utils';
+import {
+  criarGeometria,
+  espiralDe,
+  pintarCampo,
+  suavizarAlfa,
+  type Geometria,
+  type QuadroDaNevoa,
+} from './auraDoPlay/campo';
+import {
+  avancar,
+  emRepouso,
+  estadoInicial,
+  type EstadoDaNevoa,
+  type SinaisDaNevoa,
+} from './auraDoPlay/maquina';
+import { campoDaFaixa, type CampoDaFaixa } from './auraDoPlay/ruido';
 
 /**
- * A AURA DO PLAY — neblina em volta do botão, que nunca passa duas vezes pelo
- * mesmo desenho.
+ * A AURA DO PLAY — a névoa em volta do botão, que reage ao que o player faz e
+ * nunca passa duas vezes pelo mesmo desenho.
  *
- * O campo de densidade é RUÍDO 3D (x, y e tempo) com o domínio distorcido por
- * outro ruído — é isso que enrola a névoa em volutas que rasgam e se juntam —,
- * recortado num anel em volta do botão (denso na borda, esgarçando para fora).
- * Semente sorteada a cada montagem; os relógios só andam para a frente: nenhum
- * quadro se repete.
+ *  • BAIXANDO (a faixa foi pedida e o som ainda não saiu): a névoa nasce
+ *    espalhada e é SUGADA para o botão, cada vez mais depressa ao chegar perto
+ *    — e se acumula na borda.
+ *  • TOCANDO: a sucção vira giro, sem salto, no ritmo e na fase do GUIA (a
+ *    borda-CD: uma volta a cada 1,8 s, presa ao relógio da música).
+ *  • PAUSADO: desacelera até repousar; o laço dorme.
+ *  • TROCOU A FAIXA: a atual se dissipa, a semente muda com a névoa invisível e a
+ *    nova é reunida.
  *
- * DOIS ESTADOS, UMA ANIMAÇÃO SÓ:
- *  • TOCANDO — a névoa GIRA em volta do botão (uma volta a cada ~9 s) enquanto
- *    muda de forma.
- *  • PARADA — o giro freia até parar e fica o VENTO: a névoa quase parada,
- *    levada devagar numa direção que muda aos poucos, com rajadas que a
- *    remexem e a inclinam para um lado — como neblina de verdade numa brisa.
- * A passagem de um para o outro é pela "vivacidade", que sobe e desce com
- * inércia: velocidade do giro, ritmo da forma e peso do vento são todos
- * contínuos nela, e ângulo, forma e deriva do vento são ACUMULADOS — nada
- * recomeça, nada salta, nunca quebra.
+ * Quem decide tudo isso é a MÁQUINA DE ESTADOS PURA (`auraDoPlay/maquina.ts`);
+ * o desenho (`auraDoPlay/campo.ts`) só transforma parâmetros em pixels; este
+ * arquivo é a cola: laço de quadros, canvas, visibilidade, modo leve.
  *
- * E UM TERCEIRO, POR CIMA DOS DOIS — A SUCÇÃO: enquanto a música está sendo
- * BAIXADA (o play virou a seta de download), a névoa é SUGADA para dentro do
- * botão. As línguas, que normalmente escorrem para fora, passam a correr para
- * dentro; o anel se contrai e se cola à borda; e o conjunto gira mais depressa,
- * como água descendo pelo ralo. Chegando o som, tudo volta a escorrer para
- * fora — também por uma "sucção" com inércia, contínua: nenhum quadro salta.
+ * NÃO REPETE: ruído 3D contínuo (x, y e TEMPO) com domínio distorcido, hash de
+ * inteiros sem tabela (sem período) e SEMENTE POR FAIXA (o id): cada música tem
+ * a sua névoa, igual em todo aparelho.
  *
- * Custo: campo pequeno (56×56; 36×36 em aparelho fraco) ampliado com
- * suavização — névoa não tem detalhe fino, e o desfoque do CSS esconde os
- * pixels. Parada (e em aparelho fraco) roda a 30 quadros/s. O laço só roda com
- * a aura visível e a aba à vista. Sem movimento pedido, fica um quadro parado.
+ * CUSTO: canvas de 48×48 ampliado pelo CSS (névoa não tem detalhe fino); 30
+ * quadros/s no máximo, sem alocar por quadro (ImageData e vetores reaproveitados).
+ * O laço só roda com a aura visível, a aba à vista e algo mudando.
+ *
+ * MODO LEVE (`data-perf="baixo"`): nenhum JavaScript por quadro. A névoa são 4
+ * camadas pintadas UMA vez por faixa (64×64, semente da faixa) e animadas só por
+ * `transform`/`opacity` em CSS, com durações primas entre si (31 s, 17 s, 13 s,
+ * 3,1 s, 2,3 s) para o conjunto não repetir. O guia é o único giro sincronizado.
  */
 
-const sorteio = (min: number, max: number) => min + Math.random() * (max - min);
-
-/**
- * Sequência pseudoaleatória com SEMENTE FIXA (mulberry32). O campo de névoa
- * tem de ser o mesmo em todos os aparelhos: com `Math.random` cada tela
- * desenhava uma névoa diferente, e "sincronizado" não passava do giro.
- */
-function sequencia(semente: number): () => number {
-  let a = semente >>> 0;
-  return () => {
-    a = (a + 0x6d2b79f5) >>> 0;
-    let t = Math.imul(a ^ (a >>> 15), 1 | a);
-    t = (t + Math.imul(t ^ (t >>> 7), 61 | t)) ^ t;
-    return ((t ^ (t >>> 14)) >>> 0) / 4294967296;
-  };
-}
-
-/** Ruído de valor 3D, suave (fade quíntico), com tabela embaralhada pela semente. */
-function criarRuido(aleatorio: () => number): (x: number, y: number, z: number) => number {
-  const p = new Uint8Array(512);
-  const base = Array.from({ length: 256 }, (_, i) => i);
-  for (let i = 255; i > 0; i--) {
-    const j = Math.floor(aleatorio() * (i + 1));
-    [base[i], base[j]] = [base[j]!, base[i]!];
-  }
-  for (let i = 0; i < 512; i++) p[i] = base[i & 255]!;
-  const valor = new Float32Array(256);
-  for (let i = 0; i < 256; i++) valor[i] = aleatorio();
-  const fade = (t: number) => t * t * t * (t * (t * 6 - 15) + 10);
-  const h = (x: number, y: number, z: number) => valor[p[p[p[x]! + y]! + z]!]!;
-  return (x, y, z) => {
-    const xi = Math.floor(x);
-    const yi = Math.floor(y);
-    const zi = Math.floor(z);
-    const xf = x - xi;
-    const yf = y - yi;
-    const zf = z - zi;
-    const X = xi & 255;
-    const Y = yi & 255;
-    const Z = zi & 255;
-    const u = fade(xf);
-    const v = fade(yf);
-    const w = fade(zf);
-    const l = (a: number, b: number, t: number) => a + (b - a) * t;
-    return l(
-      l(l(h(X, Y, Z), h(X + 1, Y, Z), u), l(h(X, Y + 1, Z), h(X + 1, Y + 1, Z), u), v),
-      l(
-        l(h(X, Y, Z + 1), h(X + 1, Y, Z + 1), u),
-        l(h(X, Y + 1, Z + 1), h(X + 1, Y + 1, Z + 1), u),
-        v,
-      ),
-      w,
-    );
-  };
-}
-
-/** Três oitavas: grande forma + fiapos. 0..1. */
-function fbm(ruido: (x: number, y: number, z: number) => number, x: number, y: number, z: number) {
-  return (
-    ruido(x, y, z) * 0.57 +
-    ruido(x * 2.03 + 17.1, y * 2.03 - 9.3, z * 1.7) * 0.29 +
-    ruido(x * 4.11 - 31.7, y * 4.11 + 5.2, z * 2.9) * 0.14
-  );
-}
-
-/**
- * Duas oitavas, para a DISTORÇÃO do domínio: o que enrola as línguas é a forma
- * grande; a terceira oitava ali virava ruído que o desfoque do CSS apaga. Por
- * pixel são 7 amostras de ruído em vez de 9 — e a aura roda em TODO quadro em
- * que há música.
- */
-function fbm2(ruido: (x: number, y: number, z: number) => number, x: number, y: number, z: number) {
-  return ruido(x, y, z) * 0.66 + ruido(x * 2.03 + 17.1, y * 2.03 - 9.3, z * 1.7) * 0.34;
-}
-
-const smooth = (a: number, b: number, x: number) => {
-  const t = Math.max(0, Math.min(1, (x - a) / (b - a)));
-  return t * t * (3 - 2 * t);
-};
-
-/** Quanto tempo (s) a vivacidade leva para andar ~63% do caminho. */
-const INERCIA_PAUSA = 0.9;
-const INERCIA_PLAY = 0.45;
-/** O CD (e a névoa com ele) pega o giro em ~0,35 s. */
-const INERCIA_CD = 0.35;
-/** Uma volta a cada 1,8 s (33⅓ rpm, a do disco). */
-const VEL_CD = (Math.PI * 2) / 1.8;
 const DOIS_PI = Math.PI * 2;
-/** O braço do tornado: quanto se enrola por unidade de raio (rad). */
-const ESPIRAL = 7;
-/** Comprimento da cauda atrás do braço (rad): a névoa rarefaz depois disso. */
-const CAUDA = 2.2;
-/** A sucção pega em ~0,4 s e solta em ~0,7 s (o som chegou: a névoa volta a sair devagar). */
-const INERCIA_SUGA = 0.4;
-const INERCIA_SOLTA = 0.7;
-/** Quanto as línguas correm PARA DENTRO por segundo, sugadas (unidades da textura). */
-const VEL_SUCAO = 1.7;
-/** O giro extra do redemoinho enquanto suga: mais uma volta a cada 2,4 s. */
-const VEL_REDEMOINHO = (Math.PI * 2) / 2.4;
+/** Resolução da névoa (CSS amplia). */
+const N_NORMAL = 48;
+const N_LEVE = 64;
+/** Quanto tempo (ms) as camadas do modo leve ficam andando depois de já invisíveis. */
+const ESPERA_QUIETO = 1000;
+/** Fade da troca de faixa no modo leve (ms). */
+const TROCA_LEVE = 380;
+
+type CorRgb = readonly [number, number, number];
 
 export function AuraDoPlay({
   playing,
   toque,
   carregando = false,
+  faixa = '',
 }: {
   playing: boolean;
   toque: boolean;
-  /** A música está sendo baixada: o rastro sai de cena e a névoa é SUGADA
-   *  para dentro do botão. */
+  /** A música está sendo baixada: a névoa é SUGADA para dentro do botão. */
   carregando?: boolean;
+  /** Id da faixa: a semente da névoa. */
+  faixa?: string;
 }) {
   const semMovimento = useSemMovimento();
   const canvasRef = useRef<HTMLCanvasElement>(null);
+  const leveRef = useRef<HTMLSpanElement>(null);
   const cdRef = useRef<HTMLSpanElement>(null);
-  const tocandoRef = useRef(playing);
-  const carregandoRef = useRef(carregando);
+  const sinaisRef = useRef<SinaisDaNevoa>({
+    tocando: playing,
+    carregando,
+    semMovimento,
+    faixa,
+    posicao: null,
+    rajada: 0.5,
+  });
   const acordarRef = useRef<() => void>(() => undefined);
 
   useEffect(() => {
-    tocandoRef.current = playing;
+    sinaisRef.current.tocando = playing;
+    sinaisRef.current.carregando = carregando;
+    sinaisRef.current.faixa = faixa;
     acordarRef.current();
-  }, [playing]);
-
-  useEffect(() => {
-    carregandoRef.current = carregando;
-    acordarRef.current();
-  }, [carregando]);
+  }, [playing, carregando, faixa]);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext('2d');
     if (!canvas || !ctx) return;
+    const sinais = sinaisRef.current;
+    sinais.semMovimento = semMovimento;
 
-    const leve = modoLeve();
-    // 48 (32 no aparelho fraco): a névoa não tem detalhe fino, o desfoque do
-    // CSS esconde os pixels, e são 27% menos pixels por quadro que os 56 de antes.
-    const N = leve ? 32 : 48;
-    canvas.width = N;
-    canvas.height = N;
-    const imagem = ctx.createImageData(N, N);
+    canvas.width = N_NORMAL;
+    canvas.height = N_NORMAL;
+    const geo = criarGeometria(N_NORMAL);
+    const imagem = ctx.createImageData(N_NORMAL, N_NORMAL);
     const px = imagem.data;
-    // Mesma semente em todo aparelho: a mesma névoa (ver `sequencia`).
-    const ruido = criarRuido(sequencia(0x72616469));
-
-    // Onde cada pixel está: raio e ângulo, calculados uma vez.
-    const raioDe = new Float32Array(N * N);
-    const xs = new Float32Array(N * N);
-    const ys = new Float32Array(N * N);
-    const cosDe = new Float32Array(N * N);
-    const senDe = new Float32Array(N * N);
-    const thetaDe = new Float32Array(N * N);
-    for (let j = 0; j < N; j++) {
-      for (let i = 0; i < N; i++) {
-        const x = ((i + 0.5) / N) * 2 - 1;
-        const y = ((j + 0.5) / N) * 2 - 1;
-        const k = j * N + i;
-        xs[k] = x;
-        ys[k] = y;
-        raioDe[k] = Math.hypot(x, y);
-        const raio = raioDe[k]! || 1e-3;
-        // Direção de cada pixel a partir do centro: a névoa é amostrada num
-        // CÍRCULO do espaço do ruído (sem emenda em volta do botão).
-        cosDe[k] = x / raio;
-        senDe[k] = y / raio;
-        thetaDe[k] = Math.atan2(y, x);
-      }
-    }
-    // O botão ocupa ~54% do raio da caixa (inset -42%/-48%).
+    let campo: CampoDaFaixa = campoDaFaixa(sinais.faixa);
+    let campoDe = sinais.faixa;
+    const est: EstadoDaNevoa = estadoInicial(sinais);
+    /** Borda do botão: ~54% do raio da caixa (inset -42%/-48%). */
     const borda = toque ? 0.51 : 0.54;
 
-    // A COR: a de destaque do tema, relida de tempos em tempos (a cor da capa
-    // muda o destaque a cada faixa).
-    let cor: [number, number, number] = [255, 255, 255];
-    /** Opacidade máxima da névoa (0–255), ajustada à cor em `lerCor`. */
+    // A COR: a de destaque do tema, relida de tempos em tempos.
+    let cor: CorRgb = [255, 255, 255];
     let teto = 230;
     let corLidaEm = -Infinity;
-    const lerCor = (agora: number) => {
-      if (agora - corLidaEm < 1000) return;
+    /** Lê a cor; devolve true se mudou. */
+    const lerCor = (agora: number): boolean => {
+      if (agora - corLidaEm < 1000) return false;
       corLidaEm = agora;
       const hsl = getComputedStyle(canvas).getPropertyValue('--accent').trim();
-      if (!hsl) return;
+      if (!hsl) return false;
       ctx.fillStyle = '#000';
       ctx.fillStyle = `hsl(${hsl})`;
-      const hex = String(ctx.fillStyle);
-      const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(hex);
-      if (m) cor = [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
-      // MESMA PRESENÇA NOS DOIS TEMAS. Névoa clara sobre fundo escuro é brilho;
-      // a mesma opacidade em névoa ESCURA sobre fundo claro vira fumaça pesada
-      // (o olho pesa muito mais o escuro no claro). Cor escura → mais rala.
-      const [cr, cg, cb] = cor;
-      const luz = (0.2126 * cr + 0.7152 * cg + 0.0722 * cb) / 255;
+      const m = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i.exec(String(ctx.fillStyle));
+      if (!m) return false;
+      const nova: CorRgb = [parseInt(m[1]!, 16), parseInt(m[2]!, 16), parseInt(m[3]!, 16)];
+      const mudou = nova[0] !== cor[0] || nova[1] !== cor[1] || nova[2] !== cor[2];
+      cor = nova;
+      // MESMA PRESENÇA NOS DOIS TEMAS: névoa escura sobre fundo claro pesa mais.
+      const luz = (0.2126 * nova[0] + 0.7152 * nova[1] + 0.0722 * nova[2]) / 255;
       teto = luz < 0.5 ? 130 : 230;
+      return mudou;
     };
 
-    // Deslocamentos sorteados: duas montagens nunca começam no mesmo desenho.
-    // Deslocamentos FIXOS pelo mesmo motivo da semente: os aparelhos desenham igual.
-    const ox = 73.1;
-    const oy = 141.7;
-    /** Relógio da FORMA da névoa (só anda para a frente). */
-    let t = sorteio(0, 100);
-    /** Relógio do VENTO (tempo real; nunca desacelera). */
-    let tv = sorteio(0, 100);
-    /** Ângulo do giro (rad), acumulado — nunca volta a zero, nunca salta. */
-    let angulo = sorteio(0, Math.PI * 2);
-    // SENTIDO HORÁRIO, como o disco girando (na tela, com y para baixo, o
-    // ângulo crescendo é o horário).
-    const sentido = 1;
-    // O CD E O PUXÃO. A borda do botão é um CD girando (uma volta a cada
-    // 1,8 s, a do disco). Ele acelera depressa; a névoa acelera DEPOIS, puxada
-    // por ele (inércia maior), e a parte colada ao botão gira mais que a de
-    // fora — a espiral arrastada de algo sendo puxado pelo giro. Pausando, o
-    // CD freia primeiro e a névoa ainda roda um pouco no embalo.
-    let anguloCd = sorteio(0, Math.PI * 2);
-    let velCd = tocandoRef.current && !semMovimento ? 1 : 0;
-    /** Relógio da CHAMA: quanto a névoa já escorreu para fora do botão. */
-    let fluxo = sorteio(0, 50);
-    /** Para onde o vento já levou a névoa (acumulado, vai e volta). */
+    /** Relógio do VENTO (tempo real) e o quanto ele já levou a névoa. */
+    let tv = campo.ox % 100;
     let ventoX = 0;
     let ventoY = 0;
-    let viva = tocandoRef.current && !semMovimento ? 1 : 0;
-    /** Quanto a névoa está sendo SUGADA para o botão (0–1, com inércia). */
-    let sucao = carregandoRef.current && !semMovimento ? 1 : 0;
+    let vx = 0;
+    let vy = 0;
     let raf = 0;
     let ultimo = 0;
     let visivel = true;
 
-    const pintar = (dt: number, agora: number) => {
+    /** Quadro reaproveitado: nenhum objeto novo por quadro. */
+    const quadro: QuadroDaNevoa = {
+      ang: 0,
+      t: 0,
+      fluxo: 0,
+      viva: 0,
+      suga: 0,
+      giro: 0,
+      densidade: 0.5,
+      raio: 0.98,
+      opacidade: 1,
+      vx: 0,
+      vy: 0,
+      ventoX: 0,
+      ventoY: 0,
+      borda,
+      cor,
+      teto,
+      braco: 0,
+      espiral: 7,
+    };
+
+    const trocarCampo = () => {
+      if (campoDe === est.faixa) return;
+      campo = campoDaFaixa(est.faixa);
+      campoDe = est.faixa;
+    };
+
+    /** Os parâmetros da máquina viram o quadro do desenho. */
+    const preencher = () => {
+      quadro.ang = est.ang;
+      quadro.t = est.t;
+      quadro.fluxo = est.fluxo;
+      quadro.viva = est.viva;
+      quadro.suga = est.suga;
+      quadro.giro = est.giro;
+      quadro.densidade = est.densidade;
+      quadro.raio = est.raio;
+      quadro.opacidade = est.opacidade;
+      quadro.vx = vx;
+      quadro.vy = vy;
+      quadro.ventoX = ventoX;
+      quadro.ventoY = ventoY;
+      quadro.cor = cor;
+      quadro.teto = teto;
+      // O braço do tornado se firma com o giro e com a sucção (que enrola a espiral).
+      quadro.braco = 0.35 + 0.65 * Math.max(est.giro, est.suga * 0.85);
+      quadro.espiral = espiralDe(est.suga);
+    };
+
+    const aplicarCd = () => {
+      const cd = cdRef.current;
+      if (cd) cd.style.transform = `rotate(${est.ang.toFixed(4)}rad)`;
+    };
+
+    /** Avança a máquina (dt) e desenha. `dt = 0` só redesenha. */
+    const passo = (dt: number, agora: number) => {
       lerCor(agora);
-      const parada = 1 - viva;
       tv += dt;
-      // O VENTO: direção e força variam devagar (ruído no tempo real), com
-      // rajadas por cima — como névoa num dia de brisa. Pesa só na pausa;
-      // tocando, quem manda é o giro.
-      const dirVento = (ruido(tv * 0.07, 11.3, 2.7) - 0.5) * Math.PI * 2.4;
-      const rajada = ruido(tv * 0.45, 4.1, 9.9);
-      const forca = (0.35 + 0.65 * rajada * rajada) * parada;
-      const vx = Math.cos(dirVento) * forca;
-      const vy = Math.sin(dirVento) * forca;
+      // VENTO: direção e força variam devagar (ruído no tempo real), com
+      // rajadas. Pesa só parada.
+      const dirVento = (campo.ruido(tv * 0.07, 11.3, 2.7) - 0.5) * Math.PI * 2.4;
+      const rajada = campo.ruido(tv * 0.45, 4.1, 9.9);
+      sinais.rajada = rajada;
+      sinais.posicao =
+        sinais.tocando && !sinais.carregando && !semMovimento
+          ? (() => {
+              const p = posicaoDoQueToca(() => audioEngine.getPosition());
+              return p !== null && Number.isFinite(p) ? p : null;
+            })()
+          : null;
+      avancar(est, sinais, dt, est);
+      trocarCampo();
+      const forca = (0.35 + 0.65 * rajada * rajada) * (1 - est.viva);
+      vx = Math.cos(dirVento) * forca;
+      vy = Math.sin(dirVento) * forca;
       ventoX += vx * dt * 0.35;
       ventoY += vy * dt * 0.35;
-      // UM GIRO SÓ: o rastro do CD e a névoa andam no MESMO ângulo — a névoa
-      // sai do rastro e o segue, sincronizada (antes eram dois giros, e o
-      // rastro não guiava nada).
-      const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
-      velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
-      // Encosta no zero (como `viva`/`sucao`): sem isto o giro tende a zero e
-      // nunca chega, e o laço não teria quando dormir.
-      if (alvoGiro === 0 && velCd < 0.002) velCd = 0;
-      // A SUCÇÃO sobe e desce com inércia, como a vivacidade: baixando, vai a
-      // 1; o som chegou, volta a 0 — e tudo o que depende dela é contínuo.
-      const alvoSucao = semMovimento ? 0 : carregandoRef.current ? 1 : 0;
-      const inerciaSucao = alvoSucao > sucao ? INERCIA_SUGA : INERCIA_SOLTA;
-      sucao += (alvoSucao - sucao) * (1 - Math.exp(-dt / inerciaSucao));
-      if (alvoSucao === 0 && sucao < 0.001) sucao = 0;
-      if (alvoSucao === 1 && sucao > 0.999) sucao = 1;
-      // Sugada, a névoa roda mais depressa — o redemoinho do ralo — por cima
-      // do giro do CD (que, baixando, está escondido; ver `data-oculto`).
-      anguloCd += dt * sentido * (velCd * VEL_CD + sucao * VEL_REDEMOINHO);
-      // PRESO AO RELÓGIO DA MÚSICA. Tocando, giro, forma e chama convergem para
-      // valores que são FUNÇÃO DA POSIÇÃO da faixa — a mesma em todos os
-      // aparelhos (a do outro aparelho vem do relógio corrigido pelo servidor).
-      // A correção é suave: nada salta, só se acerta em ~1 s.
-      // Sugando não: a música ainda não anda, e o redemoinho não é dela.
-      if (!semMovimento && tocandoRef.current && velCd > 0.9 && sucao < 0.5) {
-        const pos = posicaoDoQueToca(() => audioEngine.getPosition());
-        if (pos !== null && Number.isFinite(pos)) {
-          const puxao = 1 - Math.exp(-dt / 0.6);
-          const alvo = pos * VEL_CD;
-          const dif = ((((alvo - anguloCd) % DOIS_PI) + 3 * Math.PI) % DOIS_PI) - Math.PI;
-          anguloCd += dif * puxao;
-          const devagar = 1 - Math.exp(-dt / 1.2);
-          t += (pos * 0.2 + 11 - t) * devagar;
-          fluxo += (pos * 0.95 + 5 - fluxo) * devagar;
-        }
-      }
-      angulo = anguloCd;
-      const cd = cdRef.current;
-      if (cd) cd.style.transform = `rotate(${anguloCd.toFixed(4)}rad)`;
-      // A CABEÇA DO RASTRO na tela: o anel começa com ela no topo (12 h),
-      // que no canvas (y para baixo) é o ângulo −π/2.
-      const cabeca = anguloCd - Math.PI / 2;
-      // O braço do tornado se firma com o giro; parado, a névoa se espalha.
-      const forcaDoBraco = 0.35 + 0.65 * velCd;
-      // A forma muda o tempo todo: depressa tocando, devagar parada — e a
-      // rajada a remexe um pouco mais. Sugada, revira ainda mais.
-      t += dt * (0.2 * viva + (0.035 + 0.06 * rajada) * parada + 0.2 * sucao);
-      // Tocando, as línguas saem do botão com força; parada, quase param.
-      // SUGADA, o fluxo INVERTE: `fluxo` anda para trás e as línguas correm
-      // para DENTRO do botão (a 3ª coordenada da amostra é `fora − fluxo`).
-      const escorre = 0.95 * viva + (0.06 + 0.1 * rajada) * parada;
-      fluxo += dt * (escorre * (1 - sucao) - VEL_SUCAO * sucao);
-      // Tocando brilha mais; parada fica mais tênue, mas não some. Sugada,
-      // acesa: a névoa toda se junta na borda.
-      const presenca = 0.62 + 0.38 * Math.max(viva, sucao);
-      // A BEIRA DO ANEL: solta, a névoa esgarça até a borda da caixa; sugada,
-      // o anel se CONTRAI e se cola ao botão — o que sobra fora é só fiapo.
-      const beira = 0.98 - 0.22 * sucao;
-      const cosA = Math.cos(angulo);
-      const senA = Math.sin(angulo);
-      const [r, g, b] = cor;
-      for (let k = 0; k < N * N; k++) {
-        const raio = raioDe[k]!;
-        // Anel: nasce na borda do botão, esgarça até a beira da caixa.
-        const janela =
-          smooth(borda - 0.08, borda + 0.04, raio) * (1 - smooth(borda + 0.05, beira, raio));
-        const o = k * 4;
-        if (janela <= 0.001) {
-          px[o + 3] = 0;
-          continue;
-        }
-        const x = xs[k]!;
-        const y = ys[k]!;
-        // CHAMA EM VOLTA DO BOTÃO. A amostra é polar: o ângulo (girado pelo
-        // relógio do giro, no sentido horário) percorre um círculo do ruído, e a
-        // distância à borda vira a terceira coordenada, deslocada pelo `fluxo`
-        // — o desenho escorre PARA FORA, como línguas de fogo saindo do
-        // círculo, enquanto o conjunto gira.
-        const c = cosDe[k]!;
-        const sn = senDe[k]!;
-        const fora = raio - borda;
-        // A textura gira presa ao rastro (mesmo ângulo do CD).
-        const ca = c * cosA + sn * senA; // cos(θ − giro)
-        const sa = sn * cosA - c * senA; // sen(θ − giro)
-        const sx = ca * 2.3 + ox - ventoX;
-        const sy = sa * 2.3 + oy - ventoY;
-        const sz = fora * 4.4 - fluxo;
-        // Distorção de domínio: é o que enrola e rasga as línguas.
-        const wx = fbm2(ruido, sx * 0.8, sy * 0.8, sz * 0.5 + t * 0.6);
-        const wy = fbm2(ruido, sx * 0.8 + 5.2, sy * 0.8 + 1.3, sz * 0.5 + t * 0.6 + 3.1);
-        const d = fbm(ruido, sx + 1.9 * wx, sy + 1.9 * wy, sz + t);
-        // Parada, a névoa se inclina para o lado para onde o vento sopra
-        // (sugada, não: o puxão é para o centro, de todos os lados).
-        const inclina = 1 + (x * vx + y * vy) * 0.55 * (1 - sucao);
-        // As línguas afinam conforme se afastam (a ponta da chama), mais
-        // compridas tocando; o contraste abre vazios de verdade entre elas.
-        // Sugadas, afinam depressa: o grosso da névoa já está colado ao botão.
-        const afina = fora * (0.95 - 0.55 * viva + 0.9 * sucao);
-        // O TORNADO: a névoa nasce na cabeça do rastro e se enrola para fora
-        // numa espiral — quanto mais longe da borda, mais atrás (ESPIRAL rad
-        // por unidade de raio). `atras` é o quanto este pixel está atrás do
-        // braço, no sentido do giro; a cauda se desfaz com a distância.
-        const atras =
-          (((cabeca - ESPIRAL * Math.max(0, fora) - thetaDe[k]!) % DOIS_PI) + DOIS_PI) % DOIS_PI;
-        const braco = Math.exp(-atras / CAUDA);
-        const guia = 1 - forcaDoBraco + forcaDoBraco * braco;
-        // Ao longo do braço a névoa é mais cheia (limiar mais baixo); fora dele,
-        // rala — é o que desenha o tornado.
-        const densidade =
-          Math.max(0, Math.min(1, (d - 0.36 - afina + 0.24 * braco * forcaDoBraco) * 4 * inclina)) *
-          janela *
-          guia;
-        px[o] = r;
-        px[o + 1] = g;
-        px[o + 2] = b;
-        px[o + 3] = Math.round(densidade * presenca * teto);
-      }
+      preencher();
+      pintarCampo(px, geo, campo, quadro);
       ctx.putImageData(imagem, 0, 0);
+      aplicarCd();
+    };
+
+    // ── MODO LEVE ─────────────────────────────────────────────────────────
+    let geoLeve: Geometria | null = null;
+    let imagemLeve: ImageData | null = null;
+    let tmpLeve: Uint8ClampedArray | null = null;
+    /** Faixa e cor com que as camadas estão pintadas agora. */
+    let leveFaixa: string | null = null;
+    let leveCor = '';
+    let timerQuieto: ReturnType<typeof setTimeout> | undefined;
+    let timerTroca: ReturnType<typeof setTimeout> | undefined;
+
+    /** Pinta as 4 camadas (UMA vez por faixa/cor): guia, difusa e duas de sucção. */
+    const pintarCamadas = (nome: string) => {
+      const raiz = leveRef.current;
+      if (!raiz) return;
+      const telas = Array.from(raiz.querySelectorAll('canvas'));
+      const c0 = telas[0]?.getContext('2d');
+      if (!c0) return;
+      geoLeve ??= criarGeometria(N_LEVE);
+      imagemLeve ??= c0.createImageData(N_LEVE, N_LEVE);
+      const campoLeve = nome === campoDe ? campo : campoDaFaixa(nome);
+      const base: QuadroDaNevoa = {
+        ...quadro,
+        ang: 0,
+        vx: 0,
+        vy: 0,
+        ventoX: 0,
+        ventoY: 0,
+        borda,
+        cor,
+        teto,
+        opacidade: 0.62,
+        raio: 0.98,
+        suga: 0,
+        giro: 0,
+        viva: 0,
+        densidade: 0.9,
+        fluxo: 3,
+        t: 5,
+        braco: 0,
+        espiral: espiralDe(0),
+      };
+      const camadas: QuadroDaNevoa[] = [
+        // 0 — o GUIA: o braço do tornado, que gira com o CD.
+        { ...base, viva: 1, giro: 1, braco: 1, t: 9, fluxo: 7 },
+        // 1 — a névoa difusa, assentada.
+        { ...base, t: 41, fluxo: 19, densidade: 0.8 },
+        // 2 e 3 — a sucção: espirais apertadas, de fatias diferentes do ruído.
+        { ...base, suga: 1, braco: 1, espiral: espiralDe(1), t: 73, fluxo: 31, densidade: 1 },
+        { ...base, suga: 1, braco: 1, espiral: espiralDe(1), t: 113, fluxo: 47, densidade: 1 },
+      ];
+      telas.forEach((tela, i) => {
+        const c = tela.getContext('2d');
+        const q = camadas[i];
+        if (!c || !q || !imagemLeve || !geoLeve) return;
+        tela.width = N_LEVE;
+        tela.height = N_LEVE;
+        pintarCampo(imagemLeve.data, geoLeve, campoLeve, q);
+        suavizarAlfa(
+          imagemLeve.data,
+          N_LEVE,
+          (tmpLeve ??= new Uint8ClampedArray(N_LEVE * N_LEVE * 4)),
+          2,
+        );
+        c.putImageData(imagemLeve, 0, 0);
+      });
+      leveFaixa = nome;
+      leveCor = cor.join(',');
     };
 
     /**
-     * MODO ESTÁTICO (`data-perf="baixo"`). Aparelho de entrada não paga um
-     * ruído por pixel a 30 quadros/s para enfeitar um botão: a névoa vira UM
-     * quadro, repintado só quando o estado muda (toca/pausa/baixa), e o CD gira
-     * por CSS (`transform` na composição, sem JavaScript nenhum por quadro).
-     * É consultado a cada despertar: o monitor pode rebaixar o aparelho no meio
-     * da sessão, e então o laço em andamento se encerra no quadro seguinte.
+     * Estado das camadas em CSS: `data-fase` decide a opacidade de cada uma (com
+     * transição — a passagem baixando→tocando é um fade contínuo, nunca um corte)
+     * e `data-quieto` pausa as animações que já ficaram invisíveis.
      */
-    const pintarEstatico = () => {
-      viva = tocandoRef.current && !semMovimento ? 1 : 0;
-      sucao = carregandoRef.current && !semMovimento ? 1 : 0;
-      velCd = viva;
-      pintar(0, performance.now());
-      const cd = cdRef.current;
-      if (cd) {
-        cd.style.transform = '';
-        cd.dataset.estatica = 'true';
-        cd.dataset.girando = String(tocandoRef.current && !semMovimento);
+    const fixarFase = (fase: 'reunindo' | 'girando' | 'repouso', parado: boolean) => {
+      const raiz = leveRef.current;
+      if (!raiz) return;
+      // Mesma fase: nada a mexer (e o relógio do quieto em andamento segue).
+      if (raiz.dataset.fase === fase && (!parado || raiz.dataset.quieto === 'tudo')) return;
+      if (timerQuieto) clearTimeout(timerQuieto);
+      timerQuieto = undefined;
+      raiz.dataset.fase = fase;
+      raiz.dataset.girando = String(fase === 'girando');
+      if (parado) {
+        raiz.dataset.quieto = 'tudo';
+        return;
+      }
+      raiz.dataset.quieto = 'nao';
+      if (fase === 'reunindo') return;
+      timerQuieto = setTimeout(() => {
+        raiz.dataset.quieto = fase === 'repouso' ? 'tudo' : 'puxa';
+      }, ESPERA_QUIETO);
+    };
+
+    /**
+     * MODO LEVE: zero JavaScript por quadro. Repinta só quando o estado muda
+     * (toca/pausa/baixa/troca de faixa); o resto é CSS na composição.
+     */
+    const pintarLeve = () => {
+      lerCor(performance.now());
+      const nome = sinais.faixa || est.faixa;
+      const cdEl = cdRef.current;
+      const gira = sinais.tocando && !sinais.carregando && !semMovimento;
+      const fase: 'reunindo' | 'girando' | 'repouso' = semMovimento
+        ? 'repouso'
+        : sinais.carregando
+          ? 'reunindo'
+          : sinais.tocando
+            ? 'girando'
+            : 'repouso';
+      est.faixa = nome;
+      est.viva = est.giro = gira ? 1 : 0;
+      est.suga = fase === 'reunindo' ? 1 : 0;
+      const corAgora = cor.join(',');
+      if (leveFaixa === null || corAgora !== leveCor) {
+        pintarCamadas(nome);
+      } else if (leveFaixa !== nome && timerTroca === undefined) {
+        // Troca de faixa: a névoa atual se dissipa (opacity) e a nova é pintada
+        // com ela invisível; depois reúne.
+        const raiz = leveRef.current;
+        if (raiz) raiz.dataset.troca = 'true';
+        timerTroca = setTimeout(() => {
+          timerTroca = undefined;
+          pintarCamadas(sinais.faixa || est.faixa);
+          if (leveRef.current) delete leveRef.current.dataset.troca;
+        }, TROCA_LEVE);
+      }
+      fixarFase(fase, semMovimento);
+      if (cdEl) {
+        cdEl.style.transform = '';
+        if (!semMovimento) {
+          cdEl.dataset.estatica = 'true';
+          cdEl.dataset.girando = String(gira);
+        }
       }
     };
 
     /**
-     * REPOUSO: pausada, sem baixar, com o giro, a vivacidade e a sucção já
-     * assentados em zero. Nada mais muda de um quadro para o outro, então o laço
-     * PARA — pausada, a aura custa zero (antes seguia "ao vento" para sempre,
-     * 30 vezes por segundo, com a música parada). Tocar ou baixar a acorda.
+     * O laço dorme em repouso (ver `emRepouso`): pausada, sem baixar, tudo
+     * assentado — nada muda de um quadro para o outro. Tocar ou baixar acorda.
      */
-    const emRepouso = () =>
-      !tocandoRef.current && !carregandoRef.current && viva === 0 && sucao === 0 && velCd === 0;
-
-    const quadro = (agora: number) => {
+    const loop = (agora: number) => {
       raf = 0;
       if (!visivel || document.hidden) return;
       if (modoLeve()) {
-        pintarEstatico();
+        pintarLeve();
         return;
       }
-      // 30 QUADROS POR SEGUNDO, SEMPRE. Névoa desfocada que gira uma volta a
-      // cada 1,8 s não ganha nada com 60 — e a 60 ela custava 27% de um núcleo
-      // no computador (medido com o perfil de CPU), que num celular de entrada
-      // é a interface inteira engasgando enquanto há música.
-      const intervalo = 32;
-      if (agora - ultimo < intervalo) {
-        raf = requestAnimationFrame(quadro);
+      // 30 QUADROS POR SEGUNDO, SEMPRE: névoa desfocada não ganha nada com 60.
+      if (agora - ultimo < 32) {
+        raf = requestAnimationFrame(loop);
         return;
       }
       // Passo limitado: voltando de uma aba escondida, nada de salto.
       const dt = Math.min(0.05, Math.max(0, (agora - ultimo) / 1000));
       ultimo = agora;
-      const alvo = tocandoRef.current ? 1 : 0;
-      const inercia = alvo > viva ? INERCIA_PLAY : INERCIA_PAUSA;
-      viva += (alvo - viva) * (1 - Math.exp(-dt / inercia));
-      if (alvo === 0 && viva < 0.001) viva = 0;
-      if (alvo === 1 && viva > 0.999) viva = 1;
-      pintar(dt, agora);
-      // Assentou em repouso: o último quadro fica na tela e o laço dorme.
-      if (emRepouso()) return;
-      raf = requestAnimationFrame(quadro);
+      passo(dt, agora);
+      if (emRepouso(est, sinais)) return;
+      raf = requestAnimationFrame(loop);
     };
 
     const acordar = () => {
       if (semMovimento) {
-        viva = 0;
-        pintar(0, performance.now());
+        avancar(est, sinais, 0, est);
+        trocarCampo();
+        if (modoLeve()) {
+          pintarLeve();
+          return;
+        }
+        passo(0, performance.now());
         return;
       }
       if (modoLeve()) {
-        pintarEstatico();
+        pintarLeve();
         return;
       }
       if (raf || !visivel || document.hidden) return;
-      // Já em repouso e nada a mudar (montagem de um botão parado): um quadro
-      // pintado no `pintar` inicial basta, sem laço.
-      if (emRepouso()) return;
+      if (emRepouso(est, sinais)) return;
       ultimo = performance.now();
-      raf = requestAnimationFrame(quadro);
+      raf = requestAnimationFrame(loop);
     };
     acordarRef.current = acordar;
 
-    // Primeiro quadro na hora: a névoa aparece já no lugar.
-    pintar(0, performance.now());
+    // Primeiro quadro na hora: a névoa aparece já no lugar (no modo leve, o
+    // `acordar` abaixo pinta as camadas).
+    if (!modoLeve()) passo(0, performance.now());
 
-    // Sem IntersectionObserver (jsdom dos testes), vale como visível.
     const observador =
       typeof IntersectionObserver === 'undefined'
         ? null
@@ -495,28 +433,63 @@ export function AuraDoPlay({
     observador?.observe(canvas);
     const aba = () => acordar();
     document.addEventListener('visibilitychange', aba);
+    // Trocou o tema: a cor da névoa muda (relida na hora; o modo leve repinta).
+    const tema =
+      typeof MutationObserver === 'undefined'
+        ? null
+        : new MutationObserver(() => {
+            corLidaEm = -Infinity;
+            if (modoLeve() && lerCor(performance.now())) pintarLeve();
+          });
+    tema?.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ['class', 'data-theme', 'style'],
+    });
     acordar();
 
     return () => {
       observador?.disconnect();
+      tema?.disconnect();
       document.removeEventListener('visibilitychange', aba);
       if (raf) cancelAnimationFrame(raf);
+      if (timerQuieto) clearTimeout(timerQuieto);
+      if (timerTroca) clearTimeout(timerTroca);
       acordarRef.current = () => undefined;
     };
   }, [semMovimento, toque]);
 
+  const caixa = toque ? 'inset-[-48%] size-[196%]' : 'inset-[-42%] size-[184%]';
   return (
     <>
       <canvas
         ref={canvasRef}
         aria-hidden
-        className={cn(
-          'aura-play-nevoa pointer-events-none absolute',
-          toque ? 'inset-[-48%] size-[196%]' : 'inset-[-42%] size-[184%]',
-        )}
+        className={cn('aura-play-nevoa aura-play-surge pointer-events-none absolute', caixa)}
       />
+      {/* Modo leve: as camadas animadas só por transform/opacity (ver o CSS). */}
+      <span
+        ref={leveRef}
+        aria-hidden
+        data-fase="inicio"
+        data-girando="false"
+        data-quieto="nao"
+        className={cn('aura-play-leve aura-play-surge pointer-events-none absolute', caixa)}
+      >
+        <span className="aura-play-camada aura-play-c-braco">
+          <canvas />
+        </span>
+        <span className="aura-play-camada aura-play-c-difusa">
+          <canvas />
+        </span>
+        <span className="aura-play-camada aura-play-c-puxa">
+          <canvas />
+        </span>
+        <span className="aura-play-camada aura-play-c-puxa aura-play-c-puxa-2">
+          <canvas />
+        </span>
+      </span>
       {/* A borda-CD: por CIMA do botão (z-10), só o anel de fora — o ícone no
-          meio fica limpo. Gira pelo mesmo laço da névoa (ver "O CD E O PUXÃO"). */}
+          meio fica limpo. Gira pelo mesmo ângulo da névoa. */}
       <span
         ref={cdRef}
         aria-hidden

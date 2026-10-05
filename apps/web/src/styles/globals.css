@@ -607,7 +607,7 @@
 .aura-play-nevoa {
   /* O campo é pequeno e ampliado: o desfoque apaga os pixels e amacia os
      fiapos — névoa não tem borda. */
-  filter: blur(3.5px);
+  filter: blur(2.2px);
   image-rendering: auto;
 }
 /* A BORDA-CD do play: UM rastro na COR DO ÍCONE (--accent-fg) na borda — preto
@@ -640,9 +640,21 @@
   opacity: 0;
 }
 
-:root[data-perf='baixo'] .aura-play-nevoa {
-  filter: blur(3px);
+/* A névoa APARECE (uma vez) em vez de estalar quando a aura monta — o
+   NowPlaying é lazy e monta com a música já tocando. Animação de uma só
+   passada, não é laço. */
+.aura-play-surge {
+  animation: aura-surge 500ms ease-out backwards;
 }
+@keyframes aura-surge {
+  from {
+    opacity: 0;
+  }
+  to {
+    opacity: 1;
+  }
+}
+
 /* Aparelho no modo leve: o CD gira por CSS (só `transform`, na composição) em
    vez do laço de JavaScript — o AuraDoPlay marca `data-estatica` e `data-girando`.
    `disco-gira` é declarado logo abaixo, fora do @theme. */
@@ -652,6 +664,111 @@
 }
 .aura-play-cd[data-estatica='true'][data-girando='true'] {
   animation-play-state: running;
+}
+
+/* NÉVOA DO MODO LEVE — zero JavaScript por quadro. Quatro camadas pintadas UMA
+   vez por faixa (semente da faixa) e animadas só com transform/opacity:
+     • braço  — gira com o CD (mesma duração, mesma pausa → mesma fase);
+     • difusa — gira devagar no sentido contrário (31 s);
+     • puxa 1 e 2 — a SUCÇÃO: cada ciclo nasce grande e fraca e é puxado para o
+       centro acelerando (ease-in); durações primas (2,3 s e 3,1 s) e giros
+       primos (13 s e 17 s) para o conjunto não repetir.
+   Quem aparece é decidido por `data-fase` do contêiner, com transição: baixando
+   → tocando é um fade contínuo, nunca um corte. A caixa só aparece no modo leve. */
+.aura-play-leve {
+  display: none;
+}
+:root[data-perf='baixo'] .aura-play-nevoa {
+  display: none;
+}
+:root[data-perf='baixo'] .aura-play-leve {
+  display: block;
+}
+.aura-play-camada,
+.aura-play-camada > canvas {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+}
+.aura-play-camada {
+  opacity: 0;
+  transition: opacity 800ms ease;
+}
+.aura-play-camada > canvas {
+  will-change: transform, opacity;
+}
+.aura-play-leve[data-troca='true'] .aura-play-camada {
+  opacity: 0 !important;
+  transition-duration: 350ms;
+}
+/* repouso/início: só a névoa difusa, assentada */
+.aura-play-c-difusa {
+  opacity: 0.7;
+}
+.aura-play-c-difusa > canvas {
+  animation: aura-gira 31s linear infinite reverse;
+}
+.aura-play-c-braco > canvas {
+  animation: aura-gira 1.8s linear infinite;
+  animation-play-state: paused;
+}
+.aura-play-c-puxa > canvas {
+  animation:
+    aura-puxa 2.3s cubic-bezier(0.55, 0, 0.9, 0.55) infinite,
+    aura-gira 13s linear infinite;
+}
+.aura-play-c-puxa-2 > canvas {
+  animation:
+    aura-puxa 3.1s cubic-bezier(0.55, 0, 0.9, 0.55) infinite,
+    aura-gira 17s linear infinite reverse;
+}
+/* tocando: o braço aparece e gira junto com o guia */
+.aura-play-leve[data-fase='girando'] .aura-play-c-braco {
+  opacity: 1;
+}
+.aura-play-leve[data-girando='true'] .aura-play-c-braco > canvas {
+  animation-play-state: running;
+}
+.aura-play-leve[data-fase='girando'] .aura-play-c-difusa {
+  opacity: 0.9;
+}
+/* baixando: a névoa difusa recua e a sucção toma a cena */
+.aura-play-leve[data-fase='reunindo'] .aura-play-c-difusa {
+  opacity: 0.45;
+}
+.aura-play-leve[data-fase='reunindo'] .aura-play-c-puxa {
+  opacity: 1;
+  transition-duration: 700ms;
+  transition-timing-function: cubic-bezier(0.5, 0, 1, 0.5);
+}
+/* já invisíveis: param de andar (nenhum trabalho de composição à toa) */
+.aura-play-leve[data-quieto='puxa'] .aura-play-c-puxa > canvas,
+.aura-play-leve[data-quieto='tudo'] .aura-play-camada > canvas {
+  animation-play-state: paused;
+}
+
+@keyframes aura-gira {
+  from {
+    rotate: 0deg;
+  }
+  to {
+    rotate: 360deg;
+  }
+}
+/* Um ciclo da sucção: nasce grande e fraca, é puxado para o centro e some nele. */
+@keyframes aura-puxa {
+  0% {
+    scale: 1.5;
+    opacity: 0;
+  }
+  30% {
+    opacity: 0.85;
+  }
+  100% {
+    scale: 0.7;
+    opacity: 0;
+  }
 }
 
 /* O DISCO GIRANDO no lugar do play enquanto a música é trazida. Uma volta a
