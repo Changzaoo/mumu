@@ -14,7 +14,11 @@
       "destination": "https://aurial-api.nexusholding.xyz/api/:path*"
     },
     {
-      "source": "/((?!assets/).*)",
+      "source": "/__/:path*",
+      "destination": "https://mumu-2f54e.firebaseapp.com/__/:path*"
+    },
+    {
+      "source": "/((?!assets/|__/).*)",
       "destination": "/index.html"
     }
   ],
@@ -29,7 +33,7 @@
       ]
     },
     {
-      "source": "/(.*)",
+      "source": "/((?!__/).*)",
       "headers": [
         { "key": "X-Frame-Options", "value": "DENY" },
         { "key": "X-Content-Type-Options", "value": "nosniff" },
