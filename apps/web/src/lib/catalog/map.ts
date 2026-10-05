@@ -76,9 +76,12 @@ export function audiusTrackToDto(t: AudiusTrack): TrackDto {
   const stream = streamUrlFor(t.id);
   return {
     id: `audius:${t.id}`,
-    title: t.title,
+    title: t.title ?? '',
     // Nó sem `duration` viraria NaN e se propagaria até a UI como "0:00".
-    durationMs: Number.isFinite(t.duration) ? t.duration * 1000 : 0,
+    durationMs:
+      typeof t.duration === 'number' && Number.isFinite(t.duration) && t.duration > 0
+        ? t.duration * 1000
+        : 0,
     trackNumber: null,
     discNumber: null,
     explicit: false,
@@ -89,10 +92,11 @@ export function audiusTrackToDto(t: AudiusTrack): TrackDto {
     album: null,
     artists: [
       {
-        id: `audius-user:${t.user.id}`,
-        name: t.user.name,
-        slug: t.user.handle,
-        imageUrl: t.user.profile_picture?.['150x150'] ?? null,
+        // A fonte é de terceiros e às vezes omite o `user` da faixa.
+        id: `audius-user:${t.user?.id ?? ''}`,
+        name: t.user?.name ?? '',
+        slug: t.user?.handle ?? '',
+        imageUrl: t.user?.profile_picture?.['150x150'] ?? null,
       },
     ],
     streamUrl: stream,

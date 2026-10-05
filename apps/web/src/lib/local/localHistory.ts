@@ -43,7 +43,13 @@ function read(): LocalHistoryEntry[] {
   try {
     const raw = window.localStorage.getItem(HISTORY_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    cache = Array.isArray(parsed) ? (parsed as LocalHistoryEntry[]) : [];
+    // JSON válido não é dado válido: um `null` ou entrada sem faixa (versão antiga,
+    // escrita interrompida) derrubava a Home e a fila na primeira leitura de `.track`.
+    cache = Array.isArray(parsed)
+      ? (parsed as LocalHistoryEntry[]).filter(
+          (e) => !!e && typeof e === 'object' && !!e.track && typeof e.track.id === 'string',
+        )
+      : [];
   } catch {
     cache = [];
   }

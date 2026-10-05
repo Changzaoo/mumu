@@ -2113,7 +2113,14 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         seek: (seconds) => {
-          const target = clamp(seconds, 0, get().duration || 0);
+          // NaN (seekto sem tempo, slider quebrado) faria `el.currentTime = NaN`
+          // LANÇAR no navegador; Infinity sem duração conhecida idem.
+          if (Number.isNaN(seconds)) return;
+          // Duração ainda desconhecida (0, durante a carga/retomada) NÃO é "fim
+          // em zero": travar o teto ali jogava todo seek de volta para o início.
+          const teto = get().duration > 0 ? get().duration : Number.POSITIVE_INFINITY;
+          const target = clamp(seconds, 0, teto);
+          if (!Number.isFinite(target)) return;
           audioEngine.seek(target);
           set({ progress: target });
           // Buscar muda o quanto falta — o temporizador de fim tem que mirar
@@ -2122,6 +2129,9 @@ export const usePlayerStore = create<PlayerState>()(
         },
 
         setVolume: (volume) => {
+          // NaN viraria `el.volume = NaN` (TypeError) e `null` no localStorage,
+          // e o volume gravado voltaria quebrado na abertura seguinte.
+          if (Number.isNaN(volume)) return;
           const value = clamp(volume, 0, 1);
           audioEngine.setVolume(value);
           if (value > 0 && get().muted) {

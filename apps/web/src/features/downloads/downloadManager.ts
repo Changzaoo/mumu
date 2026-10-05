@@ -203,17 +203,47 @@ function isQuotaError(err: unknown): boolean {
   );
 }
 
+/** Falha de HTTP: carrega o status para separar "tente de novo" de "não adianta". */
+class HttpError extends Error {
+  constructor(readonly status: number) {
+    super(`Falha no download (${status})`);
+  }
+}
+
+/**
+ * 4xx é decisão do servidor (faixa apagada, sem permissão): repetir só gasta
+ * banda e segura uma das 3 vagas por segundos. 408/425/429 pedem para esperar,
+ * e 5xx (inclusive o 503 de "cofre reconstruindo") é transitório.
+ */
+function erroDefinitivo(err: unknown): boolean {
+  if (!(err instanceof HttpError)) return false;
+  return err.status >= 400 && err.status < 500 && ![408, 425, 429].includes(err.status);
+}
+
 /** Baixa o corpo uma vez, com timeout/abort. Lança em falha de rede/HTTP. */
 async function fetchAudioBlob(
   url: string,
   headers: Record<string, string>,
   onProgress: (fraction: number | null) => void,
+  pai: AbortSignal,
 ): Promise<Blob> {
+  // Um AbortController por tentativa: o timeout de uma não pode envenenar a
+  // seguinte. O sinal do pai só carrega o "usuário apagou a faixa".
   const ac = new AbortController();
+  const cancelaComOPai = (): void => ac.abort();
+  if (pai.aborted) ac.abort();
+  else pai.addEventListener('abort', cancelaComOPai, { once: true });
   const timer = setTimeout(() => ac.abort(), DOWNLOAD_TIMEOUT_MS);
   try {
     const res = await fetch(url, { headers, signal: ac.signal });
-    if (!res.ok || !res.body) throw new Error(`Falha no download (${res.status})`);
+    if (!res.ok || !res.body) throw new HttpError(res.status);
+    // Portal cativo / página de erro do CDN respondem 200 com HTML. Guardar isso
+    // como "áudio" cria uma faixa baixada que não toca — e offline não há como
+    // descobrir. octet-stream e ausência de tipo continuam valendo.
+    const tipo = (res.headers.get('Content-Type') ?? '').toLowerCase();
+    if (tipo.startsWith('text/') || tipo.includes('json')) {
+      throw new Error('O servidor respondeu com uma página, não com áudio.');
+    }
     // Content-Length é omitido em CDN cross-origin sem Expose-Headers → total 0.
     // Nesse caso mostramos progresso indeterminado (null) em vez de barra travada.
     const total = Number(res.headers.get('Content-Length') ?? 0);
@@ -229,11 +259,17 @@ async function fetchAudioBlob(
       received += value.length;
       if (total > 0) onProgress(Math.min(0.99, received / total));
     }
-    return new Blob(chunks as BlobPart[], {
-      type: res.headers.get('Content-Type') ?? 'audio/mpeg',
-    });
+    // Corpo vazio ou cortado limpo (proxy que fecha a conexão sem erro): sem
+    // este teste a faixa entra no registro como baixada e emudece offline. Com
+    // Content-Encoding o tamanho declarado é o comprimido, então não se compara.
+    if (received === 0) throw new Error('O download veio vazio.');
+    if (total > 0 && received < total && !res.headers.get('Content-Encoding')) {
+      throw new Error('O download veio incompleto.');
+    }
+    return new Blob(chunks as BlobPart[], { type: tipo || 'audio/mpeg' });
   } finally {
     clearTimeout(timer);
+    pai.removeEventListener('abort', cancelaComOPai);
   }
 }
 
@@ -279,18 +315,36 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
   // -1 = indeterminado: a UI já mostra "na fila" enquanto a vaga não sai, em
   // vez de uma barra parada em 0% que parece travamento.
   inFlight.set(track.id, -1);
+  const corrida: Corrida = { ac: new AbortController() };
+  corridas.set(track.id, corrida);
   emit();
   anotar('download', 'pedido', track.title);
 
   await pegarVaga();
   try {
-    await baixarComVaga(track, downloadUrl);
+    if (corridas.get(track.id) === corrida) await baixarComVaga(track, downloadUrl, corrida);
   } finally {
     devolverVaga();
+    if (corridas.get(track.id) === corrida) corridas.delete(track.id);
   }
 }
 
-async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void> {
+/**
+ * Uma rodada de download de uma faixa. Remover a faixa ENQUANTO ela baixa tira
+ * a corrida do mapa e aborta o fetch: sem isso o download terminava depois,
+ * gravava os bytes e a faixa apagada pelo usuário reaparecia na lista.
+ */
+interface Corrida {
+  ac: AbortController;
+}
+const corridas = new Map<string, Corrida>();
+
+async function baixarComVaga(
+  track: TrackDto,
+  downloadUrl: string,
+  corrida: Corrida,
+): Promise<void> {
+  const cancelada = (): boolean => corridas.get(track.id) !== corrida;
   // Persistência garante que o browser não evicte o áudio sob pressão enquanto
   // o registro (localStorage) sobrevive — faixa "some" no boot. Pedida uma vez
   // para o app todo, e sem segurar o primeiro byte: o download já pode começar.
@@ -313,11 +367,18 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
 
   let lastErr: unknown;
   for (let attempt = 1; attempt <= MAX_DOWNLOAD_TRIES; attempt++) {
+    if (cancelada()) return;
     try {
-      const blob = await fetchAudioBlob(downloadUrl, headers, setProgress);
+      const blob = await fetchAudioBlob(downloadUrl, headers, setProgress, corrida.ac.signal);
+      if (cancelada()) return;
       // putAudio só resolve quando a transação COMMITA (ver audioCache.tx) — um
       // abort de quota rejeita aqui e nunca registramos uma faixa fantasma.
       await putAudio(track.id, blob);
+      if (cancelada()) {
+        // Removida durante a gravação: os bytes que acabaram de entrar são lixo.
+        await deleteAudio(track.id).catch(() => undefined);
+        return;
+      }
       addDownload(track, blob.size);
       abrir('audio', track.id, blob);
       // O áudio acabou de chegar ao aparelho: além de cachear a letra, é AQUI
@@ -331,6 +392,7 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
       pushNotification({ type: 'download', title: 'Download concluído', body: track.title });
       return;
     } catch (err) {
+      if (cancelada()) return; // o usuário apagou: não é falha nem pede retomada
       lastErr = err;
       anotar(
         'download',
@@ -343,6 +405,14 @@ async function baixarComVaga(track: TrackDto, downloadUrl: string): Promise<void
         failed.add(track.id);
         emit();
         throw new Error('Sem espaço no dispositivo para baixar esta faixa.');
+      }
+      // 404/403: o servidor já respondeu de forma definitiva. Sem retentativa
+      // e sem retomada automática — só o usuário, tocando de novo, reabre isso.
+      if (erroDefinitivo(err)) {
+        inFlight.delete(track.id);
+        failed.add(track.id);
+        emit();
+        throw err;
       }
       if (attempt < MAX_DOWNLOAD_TRIES) {
         // Mantém inFlight (UI mostra "baixando", não "erro") e espera o backoff.
@@ -392,6 +462,9 @@ function scheduleAutoRetry(track: TrackDto): void {
 
 export async function removeDownloadedTrack(trackId: string): Promise<void> {
   anotar('download', 'removido', trackId);
+  const rodando = corridas.get(trackId);
+  corridas.delete(trackId);
+  rodando?.ac.abort();
   await deleteAudio(trackId).catch(() => undefined);
   soltar('audio', trackId);
   removeDownload(trackId);

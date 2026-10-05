@@ -30,7 +30,7 @@ const FALLBACK_HOST = 'https://discoveryprovider.audius.co';
 const FETCH_TIMEOUT_MS = 8_000;
 
 /** `fetch` com teto — nó de descoberta que só pendura vira falha, não trava. */
-function fetchWithTimeout(url: string, ms = FETCH_TIMEOUT_MS): Promise<Response> {
+export function fetchWithTimeout(url: string, ms = FETCH_TIMEOUT_MS): Promise<Response> {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), ms);
   return fetch(url, { signal: controller.signal }).finally(() => clearTimeout(timer));
@@ -104,10 +104,15 @@ function fetchHostList(): Promise<string[]> {
   return (hostListPromise ??= (async () => {
     try {
       const res = await fetchWithTimeout('https://api.audius.co');
-      if (!res.ok) return [];
+      if (!res.ok) throw new Error(`descoberta ${res.status}`);
       const body = (await res.json()) as { data?: string[] };
-      return (body.data ?? []).map((h) => h.replace(/\/$/, ''));
+      return (Array.isArray(body.data) ? body.data : [])
+        .filter((h): h is string => typeof h === 'string' && h.length > 0)
+        .map((h) => h.replace(/\/$/, ''));
     } catch {
+      // Falha transitória NÃO pode ficar memoizada: com a lista vazia gravada
+      // para a sessão inteira, nenhum nó morto voltava a ser rotacionado.
+      hostListPromise = null;
       return [];
     }
   })());
@@ -160,7 +165,9 @@ async function fetchData<T>(path: string, params: QueryParams = {}): Promise<T> 
   } catch (cause) {
     throw new CatalogError('Resposta inesperada do catálogo.', cause);
   }
-  if (!body || body.data === undefined) {
+  // Todo endpoint daqui devolve lista; `data` objeto/null (erro de limite de
+  // taxa, por exemplo) estourava TypeError em `.map` em vez de "fonte caiu".
+  if (!body || !Array.isArray(body.data)) {
     throw new CatalogError('Resposta inesperada do catálogo.');
   }
   return body.data;
@@ -190,13 +197,13 @@ export async function trendingPlaylists(): Promise<CatalogPlaylist[]> {
 }
 
 export async function playlist(id: string): Promise<CatalogPlaylist | null> {
-  const data = await fetchData<AudiusPlaylist[]>(`/playlists/${id}`);
+  const data = await fetchData<AudiusPlaylist[]>(`/playlists/${encodeURIComponent(id)}`);
   const first = data[0];
   return first ? audiusPlaylistToCatalog(first) : null;
 }
 
 export async function playlistTracks(id: string): Promise<TrackDto[]> {
-  const data = await fetchData<AudiusTrack[]>(`/playlists/${id}/tracks`);
+  const data = await fetchData<AudiusTrack[]>(`/playlists/${encodeURIComponent(id)}/tracks`);
   return data.map(audiusTrackToDto);
 }
 
@@ -206,7 +213,7 @@ export async function searchUsers(q: string): Promise<ArtistDto[]> {
 }
 
 export async function userTracks(id: string): Promise<TrackDto[]> {
-  const data = await fetchData<AudiusTrack[]>(`/users/${id}/tracks`);
+  const data = await fetchData<AudiusTrack[]>(`/users/${encodeURIComponent(id)}/tracks`);
   return data.map(audiusTrackToDto);
 }
 

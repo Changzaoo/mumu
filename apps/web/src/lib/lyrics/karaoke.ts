@@ -95,16 +95,25 @@ const TAG_DE_PALAVRA = /<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>/g;
  *
  * Antes estas marcas passavam direto para a tela, como texto. Devolve o texto
  * limpo e, quando havia marcas, o tempo real de cada palavra.
+ *
+ * LRC por palavra INCOMPLETO (`[00:01.00]Eu vou <00:02.00>ali`): o texto antes
+ * da primeira marca também é cantado. Sem dar tempo a ele, `words` ficava só
+ * com "ali" e a tela, que desenha `words` quando existe, perdia "Eu vou". Essas
+ * palavras entram no instante da linha (`inicioMs`, já com o offset aplicado).
  */
 export function lerPalavrasMarcadas(
   bruto: string,
   offsetMs: number,
+  inicioMs = 0,
 ): { text: string; words?: PalavraComTempo[] } {
   TAG_DE_PALAVRA.lastIndex = 0;
   if (!TAG_DE_PALAVRA.test(bruto)) return { text: bruto.trim() };
   TAG_DE_PALAVRA.lastIndex = 0;
   const words: PalavraComTempo[] = [];
   const partes = bruto.split(TAG_DE_PALAVRA);
+  for (const texto of (partes[0] ?? '').split(/\s+/).filter(Boolean)) {
+    words.push({ text: texto, timeMs: inicioMs });
+  }
   // split com 3 grupos: [texto, min, seg, frac, texto, min, seg, frac, texto…]
   for (let i = 1; i + 3 < partes.length + 1; i += 4) {
     const min = Number(partes[i]);

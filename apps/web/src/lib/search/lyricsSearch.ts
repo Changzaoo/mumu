@@ -6,6 +6,7 @@
  * (indexLyricsInBackground) vai completando o cache da biblioteca aos poucos.
  */
 import type { TrackDto } from '@radinho/shared';
+import { corrigirGrafia, normalizarLetra } from '@/lib/lyrics/grafia';
 import { cachedLyrics, fetchLyrics, lyricsCacheEntries, type Lyrics } from '@/lib/lyrics/lyrics';
 
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
@@ -28,31 +29,52 @@ export interface LyricMatch {
 }
 
 // Texto normalizado por faixa, memoizado — recalcular a cada tecla seria caro.
-const normalizedCache = new Map<string, { lineCount: number; lines: string[]; full: string }>();
+// A chave de validade é a PRÓPRIA letra (referência), não o nº de linhas: uma
+// letra regravada com o mesmo número de linhas (alinhada ao áudio, ou trocada
+// pela que a voz confirmou) tem texto novo e não pode ser buscada pelo índice
+// da antiga.
+interface Indexada {
+  fonte: Lyrics;
+  /** Linhas normalizadas (sem vazias) e, em paralelo, o texto exibido de cada uma. */
+  lines: string[];
+  exibidas: string[];
+  full: string;
+}
+const normalizedCache = new Map<string, Indexada>();
 
-function normalizedLyrics(trackId: string, lyrics: Lyrics): { lines: string[]; full: string } {
+/**
+ * A busca compara o texto COMO É EXIBIDO: a tela mostra "nós" para uma letra
+ * guardada como "nois" (grafia.ts), então quem digita "nós" tem que achá-la.
+ * O cache de letras não é tocado — só este índice.
+ */
+function normalizedLyrics(trackId: string, lyrics: Lyrics): Indexada {
   const cached = normalizedCache.get(trackId);
-  if (cached && cached.lineCount === lyrics.lines.length) return cached;
-  const lines = lyrics.lines.map((l) => norm(l.text)).filter(Boolean);
-  const entry = { lineCount: lyrics.lines.length, lines, full: lines.join(' ') };
+  if (cached && cached.fonte === lyrics) return cached;
+  const lines: string[] = [];
+  const exibidas: string[] = [];
+  for (const l of normalizarLetra(lyrics).lines) {
+    const n = norm(l.text);
+    if (!n) continue;
+    lines.push(n);
+    exibidas.push(l.text);
+  }
+  const entry = { fonte: lyrics, lines, exibidas, full: lines.join(' ') };
   normalizedCache.set(trackId, entry);
   return entry;
 }
 
-/** Linha original mais próxima do trecho — vira o excerpt exibido. */
-function bestExcerpt(lyrics: Lyrics, tokens: string[]): string {
+/** Linha exibida mais próxima do trecho — vira o excerpt mostrado na busca. */
+function bestExcerpt(entry: Indexada, tokens: string[]): string {
   let best = '';
   let bestHits = 0;
-  for (const line of lyrics.lines) {
-    if (!line.text) continue;
-    const nline = norm(line.text);
+  entry.lines.forEach((nline, i) => {
     let hits = 0;
     for (const t of tokens) if (nline.includes(t)) hits += 1;
     if (hits > bestHits) {
       bestHits = hits;
-      best = line.text;
+      best = entry.exibidas[i] ?? '';
     }
-  }
+  });
   return best.slice(0, 120);
 }
 
@@ -80,6 +102,18 @@ export async function searchByLyrics(
   const tokens = nq.split(' ').filter((w) => w.length >= 2);
   if (nq.length < 8 || tokens.length < 2) return [];
 
+  // A consulta também passa pela grafia padrão ("nois" digitado acha "nós"). Mas
+  // a letra pode estar em inglês, onde "memo" é "memo": por isso as DUAS
+  // formas são tentadas (a que não ajudar simplesmente não casa).
+  const nqCorrigida = norm(corrigirGrafia(query));
+  const variantes = [{ nq, tokens }];
+  if (nqCorrigida !== nq) {
+    variantes.push({
+      nq: nqCorrigida,
+      tokens: nqCorrigida.split(' ').filter((w) => w.length >= 2),
+    });
+  }
+
   const entries = lyricsCacheEntries();
   const results: LyricMatch[] = [];
   let exactHits = 0;
@@ -87,32 +121,36 @@ export async function searchByLyrics(
   for (let start = 0; start < entries.length; start += CHUNK) {
     if (signal?.aborted) return [];
     for (const [trackId, lyrics] of entries.slice(start, start + CHUNK)) {
-      const { lines, full } = normalizedLyrics(trackId, lyrics);
+      const indexada = normalizedLyrics(trackId, lyrics);
+      const { lines, full } = indexada;
       if (!full) continue;
 
-      // 1. Casamento exato do trecho inteiro.
-      if (full.includes(nq)) {
-        results.push({ trackId, excerpt: bestExcerpt(lyrics, tokens), score: 100 });
-        exactHits += 1;
-        continue;
-      }
+      let melhor: LyricMatch | null = null;
+      for (const v of variantes) {
+        // 1. Casamento exato do trecho inteiro.
+        if (full.includes(v.nq)) {
+          melhor = { trackId, excerpt: bestExcerpt(indexada, v.tokens), score: 100 };
+          break;
+        }
 
-      // 2. Fuzzy: melhor linha (e vizinha) por cobertura das palavras.
-      let bestCoverage = 0;
-      for (let i = 0; i < lines.length; i++) {
-        const window = i + 1 < lines.length ? `${lines[i]} ${lines[i + 1]}` : lines[i]!;
-        let hits = 0;
-        for (const t of tokens) if (window.includes(t)) hits += 1;
-        const coverage = hits / tokens.length;
-        if (coverage > bestCoverage) bestCoverage = coverage;
-        if (bestCoverage === 1) break;
+        // 2. Fuzzy: melhor linha (e vizinha) por cobertura das palavras.
+        let bestCoverage = 0;
+        for (let i = 0; i < lines.length; i++) {
+          const window = i + 1 < lines.length ? `${lines[i]} ${lines[i + 1]}` : lines[i]!;
+          let hits = 0;
+          for (const t of v.tokens) if (window.includes(t)) hits += 1;
+          const coverage = hits / v.tokens.length;
+          if (coverage > bestCoverage) bestCoverage = coverage;
+          if (bestCoverage === 1) break;
+        }
+        const score = Math.round(bestCoverage * 90);
+        if (bestCoverage >= 0.65 && (!melhor || score > melhor.score)) {
+          melhor = { trackId, excerpt: bestExcerpt(indexada, v.tokens), score };
+        }
       }
-      if (bestCoverage >= 0.65) {
-        results.push({
-          trackId,
-          excerpt: bestExcerpt(lyrics, tokens),
-          score: Math.round(bestCoverage * 90),
-        });
+      if (melhor) {
+        results.push(melhor);
+        if (melhor.score === 100) exactHits += 1;
       }
     }
     // Já achou exatos suficientes → não precisa varrer o resto.

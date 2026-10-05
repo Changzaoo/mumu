@@ -34,6 +34,7 @@ const TABS: Array<{ value: Tab; label: string }> = [
 ];
 
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
+const NAO_ALFANUMERICO = /[^\p{L}\p{N}]+/gu;
 /**
  * Nunca lança: o acervo chega do servidor sem validação (`Record<string,
  * unknown>` do outro lado), e UMA entrada sem título ou com artista sem nome
@@ -42,7 +43,14 @@ const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
  */
 function norm(value: unknown): string {
   return typeof value === 'string'
-    ? value.toLowerCase().normalize('NFD').replace(DIACRITICS, '').trim()
+    ? value
+        .toLowerCase()
+        .normalize('NFD')
+        .replace(DIACRITICS, '')
+        // Pontuação e espaço repetido valem um espaço só: "ola mundo" tem que
+        // achar "Olá, Mundo!". `\p{L}\p{N}` (e não a-z) preserva outros alfabetos.
+        .replace(NAO_ALFANUMERICO, ' ')
+        .trim()
     : '';
 }
 

@@ -199,7 +199,10 @@ export function ehLetraEmPortugues(textos: readonly string[]): boolean {
   let marcas = 0;
   let palavras = 0;
   for (const texto of textos) {
-    for (const p of texto.toLowerCase().match(/\p{L}+/gu) ?? []) {
+    for (const p of texto
+      .normalize('NFC')
+      .toLowerCase()
+      .match(/\p{L}+/gu) ?? []) {
       palavras += 1;
       if (MARCAS_DE_PORTUGUES.has(p) || /[ãõ]/.test(p)) marcas += 1;
     }
@@ -226,8 +229,12 @@ const LIGACAO = /[-'’]/;
 export function corrigirGrafia(texto: string): string {
   // Cabeçalho de seção ("[Refrão: Mano Brown]") não é cantado: nomes ali ficam.
   if (/^\s*\[[^\]]*\]\s*$/.test(texto)) return texto;
-  return texto.replace(/\p{L}+/gu, (palavra, pos: number) => {
-    const correta = DICIONARIO[palavra.toLowerCase()];
+  // `\p{M}`: acento solto (texto NFD) faz parte da palavra — sem ele "nóis" viraria
+  // "no" + "is" e nunca casaria. `hasOwn`: "constructor" não é chave do dicionário
+  // (o objeto herda de Object.prototype e devolveria uma função).
+  return texto.replace(/[\p{L}\p{M}]+/gu, (palavra, pos: number) => {
+    const chave = palavra.normalize('NFC').toLowerCase();
+    const correta = Object.hasOwn(DICIONARIO, chave) ? DICIONARIO[chave] : undefined;
     if (!correta) return palavra;
     const antes = texto.charAt(pos - 1);
     const depois = texto.charAt(pos + palavra.length);

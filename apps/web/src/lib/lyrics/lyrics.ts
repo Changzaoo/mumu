@@ -73,7 +73,11 @@ function parseLrc(lrc: string): LyricLine[] {
     if (times.length === 0) continue;
     // LRC estendido traz `<mm:ss.xx>` por palavra: vira tempo real por
     // palavra em vez de aparecer como texto na tela.
-    const { text, words } = lerPalavrasMarcadas(raw.slice(end), offset);
+    const { text, words } = lerPalavrasMarcadas(
+      raw.slice(end),
+      offset,
+      Math.max(0, (times[0] ?? 0) - offset),
+    );
     for (const t of times) {
       // Marcas de palavra são absolutas: só valem para uma linha de tempo único.
       const comPalavras = words && times.length === 1;
@@ -129,6 +133,15 @@ function normLoose(s: string): string {
 }
 
 /**
+ * `menor` aparece em `maior` como PALAVRA(S) inteira(s), não no meio de outra. Com
+ * `includes` puro "Amor" casava com "Amora" e o artista "Ana" com "Mariana" — e
+ * numa faixa de preview (sem duração) só título+artista seguram a letra alheia.
+ */
+function contemPalavras(maior: string, menor: string): boolean {
+  return ` ${maior} `.includes(` ${menor} `);
+}
+
+/**
  * True when a fuzzy `/api/search` row plausibly IS this track — the search
  * endpoint is loose full-text and returns many unrelated songs, so accepting
  * the first row with synced lyrics is exactly how WRONG lyrics get locked in.
@@ -146,13 +159,14 @@ export function rowMatches(
   // O casamento de título é de propósito FROUXO ("Warzone" casa com "Warzone
   // (Remix)"), e por isso ele sozinho nunca pode bastar — ver a prova mínima
   // no fim desta função.
-  const titleOk = rt === qt || rt.includes(qt) || qt.includes(rt);
+  const titleOk = rt === qt || contemPalavras(rt, qt) || contemPalavras(qt, rt);
   if (!titleOk) return false;
 
   const ra = normLoose(row.artistName ?? '');
   const nomes = names.map(normLoose).filter(Boolean);
   const daParaCompararArtista = ra.length > 0 && nomes.length > 0;
-  const artistaBate = daParaCompararArtista && nomes.some((n) => ra.includes(n) || n.includes(ra));
+  const artistaBate =
+    daParaCompararArtista && nomes.some((n) => contemPalavras(ra, n) || contemPalavras(n, ra));
   if (daParaCompararArtista && !artistaBate) return false; // artista conhecido e diferente
 
   const daParaCompararDuracao = durationSec > 0 && typeof row.duration === 'number';
@@ -288,10 +302,20 @@ registrarDescartavel(CACHE_KEY, 40, () => {
   cacheMem = null;
 });
 
+/**
+ * A letra de uma entrada do cache, ou null se a entrada não presta. O armazenamento
+ * é só um JSON no localStorage: uma entrada nula, um texto solto ou uma letra sem
+ * `lines` (gravada por versão antiga, editada à mão, cortada pela cota) fazia o
+ * operador `in` lançar e derrubava a tela da letra e a busca por trecho inteiras.
+ */
+function letraDaEntrada(cached: unknown): Lyrics | null {
+  if (!cached || typeof cached !== 'object') return null;
+  const letra = 'lyrics' in cached ? (cached as CachedLyricsEntry).lyrics : (cached as Lyrics);
+  return letra && typeof letra === 'object' && Array.isArray(letra.lines) ? letra : null;
+}
+
 export function cachedLyrics(trackId: string): Lyrics | null {
-  const cached = readCache()[trackId];
-  if (!cached) return null;
-  return 'lyrics' in cached ? cached.lyrics : cached;
+  return letraDaEntrada(readCache()[trackId]);
 }
 
 /**
@@ -324,7 +348,7 @@ export function writeLyrics(trackId: string, lyrics: Lyrics): void {
 export function lyricsCacheEntries(): Array<[string, Lyrics]> {
   const saida: Array<[string, Lyrics]> = [];
   for (const [trackId, cached] of Object.entries(readCache())) {
-    const letra = 'lyrics' in cached ? cached.lyrics : cached;
+    const letra = letraDaEntrada(cached);
     // As entradas negativas ("procuramos e não existe") não são letra nenhuma:
     // deixá-las passar aqui quebraria a busca por trecho.
     if (letra) saida.push([trackId, letra]);
@@ -338,16 +362,30 @@ export function lyricsCacheEntries(): Array<[string, Lyrics]> {
 function cleanTitleForLyrics(title: string): string {
   return title
     .replace(/[([{][^)\]}]*[)\]}]/g, ' ') // (feat …), [Official Video]
-    .replace(/\s*[-–—]\s*(?:ao\s+vivo|live|remaster(?:ed)?.*|slowed.*|sped\s*up.*)$/i, ' ')
+    .replace(
+      /\s*[-–—]\s*(?:ao\s+vivo|live|(?:\d{4}\s+)?remaster(?:ed)?.*|slowed.*|sped\s*up.*)$/i,
+      ' ',
+    )
     .replace(/\bfeat\.?\b.*$|\bft\.?\b.*$/i, ' ') // trailing "feat X" without parens
     .replace(/\s{2,}/g, ' ')
     .trim();
 }
 
-async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
+/**
+ * `falhou` vira true quando uma ida à fonte ERROU (rede caiu, timeout, 5xx, JSON
+ * quebrado) em vez de responder "não tenho". Quem chama não pode gravar "sem
+ * letra" por uma semana com base numa resposta que nem chegou.
+ */
+async function lrclibGet(
+  track: TrackDto,
+  estado: { falhou: boolean } = { falhou: false },
+): Promise<Lyrics | null> {
   const rawTitle = track.title.trim();
   const cleanTitle = cleanTitleForLyrics(rawTitle) || rawTitle;
-  const durationSec = track.previewOnly ? 0 : Math.round((track.durationMs || 0) / 1000);
+  // Duração negativa/NaN conta como desconhecida: /api/get só é seguro COM duração.
+  const durationSec = track.previewOnly
+    ? 0
+    : Math.max(0, Math.round((track.durationMs || 0) / 1000));
 
   // Try every distinct artist on the track (a two-artist song matches on either),
   // then no-artist. Distinct, order-preserving, non-empty.
@@ -407,8 +445,12 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     if (track.album?.title) url.searchParams.set('album_name', track.album.title);
     url.searchParams.set('duration', String(durationSec));
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-    if (!res.ok) return null;
-    const row = (await res.json()) as LrclibRow;
+    if (!res.ok) {
+      if (res.status !== 404) estado.falhou = true; // 404 = "não tenho", o resto = erro
+      return null;
+    }
+    const row = (await res.json()) as LrclibRow | null;
+    if (!row || typeof row !== 'object') return null; // corpo vazio: "não tenho"
     // /api/get também pode devolver "melhor chute" errado; só aceita quando a
     // linha realmente bate com título/artista/duração da faixa.
     if (!rowMatches(row, title, names, durationSec)) return null;
@@ -417,7 +459,14 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
 
   // Exact get() across title × artist candidates — prefer a synced hit.
   const exatos = escolher(
-    await Promise.all(combinacoes.map(({ title, artist }) => get(title, artist).catch(() => null))),
+    await Promise.all(
+      combinacoes.map(({ title, artist }) =>
+        get(title, artist).catch(() => {
+          estado.falhou = true;
+          return null;
+        }),
+      ),
+    ),
   );
   if (exatos.synced) return exatos.synced;
   let plainFallback: Lyrics | null = exatos.plain;
@@ -428,7 +477,10 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
     url.searchParams.set('track_name', title);
     if (artist) url.searchParams.set('artist_name', artist);
     const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      estado.falhou = true;
+      return null;
+    }
     const rows = (await res.json()) as LrclibRow[];
     if (!Array.isArray(rows) || rows.length === 0) return null;
     // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
@@ -441,7 +493,12 @@ async function lrclibGet(track: TrackDto): Promise<Lyrics | null> {
 
   const soltos = escolher(
     await Promise.all(
-      combinacoes.map(({ title, artist }) => search(title, artist).catch(() => null)),
+      combinacoes.map(({ title, artist }) =>
+        search(title, artist).catch(() => {
+          estado.falhou = true;
+          return null;
+        }),
+      ),
     ),
   );
   if (soltos.synced) return soltos.synced;
@@ -548,7 +605,9 @@ async function outrasFontesDeLetra(track: TrackDto): Promise<Lyrics | null> {
  */
 export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
   const fingerprint = trackFingerprint(track);
-  const rawCached = readCache()[track.id];
+  const guardada = readCache()[track.id];
+  // Entrada que não é objeto (cache sujo) conta como ausente — `in` lançaria.
+  const rawCached = guardada && typeof guardada === 'object' ? guardada : undefined;
   if (rawCached) {
     if ('lyrics' in rawCached) {
       if (rawCached.fingerprint === fingerprint) {
@@ -572,19 +631,23 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
   }
   if (!track.title?.trim()) return null;
   try {
-    let lyrics = await lrclibGet(track);
+    const estado = { falhou: false };
+    let lyrics = await lrclibGet(track, estado);
     // Fallback: let the AI parse a clean artist/title and retry once.
     if (!lyrics) {
       const cleaned = await aiCleanSongTitle(track.title, track.artists[0]?.name);
       if (cleaned && (cleaned.title !== track.title || cleaned.artist)) {
         const a0 = track.artists[0];
-        lyrics = await lrclibGet({
-          ...track,
-          title: cleaned.title,
-          artists: cleaned.artist
-            ? [{ id: a0?.id ?? 'ai', name: cleaned.artist, slug: a0?.slug ?? '', imageUrl: null }]
-            : track.artists,
-        });
+        lyrics = await lrclibGet(
+          {
+            ...track,
+            title: cleaned.title,
+            artists: cleaned.artist
+              ? [{ id: a0?.id ?? 'ai', name: cleaned.artist, slug: a0?.slug ?? '', imageUrl: null }]
+              : track.artists,
+          },
+          estado,
+        );
       }
     }
     // LRCLIB não devolveu versão COM TEMPO (nada, ou só texto puro): tenta o
@@ -596,6 +659,10 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
       if (outra?.synced) lyrics = outra;
       else if (!lyrics) lyrics = outra;
     }
+    // A fonte ERROU e não achou nada: não é "sem letra". Gravar a entrada
+    // negativa aqui trancaria a faixa por uma semana por causa de um soluço de
+    // rede — melhor perguntar de novo na próxima reprodução.
+    if (!lyrics && estado.falhou) return null;
     julgarConteudo(track.id, track.title ?? '', lyrics);
     writeCache({
       ...readCache(),

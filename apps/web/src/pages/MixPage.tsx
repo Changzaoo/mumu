@@ -13,6 +13,7 @@ import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
+import { buildRecommendations, mixDaChave } from '@/lib/reco/recommend';
 import { usePlayerStore } from '@/stores/playerStore';
 
 const EMPTY: localLibrary.LibraryEntry[] = [];
@@ -70,8 +71,17 @@ export default function MixPage() {
   const mixKey = decodeURIComponent(key);
   const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
 
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- entries drives recompute
-  const mix = useMemo(() => mixFor(mixKey), [entries, mixKey]);
+  // O card da Home é montado por afinidade (cluster, até 25 faixas); abrir a lista
+  // reconstruída por gênero era mostrar OUTRO mix. `buildRecommendations()` é
+  // memoizado (biblioteca, dia, histórico e curtidas na chave), então devolve a
+  // mesma referência que a Home exibiu — e muda sozinho quando o gosto muda.
+  const recos = buildRecommendations();
+  const mix = useMemo(() => {
+    const card = mixDaChave(recos, mixKey);
+    if (!card) return mixFor(mixKey);
+    return { title: card.title, tracks: card.tracks, cover: card.coverUrl, covers: card.coverUrls };
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- entries drives recompute
+  }, [entries, mixKey, recos]);
 
   const playQueue = usePlayerStore((s) => s.playQueue);
   const currentTrack = usePlayerStore((s) => s.currentTrack);

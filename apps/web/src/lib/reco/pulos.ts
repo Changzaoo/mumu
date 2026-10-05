@@ -94,7 +94,10 @@ export function lerPulos(): Pulo[] {
   try {
     const bruto = window.localStorage.getItem(CHAVE);
     const lido: unknown = bruto ? JSON.parse(bruto) : [];
-    cache = Array.isArray(lido) ? (lido as Pulo[]) : [];
+    // Pulo torto (null, sem `em`) derrubava o fator e a gravação do próximo pulo.
+    cache = Array.isArray(lido)
+      ? (lido as Pulo[]).filter((p) => !!p && typeof p === 'object' && Number.isFinite(p.em))
+      : [];
   } catch {
     cache = [];
   }

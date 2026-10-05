@@ -87,6 +87,7 @@ import {
   fetchCredits,
   fetchPlaylistEntries,
   fetchTrackMeta,
+  HelperError,
   helperSupportsMetaTeam,
   importerHostLabel,
   importViaHelper,
@@ -1440,6 +1441,14 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
       await putBlob(id, file);
     } catch {
       falhas.push(title);
+      // A capa já foi gravada lá em cima, ANTES do áudio. Sem faixa não há dono
+      // para ela: ficaria no IndexedDB para sempre, comendo justamente a cota
+      // que acabou de estourar — e cada nova tentativa deixaria mais uma.
+      if (coverUrl) {
+        await deleteCover(id).catch(() => undefined);
+        soltar('capa', id);
+        comCapa.delete(id);
+      }
       continue;
     }
     addEntry(
@@ -1843,10 +1852,10 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   try {
     parsed = new URL(url.trim());
   } catch {
-    throw new Error('Cole um link válido (que comece com http:// ou https://).');
+    throw new HelperError('Cole um link válido (que comece com http:// ou https://).', 400);
   }
   if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-    throw new Error('Cole um link válido (que comece com http:// ou https://).');
+    throw new HelperError('Cole um link válido (que comece com http:// ou https://).', 400);
   }
 
   const host = parsed.hostname.toLowerCase();
@@ -1883,8 +1892,9 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
     // A plataforma NÃO é nomeada na mensagem de propósito: o app não anuncia de
     // onde vem (nem de onde não vem) a música. O `label` segue existindo para o
     // log e para os testes distinguirem os casos.
-    throw new Error(
+    throw new HelperError(
       'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
+      400,
     );
   }
 
@@ -1901,12 +1911,12 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   const contentType = (res.headers.get('content-type') ?? '').toLowerCase();
   const isAudio = contentType.startsWith('audio/') || AUDIO_EXT.test(parsed.pathname);
   if (!isAudio) {
-    throw new Error('Esse link não parece ser um arquivo de áudio.');
+    throw new HelperError('Esse link não parece ser um arquivo de áudio.', 400);
   }
 
   const blob = await res.blob();
   if (blob.size === 0) {
-    throw new Error('Esse link não parece ser um arquivo de áudio.');
+    throw new HelperError('Esse link não parece ser um arquivo de áudio.', 400);
   }
 
   const fileName = decodeURIComponent(parsed.pathname.split('/').pop() || 'faixa');

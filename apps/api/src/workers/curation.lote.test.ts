@@ -20,7 +20,7 @@
  *  3. A LEITURA DO CONTADOR ZERA. Quem lê fica dono da janela — então só pode
  *     existir UM leitor por volta, senão a segunda leitura vê zero.
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const pressao = vi.fn<() => { recusas: number; chamadas: number }>(() => ({
   recusas: 0,
@@ -71,6 +71,14 @@ async function reiniciarWorker(): Promise<typeof CurationWorker> {
   await mod.__carregarLoteParaTeste();
   return mod;
 }
+
+// O import frio do worker arrasta o `@radinho/shared` inteiro (transform + avaliação),
+// ~1,3 s com a máquina livre e vários segundos com ela carregada. Não há espera real
+// nem retry aqui: era esse custo caindo DENTRO do 1º teste, sob o limite de 5 s.
+// Pagar uma vez, num hook com folga, deixa os testes só com a lógica pura.
+beforeAll(async () => {
+  await import('./curation.worker.js');
+}, 60_000);
 
 beforeEach(() => {
   vi.clearAllMocks();

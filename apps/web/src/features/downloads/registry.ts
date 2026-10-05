@@ -27,7 +27,12 @@ function read(): DownloadEntry[] {
   try {
     const raw = window.localStorage.getItem(STORAGE_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    cache = Array.isArray(parsed) ? (parsed as DownloadEntry[]) : [];
+    // Entrada torta (escrita parcial, esquema antigo) é descartada na leitura: um
+    // único `null` aqui fazia `entry.track.id` lançar em toda consulta, e a
+    // lista de faixas inteira quebrava no boot — com os bytes ainda no aparelho.
+    cache = Array.isArray(parsed)
+      ? (parsed as DownloadEntry[]).filter((e) => typeof e?.track?.id === 'string')
+      : [];
   } catch {
     cache = [];
   }

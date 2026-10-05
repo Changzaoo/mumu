@@ -19,7 +19,7 @@
  * `mapApple.ts`) and throws the shared `CatalogError` on network failure.
  * Country defaults to `'br'` and falls back to `'us'` on empty results.
  */
-import { CatalogError } from '@/lib/catalog/audius';
+import { CatalogError, fetchWithTimeout } from '@/lib/catalog/audius';
 import { parseLabel } from '@/lib/catalog/label';
 
 /** iTunes Search/Lookup song result row (only the fields we consume). */
@@ -265,7 +265,8 @@ async function fetchJson<T>(url: string): Promise<T> {
     /* leave url as-is */
   }
   try {
-    res = await fetch(url);
+    // Com teto: servidor da Apple que só pendura não pode travar a UI para sempre.
+    res = await fetchWithTimeout(url);
   } catch (cause) {
     throw new CatalogError('Não foi possível conectar ao catálogo de músicas.', cause);
   }

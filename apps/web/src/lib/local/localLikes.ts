@@ -35,7 +35,9 @@ function readIds(): string[] {
   try {
     const raw = window.localStorage.getItem(LIKES_KEY);
     const parsed: unknown = raw ? JSON.parse(raw) : [];
-    idsCache = Array.isArray(parsed) ? (parsed as string[]) : [];
+    idsCache = Array.isArray(parsed)
+      ? (parsed as unknown[]).filter((i): i is string => typeof i === 'string')
+      : [];
   } catch {
     idsCache = [];
   }
@@ -74,9 +76,12 @@ export function has(id: string): boolean {
 /** Liked tracks, newest-first (skips any whose DTO was lost). */
 export function list(): TrackDto[] {
   const map = readTracks();
-  return readIds()
-    .map((id) => map[id])
-    .filter((t): t is TrackDto => t !== undefined);
+  return (
+    readIds()
+      .map((id) => map[id])
+      // `null` no baú (escrita torta) não é curtida: quem consome lê `.id` sem checar.
+      .filter((t): t is TrackDto => !!t && typeof t === 'object')
+  );
 }
 
 // Local-only appliers (used by the cloud sync — must not re-push).

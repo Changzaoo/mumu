@@ -1219,6 +1219,10 @@ export async function fetchPlaylistEntries(url: string): Promise<PlaylistResult>
 // faixas longas; 15 min cobre qualquer música real sem segurar slot infinito).
 const JOB_POLL_MS = 2_500;
 const JOB_TIMEOUT_MS = 15 * 60_000;
+/** Teto de UMA consulta de status (resposta é um JSON minúsculo). */
+const JOB_POLL_TIMEOUT_MS = 20_000;
+/** Teto da transferência do arquivo pronto — um MP3/FLAC por rede de celular. */
+const JOB_FILE_TIMEOUT_MS = 5 * 60_000;
 
 interface JobStatus {
   status: 'running' | 'done' | 'error';
@@ -1272,17 +1276,33 @@ async function importViaJob(url: string): Promise<HelperImport> {
   for (;;) {
     await sleep(JOB_POLL_MS);
     if (Date.now() > deadline) throw new Error('O download demorou demais e foi abortado.');
-    let res: Response;
+    let body: JobStatus;
+    let expirou = false;
+    const ctl = new AbortController();
+    const teto = setTimeout(() => ctl.abort(), JOB_POLL_TIMEOUT_MS); // sem AbortSignal.timeout: WebView antigo não tem
     try {
-      res = await fetch(`${helperUrl()}/import/job/${encodeURIComponent(id)}`, {
+      // COM TETO POR CONSULTA: uma conexão que fica meio aberta (túnel do
+      // celular que não devolve nem erro) pendurava o `await` para sempre, e o
+      // `deadline` lá em cima só é lido ENTRE consultas — o job "nunca
+      // terminava" e segurava uma das vagas da fila.
+      const res = await fetch(`${helperUrl()}/import/job/${encodeURIComponent(id)}`, {
         headers: await baseHeaders(),
+        signal: ctl.signal,
       });
+      if (res.status === 404) {
+        expirou = true;
+        throw new Error('expirou');
+      }
+      if (!res.ok) continue; // 5xx transitório do túnel — não desiste do job
+      body = (await res.json()) as JobStatus;
     } catch {
-      continue; // rede piscou — o job segue vivo no servidor, só continua olhando
+      if (expirou) throw new Error('O download expirou no servidor. Tente de novo.');
+      // Rede piscou, consulta pendurada ou corpo que não é JSON (página de
+      // desafio do túnel): o job segue vivo no servidor, só continua olhando.
+      continue;
+    } finally {
+      clearTimeout(teto);
     }
-    if (res.status === 404) throw new Error('O download expirou no servidor. Tente de novo.');
-    if (!res.ok) continue; // 5xx transitório do túnel — não desiste do job
-    const body = (await res.json()) as JobStatus;
     if (body.status === 'error') {
       throw new HelperError(body.error ?? 'Falha na importação.', body.permanent ? 422 : 500);
     }
@@ -1292,11 +1312,39 @@ async function importViaJob(url: string): Promise<HelperImport> {
     }
   }
 
-  const file = await fetch(`${helperUrl()}/import/file/${encodeURIComponent(id)}`, {
-    headers: await baseHeaders(),
-  });
-  if (!file.ok) throw new HelperError(`Falha ao buscar o arquivo (${file.status}).`, file.status);
-  const blob = await file.blob();
+  // O job já terminou NO SERVIDOR: perder o import por um blip nesta última
+  // transferência jogaria fora minutos de trabalho dele. Três tentativas, só
+  // para rede e 5xx — 4xx é resposta definitiva (arquivo expirado: 404).
+  let blob: Blob | null = null;
+  let falhaDoArquivo: Error = new Error(
+    'Não foi possível baixar esse link agora. Tente novamente em instantes.',
+  );
+  for (let tentativa = 0; tentativa < 3 && !blob; tentativa++) {
+    if (tentativa > 0) await sleep(1_000 * tentativa);
+    const ctl = new AbortController();
+    const teto = setTimeout(() => ctl.abort(), JOB_FILE_TIMEOUT_MS);
+    try {
+      const file = await fetch(`${helperUrl()}/import/file/${encodeURIComponent(id)}`, {
+        headers: await baseHeaders(),
+        signal: ctl.signal,
+      });
+      if (file.ok) {
+        blob = await file.blob();
+      } else {
+        falhaDoArquivo = new HelperError(
+          `Falha ao buscar o arquivo (${file.status}).`,
+          file.status,
+        );
+        if (file.status < 500) throw falhaDoArquivo;
+      }
+    } catch (err) {
+      if (err === falhaDoArquivo && err instanceof HelperError && err.status < 500) throw err;
+      // rede caiu / timeout: tenta de novo
+    } finally {
+      clearTimeout(teto);
+    }
+  }
+  if (!blob) throw falhaDoArquivo;
   if (blob.size === 0) throw new Error('O importador devolveu um arquivo vazio.');
   return {
     blob,

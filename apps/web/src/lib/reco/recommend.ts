@@ -247,7 +247,36 @@ interface GenreBucket {
 }
 
 // ── motor ───────────────────────────────────────────────────────
-function compute(inputs: RecoInputs): Recommendation[] {
+/** Faixa utilizável: objeto com id, e `artists` sempre array (storage antigo/corrompido). */
+function faixaSegura(t: unknown): TrackDto | null {
+  if (!t || typeof t !== 'object') return null;
+  const x = t as TrackDto;
+  if (typeof x.id !== 'string' || !x.id) return null;
+  return Array.isArray(x.artists) ? x : { ...x, artists: [] };
+}
+
+/**
+ * O gosto vem de localStorage, que pode ter JSON válido porém torto (`[null]`, faixa
+ * sem `artists`, versão antiga). Uma entrada ruim derrubava a Home inteira: aqui ela
+ * só é descartada.
+ */
+function higienizar(inputs: RecoInputs): RecoInputs {
+  const entries: RecoEntry[] = [];
+  for (const e of inputs.entries) {
+    const t = faixaSegura(e?.track);
+    if (t) entries.push({ ...e, track: t });
+  }
+  const history: RecoPlay[] = [];
+  for (const p of inputs.history) {
+    const t = faixaSegura(p?.track);
+    if (t) history.push({ ...p, track: t });
+  }
+  const liked = inputs.liked.map(faixaSegura).filter((t): t is TrackDto => t !== null);
+  return { ...inputs, entries, history, liked };
+}
+
+function compute(bruto: RecoInputs): Recommendation[] {
+  const inputs = higienizar(bruto);
   const now = inputs.now ?? new Date();
   const nowMs = now.getTime();
   const seed = daySeed(now);
@@ -339,7 +368,9 @@ function compute(inputs: RecoInputs): Recommendation[] {
   }
 
   // COLD START: pouco histórico → mixes simples por gênero/artista (comportamento antigo).
-  if (inputs.history.length < MIN_PLAYS_MOTOR) return fallbackMixes(genreIdx, artistIdx);
+  if (inputs.history.length < MIN_PLAYS_MOTOR) {
+    return fallbackMixes(genreIdx, artistIdx, genreScore, artistScore);
+  }
 
   const out: Recommendation[] = [];
 
@@ -488,7 +519,7 @@ function compute(inputs: RecoInputs): Recommendation[] {
 
   // Nunca prateleira vazia: se nada acima rendeu (ex.: plays de faixas que já
   // saíram da biblioteca), volta ao fallback simples.
-  return out.length > 0 ? out : fallbackMixes(genreIdx, artistIdx);
+  return out.length > 0 ? out : fallbackMixes(genreIdx, artistIdx, genreScore, artistScore);
 }
 
 function computeAlbumRecommendations(inputs: AlbumRecoInputs): LocalAlbum[] {
@@ -575,9 +606,19 @@ function computeAlbumRecommendations(inputs: AlbumRecoInputs): LocalAlbum[] {
 function fallbackMixes(
   genreIdx: Map<string, GenreBucket>,
   artistIdx: Map<string, ArtistBucket>,
+  genreScore: ReadonlyMap<string, number> = new Map(),
+  artistScore: ReadonlyMap<string, number> = new Map(),
 ): Recommendation[] {
   const out: Recommendation[] = [];
-  const genres = [...genreIdx.values()].sort((a, b) => b.tracks.length - a.tracks.length);
+  // O gosto manda e o tamanho só desempata: quem só curtiu (sem histórico) via a
+  // prateleira ordenada pelo que a biblioteca tem MAIS, ignorando o like (o sinal
+  // mais forte). Sem sinal nenhum, os scores são 0 e vale o tamanho, como antes.
+  const genres = [...genreIdx.entries()]
+    .sort(
+      ([ka, a], [kb, b]) =>
+        (genreScore.get(kb) ?? 0) - (genreScore.get(ka) ?? 0) || b.tracks.length - a.tracks.length,
+    )
+    .map(([, g]) => g);
   for (const g of genres.slice(0, 4)) {
     if (g.tracks.length < 3) continue;
     out.push({
@@ -589,7 +630,13 @@ function fallbackMixes(
       tracks: g.tracks,
     });
   }
-  const artists = [...artistIdx.values()].sort((a, b) => b.tracks.length - a.tracks.length);
+  const artists = [...artistIdx.entries()]
+    .sort(
+      ([ka, a], [kb, b]) =>
+        (artistScore.get(kb) ?? 0) - (artistScore.get(ka) ?? 0) ||
+        b.tracks.length - a.tracks.length,
+    )
+    .map(([, a]) => a);
   for (const a of artists.slice(0, 6)) {
     if (a.tracks.length < 2) continue;
     out.push({
@@ -664,6 +711,16 @@ export function buildRecommendations(inputs?: RecoInputs): Recommendation[] {
   memoResult = compute({ entries, history, liked: localLikes.list(), now });
   memoKey = { entries, day, historyLen: history.length, likedCount };
   return memoResult;
+}
+
+/**
+ * O mix que o card mostrou, pela chave que o card abre. `null` quando a chave
+ * não é de nenhum card atual (aí quem abre cai na lista por gênero/artista).
+ * Existe porque o card é montado por afinidade (cluster, 25 faixas) e a página
+ * /mix reconstruía a lista por gênero: o usuário clicava num mix e abria outro.
+ */
+export function mixDaChave(recos: readonly Recommendation[], key: string): Recommendation | null {
+  return recos.find((r) => r.key === key) ?? null;
 }
 
 export function buildAlbumRecommendations(inputs?: AlbumRecoInputs): LocalAlbum[] {
