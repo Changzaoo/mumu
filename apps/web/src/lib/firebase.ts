@@ -44,7 +44,7 @@ import { marcarBoot } from '@/lib/telemetry/bootPerf';
  * já está nos "URIs de redirecionamento autorizados" do cliente OAuth no Google
  * Cloud — sem isso o Google recusa TODO login com `redirect_uri_mismatch`.
  */
-const DOMINIOS_COM_LOGIN_PROPRIO: readonly string[] = [];
+const DOMINIOS_COM_LOGIN_PROPRIO: readonly string[] = ['radinho.online'];
 
 const loginNoProprioDominio =
   typeof window !== 'undefined' && DOMINIOS_COM_LOGIN_PROPRIO.includes(window.location.host);
