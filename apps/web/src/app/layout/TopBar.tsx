@@ -5,7 +5,6 @@ import {
   ChevronRight,
   LogOut,
   Moon,
-  Plus,
   Search,
   Settings,
   Shield,
@@ -24,7 +23,6 @@ import {
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { IconButton } from '@/components/ui/icon-button';
-import { AddMusicDialog } from '@/components/media/AddMusicDialog';
 import { NotificationBell } from '@/app/layout/NotificationBell';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useDebounce } from '@/hooks/useDebounce';
@@ -44,7 +42,6 @@ export function TopBar() {
   const location = useLocation();
   const scroller = useScrollContainer();
   const [scrolled, setScrolled] = useState(false);
-  const [addOpen, setAddOpen] = useState(false);
   const theme = useSettingsStore((s) => s.theme);
   const setTheme = useSettingsStore((s) => s.setTheme);
   const { user, profile, loading } = useAuthUser();
@@ -178,12 +175,8 @@ export function TopBar() {
       </div>
 
       <div className="ml-auto flex items-center gap-1">
-        {user && (
-          <IconButton aria-label="Adicionar música" onClick={() => setAddOpen(true)}>
-            <Plus />
-          </IconButton>
-        )}
-        <AddMusicDialog open={addOpen} onOpenChange={setAddOpen} />
+        {/* Sem atalho de "adicionar música/colar link": a busca já procura na
+            internet o que não está no acervo. */}
         <NotificationBell />
         <IconButton
           aria-label={resolved === 'dark' ? 'Tema claro' : 'Tema escuro'}

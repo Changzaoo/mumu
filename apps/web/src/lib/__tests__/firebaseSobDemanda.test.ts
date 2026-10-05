@@ -14,6 +14,10 @@ const estado = vi.hoisted(() => ({
   emitirDoSdk: null as ((user: unknown) => void) | null,
   usuarioAtual: null as unknown,
   usuarioFalso: { uid: 'u1', email: 'a@b.c', getIdToken: async () => 'token-u1' },
+  /** Quantas subidas do SDK ainda devem FALHAR (initializeApp lança). */
+  falhasRestantes: 0,
+  /** Atraso artificial (ms) ao "baixar" firebase/auth — SDK lento. */
+  atrasoDoAuth: 0,
 }));
 const { carregamentos, usuarioFalso } = estado;
 
@@ -21,10 +25,19 @@ const { carregamentos, usuarioFalso } = estado;
 function mockarSdk(): void {
   vi.doMock('firebase/app', () => {
     carregamentos.app++;
-    return { initializeApp: () => ({}) };
+    return {
+      initializeApp: () => {
+        if (estado.falhasRestantes > 0) {
+          estado.falhasRestantes--;
+          throw new Error('chunk do firebase não carregou');
+        }
+        return {};
+      },
+    };
   });
-  vi.doMock('firebase/auth', () => {
+  vi.doMock('firebase/auth', async () => {
     carregamentos.auth++;
+    if (estado.atrasoDoAuth > 0) await new Promise((r) => setTimeout(r, estado.atrasoDoAuth));
     return {
       getAuth: () => ({ currentUser: null }),
       onAuthStateChanged: (_auth: unknown, cb: (u: unknown) => void) => {
@@ -80,6 +93,8 @@ describe('firebase sob demanda', () => {
     window.localStorage.clear();
     estado.emitirDoSdk = null;
     estado.usuarioAtual = null;
+    estado.falhasRestantes = 0;
+    estado.atrasoDoAuth = 0;
   });
   afterEach(() => {
     vi.unstubAllEnvs();
@@ -108,6 +123,38 @@ describe('firebase sob demanda', () => {
     expect(carregamentos.app).toBe(1);
     estado.emitirDoSdk?.(usuarioFalso);
     expect(vistos.at(-1)).toBe(usuarioFalso);
+  });
+
+  it('sessão salva + SDK lento: nunca emite null antes do usuário', async () => {
+    await guardarSessaoNoIndexedDb();
+    estado.usuarioAtual = usuarioFalso;
+    estado.atrasoDoAuth = 150;
+    const { subscribeAuth } = await import('@/lib/firebase');
+    const vistos: unknown[] = [];
+    subscribeAuth((u) => vistos.push(u));
+    // durante a janela de download o app NÃO pode concluir "deslogado"
+    await new Promise((r) => setTimeout(r, 100));
+    expect(vistos).toEqual([]);
+    await esperar(() => vistos.length > 0);
+    expect(vistos).toEqual([usuarioFalso]);
+  });
+
+  it('SDK que falha na 1ª tentativa e sobe na 2ª: não vira deslogado, restaura o login', async () => {
+    await guardarSessaoNoIndexedDb();
+    estado.usuarioAtual = usuarioFalso;
+    estado.falhasRestantes = 1;
+    const { subscribeAuth } = await import('@/lib/firebase');
+    const vistos: unknown[] = [];
+    subscribeAuth((u) => vistos.push(u));
+    // passa da 1ª tentativa (falha) sem emitir null
+    await esperar(() => estado.falhasRestantes === 0);
+    await new Promise((r) => setTimeout(r, 100));
+    expect(vistos).toEqual([]);
+    // a nova tentativa (backoff de 500 ms) sobe o SDK e entrega o usuário
+    for (let i = 0; i < 400 && vistos.length === 0; i++)
+      await new Promise((r) => setTimeout(r, 10));
+    expect(vistos).toEqual([usuarioFalso]);
+    expect(carregamentos.app).toBe(1);
   });
 
   it('anônimo que entra depois: a mesma assinatura recebe o usuário', async () => {

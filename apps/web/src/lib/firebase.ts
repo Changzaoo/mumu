@@ -173,11 +173,18 @@ let authApi: typeof import('firebase/auth') | null = null;
  * Sobe o SDK uma única vez (idempotente) e resolve mesmo em caso de falha —
  * quem espera por isto quer saber "a janela de carregamento acabou", não "deu
  * certo"; o teste de verdade continua sendo `if (!db)`.
+ *
+ * FALHA NÃO É DEFINITIVA: o `sdkPromise` é descartado, e a próxima chamada tenta
+ * de novo (o chunk do Firebase está fora do precache; logo depois de uma troca de
+ * versão ou sem rede o `import()` pode falhar e, minutos depois, funcionar).
+ * Quem decide "deslogado" não pode tratar essa falha como resposta — ver
+ * `ligarOuvinteDoSdk`.
  */
 function carregarSdk(): Promise<void> {
   if (authDisabled) return Promise.resolve();
   if (sdkPromise) return sdkPromise;
   const subindo = (async () => {
+    let subiu = false;
     try {
       const [{ initializeApp }, authMod, storeMod] = await Promise.all([
         import('firebase/app'),
@@ -189,9 +196,17 @@ function carregarSdk(): Promise<void> {
       auth = authMod.getAuth(app);
       auth.languageCode = 'pt-BR';
       db = criarFirestore(app, storeMod);
+      subiu = true;
     } catch {
       // Sem SDK o app continua inteiro no modo local: biblioteca, reprodução
       // e importação não dependem da nuvem. Só a sincronia fica de fora.
+      auth = null;
+      authApi = null;
+      db = null;
+    }
+    if (!subiu) {
+      sdkPromise = null; // permite nova tentativa
+      return;
     }
     marcarBoot('firebase-pronto');
   })();
@@ -474,7 +489,9 @@ export async function logout(): Promise<void> {
  *  - visitante anônimo: emite `null` assim que a leitura local confirma que não
  *    há sessão — SEM baixar o SDK. Se depois alguém fizer login (o SDK sobe sob
  *    demanda), o mesmo SDK passa a notificar esta assinatura;
- *  - SDK que falhou: emite `null` e o app segue como deslogado.
+ *  - SDK que falhou: com sessão salva/dúvida NÃO emite nada (o app fica em
+ *    "carregando") e tenta de novo com espera crescente; só sem sessão salva a
+ *    falha vira `null`.
  * Cancelar antes de qualquer uma delas também precisa funcionar.
  */
 const assinantes = new Set<(user: User | null) => void>();
@@ -492,12 +509,40 @@ function emitirAuth(user: User | null): void {
 async function ligarOuvinteDoSdk(): Promise<void> {
   if (ouvindoSdk) return;
   ouvindoSdk = true;
-  await carregarSdk();
-  if (!auth || !authApi) {
-    emitirAuth(null);
-    return;
+  // ESPERAS ENTRE TENTATIVAS quando o SDK não sobe. A falha de carregamento NÃO
+  // vira "deslogado": quem tem sessão salva (ou dúvida) fica em "carregando"
+  // (sem emitir nada) até o SDK subir, em vez de ver o botão "Entrar".
+  for (let tentativa = 0; ; tentativa++) {
+    await carregarSdk();
+    if (auth && authApi) {
+      authApi.onAuthStateChanged(auth, emitirAuth);
+      return;
+    }
+    if ((await sessaoSalva) === 'nao') {
+      // Nada a restaurar: sem SDK, sem sessão — "deslogado" é a resposta certa.
+      // Desliga a trava para que um login futuro (que sobe o SDK) religue isto.
+      emitirAuth(null);
+      ouvindoSdk = false;
+      return;
+    }
+    await esperarParaRetentar(tentativa);
   }
-  authApi.onAuthStateChanged(auth, emitirAuth);
+}
+
+const ESPERAS_DE_RETENTATIVA_MS = [500, 1500, 4000, 10_000, 30_000];
+
+/** Espera o próximo backoff, ou acorda antes se a rede voltar. */
+function esperarParaRetentar(tentativa: number): Promise<void> {
+  const ms = ESPERAS_DE_RETENTATIVA_MS[Math.min(tentativa, ESPERAS_DE_RETENTATIVA_MS.length - 1)]!;
+  return new Promise<void>((resolve) => {
+    const acordar = (): void => {
+      clearTimeout(timer);
+      window.removeEventListener('online', acordar);
+      resolve();
+    };
+    const timer = setTimeout(acordar, ms);
+    window.addEventListener('online', acordar);
+  });
 }
 
 export function subscribeAuth(callback: (user: User | null) => void): () => void {

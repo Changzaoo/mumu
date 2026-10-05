@@ -50,6 +50,8 @@ import {
   transcribeSegments,
   transcribeWords,
 } from './riva.mjs';
+import { criarClaudeCli } from './claudeCli.mjs';
+import { criarIaChat } from './iaChat.mjs';
 import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
@@ -919,6 +921,38 @@ const NVIDIA_EMBED_MODEL = process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/nemotron-3-
 // conservador o bastante para não tomar 4xx e grande o bastante para não
 // transformar uma biblioteca em centenas de requisições.
 const EMBED_MAX_BATCH = Number(process.env.NVIDIA_EMBED_BATCH ?? 32);
+
+// ── Chat de texto: Claude CLI (conta do dono) com queda para a NVIDIA ───────
+// Ver iaChat.mjs (mapa tarefa→modelo, IA_PROVEDOR, fallback). Embeddings e
+// transcrição NÃO passam por aqui: o Claude não tem equivalente.
+async function nvidiaChat({ messages, model, maxTokens, temperature }) {
+  if (!NVIDIA_API_KEY) return null;
+  const upstream = await fetch(`${NVIDIA_BASE}/chat/completions`, {
+    method: 'POST',
+    headers: {
+      Authorization: `Bearer ${NVIDIA_API_KEY}`,
+      'Content-Type': 'application/json',
+    },
+    body: JSON.stringify({
+      model: typeof model === 'string' && model ? model : NVIDIA_MODEL,
+      messages,
+      // O Nemotron gasta tokens raciocinando antes de responder, e esse
+      // gasto sai do mesmo teto. 512 truncava no meio do raciocínio.
+      max_tokens: Math.min(Number(maxTokens) || 2048, 4096),
+      temperature: typeof temperature === 'number' ? temperature : 0.2,
+      stream: false,
+    }),
+  });
+  const data = await upstream.json().catch(() => ({}));
+  if (!upstream.ok) throw new Error(`NVIDIA respondeu ${upstream.status}`);
+  return data?.choices?.[0]?.message?.content ?? '';
+}
+const claudeCli = criarClaudeCli({ log: (...a) => log(...a) });
+const iaChat = criarIaChat({
+  claude: claudeCli,
+  nvidia: NVIDIA_API_KEY ? nvidiaChat : null,
+  log: (...a) => log(...a),
+});
 /** Teto do áudio aceito para transcrição (uma música cabe folgada em 40 MB). */
 const MAX_TRANSCRIBE_BYTES = Number(process.env.MAX_TRANSCRIBE_MB ?? 40) * 1024 * 1024;
 
@@ -3519,39 +3553,41 @@ async function main() {
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
         }
-        if (!NVIDIA_API_KEY) {
+        if (!iaChat.configurado()) {
           res.writeHead(503, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'IA não configurada no servidor.' }));
           return;
         }
         try {
           const body = JSON.parse((await readBody(req)) || '{}');
-          const messages = Array.isArray(body.messages) ? body.messages : [];
+          const messages = (Array.isArray(body.messages) ? body.messages : []).filter(
+            (m) =>
+              m &&
+              (m.role === 'system' || m.role === 'user' || m.role === 'assistant') &&
+              typeof m.content === 'string',
+          );
           if (messages.length === 0) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'messages obrigatório.' }));
             return;
           }
-          const upstream = await fetch(`${NVIDIA_BASE}/chat/completions`, {
-            method: 'POST',
-            headers: {
-              Authorization: `Bearer ${NVIDIA_API_KEY}`,
-              'Content-Type': 'application/json',
-            },
-            body: JSON.stringify({
-              model: typeof body.model === 'string' ? body.model : NVIDIA_MODEL,
+          let r;
+          try {
+            r = await iaChat.conversar({
               messages,
-              // O Nemotron gasta tokens raciocinando antes de responder, e esse
-              // gasto sai do mesmo teto. 512 truncava no meio do raciocínio.
-              max_tokens: Math.min(Number(body.max_tokens) || 2048, 4096),
-              temperature: typeof body.temperature === 'number' ? body.temperature : 0.2,
-              stream: false,
-            }),
-          });
-          const data = await upstream.json().catch(() => ({}));
-          const content = data?.choices?.[0]?.message?.content ?? '';
-          res.writeHead(upstream.ok ? 200 : 502, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify(upstream.ok ? { content } : { error: 'Falha na IA.' }));
+              tarefa: body.task,
+              model: body.model,
+              maxTokens: body.max_tokens,
+              temperature: body.temperature,
+            });
+          } catch (err) {
+            log('ai chat sem provedor:', err instanceof Error ? err.message : err);
+            res.writeHead(502, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Falha na IA.' }));
+            return;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json', 'X-IA-Provedor': r.provedor });
+          res.end(JSON.stringify({ content: r.content }));
         } catch (err) {
           log('ai error:', err instanceof Error ? err.message : err);
           res.writeHead(500, { 'Content-Type': 'application/json' });

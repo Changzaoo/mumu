@@ -71,8 +71,8 @@ const FONTES = ['Spotify', 'YouTube', 'YouTube Music', 'Apple Music', 'Deezer', 
  * PASSO 3: A PESSOA SABE QUE PODE TRAZER A MÚSICA DELA.
  *
  * O acervo é o que dá para tocar hoje; o que falta, cada um traz colando um
- * link. Isso existia no "Adicionar música", mas ninguém descobre um botão que
- * não sabe que procura — dito aqui, na primeira visita, vira hábito.
+ * link. A busca já traz o que falta (procura na internet), mas ninguém
+ * descobre o que não sabe que existe — dito aqui, na primeira visita, vira hábito.
  *
  * O texto também responde a dúvida de segurança antes que ela vire desistência:
  * o app só lê o LINK. Não pede login do Spotify, não acessa conta nenhuma.
@@ -282,7 +282,7 @@ export default function OnboardingPage() {
             {noPasso1
               ? 'Escolha os estilos que combinam com você. Serve para a primeira tela já fazer sentido — depois ela se ajusta sozinha ao que você realmente ouvir.'
               : noPassoLinks
-                ? 'Não achou alguma? Copie o link de uma música, álbum ou playlist de qualquer lugar e cole aqui. Dá para fazer isso a qualquer hora pelo botão "Adicionar música".'
+                ? 'Não achou alguma? Copie o link de uma música, álbum ou playlist de qualquer lugar e cole aqui. Depois, é só escrever o nome da música na busca — se ela não estiver no radinho, ele procura na internet.'
                 : 'Quem você escolher aqui ganha uma prateleira própria na Home. Pode deixar em branco se não reconhecer ninguém.'}
           </p>
         </header>

@@ -1,6 +1,6 @@
 /**
- * O "+" da barra é a porta de entrada principal (qualquer usuário logado, em
- * qualquer aparelho) — por isso ela precisa ENFILEIRAR e devolver a tela na
+ * (O "+" da barra que abria este diálogo saiu: a busca já procura na internet.
+ * O componente segue válido.) Ele precisa ENFILEIRAR e devolver a tela na
  * hora, nunca esperar o download/conversão inteiros. Estes testes cobrem essa
  * garantia e a validação síncrona (link mal formado / plataforma sem suporte)
  * que ainda faz sentido travar antes de gastar uma vaga da fila.
@@ -11,8 +11,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 const enqueue = vi.fn();
 vi.mock('@/lib/local/importQueue', () => ({ enqueue: (...a: unknown[]) => enqueue(...a) }));
 
-const validateImportUrl =
-  vi.fn<(url: string) => { ok: true } | { ok: false; message: string }>();
+const validateImportUrl = vi.fn<(url: string) => { ok: true } | { ok: false; message: string }>();
 const importFiles = vi.fn();
 vi.mock('@/lib/local/localLibrary', () => ({
   validateImportUrl: (url: string) => validateImportUrl(url),
@@ -62,7 +61,8 @@ describe('AddMusicDialog', () => {
   it('link inválido barra ANTES de enfileirar — a fila não é o lugar de aprender isso', () => {
     validateImportUrl.mockReturnValue({
       ok: false,
-      message: 'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
+      message:
+        'Não dá para importar desse serviço por aqui. Cole o link direto de um arquivo de áudio ou importe o arquivo.',
     });
     abrir();
     fireEvent.change(screen.getByPlaceholderText(/Link do Spotify/), {

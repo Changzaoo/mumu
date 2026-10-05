@@ -54,6 +54,8 @@ dependencies {
     implementation "androidx.core:core-splashscreen:$coreSplashScreenVersion"
     implementation project(':capacitor-android')
     // Login com Google nativo (LoginGooglePlugin): a folha de contas do Android.
+    // Player do sistema (ServicoDeReproducao): sessao de midia e notificacao MediaStyle.
+    implementation "androidx.media:media:1.7.0"
     implementation "androidx.credentials:credentials:1.5.0"
     implementation "androidx.credentials:credentials-play-services-auth:1.5.0"
     implementation "com.google.android.libraries.identity.googleid:googleid:1.1.1"
