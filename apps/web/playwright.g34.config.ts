@@ -23,9 +23,9 @@ import { ARGS_CHROMIUM } from './e2e/motoG34';
  */
 export default defineConfig({
   testDir: './e2e',
-  // Fora de test-results/g34: o Playwright limpa o outputDir a cada rodada e
+  // Fora de .g34: o Playwright limpa o outputDir a cada rodada e
   // as fixtures (acervo, capas) não podem ir junto.
-  outputDir: './test-results/g34-saida',
+  outputDir: './.g34/saida',
   testMatch: /g34\.[a-z]+\.spec\.ts/,
   timeout: 40 * 60_000,
   fullyParallel: false,

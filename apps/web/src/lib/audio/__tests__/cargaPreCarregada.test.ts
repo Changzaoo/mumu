@@ -139,16 +139,17 @@ describe('ticker', () => {
     engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
     lancar = true; // só no ticker (o `load` também emite 'timeupdate')
     // A exceção do ouvinte continua visível (não é engolida), mas o próximo
-    // quadro já estava agendado.
+    // pulso já estava agendado. O pulso é de ~200 ms (era um rAF de 16 ms — a
+    // cadência caiu de propósito, ver `tick` no motor), daí as janelas de 250 ms.
     let pegou = false;
     try {
-      vi.advanceTimersByTime(40);
+      vi.advanceTimersByTime(250);
     } catch {
       pegou = true;
     }
     expect(pegou).toBe(true);
     const antes = chamadas;
-    vi.advanceTimersByTime(100);
+    vi.advanceTimersByTime(450);
     expect(chamadas).toBeGreaterThan(antes);
     engine.destroy();
   });

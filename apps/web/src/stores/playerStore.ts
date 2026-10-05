@@ -504,6 +504,52 @@ function novaGeracao(intencao: boolean): number {
   return ++geracaoDeCarga;
 }
 
+// ── O QUE NÃO É SOM ESPERA O SOM ─────────────────────────────────
+//
+// Medido no Moto G34 emulado: o toque no play deixava ~1,2 s de tarefas longas
+// DEPOIS dele. Boa parte era trabalho que não tem pressa nenhuma: avisar o
+// guardião do offline, aquecer fontes no importador, buscar letra e calibração
+// (a desta e a da próxima), enfileirar transcrição, montar a rádio de parecidas.
+// Tudo isso disputava a thread única com o `play()` e com a decodificação do
+// primeiro quadro. Agora esse trabalho fica pendurado na faixa que acabou de
+// ser pedida e só roda quando sai som (primeiro 'timeupdate' com posição > 0),
+// em ociosidade.
+//
+// Rede de segurança: se o som não sair em `TETO_APOS_O_SOM_MS` (fonte lenta, faixa
+// morta), o lote roda assim mesmo — a fila e as letras não podem depender de a
+// primeira faixa ter dado certo. Lote de faixa que já não é a atual é descartado:
+// numa sequência de "próxima" só o último pedido paga o trabalho.
+const TETO_APOS_O_SOM_MS = 4_000;
+let aposOSom: { trackId: string; tarefas: Array<() => void> } | null = null;
+let aposOSomTimer: ReturnType<typeof setTimeout> | null = null;
+
+function depoisDoSom(trackId: string, tarefa: () => void): void {
+  if (aposOSom?.trackId !== trackId) {
+    aposOSom = { trackId, tarefas: [] };
+    if (aposOSomTimer !== null) clearTimeout(aposOSomTimer);
+    aposOSomTimer = setTimeout(liberarDepoisDoSom, TETO_APOS_O_SOM_MS);
+  }
+  aposOSom.tarefas.push(tarefa);
+}
+
+function liberarDepoisDoSom(): void {
+  if (aposOSomTimer !== null) clearTimeout(aposOSomTimer);
+  aposOSomTimer = null;
+  const lote = aposOSom;
+  aposOSom = null;
+  if (!lote || usePlayerStore.getState().currentTrack?.id !== lote.trackId) return;
+  // Uma tarefa por ociosidade: juntas seriam outra tarefa longa, só que depois.
+  for (const tarefa of lote.tarefas) {
+    quandoOciosa(() => {
+      try {
+        tarefa();
+      } catch {
+        /* trabalho de fundo nunca interrompe a reprodução */
+      }
+    });
+  }
+}
+
 /**
  * FIM DA TRANSIÇÃO: aproxima a realidade da INTENÇÃO da pessoa.
  *
@@ -607,9 +653,22 @@ function bgHandoffLeadMs(): number {
 /** Blend curtíssimo no Android (via grafo Web Audio); no iOS a troca é seca. */
 const BG_HANDOFF_XF = 0.4;
 
+/**
+ * O gatilho do crossfade no instante exato (ver `armCrossfadeTimer`). Mora aqui
+ * porque é cancelado pelos mesmos eventos que cancelam a troca antecipada
+ * (carga nova, pausa, interrupção, fim) — `clearHandoffTimer` cobre os dois.
+ */
+let crossfadeTimer: ReturnType<typeof setTimeout> | null = null;
+
+function clearCrossfadeTimer(): void {
+  if (crossfadeTimer !== null) clearTimeout(crossfadeTimer);
+  crossfadeTimer = null;
+}
+
 function clearHandoffTimer(): void {
   if (handoffTimer !== null) clearTimeout(handoffTimer);
   handoffTimer = null;
+  clearCrossfadeTimer();
 }
 
 /**
@@ -770,8 +829,12 @@ function resetDeadRun(): void {
  *  - tinha fonte e ela morreu → é o caso comum (cópia podada do cofre), e o
  *    caminho de volta é o `sourceUrl`.
  */
+/** Faixa cujo "saiu som => reparada" já foi conferido (ver o 'timeupdate'). */
+let reparoConferidoDe: string | null = null;
+
 function registrarNoMapa(track: TrackDto | null): void {
   if (!track) return;
+  reparoConferidoDe = null; // o caso novo precisa poder ser dado por reparado depois
   try {
     const audioLocal = hasLocalAudio(track.id);
     const remota = Boolean(remoteUrlFor(track.id));
@@ -1033,6 +1096,96 @@ function indiceSeguinte(s: PosicaoNaFila): number {
   return noAparelho >= 0 ? noAparelho : normal;
 }
 
+// ── A PRÓXIMA JÁ ESTÁ PRONTA QUANDO A ATUAL ACABA ─────────────────
+//
+// Medido (Moto G34 emulado, 60 ms de latência, melhor caso): "próxima → som" levava
+// ~1,9 s. A decomposição, lida no código de `loadIndex`, é uma cadeia SERIAL que
+// recomeçava do zero a cada troca:
+//   1. esperar os cofres locais hidratarem (`localSourcesReady`);
+//   2. ir ao disco procurar a faixa no aparelho (`ensureLocalAudioUrl` e depois
+//      `ensureDownloadedAudioUrl` — duas idas, uma atrás da outra);
+//   3. `GET /catalogo/:id` para trocar o id pelo endereço vivo do cofre — 1 RTT;
+//   4. criar o elemento, o servidor responder o primeiro trecho (outro RTT + TTFB)
+//      e o navegador chegar ao `canplay`;
+//   5. tudo isso numa thread ocupada com telemetria, letra e fila, que atrasa
+//      cada passo acima.
+// Nada disso depende do toque: a seguinte da fila é conhecida desde que a atual
+// começa. Então os passos 1–3 e a criação do elemento (4) acontecem durante a
+// faixa que está tocando, e o toque em "próxima" vira só a promoção do slot.
+//
+// Só UMA faixa à frente: cada pré-carga abre uma alça de blob (RAM) e um
+// elemento que baixa — mais que uma disputaria banda com a faixa de agora.
+
+/** A seguinte resolvida (fonte viva), e a chave `atual>seguinte` a que pertence. */
+let proximaResolvida: { chave: string; faixa: TrackDto; entregue: boolean } | null = null;
+/** Chave cuja resolução já foi disparada — uma por par atual/seguinte. */
+let proximaDisparadaPara: string | null = null;
+/** A pré-carga de elemento só começa depois disto: antes, a faixa de agora disputa a banda sozinha. */
+const PRECARGA_APOS_S = 5;
+
+/** O motor tem esta faixa pronta no slot ocioso? (defensivo: motor de teste pode não ter) */
+function faixaPreCarregadaNoMotor(id: string): TrackDto | null {
+  try {
+    return audioEngine.faixaPreCarregada(id);
+  } catch {
+    return null;
+  }
+}
+
+function slotOciosoLivreNoMotor(): boolean {
+  try {
+    return audioEngine.slotOciosoLivre();
+  } catch {
+    return true;
+  }
+}
+
+/** Dispara a resolução da seguinte (uma vez por par) e tenta a pré-carga do elemento. */
+function prepararProxima(state: PlayerState, position: number): void {
+  const atual = state.currentTrack;
+  if (!atual || state.repeat === 'one') return;
+  const proximo = state.queue[indiceSeguinte(state)];
+  if (!proximo || proximo.id === atual.id) return;
+  const chave = `${atual.id}>${proximo.id}`;
+  if (proximaDisparadaPara !== chave) {
+    proximaDisparadaPara = chave;
+    proximaResolvida = null;
+    if (!podeOuvir(proximo)) return;
+    // Sem rede e sem cópia no aparelho não há o que resolver (e uma pré-carga
+    // fadada a falhar só marcaria o slot como morto).
+    const semRede =
+      redeSabidamenteMorta() || (typeof navigator !== 'undefined' && !navigator.onLine);
+    if (semRede && !temCopiaNoAparelho(proximo)) return;
+    void (async () => {
+      const faixa = await comTeto(ensurePlayableSource(proximo), TETO_RESOLUCAO_MS);
+      // A fila andou durante a resolução: o resultado é de outro par.
+      if (!faixa || proximaDisparadaPara !== chave) return;
+      proximaResolvida = { chave, faixa, entregue: false };
+      precarregarProxima(audioEngine.getPosition());
+    })().catch(() => undefined);
+    return;
+  }
+  precarregarProxima(position);
+}
+
+/** Entrega a seguinte já resolvida ao slot ocioso, se for hora e ele estiver livre. */
+function precarregarProxima(position: number): void {
+  const r = proximaResolvida;
+  if (!r || r.entregue || position < PRECARGA_APOS_S) return;
+  const s = usePlayerStore.getState();
+  const seguinte = s.queue[indiceSeguinte(s)];
+  if (!s.currentTrack || r.chave !== `${s.currentTrack.id}>${seguinte?.id}`) return;
+  if (faixaPreCarregadaNoMotor(r.faixa.id)) {
+    r.entregue = true;
+    return;
+  }
+  // Slot ocupado (a anterior ainda saindo, uma pré-carga velha): tenta de novo no
+  // próximo pulso; a pré-carga de perto do fim troca o que houver.
+  if (!slotOciosoLivreNoMotor()) return;
+  r.entregue = true;
+  audioEngine.preloadNext(r.faixa);
+}
+
 /** Pulo feito pela fila (não pela pessoa) direto para uma faixa do aparelho. */
 function tocarDoAparelho(indice: number): void {
   avancoAutomatico = true;
@@ -1264,11 +1417,55 @@ export function resumeAt(seconds: number): void {
   pendingResumeSeek = seconds > 0 ? seconds : null;
 }
 
+/** Janela mínima entre gravações de rotina da retomada. */
+const JANELA_DA_RETOMADA_MS = 5_000;
+/** Quando a gravação de rotina foi agendada (0 = nenhuma pendente). */
+let retomadaAgendadaEm = 0;
+
+/** Roda `fn` quando a thread estiver ociosa (teto de 1 s), ou logo depois onde não há `requestIdleCallback`. */
+function quandoOciosa(fn: () => void): void {
+  if (typeof window === 'undefined') return;
+  const ric = (
+    window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+    }
+  ).requestIdleCallback;
+  if (typeof ric === 'function') ric.call(window, fn, { timeout: 1_000 });
+  else setTimeout(fn, 50);
+}
+
+/**
+ * Grava "de onde parou". A gravação de ROTINA (a cada 200 ms o ouvinte de
+ * progresso chama aqui) é aglutinada: no máximo uma por janela de 5 s, e feita
+ * na ociosidade — fora do quadro do 'timeupdate', que é o caminho quente de
+ * quem está ouvindo. As gravações que PRECISAM acontecer já (pause, troca de
+ * faixa, `pagehide`, `visibilitychange`, interrupção) passam `force` e vão
+ * síncronas: depois de uma tela que apagou ou de uma aba que morreu não há
+ * ociosidade para esperar.
+ */
 function saveResume(force = false, limparMarca = false): void {
+  if (force) {
+    gravarRetomada(true, limparMarca);
+    return;
+  }
+  const agora = Date.now();
+  // O agendamento "vence": se a ociosidade nunca chegou (aba congelada, relógio
+  // de teste trocado), a trava não pode ficar presa e calar a retomada para sempre.
+  if (agora - retomadaAgendadaEm < 3_000 || agora - lastResumeSave < JANELA_DA_RETOMADA_MS) return;
+  retomadaAgendadaEm = agora;
+  quandoOciosa(() => {
+    retomadaAgendadaEm = 0;
+    gravarRetomada(false, false);
+  });
+}
+
+function gravarRetomada(force: boolean, limparMarca: boolean): void {
   const s = usePlayerStore.getState();
   if (!s.currentTrack || s.progress <= 0) return;
   const now = Date.now();
-  if (!force && now - lastResumeSave < 5_000) return; // no máx. 1 escrita / 5s
+  // A janela vale de novo aqui: uma gravação forçada pode ter acontecido entre o
+  // agendamento e a ociosidade, e repetir a escrita seria só custo.
+  if (!force && now - lastResumeSave < JANELA_DA_RETOMADA_MS) return;
   lastResumeSave = now;
   // A MARCA "ESTAVA TOCANDO" SOBREVIVE À GRAVAÇÃO DE SAÍDA.
   //
@@ -1282,11 +1479,16 @@ function saveResume(force = false, limparMarca = false): void {
   let tocando = false;
   if (!limparMarca) {
     try {
-      const anterior = JSON.parse(window.localStorage.getItem(RESUME_KEY) ?? 'null') as {
-        track?: { id?: string };
-        tocando?: boolean;
-      } | null;
-      tocando = anterior?.tocando === true && anterior.track?.id === s.currentTrack.id;
+      // Só interpreta o JSON (a faixa inteira) quando a marca está lá: no caso
+      // comum ela não existe e a leitura era parse à toa a cada gravação.
+      const bruto = window.localStorage.getItem(RESUME_KEY);
+      if (bruto?.includes('"tocando":true')) {
+        const anterior = JSON.parse(bruto) as {
+          track?: { id?: string };
+          tocando?: boolean;
+        } | null;
+        tocando = anterior?.tocando === true && anterior.track?.id === s.currentTrack.id;
+      }
     } catch {
       tocando = false;
     }
@@ -1702,6 +1904,10 @@ export const usePlayerStore = create<PlayerState>()(
         previewGateFired = false;
         pendingResumeSeek = null; // troca de faixa normal — sem seek de retomada
         lastProgressCommit = 0;
+        // Troca de faixa: a retomada é gravada na 1ª ociosidade depois do som, e
+        // o "saiu som => reparada" é conferido de novo para a faixa que entra.
+        lastResumeSave = 0;
+        reparoConferidoDe = null;
         fallbackTried = new Set();
         fallbackAttempts = 0;
         cancelarRetentativa(); // trocou de faixa (ou é a própria retentativa): a espera acabou
@@ -1724,23 +1930,30 @@ export const usePlayerStore = create<PlayerState>()(
         // Sem isto ele baixaria na ordem da biblioteca, e a faixa que você
         // mandou tocar agora seria a última da fila de download — que é o mesmo
         // que não ter offline nenhum. Ver lib/offline/guardiaoOffline.ts.
-        void import('@/lib/offline/guardiaoOffline')
-          .then(({ informarContexto }) => {
-            const { queue, queueIndex } = get();
-            // O assimilador adianta o CONTEÚDO do que vem a seguir; o guardião
-            // adianta os BYTES. Mesma fila, dois adiantamentos diferentes.
-            informarFila(queue.slice(queueIndex + 1).map((t) => t.id));
-            informarContexto({
-              // A FILA INTEIRA, não as próximas sete. O corte antigo fazia a
-              // música parar na oitava faixa de uma playlist quando o sinal
-              // sumia — justamente a situação para a qual o offline existe. O
-              // guardião continua baixando uma por vez e parando na cota; só
-              // passa a saber para onde a lista vai.
-              aSeguir: queue.slice(queueIndex + 1).map((t) => t.id),
-              recentes: [track.id],
-            });
-          })
-          .catch(() => undefined);
+        //
+        // Depois do som (ver `depoisDoSom`): o guardião só baixa em segundo plano
+        // e já espera a faixa de agora carregar (`informarCarregando`) — saber a
+        // fila 1 s depois não muda nada, e montar `aSeguir` da fila inteira é
+        // trabalho síncrono no meio do toque.
+        depoisDoSom(track.id, () => {
+          void import('@/lib/offline/guardiaoOffline')
+            .then(({ informarContexto }) => {
+              const { queue, queueIndex } = get();
+              // O assimilador adianta o CONTEÚDO do que vem a seguir; o guardião
+              // adianta os BYTES. Mesma fila, dois adiantamentos diferentes.
+              informarFila(queue.slice(queueIndex + 1).map((t) => t.id));
+              informarContexto({
+                // A FILA INTEIRA, não as próximas sete. O corte antigo fazia a
+                // música parar na oitava faixa de uma playlist quando o sinal
+                // sumia — justamente a situação para a qual o offline existe. O
+                // guardião continua baixando uma por vez e parando na cota; só
+                // passa a saber para onde a lista vai.
+                aSeguir: queue.slice(queueIndex + 1).map((t) => t.id),
+                recentes: [track.id],
+              });
+            })
+            .catch(() => undefined);
+        });
 
         // AQUECE AS PRÓXIMAS NO IMPORTADOR.
         //
@@ -1754,37 +1967,47 @@ export const usePlayerStore = create<PlayerState>()(
         // Só as três seguintes, e só as `local:` — faixa de catálogo não passa
         // pelo ajudante, e uma fila inteira viraria uma rajada de extrações que
         // o YouTube limita por IP.
-        void (async () => {
-          const { queue, queueIndex } = get();
-          const proximas = queue.slice(queueIndex, queueIndex + 4);
-          if (proximas.length === 0) return;
-          const [{ sourceUrlFor }, { aquecerFontes }] = await Promise.all([
-            import('@/lib/local/localLibrary'),
-            import('@/lib/local/importerHelper'),
-          ]);
-          const fontes = proximas
-            .filter((t) => t.id.startsWith('local:'))
-            .map((t) => sourceUrlFor(t.id))
-            .filter((u): u is string => Boolean(u));
-          if (fontes.length > 0) await aquecerFontes(fontes);
-        })().catch(() => undefined);
+        //
+        // Tudo daqui até a calibração roda DEPOIS do som (`depoisDoSom`): são
+        // pedidos de fundo, e antes do primeiro som cada `import()` + `.then`
+        // era tarefa na thread que o `play()` precisava.
+        depoisDoSom(track.id, () => {
+          void (async () => {
+            const { queue, queueIndex } = get();
+            const proximas = queue.slice(queueIndex, queueIndex + 4);
+            if (proximas.length === 0) return;
+            const [{ sourceUrlFor }, { aquecerFontes }] = await Promise.all([
+              import('@/lib/local/localLibrary'),
+              import('@/lib/local/importerHelper'),
+            ]);
+            const fontes = proximas
+              .filter((t) => t.id.startsWith('local:'))
+              .map((t) => sourceUrlFor(t.id))
+              .filter((u): u is string => Boolean(u));
+            if (fontes.length > 0) await aquecerFontes(fontes);
+          })().catch(() => undefined);
+        });
 
         // A letra da faixa que está começando fura a fila de transcrição. Sem
         // isto, quem abrisse a letra do que está tocando esperava atrás da
         // playlist inteira que foi baixada meia hora antes.
-        void import('@/lib/lyrics/syncFromAudio')
-          .then((m) => m.queueLyricsSync(track, { agora: true }))
-          .catch(() => undefined);
+        depoisDoSom(track.id, () => {
+          void import('@/lib/lyrics/syncFromAudio')
+            .then((m) => m.queueLyricsSync(track, { agora: true }))
+            .catch(() => undefined);
+        });
         // A LETRA JÁ VEM BUSCADA quando a pessoa abrir a tela: a desta faixa e
         // a da próxima. É uma consulta leve ao LRCLIB e o resultado fica em cache.
-        void import('@/lib/lyrics/lyrics')
-          .then((m) => {
-            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-            m.prefetchLyrics(track);
-            const proxima = get().queue[index + 1];
-            if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
-          })
-          .catch(() => undefined);
+        depoisDoSom(track.id, () => {
+          void import('@/lib/lyrics/lyrics')
+            .then((m) => {
+              if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+              m.prefetchLyrics(track);
+              const proxima = get().queue[index + 1];
+              if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
+            })
+            .catch(() => undefined);
+        });
         // A CALIBRAÇÃO PRECISA ESTAR PRONTA QUANDO A LETRA FOR ABERTA, não
         // começar naquele instante — o caminho pt-BR (faster-whisper) leva
         // ~50s por música de 4 min, e quem abrisse a tela via a letra
@@ -1793,20 +2016,22 @@ export const usePlayerStore = create<PlayerState>()(
         // acima, para não competir com o que a faixa atual ainda precisa).
         // `manterVivo` desiste sem gastar mais uma pergunta ao importador se a
         // pessoa pular para longe antes da resposta chegar.
-        void import('@/lib/lyrics/calibragem')
-          .then((m) => {
-            if (typeof navigator !== 'undefined' && !navigator.onLine) return;
-            const ehRelevante = (id: string) => (): boolean => {
-              const { currentTrack, queue, queueIndex } = get();
-              return currentTrack?.id === id || queue[queueIndex + 1]?.id === id;
-            };
-            m.aquecerCalibracao(track, ehRelevante(track.id));
-            const proxima = get().queue[index + 1];
-            if (proxima) {
-              setTimeout(() => m.aquecerCalibracao(proxima, ehRelevante(proxima.id)), 8_000);
-            }
-          })
-          .catch(() => undefined);
+        depoisDoSom(track.id, () => {
+          void import('@/lib/lyrics/calibragem')
+            .then((m) => {
+              if (typeof navigator !== 'undefined' && !navigator.onLine) return;
+              const ehRelevante = (id: string) => (): boolean => {
+                const { currentTrack, queue, queueIndex } = get();
+                return currentTrack?.id === id || queue[queueIndex + 1]?.id === id;
+              };
+              m.aquecerCalibracao(track, ehRelevante(track.id));
+              const proxima = get().queue[index + 1];
+              if (proxima) {
+                setTimeout(() => m.aquecerCalibracao(proxima, ehRelevante(proxima.id)), 8_000);
+              }
+            })
+            .catch(() => undefined);
+        });
 
         // Local audio already resolvable THIS instant → play with zero network.
         const localNow = localLibraryAudioUrl(track.id) ?? localAudioUrl(track.id);
@@ -1816,27 +2041,59 @@ export const usePlayerStore = create<PlayerState>()(
           return;
         }
 
+        // A PRÓXIMA JÁ ESTAVA PRONTA: promover é síncrono.
+        //
+        // Quando a faixa pedida é a que `prepararProxima` deixou resolvida e
+        // pré-carregada no slot ocioso (o caso de "próxima", do fim natural e de
+        // tocar a seguinte da fila), todo o caminho abaixo — esperar os cofres
+        // locais, abrir alça, `GET /catalogo/:id`, criar elemento, esperar bytes —
+        // já foi pago durante a faixa anterior. Refazer isso era o que custava
+        // ~1,9 s entre o toque e o som. O motor promove o slot (`load` reconhece a
+        // faixa no slot ocioso) e o `play()` sai neste mesmo quadro.
+        const preparada = faixaPreCarregadaNoMotor(track.id);
+        if (preparada) {
+          marcarCarga('carregando');
+          set({ isBuffering: true }); // se o slot já carregou, o motor desliga já em seguida
+          if (preparada !== track && preparada.streamUrl) {
+            // A foto da fila ganha o endereço vivo, como no caminho completo.
+            set((s) => ({
+              queue: s.queue.map((t, i) => (i === index ? preparada : t)),
+              currentTrack: preparada,
+            }));
+          }
+          // TODO caminho que carrega arma o watchdog — ANTES do `load`: se o slot
+          // já carregou, o 'loaded' re-emitido na promoção troca este teto pelo
+          // vigia de travamento (10 s); se ainda carrega, o teto inicial fica e
+          // cobre a fonte que pendura sem erro (spinner eterno).
+          armLoadWatchdog(track.id, initialWatchdogMs(track.id));
+          audioEngine.load(preparada, { autoplay, crossfadeSeconds });
+          applyEngineSettings();
+          reconciliarIntencao(geracao);
+          return;
+        }
+
         // Wait for the local caches to hydrate before touching any network URL —
         // on a fresh boot (especially OFFLINE) the object-URL maps may still be
         // rebuilding, and a downloaded track must NEVER go to the server.
         set({ isBuffering: true });
-        // O DETALHE EM PARALELO COM O COFRE LOCAL. Quem ouve do acervo quase
-        // nunca tem a faixa no aparelho, e a busca do endereço vivo esperava
-        // em série atrás das checagens locais. Se a faixa estiver no aparelho,
-        // o custo é um GET pequeno desperdiçado.
+        // A RESOLUÇÃO DA FONTE EM PARALELO COM O COFRE LOCAL. Quem ouve do
+        // acervo quase nunca tem a faixa no aparelho, e a busca do endereço vivo
+        // (`GET /catalogo/:id` → endereço do cofre) esperava em série atrás das
+        // checagens locais — idas e voltas que não dependem uma da outra. Antes
+        // só o `GET` era adiantado; agora a resolução inteira (`ensurePlayableSource`)
+        // corre junto, e quem chega ao fim do cofre local só colhe o resultado.
+        // Se a faixa estiver no aparelho, o custo é um GET pequeno desperdiçado.
+        let resolucaoAdiantada: Promise<TrackDto | null> | null = null;
         if (
           track.id.startsWith('local:') &&
           !hasLocalAudio(track.id) &&
           !hasDownloadedAudio(track.id) &&
           (typeof navigator === 'undefined' || navigator.onLine)
         ) {
-          void Promise.race([registroPronto(), localLibraryReady()])
-            .then(() => {
-              if (!remoteUrlFor(track.id) && !sourceUrlFor(track.id)) {
-                return garantirDetalhe(track.id);
-              }
-            })
-            .catch(() => undefined);
+          resolucaoAdiantada = Promise.race([registroPronto(), localLibraryReady()]).then(
+            () => comTeto(ensurePlayableSource(track), TETO_RESOLUCAO_MS),
+            () => null,
+          );
         }
         void (async () => {
           await localSourcesReady(track.id);
@@ -1854,10 +2111,21 @@ export const usePlayerStore = create<PlayerState>()(
           // reabertura sob demanda. Sem ela, a faixa baixada só tocaria uma vez
           // por sessão — depois de a alça ser podada, cairia na rede, e offline
           // simplesmente emudeceria.
-          const local =
-            (await ensureLocalAudioUrl(track.id)) ??
-            (await ensureDownloadedAudioUrl(track.id)) ??
-            localAudioUrl(track.id);
+          //
+          // OS DOIS COFRES EM PARALELO (eram em série): cada um é uma ida ao
+          // disco (Cache Storage/IndexedDB) e nenhum depende do outro. A
+          // preferência não muda — o do aparelho vence. O cofre local só guarda
+          // faixa `local:`; para as demais pular a consulta poupa a ida ao disco
+          // (a menos que o registro já diga que há áudio). O baixado só abre
+          // alça se o registro disser que está baixado, então não há alça dupla
+          // quando a faixa só existe num dos lados.
+          const [doCofre, baixada] = await Promise.all([
+            track.id.startsWith('local:') || hasLocalAudio(track.id)
+              ? ensureLocalAudioUrl(track.id)
+              : Promise.resolve(null),
+            hasLocalAudio(track.id) ? Promise.resolve(null) : ensureDownloadedAudioUrl(track.id),
+          ]);
+          const local = doCofre ?? baixada ?? localAudioUrl(track.id);
           if (local) {
             marcarCarga('carregando');
             audioEngine.load(track, { autoplay: querTocar, crossfadeSeconds });
@@ -1908,7 +2176,8 @@ export const usePlayerStore = create<PlayerState>()(
           // Sem cópia no servidor, o caminho é extrair da origem: é a espera
           // longa, e dizer isso antes de começar evita o "travou?".
           marcarCarga(remoteUrlFor(track.id) ? 'carregando' : 'buscandoOrigem');
-          const resolved = await comTeto(ensurePlayableSource(track), TETO_RESOLUCAO_MS);
+          const resolved = await (resolucaoAdiantada ??
+            comTeto(ensurePlayableSource(track), TETO_RESOLUCAO_MS));
           if (geracao !== geracaoDeCarga) return;
           if (!resolved) {
             failCurrentTrack('Não foi possível carregar esta faixa agora.');
@@ -1971,27 +2240,33 @@ export const usePlayerStore = create<PlayerState>()(
           // segundo plano e emenda na fila, pra não parar após uma faixa. Fora
           // do fluxo de podcast/rádio (lá "próxima" não é uma música parecida).
           if (ctx.source === 'podcast' || ctx.source === 'radio') return;
-          void import('@/lib/reco/radio')
-            .then(({ construirRadio }) => {
-              const similares = construirRadio(track);
-              if (similares.length === 0) return;
-              const st = get();
-              // Só emenda se o usuário não trocou de faixa/contexto no meio tempo
-              // e a fila ainda é só a semente (não pisar numa fila real).
-              if (st.currentTrack?.id !== track.id || st.queue.length > 1) return;
-              const fila = [track, ...similares];
-              set({ queue: fila, originalQueue: fila });
-              // Conta ao guardião offline o que vem a seguir, pra já ir baixando.
-              void import('@/lib/offline/guardiaoOffline')
-                .then(({ informarContexto }) =>
-                  informarContexto({
-                    aSeguir: similares.map((t) => t.id),
-                    recentes: [track.id],
-                  }),
-                )
-                .catch(() => undefined);
-            })
-            .catch(() => undefined);
+          // `construirRadio` varre o acervo inteiro (síncrono, dezenas de ms num
+          // celular): fica para depois do som — a fila só precisa existir quando
+          // a faixa acabar, e a de uma música sozinha leva minutos para isso. O
+          // teto de `depoisDoSom` garante que ela é montada mesmo se o som demorar.
+          depoisDoSom(track.id, () => {
+            void import('@/lib/reco/radio')
+              .then(({ construirRadio }) => {
+                const similares = construirRadio(track);
+                if (similares.length === 0) return;
+                const st = get();
+                // Só emenda se o usuário não trocou de faixa/contexto no meio tempo
+                // e a fila ainda é só a semente (não pisar numa fila real).
+                if (st.currentTrack?.id !== track.id || st.queue.length > 1) return;
+                const fila = [track, ...similares];
+                set({ queue: fila, originalQueue: fila });
+                // Conta ao guardião offline o que vem a seguir, pra já ir baixando.
+                void import('@/lib/offline/guardiaoOffline')
+                  .then(({ informarContexto }) =>
+                    informarContexto({
+                      aSeguir: similares.map((t) => t.id),
+                      recentes: [track.id],
+                    }),
+                  )
+                  .catch(() => undefined);
+              })
+              .catch(() => undefined);
+          });
         },
 
         playQueue: (todas, startIndex = 0, context) => {
@@ -2513,6 +2788,10 @@ export function initPlayerEngine(): void {
       // de AGORA. Sem isto, apagar a tela nos últimos segundos deixava a faixa
       // sem a rede de segurança da troca e ela caía no vão de silêncio do fim.
       rearmEndTimer?.();
+    } else {
+      // Tela acesa de novo: o disparo exato do crossfade não age com ela
+      // apagada, então volta a ser mirado (os outros alvos são idempotentes).
+      rearmEndTimer?.();
     }
   });
 
@@ -2560,6 +2839,8 @@ export function initPlayerEngine(): void {
     if (state.normalizeVolume !== prev.normalizeVolume) {
       audioEngine.setNormalizeVolume(state.normalizeVolume);
     }
+    // Mudou o tamanho da mistura no meio da faixa: o instante exato mudou junto.
+    if (state.crossfadeSeconds !== prev.crossfadeSeconds) armCrossfadeTimer();
   });
 
   audioEngine.on('timeupdate', ({ position, duration }) => {
@@ -2578,14 +2859,21 @@ export function initPlayerEngine(): void {
     if (position > 0) {
       resetDeadRun();
       somSaiu(state.currentTrack?.id);
+      // Saiu som: libera o trabalho que esperava por ele (letra, guardião, rádio…)
+      // e já começa a resolver/pré-carregar a seguinte (ver `prepararProxima`).
+      if (aposOSom !== null) liberarDepoisDoSom();
+      if (state.isPlaying) prepararProxima(state, position);
       // Saiu som: toda fase de ANTES do som acabou. "Esperando a rede" é do
       // meio da música e quem a encerra é o evento de buffering.
       if (state.carga !== null && state.carga.fase !== 'esperandoRede') limparCarga();
       // Saiu som: se esta faixa estava no mapa de falhas, o caso está
       // encerrado. É a ÚNICA prova aceitável de reparo — "o importador disse
       // que baixou" não é a mesma coisa que "a pessoa ouviu".
+      // Uma vez por faixa: `marcarReparada` lê (e faz parse de) o mapa de falhas
+      // do localStorage, e isto roda a cada pulso. `registrarNoMapa` rearma.
       const tocando = usePlayerStore.getState().currentTrack;
-      if (tocando) {
+      if (tocando && reparoConferidoDe !== tocando.id) {
+        reparoConferidoDe = tocando.id;
         try {
           faixasQueFalharam.marcarReparada(tocando.id);
         } catch {
@@ -2597,16 +2885,20 @@ export function initPlayerEngine(): void {
     // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
     if (!signedIn && position >= PREVIEW_SECONDS) firePreviewGate();
 
-    // Throttle store writes to ~5/s — components needing 60fps read the engine.
+    // Store writes at ~5/s — components needing 60fps read the engine. O pulso do
+    // motor já é de 200 ms; a folga de 20 ms existe só para o jitter do timer não
+    // fazer um pulso sim, outro não (o que derrubaria o progresso a 2,5 Hz).
     const now = Date.now();
-    if (now - lastProgressCommit >= 200) {
+    if (now - lastProgressCommit >= 180) {
       lastProgressCommit = now;
       store.setState({
         progress: position,
         duration: duration || state.duration,
         buffered: audioEngine.getBufferedEnd(),
       });
-      saveResume(); // "de onde parou" (1 escrita leve a cada 5s, no máximo)
+      // "De onde parou": aglutinada (1 por janela de 5 s, na ociosidade) — as
+      // gravações que não podem esperar (pause, pagehide…) passam `force`.
+      saveResume();
     }
 
     // Record the play once at 30s or 50% listened (fire-and-forget).
@@ -2715,7 +3007,12 @@ export function initPlayerEngine(): void {
           // preload da faixa errada desperdiça rede e ocupa o elemento reserva.
           const agora = store.getState();
           const aindaEhAProxima = agora.queue[indiceSeguinte(agora)]?.id === upcoming.id;
-          if (aindaEhAProxima) audioEngine.preloadNext(upcoming);
+          // A versão com a fonte VIVA resolvida (`prepararProxima`), quando existe:
+          // a da fila pode ser uma fotografia sem endereço, que o motor recusaria
+          // em silêncio (`sourceFor` sem `streamUrl`) e a pré-carga nem nasceria.
+          const pronta =
+            proximaResolvida?.faixa.id === upcoming.id ? proximaResolvida.faixa : upcoming;
+          if (aindaEhAProxima) audioEngine.preloadNext(pronta);
         })();
       }
     }
@@ -2725,6 +3022,26 @@ export function initPlayerEngine(): void {
     // transmitido PARA MENOS; com o número errado, "faltam 2 s" acontecia no
     // meio da música e ela era trocada antes do fim. Sem confirmação, a faixa
     // toca até o fim de verdade e a próxima entra pelo 'ended'.
+    // O disparo no instante exato é do `crossfadeTimer` (ver `armCrossfadeTimer`);
+    // aqui fica como rede de segurança (seek, duração que só se confirmou tarde,
+    // timer estrangulado) — a mesma condição, a no máximo 200 ms do alvo.
+    if (crossfadeSeconds > 0 && remaining <= crossfadeSeconds) {
+      tentarCrossfade(state, duration, remaining, crossfadeSeconds);
+    }
+  });
+
+  /**
+   * Começa a próxima faixa misturando, SE for a hora. Chamado pelo 'timeupdate'
+   * (rede de segurança, ~5 Hz) e pelo `crossfadeTimer` (instante exato).
+   * Idempotente: depois de disparar, a faixa da store já é a nova e `remaining`
+   * deixa de valer para ela.
+   */
+  const tentarCrossfade = (
+    state: PlayerState,
+    duration: number,
+    remaining: number,
+    crossfadeSeconds: number,
+  ): void => {
     if (
       crossfadeSeconds > 0 &&
       !crossfadeTriggered &&
@@ -2738,11 +3055,16 @@ export function initPlayerEngine(): void {
         crossfadeTriggered = true;
         const track = state.queue[nextIndex];
         if (track) {
+          clearCrossfadeTimer(); // este disparo é o dela; o 'loaded' da nova rearma
           playRecorded = false;
           preloadRequested = false;
           lastProgressCommit = 0;
           novaGeracao(true); // transição nova: a carga anterior perde a voz
-          audioEngine.load(track, { autoplay: true, crossfadeSeconds });
+          // A versão com a fonte viva, se a seguinte já foi resolvida: a da fila
+          // pode ser uma foto sem endereço (o motor recusaria com 'source').
+          const aCarregar =
+            proximaResolvida?.faixa.id === track.id ? proximaResolvida.faixa : track;
+          audioEngine.load(aCarregar, { autoplay: true, crossfadeSeconds });
           store.setState({
             currentTrack: track,
             queueIndex: nextIndex,
@@ -2761,7 +3083,48 @@ export function initPlayerEngine(): void {
         }
       }
     }
-  });
+  };
+
+  /**
+   * O CROSSFADE NO INSTANTE EXATO, SEM POLLING.
+   *
+   * Com o pulso de progresso a ~5 Hz o gatilho "faltam N s" erraria até 200 ms; em
+   * vez de voltar a 60 Hz, um temporizador ÚNICO é mirado em `restante - N`. Ele
+   * se rearma onde os outros dois se rearmam (carga, seek, play/pause, tela) e
+   * só age com a tela acesa: apagada, o ticker oculto e a troca antecipada
+   * (`armHandoffTimer`) já cobrem o caso, e nenhum temporizador novo roda em
+   * segundo plano. Se a posição do elemento ficou para trás do relógio (rede
+   * engasgada), ele se remira em vez de disparar cedo.
+   */
+  const armCrossfadeTimer = (): void => {
+    clearCrossfadeTimer();
+    if (typeof window === 'undefined') return;
+    const { crossfadeSeconds } = useSettingsStore.getState();
+    if (crossfadeSeconds <= 0) return;
+    const s = store.getState();
+    const track = s.currentTrack;
+    if (!track || !s.isPlaying || s.repeat === 'one') return;
+    if (audioEngine.currentTrack?.id !== track.id) return;
+    const duration = audioEngine.getDuration();
+    if (!Number.isFinite(duration) || duration <= crossfadeSeconds * 2) return;
+    const restante = duration - audioEngine.getPosition();
+    crossfadeTimer = setTimeout(
+      () => {
+        crossfadeTimer = null;
+        const atual = store.getState();
+        if (atual.currentTrack?.id !== track.id || !atual.isPlaying) return;
+        if (typeof document !== 'undefined' && document.hidden) return;
+        const dur = audioEngine.getDuration();
+        const falta = dur - audioEngine.getPosition();
+        if (falta > crossfadeSeconds + 0.02) {
+          armCrossfadeTimer(); // chegou cedo: remira com o "quanto falta" de agora
+          return;
+        }
+        tentarCrossfade(atual, dur, falta, crossfadeSeconds);
+      },
+      Math.max(0, (restante - crossfadeSeconds) * 1000),
+    );
+  };
 
   /**
    * (Re)arma o temporizador de fim da faixa. Chamado quando ela carrega e
@@ -2888,7 +3251,9 @@ export function initPlayerEngine(): void {
    * DEPOIS de armado.
    */
   const armHandoffTimer = (): void => {
-    clearHandoffTimer();
+    // Só o da troca antecipada: o do crossfade tem dono e armamento próprios.
+    if (handoffTimer !== null) clearTimeout(handoffTimer);
+    handoffTimer = null;
     if (typeof window === 'undefined') return;
     const s = store.getState();
     const track = s.currentTrack;
@@ -2909,6 +3274,7 @@ export function initPlayerEngine(): void {
   const rearmTimers = (): void => {
     armEndTimer();
     armHandoffTimer();
+    armCrossfadeTimer();
   };
   rearmEndTimer = rearmTimers;
 

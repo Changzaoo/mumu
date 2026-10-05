@@ -284,6 +284,9 @@ export function AuraDoPlay({
       // rastro não guiava nada).
       const alvoGiro = semMovimento ? 0 : tocandoRef.current ? 1 : 0;
       velCd += (alvoGiro - velCd) * (1 - Math.exp(-dt / INERCIA_CD));
+      // Encosta no zero (como `viva`/`sucao`): sem isto o giro tende a zero e
+      // nunca chega, e o laço não teria quando dormir.
+      if (alvoGiro === 0 && velCd < 0.002) velCd = 0;
       // A SUCÇÃO sobe e desce com inércia, como a vivacidade: baixando, vai a
       // 1; o som chegou, volta a 0 — e tudo o que depende dela é contínuo.
       const alvoSucao = semMovimento ? 0 : carregandoRef.current ? 1 : 0;
@@ -395,9 +398,43 @@ export function AuraDoPlay({
       ctx.putImageData(imagem, 0, 0);
     };
 
+    /**
+     * MODO ESTÁTICO (`data-perf="baixo"`). Aparelho de entrada não paga um
+     * ruído por pixel a 30 quadros/s para enfeitar um botão: a névoa vira UM
+     * quadro, repintado só quando o estado muda (toca/pausa/baixa), e o CD gira
+     * por CSS (`transform` na composição, sem JavaScript nenhum por quadro).
+     * É consultado a cada despertar: o monitor pode rebaixar o aparelho no meio
+     * da sessão, e então o laço em andamento se encerra no quadro seguinte.
+     */
+    const pintarEstatico = () => {
+      viva = tocandoRef.current && !semMovimento ? 1 : 0;
+      sucao = carregandoRef.current && !semMovimento ? 1 : 0;
+      velCd = viva;
+      pintar(0, performance.now());
+      const cd = cdRef.current;
+      if (cd) {
+        cd.style.transform = '';
+        cd.dataset.estatica = 'true';
+        cd.dataset.girando = String(tocandoRef.current && !semMovimento);
+      }
+    };
+
+    /**
+     * REPOUSO: pausada, sem baixar, com o giro, a vivacidade e a sucção já
+     * assentados em zero. Nada mais muda de um quadro para o outro, então o laço
+     * PARA — pausada, a aura custa zero (antes seguia "ao vento" para sempre,
+     * 30 vezes por segundo, com a música parada). Tocar ou baixar a acorda.
+     */
+    const emRepouso = () =>
+      !tocandoRef.current && !carregandoRef.current && viva === 0 && sucao === 0 && velCd === 0;
+
     const quadro = (agora: number) => {
       raf = 0;
       if (!visivel || document.hidden) return;
+      if (modoLeve()) {
+        pintarEstatico();
+        return;
+      }
       // 30 QUADROS POR SEGUNDO, SEMPRE. Névoa desfocada que gira uma volta a
       // cada 1,8 s não ganha nada com 60 — e a 60 ela custava 27% de um núcleo
       // no computador (medido com o perfil de CPU), que num celular de entrada
@@ -416,7 +453,8 @@ export function AuraDoPlay({
       if (alvo === 0 && viva < 0.001) viva = 0;
       if (alvo === 1 && viva > 0.999) viva = 1;
       pintar(dt, agora);
-      // Nunca dorme enquanto visível: parada, ela continua ao vento.
+      // Assentou em repouso: o último quadro fica na tela e o laço dorme.
+      if (emRepouso()) return;
       raf = requestAnimationFrame(quadro);
     };
 
@@ -426,7 +464,14 @@ export function AuraDoPlay({
         pintar(0, performance.now());
         return;
       }
+      if (modoLeve()) {
+        pintarEstatico();
+        return;
+      }
       if (raf || !visivel || document.hidden) return;
+      // Já em repouso e nada a mudar (montagem de um botão parado): um quadro
+      // pintado no `pintar` inicial basta, sem laço.
+      if (emRepouso()) return;
       ultimo = performance.now();
       raf = requestAnimationFrame(quadro);
     };

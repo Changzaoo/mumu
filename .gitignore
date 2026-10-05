@@ -65,3 +65,7 @@ apps/importer/.cache-letras-externas.json
 # Cache dos links de Spotify/Apple/Deezer/Tidal já resolvidos para o YouTube
 apps/importer/cache-links-de-musica.json
 apps/importer/cache-links-de-musica.json.tmp
+
+# Bancada do Moto G34: fixtures gravadas e resultados (fora do test-results,
+# que o Playwright apaga a cada rodada).
+.g34/

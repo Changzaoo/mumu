@@ -1,12 +1,12 @@
 /**
- * Resume `test-results/g34/*.jsonl` em tabelas: MEDIANA e dispersão (mín–máx)
+ * Resume `.g34/*.jsonl` em tabelas: MEDIANA e dispersão (mín–máx)
  * por cenário. Uso:  node e2e/g34Resumo.mjs [carga|nav|fluidez|som|fundo]
  * Cada linha do jsonl é UMA repetição; agrupamos por (rota, estado, rótulo).
  */
 import { existsSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
-const PASTA = join(process.cwd(), 'test-results', 'g34');
+const PASTA = join(process.cwd(), '.g34');
 const grupo = process.argv[2] ?? 'carga';
 const arq = join(PASTA, `${grupo}.jsonl`);
 if (!existsSync(arq)) {

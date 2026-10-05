@@ -643,6 +643,16 @@
 :root[data-perf='baixo'] .aura-play-nevoa {
   filter: blur(3px);
 }
+/* Aparelho no modo leve: o CD gira por CSS (só `transform`, na composição) em
+   vez do laço de JavaScript — o AuraDoPlay marca `data-estatica` e `data-girando`.
+   `disco-gira` é declarado logo abaixo, fora do @theme. */
+.aura-play-cd[data-estatica='true'] {
+  animation: disco-gira 1.8s linear infinite;
+  animation-play-state: paused;
+}
+.aura-play-cd[data-estatica='true'][data-girando='true'] {
+  animation-play-state: running;
+}
 
 /* O DISCO GIRANDO no lugar do play enquanto a música é trazida. Uma volta a
    cada 1,8s — 33⅓ rotações por minuto, a de um LP. Só `transform`. */

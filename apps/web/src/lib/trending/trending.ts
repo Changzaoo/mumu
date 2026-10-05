@@ -10,7 +10,7 @@
  *   trending/{trackId}/voters/{uid}        { at }   (one per user who liked it)
  */
 import type { TrackDto } from '@radinho/shared';
-import { auth, db } from '@/lib/firebase';
+import { auth, carregarFirebase, db } from '@/lib/firebase';
 // Firestore por import DINÂMICO: `recordLike` é alcançado pela API de
 // biblioteca, que está no caminho crítico — ver lib/sync/firestoreLazy.ts.
 import { firestore } from '@/lib/sync/firestoreLazy';
@@ -62,6 +62,7 @@ function readTracks(docs: Array<{ data: () => unknown }>): TrackDto[] {
 
 /** Top liked tracks overall (community). */
 export async function topTrending(n = 12): Promise<TrackDto[]> {
+  await carregarFirebase(); // anônimo não baixa o SDK no boot
   if (!db) return [];
   try {
     const { collection, getDocs, limit: fsLimit, orderBy, query } = await firestore();
@@ -76,6 +77,7 @@ export async function topTrending(n = 12): Promise<TrackDto[]> {
 
 /** Top liked tracks in a genre (matched case-insensitively). */
 export async function topByGenre(genre: string, n = 12): Promise<TrackDto[]> {
+  await carregarFirebase();
   if (!db) return [];
   const key = genre.trim().toLowerCase();
   if (!key) return [];

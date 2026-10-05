@@ -48,29 +48,144 @@ export let auth: Auth | null = null;
 export let db: Firestore | null = null;
 
 /**
- * Sobe o SDK uma única vez. Resolve mesmo em caso de falha — quem espera por
- * isto quer saber "a janela de carregamento acabou", não "deu certo"; o teste
- * de verdade continua sendo `if (!db)`.
+ * HÁ UMA SESSÃO SALVA NESTE APARELHO?
+ *
+ * O SDK guarda o usuário logado no IndexedDB (`firebaseLocalStorageDb`). Ler
+ * isso custa microssegundos e NÃO precisa do SDK de ~140 kB comprimidos — e é a
+ * resposta que decide se vale baixá-lo no boot:
+ *
+ *  - 'sim'     → restaura o login já (o app precisa saber quem é o usuário);
+ *  - 'nao'     → visitante anônimo: ninguém para restaurar, o SDK só será
+ *                baixado quando algo REALMENTE pedir (login, link de e-mail,
+ *                abrir um compartilhamento público);
+ *  - 'incerto' → não deu para ler (IndexedDB bloqueado, navegador antigo): na
+ *                dúvida, carrega como antes — deslogar alguém por engano é pior
+ *                do que gastar a banda.
+ *
+ * A abertura é abortada no `onupgradeneeded`: se o banco NÃO existe, não pode
+ * ser CRIADO aqui (vazio e na versão 1 ele faria o SDK pular a criação do
+ * object store e nunca mais persistir login).
  */
-const readyPromise: Promise<void> = authDisabled
-  ? Promise.resolve()
-  : (async () => {
+type SessaoSalva = 'sim' | 'nao' | 'incerto';
+
+async function lerSessaoSalva(): Promise<SessaoSalva> {
+  if (authDisabled) return 'nao';
+  // Link de login por e-mail / retorno de OAuth: o SDK precisa processar a URL.
+  const url = `${window.location.search}${window.location.hash}`;
+  if (/[?&#]oobCode=/.test(url)) return 'sim';
+  try {
+    for (let i = 0; i < window.localStorage.length; i++) {
+      if (window.localStorage.key(i)?.startsWith('firebase:authUser:')) return 'sim';
+    }
+  } catch {
+    /* localStorage bloqueado: segue para o IndexedDB */
+  }
+  if (typeof indexedDB === 'undefined') return 'incerto';
+  return new Promise<SessaoSalva>((resolve) => {
+    let aberto: IDBOpenDBRequest;
+    try {
+      aberto = indexedDB.open('firebaseLocalStorageDb');
+    } catch {
+      resolve('incerto');
+      return;
+    }
+    aberto.onupgradeneeded = () => {
+      // Banco inexistente: desfaz a criação (ver o comentário acima).
+      aberto.transaction?.abort();
+      resolve('nao');
+    };
+    aberto.onerror = () => resolve((aberto.error?.name ?? '') === 'AbortError' ? 'nao' : 'incerto');
+    aberto.onblocked = () => resolve('incerto');
+    aberto.onsuccess = () => {
+      const conexao = aberto.result;
       try {
-        const [{ initializeApp }, authMod, storeMod] = await Promise.all([
-          import('firebase/app'),
-          import('firebase/auth'),
-          import('firebase/firestore'),
-        ]);
-        const app = initializeApp(config);
-        auth = authMod.getAuth(app);
-        auth.languageCode = 'pt-BR';
-        db = criarFirestore(app, storeMod);
+        if (!conexao.objectStoreNames.contains('firebaseLocalStorage')) {
+          conexao.close();
+          resolve('nao');
+          return;
+        }
+        const contagem = conexao
+          .transaction('firebaseLocalStorage', 'readonly')
+          .objectStore('firebaseLocalStorage')
+          .count();
+        contagem.onsuccess = () => {
+          conexao.close();
+          resolve(contagem.result > 0 ? 'sim' : 'nao');
+        };
+        contagem.onerror = () => {
+          conexao.close();
+          resolve('incerto');
+        };
       } catch {
-        // Sem SDK o app continua inteiro no modo local: biblioteca, reprodução
-        // e importação não dependem da nuvem. Só a sincronia fica de fora.
+        conexao.close();
+        resolve('incerto');
       }
-      marcarBoot('firebase-pronto');
-    })();
+    };
+  });
+}
+
+/**
+ * Não bloqueia: começa na avaliação do módulo (leitura local, instantânea) e as
+ * decisões abaixo esperam por ela. Falha de leitura vira 'incerto'.
+ */
+const sessaoSalva: Promise<SessaoSalva> = lerSessaoSalva().catch(() => 'incerto' as const);
+
+/** Memo do carregamento do SDK — `null` enquanto ninguém precisou dele. */
+let sdkPromise: Promise<void> | null = null;
+/** O módulo `firebase/auth` já resolvido por `carregarSdk` (evita um 2º `import()`). */
+let authApi: typeof import('firebase/auth') | null = null;
+
+/**
+ * Sobe o SDK uma única vez (idempotente) e resolve mesmo em caso de falha —
+ * quem espera por isto quer saber "a janela de carregamento acabou", não "deu
+ * certo"; o teste de verdade continua sendo `if (!db)`.
+ */
+function carregarSdk(): Promise<void> {
+  if (authDisabled) return Promise.resolve();
+  if (sdkPromise) return sdkPromise;
+  const subindo = (async () => {
+    try {
+      const [{ initializeApp }, authMod, storeMod] = await Promise.all([
+        import('firebase/app'),
+        import('firebase/auth'),
+        import('firebase/firestore'),
+      ]);
+      const app = initializeApp(config);
+      authApi = authMod;
+      auth = authMod.getAuth(app);
+      auth.languageCode = 'pt-BR';
+      db = criarFirestore(app, storeMod);
+    } catch {
+      // Sem SDK o app continua inteiro no modo local: biblioteca, reprodução
+      // e importação não dependem da nuvem. Só a sincronia fica de fora.
+    }
+    marcarBoot('firebase-pronto');
+  })();
+  sdkPromise = subindo;
+  // Quem assinou o estado de login ANTES de o SDK existir (anônimo que acabou de
+  // pedir login) passa a ser notificado por ele.
+  void subindo.then(() => {
+    if (assinantes.size > 0) void ligarOuvinteDoSdk();
+  });
+  return subindo;
+}
+
+// Sessão salva (ou dúvida) → restaura o login logo, em paralelo com a primeira
+// pintura (é `import()` assíncrono: não bloqueia render). Visitante anônimo →
+// o SDK não é baixado até alguém pedir.
+void sessaoSalva.then((s) => {
+  if (s !== 'nao') void carregarSdk();
+});
+
+/**
+ * Resolve quando o SDK que ESTÁ para subir (ou subiu) terminou. Não força o
+ * download para o visitante anônimo — nada a restaurar. Para forçar, use
+ * `carregarFirebase()`.
+ */
+async function sdkSeHouver(): Promise<void> {
+  if (!sdkPromise && (await sessaoSalva) === 'nao') return;
+  await carregarSdk();
+}
 
 /**
  * Firestore COM cache em disco.
@@ -117,13 +232,23 @@ function criarFirestore(app: FirebaseApp, mod: FirestoreModule): Firestore {
   }
 }
 
-/** Resolve quando `auth`/`db` já estão definidos (ou o SDK falhou/está desligado). */
+/**
+ * Resolve quando `auth`/`db` já estão definidos (ou o SDK falhou/está
+ * desligado/não há sessão para restaurar). NÃO baixa o SDK para o anônimo: quem
+ * precisa do Firestore mesmo sem login (link público de compartilhamento) chama
+ * `carregarFirebase()`.
+ */
 export function firebaseReady(): Promise<void> {
-  return readyPromise;
+  return sdkSeHouver();
+}
+
+/** Força o carregamento do SDK (idempotente) e espera `auth`/`db` ficarem prontos. */
+export function carregarFirebase(): Promise<void> {
+  return carregarSdk();
 }
 
 async function requireAuth(): Promise<Auth> {
-  await readyPromise;
+  await carregarSdk();
   if (!auth) {
     throw new Error('Login indisponível no modo demonstração. Configure o Firebase no .env.local.');
   }
@@ -132,7 +257,7 @@ async function requireAuth(): Promise<Auth> {
 
 /** Current user's ID token (Firebase caches and refreshes internally). Null when signed out. */
 export async function getIdToken(forceRefresh = false): Promise<string | null> {
-  await readyPromise;
+  await sdkSeHouver(); // anônimo sem sessão: sem token, sem baixar o SDK
   const user = auth?.currentUser;
   if (!user) return null;
   return user.getIdToken(forceRefresh);
@@ -229,7 +354,10 @@ export async function sendMagicLink(email: string): Promise<void> {
 
 /** Finishes a magic-link flow if the current URL is a sign-in link. Returns null otherwise. */
 export async function completeMagicLink(): Promise<UserCredential | null> {
-  await readyPromise;
+  // Só precisa do SDK se a URL é mesmo um link de login — senão a página de
+  // login abriria baixando o Firebase à toa.
+  if (!/[?&]oobCode=/.test(window.location.search)) return null;
+  await carregarSdk();
   if (!auth) return null;
   const { isSignInWithEmailLink, signInWithEmailLink } = await import('firebase/auth');
   if (!isSignInWithEmailLink(auth, window.location.href)) return null;
@@ -244,7 +372,7 @@ export async function completeMagicLink(): Promise<UserCredential | null> {
 }
 
 export async function logout(): Promise<void> {
-  await readyPromise;
+  await sdkSeHouver();
   if (!auth) return;
   const { signOut } = await import('firebase/auth');
   return signOut(auth);
@@ -253,31 +381,60 @@ export async function logout(): Promise<void> {
 /**
  * Subscribe to auth state; immediately emits null in demo mode.
  *
- * Assinar ANTES de o SDK subir é o caso normal agora (todo consumidor de boot
- * cai aqui), então a assinatura fica pendurada e é ligada quando `auth` existe.
- * Cancelar antes disso também precisa funcionar — daí o `cancelado`.
+ * Assinar ANTES de o SDK subir é o caso normal (todo consumidor de boot cai
+ * aqui). Três situações:
+ *  - sessão salva / dúvida: a assinatura fica pendurada e o estado vem do SDK;
+ *  - visitante anônimo: emite `null` assim que a leitura local confirma que não
+ *    há sessão — SEM baixar o SDK. Se depois alguém fizer login (o SDK sobe sob
+ *    demanda), o mesmo SDK passa a notificar esta assinatura;
+ *  - SDK que falhou: emite `null` e o app segue como deslogado.
+ * Cancelar antes de qualquer uma delas também precisa funcionar.
  */
+const assinantes = new Set<(user: User | null) => void>();
+/** Último estado conhecido; `undefined` = ainda não se sabe. */
+let estadoDeAuth: User | null | undefined;
+let ouvindoSdk = false;
+
+function emitirAuth(user: User | null): void {
+  if (estadoDeAuth === user) return;
+  estadoDeAuth = user;
+  for (const cb of [...assinantes]) cb(user);
+}
+
+/** Liga o ouvinte ÚNICO do SDK (uma vez), depois de ele estar pronto. */
+async function ligarOuvinteDoSdk(): Promise<void> {
+  if (ouvindoSdk) return;
+  ouvindoSdk = true;
+  await carregarSdk();
+  if (!auth || !authApi) {
+    emitirAuth(null);
+    return;
+  }
+  authApi.onAuthStateChanged(auth, emitirAuth);
+}
+
 export function subscribeAuth(callback: (user: User | null) => void): () => void {
   if (authDisabled) {
     callback(null);
     return () => undefined;
   }
-  let cancelado = false;
-  let desligar: (() => void) | null = null;
-  void (async () => {
-    await readyPromise;
-    if (cancelado) return;
-    if (!auth) {
-      callback(null); // SDK não subiu: o app segue como se estivesse deslogado
-      return;
+  assinantes.add(callback);
+  if (estadoDeAuth !== undefined) {
+    // Já se sabe quem é: entrega assíncrono, como o SDK faria.
+    const atual = estadoDeAuth;
+    void Promise.resolve().then(() => {
+      if (assinantes.has(callback) && estadoDeAuth === atual) callback(atual);
+    });
+  }
+  void sessaoSalva.then((s) => {
+    if (s === 'nao' && !sdkPromise) {
+      emitirAuth(null); // anônimo: sabido sem o SDK
+    } else {
+      void ligarOuvinteDoSdk();
     }
-    const { onAuthStateChanged } = await import('firebase/auth');
-    if (cancelado) return;
-    desligar = onAuthStateChanged(auth, callback);
-  })();
+  });
   return () => {
-    cancelado = true;
-    desligar?.();
+    assinantes.delete(callback);
   };
 }
 

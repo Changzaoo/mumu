@@ -18,6 +18,7 @@ import {
 } from 'lucide-react';
 import { MAX_NAME_LEN, MAX_ROOM_LEN, type SharedTrackMeta } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
+import { VirtualList } from '@/components/media/VirtualList';
 import { Button } from '@/components/ui/button';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { cn, formatBytes } from '@/lib/utils';
@@ -46,7 +47,7 @@ function PeerTrack({ peerId, meta }: { peerId: string; meta: SharedTrackMeta }) 
   const done = transfer?.done && !transfer.error;
 
   return (
-    <div className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-fg/5">
+    <div role="listitem" className="flex items-center gap-3 rounded-lg px-2 py-2 hover:bg-fg/5">
       <span className="grid size-9 shrink-0 place-items-center rounded-sm bg-fg/6 text-fg-subtle">
         <Music className="size-4" />
       </span>
@@ -238,11 +239,15 @@ export default function SharePage() {
                   Ainda não está compartilhando nada.
                 </p>
               ) : (
-                <div className="space-y-0.5">
-                  {tracks.map((meta) => (
-                    <PeerTrack key={meta.id} peerId={peer.id} meta={meta} />
-                  ))}
-                </div>
+                // VIRTUALIZADA: o acervo de um par chega com milhares de faixas, e
+                // uma linha por faixa eram dezenas de milhares de nós no celular.
+                // `dynamic`: a linha cresce quando aparece a barra de progresso.
+                <VirtualList
+                  items={tracks}
+                  estimateSize={56}
+                  dynamic
+                  renderItem={(meta) => <PeerTrack peerId={peer.id} meta={meta} />}
+                />
               )}
             </motion.section>
           );
@@ -271,10 +276,13 @@ export default function SharePage() {
             }
           />
         ) : (
-          <div className="space-y-0.5">
-            {localEntries.map((entry) => (
+          // VIRTUALIZADA pelo mesmo motivo: é o acervo inteiro do aparelho.
+          <VirtualList
+            items={localEntries}
+            estimateSize={56}
+            renderItem={(entry) => (
               <div
-                key={entry.track.id}
+                role="listitem"
                 className={cn(
                   'flex items-center gap-3 rounded-lg px-2 py-2',
                   connected ? 'text-fg' : 'text-fg-muted',
@@ -292,8 +300,8 @@ export default function SharePage() {
                 </div>
                 {connected && <span className="text-[13px] text-fg-subtle">compartilhado</span>}
               </div>
-            ))}
-          </div>
+            )}
+          />
         )}
       </section>
     </div>

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, useEffect, useRef, useState, useSyncExternalStore } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
@@ -14,7 +14,6 @@ import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 import { MiniPlayer } from '@/app/layout/MiniPlayer';
 import { MobileNav } from '@/app/layout/MobileNav';
-import { NowPlaying } from '@/app/layout/NowPlaying';
 import { PlayerBar } from '@/app/layout/PlayerBar';
 import { PuxarParaRecarregar } from '@/app/layout/PuxarParaRecarregar';
 import { QueuePanel } from '@/app/layout/QueuePanel';
@@ -23,6 +22,68 @@ import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
 import { avisarAtualizacaoDoApp } from '@/lib/android/conviteApk';
 import { ConviteApkBar } from '@/app/layout/ConviteApkBar';
+import { modoLeve } from '@/lib/perf/dispositivo';
+
+/**
+ * A TELA CHEIA DO PLAYER (capa grande, letra/karaokê, visualizador, menus) fica
+ * em chunk próprio: a primeira pintura nunca a mostra, e ela arrastava a
+ * letra (~110 kB) e o visualizador para o JS inicial.
+ */
+const carregarNowPlaying = () =>
+  import('@/app/layout/NowPlaying').then((m) => ({ default: m.NowPlaying }));
+const NowPlaying = lazy(carregarNowPlaying);
+
+/**
+ * Monta a `NowPlaying` quando ela abre — ou quando o navegador fica ocioso, para
+ * o chunk já estar aqui na hora do toque (sem esqueleto nem atraso). Depois de
+ * montada NÃO desmonta: a animação de saída precisa dela viva. No aparelho
+ * fraco (modo leve) a pré-carga não acontece; só abre sob demanda.
+ */
+function NowPlayingSobDemanda() {
+  const aberta = useUiStore((s) => s.nowPlayingOpen);
+  const [montada, setMontada] = useState(false);
+
+  // Aberta uma vez, fica montada (animação de saída).
+  useEffect(() => {
+    if (aberta) setMontada(true);
+  }, [aberta]);
+
+  useEffect(() => {
+    if (modoLeve()) return;
+    const w = window as unknown as {
+      requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+      cancelIdleCallback?: (id: number) => void;
+    };
+    let cancelado = false;
+    const preparar = (): void => {
+      void carregarNowPlaying().then(
+        () => {
+          if (!cancelado) setMontada(true);
+        },
+        () => undefined, // offline: abre sob demanda quando o toque vier
+      );
+    };
+    if (typeof w.requestIdleCallback === 'function') {
+      const id = w.requestIdleCallback(preparar, { timeout: 5_000 });
+      return () => {
+        cancelado = true;
+        w.cancelIdleCallback?.(id);
+      };
+    }
+    const t = window.setTimeout(preparar, 2_500);
+    return () => {
+      cancelado = true;
+      window.clearTimeout(t);
+    };
+  }, []);
+
+  if (!aberta && !montada) return null;
+  return (
+    <Suspense fallback={null}>
+      <NowPlaying />
+    </Suspense>
+  );
+}
 
 /**
  * ROTAS QUE NUNCA SAO INTERROMPIDAS PELO ONBOARDING.
@@ -219,7 +280,7 @@ export function AppShell() {
         <MobileNav />
         {/* Puxar para recarregar (só no toque) — ver PuxarParaRecarregar. */}
         <PuxarParaRecarregar scrollEl={scrollEl} />
-        <NowPlaying />
+        <NowPlayingSobDemanda />
         <EqualizerPanel />
         <ShareDialogHost />
         <AdicionarAPlaylistHost />

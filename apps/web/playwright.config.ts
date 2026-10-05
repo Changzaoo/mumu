@@ -29,7 +29,7 @@ export default defineConfig({
    *
    * Elas têm config próprio: `pnpm perf` e `pnpm perf:memoria`.
    */
-  testIgnore: /(desempenho|memoria|navegacao)\.spec\.ts/,
+  testIgnore: /(desempenho|memoria|navegacao|g34\.[a-z]+)\.spec\.ts/,
   timeout: 30_000,
   fullyParallel: true,
   retries: process.env.CI ? 2 : 0,

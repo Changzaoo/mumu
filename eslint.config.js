@@ -14,6 +14,8 @@ export default tseslint.config(
       '**/node_modules/**',
       '**/dev-dist/**',
       '**/playwright-report/**',
+      '**/test-results/**',
+      '**/.g34/**',
       '**/*.gen.ts',
       'apps/api/prisma/migrations/**',
       // Cópia do dist que o `cap sync` joga dentro do projeto Android.

@@ -189,6 +189,237 @@ export function generoDoSelo(
   return { dominante, votos, total };
 }
 
+// ── índice de votos — o mesmo resultado de `generoDoArtista`/`generoDoSelo`, sem varrer ──
+//
+// `generoDoArtista` percorre o acervo inteiro e normaliza o nome de TODO artista
+// de TODA faixa a cada chamada. Chamada uma vez por faixa (2ª e 3ª passadas de
+// `revisarGeneros`, e o laço do agente de gêneros no app), isso é O(N²) com NFD +
+// 2 regex no miolo: 165 s de thread travada num Moto G34 com 5.744 faixas.
+//
+// Aqui a chave sai UMA vez por faixa e as faixas ficam agrupadas por chave. A
+// consulta passa a custar o tamanho do grupo daquela chave (poucos gêneros), não
+// o do acervo.
+//
+// O RESULTADO TEM QUE SER BIT A BIT O DO CÓDIGO ANTIGO, inclusive o desempate:
+// o antigo percorria um Map em ordem de inserção com `>` estrito, ou seja, entre
+// gêneros empatados ganha o que apareceu PRIMEIRO no acervo (já sem a faixa
+// excluída). Por isso o grupo guarda, por gênero, as POSIÇÕES das faixas em ordem
+// crescente: a contagem é o tamanho da lista e a "primeira aparição" é a menor
+// posição que sobrou depois de excluir.
+
+interface ContribuicaoNoGrupo {
+  pos: number;
+  g: Genre;
+}
+
+interface GrupoDeVotos {
+  /** gênero → posições (índice da faixa no array de entrada), sempre ordenadas. */
+  posicoes: Map<Genre, number[]>;
+  total: number;
+  /** id → o que as faixas com esse id contribuem (ids repetidos existem no acervo real). */
+  porId: Map<string, ContribuicaoNoGrupo[]>;
+}
+
+function inserirOrdenado(lista: number[], pos: number): void {
+  let lo = 0;
+  let hi = lista.length;
+  while (lo < hi) {
+    const meio = (lo + hi) >>> 1;
+    if (lista[meio]! < pos) lo = meio + 1;
+    else hi = meio;
+  }
+  lista.splice(lo, 0, pos);
+}
+
+function removerOrdenado(lista: number[], pos: number): void {
+  let lo = 0;
+  let hi = lista.length;
+  while (lo < hi) {
+    const meio = (lo + hi) >>> 1;
+    if (lista[meio]! < pos) lo = meio + 1;
+    else hi = meio;
+  }
+  if (lista[lo] === pos) lista.splice(lo, 1);
+}
+
+function somar(
+  grupos: Map<string, GrupoDeVotos>,
+  chave: string,
+  id: string,
+  pos: number,
+  g: Genre,
+) {
+  let grupo = grupos.get(chave);
+  if (!grupo) {
+    grupo = { posicoes: new Map(), total: 0, porId: new Map() };
+    grupos.set(chave, grupo);
+  }
+  let lista = grupo.posicoes.get(g);
+  if (!lista) {
+    lista = [];
+    grupo.posicoes.set(g, lista);
+  }
+  inserirOrdenado(lista, pos);
+  grupo.total += 1;
+  const doId = grupo.porId.get(id);
+  if (doId) doId.push({ pos, g });
+  else grupo.porId.set(id, [{ pos, g }]);
+}
+
+function tirar(
+  grupos: Map<string, GrupoDeVotos>,
+  chave: string,
+  id: string,
+  pos: number,
+  g: Genre,
+) {
+  const grupo = grupos.get(chave);
+  if (!grupo) return;
+  const lista = grupo.posicoes.get(g);
+  if (lista) {
+    removerOrdenado(lista, pos);
+    if (lista.length === 0) grupo.posicoes.delete(g);
+  }
+  grupo.total -= 1;
+  const doId = grupo.porId.get(id);
+  if (doId) {
+    const i = doId.findIndex((c) => c.pos === pos);
+    if (i >= 0) doId.splice(i, 1);
+    if (doId.length === 0) grupo.porId.delete(id);
+  }
+}
+
+function apurarGrupo(grupo: GrupoDeVotos | undefined, exceto: string | undefined): VotoDoArtista {
+  if (!grupo) return VAZIO;
+  const excluidas = exceto === undefined ? undefined : grupo.porId.get(exceto);
+  const total = grupo.total - (excluidas?.length ?? 0);
+  if (total <= 0) return VAZIO;
+
+  let dominante: Genre | null = null;
+  let votos = 0;
+  let primeira = Infinity;
+  for (const [g, lista] of grupo.posicoes) {
+    let n = lista.length;
+    let ini = lista[0]!;
+    if (excluidas) {
+      let tirados = 0;
+      for (const c of excluidas) if (c.g === g) tirados += 1;
+      if (tirados > 0) {
+        n -= tirados;
+        if (n <= 0) continue;
+        // a primeira aparição que sobrou: pula as posições excluídas do começo
+        ini = Infinity;
+        for (const p of lista) {
+          if (!excluidas.some((c) => c.pos === p && c.g === g)) {
+            ini = p;
+            break;
+          }
+        }
+      }
+    }
+    if (n > votos || (n === votos && ini < primeira)) {
+      dominante = g;
+      votos = n;
+      primeira = ini;
+    }
+  }
+  return { dominante, votos, total };
+}
+
+export interface IndiceDeVotos {
+  /** Igual a `generoDoArtista(faixas, artista, exceto)`. */
+  artista(artista: string, exceto?: string): VotoDoArtista;
+  /** Igual a `generoDoSelo(faixas, label, exceto)`. */
+  selo(label: string, exceto?: string): VotoDoArtista;
+  /**
+   * Avisa que o `genre` desta faixa (o MESMO objeto passado a `indexarVotos`)
+   * mudou no lugar. Quem muda a faixa durante o laço — o agente, quando uma
+   * faixa herda gênero — chama isto para a próxima consulta enxergar a mudança,
+   * como enxergava quando o acervo era varrido de novo a cada consulta.
+   */
+  atualizar(faixa: FaixaMinima): void;
+}
+
+interface RegistroDaFaixa {
+  pos: number;
+  g: Genre | null;
+  artistas: string[];
+  selo: string | null;
+}
+
+/** `chaveArtista` é cara (NFD + regex) e os nomes se repetem muito: memoiza por texto. */
+function chaveadorMemoizado(): (nome: string) => string {
+  const memo = new Map<string, string>();
+  return (nome) => {
+    let k = memo.get(nome);
+    if (k === undefined) {
+      k = chaveArtista(nome);
+      memo.set(nome, k);
+    }
+    return k;
+  };
+}
+
+/**
+ * Indexa o acervo UMA vez para responder `artista`/`selo` em tempo ~constante.
+ * Custo de construção: O(N), com uma `chaveArtista` por nome distinto.
+ */
+export function indexarVotos(faixas: readonly FaixaMinima[]): IndiceDeVotos {
+  const chave = chaveadorMemoizado();
+  const porArtista = new Map<string, GrupoDeVotos>();
+  const porSelo = new Map<string, GrupoDeVotos>();
+  const registros = new Map<FaixaMinima, RegistroDaFaixa>();
+
+  faixas.forEach((faixa, pos) => {
+    // `some` do código antigo conta a faixa UMA vez por artista, mesmo que o
+    // mesmo nome apareça creditado duas vezes: Set para não votar em dobro.
+    const chaves = new Set<string>();
+    for (const a of faixa.artistas) {
+      const k = chave(a);
+      if (k) chaves.add(k);
+    }
+    const seloChave = faixa.label ? chave(faixa.label) : '';
+    const reg: RegistroDaFaixa = {
+      pos,
+      g: generoValido(faixa),
+      artistas: [...chaves],
+      selo: seloChave || null,
+    };
+    registros.set(faixa, reg);
+    if (!reg.g) return;
+    for (const k of reg.artistas) somar(porArtista, k, faixa.id, pos, reg.g);
+    if (reg.selo) somar(porSelo, reg.selo, faixa.id, pos, reg.g);
+  });
+
+  return {
+    artista(artista, exceto) {
+      const alvo = chave(artista);
+      if (!alvo) return VAZIO;
+      return apurarGrupo(porArtista.get(alvo), exceto);
+    },
+    selo(label, exceto) {
+      const alvo = chave(label);
+      if (!alvo) return VAZIO;
+      return apurarGrupo(porSelo.get(alvo), exceto);
+    },
+    atualizar(faixa) {
+      const reg = registros.get(faixa);
+      if (!reg) return;
+      const novo = generoValido(faixa);
+      if (novo === reg.g) return;
+      if (reg.g) {
+        for (const k of reg.artistas) tirar(porArtista, k, faixa.id, reg.pos, reg.g);
+        if (reg.selo) tirar(porSelo, reg.selo, faixa.id, reg.pos, reg.g);
+      }
+      reg.g = novo;
+      if (novo) {
+        for (const k of reg.artistas) somar(porArtista, k, faixa.id, reg.pos, novo);
+        if (reg.selo) somar(porSelo, reg.selo, faixa.id, reg.pos, novo);
+      }
+    },
+  };
+}
+
 /**
  * O artista tem gênero firme o bastante para a faixa nova nascer com ele?
  *
@@ -298,6 +529,11 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     return { ...faixa, genre: normalizado };
   });
 
+  // O índice é construído sobre `depois` (já normalizada) e `depois` não muda
+  // daqui em diante, então não precisa de `atualizar`. Troca uma varredura do
+  // acervo POR FAIXA por uma consulta ao índice — ver `indexarVotos`.
+  const indice = indexarVotos(depois);
+
   // 2ª passada: o outlier do artista. É aqui que o trap solitário na prateleira
   // de sertanejo é reconhecido e devolvido ao lugar dele — sem gastar uma
   // consulta ao modelo, porque a prova já está na biblioteca.
@@ -306,7 +542,7 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     if (!atual) continue;
     const principal = faixa.artistas[0];
     if (!principal) continue;
-    const voto = generoDoArtista(depois, principal, faixa.id);
+    const voto = indice.artista(principal, faixa.id);
     if (!voto.dominante || voto.dominante === atual) continue;
     if (voto.votos < MIN_VOTOS_VETAR || voto.votos / voto.total < MIN_FATIA_VETAR) continue;
     // GÊNERO DE ARTISTA NÃO SAI POR MAIORIA — e sem esta linha a maioria era a
@@ -359,7 +595,7 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     // cantando louvor. Fico com o voto gospel mais forte entre os creditados.
     let voto = VAZIO;
     for (const artista of faixa.artistas) {
-      const v = generoDoArtista(depois, artista, faixa.id);
+      const v = indice.artista(artista, faixa.id);
       if (v.dominante && GENEROS_DO_ARTISTA.has(v.dominante) && v.votos > voto.votos) voto = v;
     }
     if (!voto.dominante || !GENEROS_DO_ARTISTA.has(voto.dominante)) continue;
@@ -406,7 +642,7 @@ export function revisarGeneros(faixas: readonly FaixaMinima[]): RevisaoDeGenero[
     if (mudancas.has(faixa.id)) continue; // uma revisão por volta
 
     const atual = generoValido(faixa);
-    const voto = generoDoSelo(depois, label, faixa.id);
+    const voto = indice.selo(label, faixa.id);
     if (!voto.dominante || voto.dominante === atual) continue;
     if (voto.votos < MIN_VOTOS_SELO) continue;
     if (voto.votos / voto.total < MIN_FATIA_SELO) continue;

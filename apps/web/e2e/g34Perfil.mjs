@@ -1,5 +1,5 @@
 /**
- * Lê `test-results/g34/perfil-<nome>.cpuprofile` e imprime onde o tempo de CPU
+ * Lê `.g34/perfil-<nome>.cpuprofile` e imprime onde o tempo de CPU
  * foi parar: por função (arquivo:linha do código-fonte, via source map do
  * `dist-mapa`) e por arquivo/pacote. Tempos em ms SOB o estrangulamento de CPU.
  *
@@ -10,8 +10,8 @@ import { join } from 'node:path';
 import { SourceMap } from 'node:module';
 
 const nome = process.argv[2];
-const MAPA = process.argv[3] ?? join('test-results', 'g34', 'dist-mapa');
-const perfil = JSON.parse(readFileSync(join('test-results', 'g34', `perfil-${nome}.cpuprofile`), 'utf8'));
+const MAPA = process.argv[3] ?? join('.g34', 'dist-mapa');
+const perfil = JSON.parse(readFileSync(join('.g34', `perfil-${nome}.cpuprofile`), 'utf8'));
 
 const mapas = new Map();
 function mapaDe(url) {

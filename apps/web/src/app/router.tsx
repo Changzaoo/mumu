@@ -129,7 +129,12 @@ if (typeof window !== 'undefined') {
   //
   // O aquecimento por intenção (acima) continua imediato — é ele que faz a
   // navegação parecer instantânea, e ele só custa o chunk que o dedo apontou.
-  const restantes = Object.keys(pageModules);
+  // Telas de administração/diagnóstico (só para quem tem permissão) NÃO são
+  // aquecidas em segundo plano: a imensa maioria nunca as abre, e aquecê-las
+  // baixava ~120 kB de JS à toa em toda sessão. Abrir uma delas continua
+  // rápido pelo aquecimento por intenção (o dedo encostou no link).
+  const SO_SOB_DEMANDA = /\/(AdminPage|TelemetryPage|DevicePage|UploadsPage|DiagnosticoPage)\.tsx$/;
+  const restantes = Object.keys(pageModules).filter((p) => !SO_SOB_DEMANDA.test(p));
   const idle = (window as unknown as { requestIdleCallback?: typeof requestIdleCallback })
     .requestIdleCallback;
   const proximoLote = (): void => {

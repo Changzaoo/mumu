@@ -11,7 +11,7 @@ import { appendFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import type { CDPSession, Page } from '@playwright/test';
 
-export const PASTA = join(process.cwd(), 'test-results', 'g34');
+export const PASTA = join(process.cwd(), '.g34');
 
 // ── sonda na página ─────────────────────────────────────────────────────────
 export function instalarSonda(): void {

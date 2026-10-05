@@ -19,14 +19,22 @@ import { modoLeve } from '@/lib/perf/dispositivo';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import {
   aceitarSugestao,
-  generoDoArtista,
   herdarDoArtista,
+  indexarVotos,
   revisarGeneros,
   type FaixaMinima,
 } from '@radinho/shared';
 
 const ATTEMPTS_KEY = 'aurial:genreAgentAttempts';
 const REVISAO_KEY = 'aurial:genreRevisao';
+/**
+ * Checkpoint da revisão em andamento: `{ v, ids }` com o que já foi aplicado.
+ * Sem ele, fechar o app no meio refazia tudo do zero a cada boot (a chave final
+ * só era gravada no fim).
+ */
+const REVISAO_PROGRESSO_KEY = 'aurial:genreRevisaoProgresso';
+/** De quantas em quantas mudanças aplicadas o checkpoint é regravado. */
+const REVISAO_CHECKPOINT_A_CADA = 20;
 /** Suba isto para reexaminar TODA a biblioteca com as regras de gênero novas. */
 const REVISAO_VERSAO = 1;
 const MAX_ATTEMPTS = 3;
@@ -118,6 +126,52 @@ function faixasMinimas(): FaixaMinima[] {
 }
 
 /**
+ * Cede a thread principal ao navegador (toques, rolagem, áudio) e volta depois.
+ *
+ * `scheduler.yield` quando existe: ele volta à frente da fila, então o trabalho
+ * não é furado por tudo o que entrou no meio. Sem ele, `MessageChannel` — não
+ * sofre o piso de 4 ms de `setTimeout` aninhado nem o de 1 s de aba em segundo
+ * plano —, e `setTimeout 0` como último recurso (jsdom/SSR sem MessageChannel).
+ */
+export function cederThread(): Promise<void> {
+  const sched = (globalThis as { scheduler?: { yield?: () => Promise<void> } }).scheduler;
+  if (typeof sched?.yield === 'function') return sched.yield();
+  if (typeof MessageChannel === 'function') {
+    return new Promise((resolve) => {
+      const canal = new MessageChannel();
+      canal.port1.onmessage = () => {
+        canal.port1.close();
+        resolve();
+      };
+      canal.port2.postMessage(null);
+    });
+  }
+  return new Promise((resolve) => setTimeout(resolve, 0));
+}
+
+function lerProgressoDaRevisao(): Set<string> {
+  try {
+    const bruto: unknown = JSON.parse(window.localStorage.getItem(REVISAO_PROGRESSO_KEY) ?? 'null');
+    if (bruto && typeof bruto === 'object') {
+      const { v, ids } = bruto as { v?: unknown; ids?: unknown };
+      // Checkpoint de outra versão da revisão vale nada: as regras mudaram.
+      if (v === REVISAO_VERSAO && Array.isArray(ids)) {
+        return new Set(ids.filter((id): id is string => typeof id === 'string'));
+      }
+    }
+  } catch {
+    /* corrompido: recomeça — a revisão é idempotente */
+  }
+  return new Set();
+}
+
+function gravarProgressoDaRevisao(ids: Set<string>): void {
+  gravarCache(REVISAO_PROGRESSO_KEY, JSON.stringify({ v: REVISAO_VERSAO, ids: [...ids] }), 200_000);
+}
+
+registrarDescartavel(REVISAO_PROGRESSO_KEY, 10, () => undefined);
+
+/**
  * REVISÃO ÚNICA DO QUE JÁ ESTÁ GRAVADO.
  *
  * As regras novas só valem para o que vier daqui em diante — e a biblioteca já
@@ -129,6 +183,12 @@ function faixasMinimas(): FaixaMinima[] {
  * Sai caro uma vez e nunca mais: fica gravada a versão da revisão. O ritmo é
  * proposital — cada mudança vira uma escrita na nuvem e no acervo, e uma rajada
  * de trezentas já derrubou a cota do projeto inteiro uma vez.
+ *
+ * NÃO TRAVA A THREAD. `revisarGeneros` era O(N²) e custava 132 s seguidos num
+ * celular de entrada com 5.744 faixas; agora é O(N), e ainda assim cedemos a
+ * thread antes de calculá-la e a cada mudança aplicada. O progresso é
+ * gravado em checkpoints: se o app fechar no meio, o próximo boot pula o que já
+ * foi aplicado em vez de refazer.
  */
 async function revisarGravados(): Promise<void> {
   try {
@@ -136,15 +196,28 @@ async function revisarGravados(): Promise<void> {
   } catch {
     return;
   }
-  const mudancas = revisarGeneros(faixasMinimas());
+  // Deixa o que estiver na fila do navegador (primeiro desenho, toque) passar
+  // antes do cálculo, que é um bloco síncrono.
+  await cederThread();
+  const feitas = lerProgressoDaRevisao();
+  const mudancas = revisarGeneros(faixasMinimas()).filter((m) => !feitas.has(m.id));
+  let desdeOCheckpoint = 0;
   for (const mudanca of mudancas) {
     localLibrary.setTrackGenre(mudanca.id, mudanca.para);
+    feitas.add(mudanca.id);
+    desdeOCheckpoint += 1;
+    if (desdeOCheckpoint >= REVISAO_CHECKPOINT_A_CADA) {
+      gravarProgressoDaRevisao(feitas);
+      desdeOCheckpoint = 0;
+    }
     await new Promise((resolve) => setTimeout(resolve, 60));
   }
   try {
     window.localStorage.setItem(REVISAO_KEY, String(REVISAO_VERSAO));
+    window.localStorage.removeItem(REVISAO_PROGRESSO_KEY);
   } catch {
     /* cota: tenta de novo no próximo boot — a revisão é idempotente */
+    gravarProgressoDaRevisao(feitas);
   }
   emit();
 }
@@ -162,6 +235,13 @@ async function run(): Promise<void> {
     // faixa herda gênero, a lista é atualizada no lugar.
     const minimas = faixasMinimas();
     const porId = new Map(minimas.map((f) => [f.id, f]));
+    // O VOTO DO ARTISTA SAI DE UM ÍNDICE, não de uma varredura por candidata.
+    // `generoDoArtista(minimas, ...)` percorria as 5.000 faixas normalizando todo
+    // nome de artista (NFD + regex) a CADA faixa sem gênero: O(N²) na thread
+    // principal. O índice é montado uma vez e `atualizar` o mantém em dia quando
+    // uma faixa ganha gênero no meio do laço.
+    const indice = indexarVotos(minimas);
+    let herdadasNaFatia = 0;
     for (const entry of localLibrary.list()) {
       if (classifiedThisSession >= ritmo().orcamento) break;
       // O acervo é curado no servidor; classificar cópia dele aqui só gasta.
@@ -186,15 +266,22 @@ async function run(): Promise<void> {
       // faixa nova nasce com ele — de graça, e sem o sorteio independente que
       // punha uma faixa de trap sozinha na prateleira de sertanejo. Ver
       // generoCoerencia.ts.
-      const voto = generoDoArtista(minimas, artist, t.id);
+      const voto = indice.artista(artist, t.id);
       const herdado = herdarDoArtista(voto);
       if (herdado) {
         localLibrary.setTrackGenre(t.id, herdado);
         const minima = porId.get(t.id);
-        if (minima) minima.genre = herdado;
+        if (minima) {
+          minima.genre = herdado;
+          indice.atualizar(minima);
+        }
         delete attempts[t.id];
         writeAttempts(attempts);
         emit();
+        // Herdar não espera rede nem pausa, então um artista com centenas de
+        // faixas soltas rodaria sem nenhuma folga: cede a thread de tempos em tempos.
+        herdadasNaFatia += 1;
+        if (herdadasNaFatia % 10 === 0) await cederThread();
         continue; // não gastou consulta nenhuma
       }
 
@@ -207,7 +294,10 @@ async function run(): Promise<void> {
       if (genre) {
         localLibrary.setTrackGenre(t.id, genre);
         const minima = porId.get(t.id);
-        if (minima) minima.genre = genre;
+        if (minima) {
+          minima.genre = genre;
+          indice.atualizar(minima);
+        }
         delete attempts[t.id];
       } else {
         attempts[t.id] = (attempts[t.id] ?? 0) + 1;

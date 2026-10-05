@@ -3,10 +3,10 @@
  * PERFIL DE CPU (CDP Profiler) dos cenários mais pesados — serve para apontar
  * funções e arquivos. Roda contra um build COM source map (`dist-mapa`, ver
  * `G34_DIST` em g34Servidor.mjs) porque o `dist` de produção é minificado e sem
- * mapa. Grava `test-results/g34/perfil-<cenário>-<n>.cpuprofile`; o
+ * mapa. Grava `.g34/perfil-<cenário>-<n>.cpuprofile`; o
  * `g34Perfil.mjs` converte em tabela por arquivo:linha de `src/`.
  *
- *   G34_DIST=test-results/g34/dist-mapa G34_GRUPO=perfil pnpm perf:g34
+ *   G34_DIST=.g34/dist-mapa G34_GRUPO=perfil pnpm perf:g34
  *   G34_PERFIS=home-quente,biblioteca-rolagem,player-letra  (padrão: todos)
  */
 import { test, type Browser, type CDPSession } from '@playwright/test';

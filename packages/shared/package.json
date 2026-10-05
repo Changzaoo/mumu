@@ -3,6 +3,7 @@
   "version": "0.1.0",
   "private": true,
   "type": "module",
+  "sideEffects": false,
   "description": "Shared Zod schemas, DTO types and constants for radinho.online web + api",
   "exports": {
     ".": {

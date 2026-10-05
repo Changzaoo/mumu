@@ -19,7 +19,7 @@
  * ── ENTÃO O "ANTES" JÁ ESTÁ ANOTADO (FLIP) ──
  *
  * O app mantém anotada a posição das peças marcadas com `data-giro` que estão
- * na tela — medida barata, feita ao parar de rolar e de tempos em tempos, e só
+ * na tela — medida barata, feita ao parar de rolar e ao soltar o dedo (nunca por intervalo), e só
  * em tela de toque (é onde gira). Quando o aparelho gira, cada peça é posta de
  * volta, por transform, onde ESTAVA, e anima até onde ESTÁ, na curva de mola
  * das folhas do iOS. Peça que não existia antes (o menu lateral que surge na
@@ -47,8 +47,6 @@ const CURVA = 'cubic-bezier(0.32, 0.72, 0, 1)';
 const DURACAO_MS = 520;
 /** Quantas peças medir no máximo: basta o que está na tela. */
 const MAX_PECAS = 80;
-/** Remedição de fundo; a principal é ao parar de rolar. */
-const INTERVALO_MS = 2_500;
 
 /**
  * O transform que põe a peça (já na caixa NOVA `b`) de volta sobre a caixa
@@ -77,7 +75,6 @@ let instalado = false;
 let anotadas = new Map<Element, Caixa>();
 /** Quando o último giro começou — um segundo aviso no meio dele é o mesmo giro. */
 let ultimoGiro = -Infinity;
-let remedirTimer: ReturnType<typeof setTimeout> | null = null;
 
 const naTela = (c: Caixa): boolean =>
   c.width > 0 &&
@@ -104,19 +101,29 @@ function anotar(): void {
   anotadas = novas;
 }
 
-function agendarRemedicao(): void {
-  if (remedirTimer !== null) clearTimeout(remedirTimer);
-  remedirTimer = setTimeout(() => {
-    remedirTimer = null;
+/**
+ * Pede UMA anotação para a próxima folga da thread, juntando os pedidos que
+ * chegarem até lá (rolar solta vários `scrollend`; tocar solta `touchend`).
+ *
+ * NÃO HÁ REMEDIÇÃO POR INTERVALO. Antes, um `setTimeout` de 2,5 s relia o
+ * `getBoundingClientRect` de até 80 peças para sempre — medido no moto g34
+ * emulado: 273 ms no boot, 557 ms na navegação, 143 ms com o app parado. A
+ * anotação só muda quando a página muda de posição, e isso sempre termina num
+ * evento: rolagem parada, dedo solto, carga da página.
+ */
+let anotacaoPedida = false;
+function pedirAnotacao(): void {
+  if (anotacaoPedida) return;
+  anotacaoPedida = true;
+  const rodar = (): void => {
+    anotacaoPedida = false;
     // Aba escondida não gira na mão de ninguém: nada a medir.
-    if (!document.hidden) {
-      const ocioso = (window as Window & { requestIdleCallback?: (cb: () => void) => void })
-        .requestIdleCallback;
-      if (ocioso) ocioso(anotar);
-      else anotar();
-    }
-    agendarRemedicao();
-  }, INTERVALO_MS);
+    if (!document.hidden) anotar();
+  };
+  const ocioso = (window as Window & { requestIdleCallback?: (cb: () => void) => void })
+    .requestIdleCallback;
+  if (ocioso) ocioso(rodar);
+  else requestAnimationFrame(rodar);
 }
 
 /** O aparelho girou: cada peça sai de onde estava e desliza até onde está. */
@@ -181,10 +188,11 @@ export function instalarGiroDeTela(): void {
 
   // A medição principal: ao PARAR de rolar (a posição que vale é a de repouso)
   // e ao soltar o dedo. `scrollend` não borbulha — escuta na captura.
-  document.addEventListener('scrollend', anotar, { capture: true, passive: true });
-  document.addEventListener('touchend', () => setTimeout(anotar, 350), { passive: true });
-  window.addEventListener('load', anotar, { once: true });
-  agendarRemedicao();
+  document.addEventListener('scrollend', pedirAnotacao, { capture: true, passive: true });
+  document.addEventListener('touchend', () => setTimeout(pedirAnotacao, 350), { passive: true });
+  window.addEventListener('load', pedirAnotacao, { once: true });
+  // A primeira anotação não espera nenhum evento (a página pode já ter carregado).
+  pedirAnotacao();
 
   const orientacao = typeof screen !== 'undefined' ? screen.orientation : undefined;
   if (orientacao && typeof orientacao.addEventListener === 'function') {
@@ -193,4 +201,12 @@ export function instalarGiroDeTela(): void {
   }
   // Sem a API: a troca retrato/paisagem da janela, que em tela de toque é giro.
   window.matchMedia('(orientation: portrait)').addEventListener('change', girar);
+}
+
+/** Só para testes: volta ao estado de antes da instalação. */
+export function _reiniciarGiroParaTeste(): void {
+  instalado = false;
+  anotacaoPedida = false;
+  anotadas = new Map();
+  ultimoGiro = -Infinity;
 }

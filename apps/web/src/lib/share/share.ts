@@ -7,7 +7,7 @@
 import { firestore } from '@/lib/sync/firestoreLazy';
 import type { User } from 'firebase/auth';
 import type { TrackDto } from '@radinho/shared';
-import { db, subscribeAuth } from '@/lib/firebase';
+import { carregarFirebase, db, subscribeAuth } from '@/lib/firebase';
 import { remoteUrlFor, sourceUrlFor } from '@/lib/local/localLibrary';
 import { trackArtistNames } from '@/lib/utils';
 
@@ -130,6 +130,9 @@ export async function fetchShare(id: string): Promise<ShareDoc | null> {
       return null;
     }
   }
+  // O link público abre para QUEM NÃO TEM CONTA: o SDK não foi baixado no boot
+  // (visitante anônimo), então é aqui que ele passa a ser necessário.
+  await carregarFirebase();
   if (!db) return null;
   try {
     const { doc, getDoc } = await firestore();

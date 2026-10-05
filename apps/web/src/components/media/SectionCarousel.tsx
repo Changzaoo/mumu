@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
+import { Children, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
 import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -14,12 +14,31 @@ const FOLGA_PX = 4000;
  */
 /** Teto de cópias (prateleira de 2-3 capas não vira centenas de cards). */
 const COPIAS_MAX = 3;
+/**
+ * GESTO DE VERDADE. A volta infinita só liga depois que a PESSOA rolou a
+ * prateleira: toque, ponteiro, roda, tecla ou seta. Medido no moto g34: ~1,3 s
+ * depois do boot cada trilho recebia um `scroll` de 3–4 px (o encaixe do
+ * `snap` com o `-mx-1 px-1`), o 'parou de rolar' via scrollLeft < 1 tela e
+ * ligava as 3 cópias SOZINHO — o DOM foi de 5,8 mil para 16,8 mil nós (1.341
+ * cartões) sem ninguém encostar na tela. Um gesto vale por esta janela, e é
+ * renovado enquanto a rolagem do embalo continua.
+ */
+const JANELA_GESTO_MS = 600;
+/** Quanto a pessoa precisa ter rolado (em telas) para a volta valer a pena. */
+const DESLOCAMENTO_MIN = 0.5;
 
 export interface SectionCarouselProps extends ComponentProps<'section'> {
   title: string;
   subtitle?: string;
   /** "Mostrar tudo" target. */
   href?: string;
+  /**
+   * Quantos cartões montar de início. O resto entra sob demanda, em lotes do
+   * mesmo tamanho, quando a pessoa rola perto do fim do que já existe (e só
+   * então a volta infinita pode ligar, com a fila inteira). Sem isto, monta
+   * tudo — o comportamento de antes, para prateleiras curtas.
+   */
+  inicial?: number;
   /** Dá a volta ao chegar no fim (padrão). Só vale quando há fila para dar. */
   loop?: boolean;
 }
@@ -32,6 +51,7 @@ export function SectionCarousel({
   title,
   subtitle,
   href,
+  inicial,
   loop = true,
   className,
   children,
@@ -66,6 +86,37 @@ export function SectionCarousel({
   const meio = Math.floor(copias / 2);
   const tocando = useRef(false);
   const parouTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  /** Quando foi o último gesto real (ver JANELA_GESTO_MS). */
+  const gestoEm = useRef(-Infinity);
+  /** Quanto a pessoa já rolou de verdade (px, somando idas e voltas). */
+  const deslocamento = useRef(0);
+  const ultimaPosicao = useRef(0);
+  const marcarGesto = (): void => {
+    gestoEm.current = performance.now();
+  };
+  const gestoVivo = (): boolean =>
+    tocando.current || performance.now() - gestoEm.current < JANELA_GESTO_MS;
+
+  // CARTÕES SOB DEMANDA. `todos` é a fila inteira; só `liberados` entram no DOM.
+  const todos = inicial ? Children.toArray(children) : null;
+  const total = todos?.length ?? 0;
+  const [liberados, setLiberados] = useState(inicial ?? 0);
+  const conteudo = todos ? todos.slice(0, Math.max(liberados, inicial ?? 0)) : children;
+  const completo = !todos || Math.max(liberados, inicial ?? 0) >= total;
+  const completoRef = useRef(completo);
+  completoRef.current = completo;
+  const faltaRef = useRef({ total, lote: inicial ?? 0 });
+  faltaRef.current = { total, lote: inicial ?? 0 };
+
+  /** Perto do fim do que existe (duas telas)? Libera mais um lote. */
+  const completarSeFalta = (): void => {
+    const el = scrollerRef.current;
+    const { total: t, lote } = faltaRef.current;
+    if (!el || lote <= 0 || completoRef.current) return;
+    if (el.scrollLeft + el.clientWidth * 2 > el.scrollWidth) {
+      setLiberados((l) => Math.min(t, Math.max(l, lote) + lote));
+    }
+  };
 
   /** Largura exata de uma cópia (cards + vãos), medida entre os primeiros cards. */
   const unidadeDe = (el: HTMLDivElement): number => {
@@ -77,6 +128,7 @@ export function SectionCarousel({
   const medir = useCallback((): void => {
     const el = scrollerRef.current;
     if (!el) return;
+    completarSeFalta();
     const unidade = looping ? unidadeDe(el) : el.scrollWidth;
     const deveria = loop && unidade > el.clientWidth * 1.5;
     podeDarAVolta.current = deveria;
@@ -135,9 +187,15 @@ export function SectionCarousel({
   const ligarVoltaSePerto = (): void => {
     const el = scrollerRef.current;
     if (!el || looping || !podeDarAVolta.current || tocando.current) return;
+    // Só com a fila INTEIRA montada (senão a volta repetiria um pedaço) e só
+    // depois de a pessoa ter rolado de verdade mais de meia tela: o encaixe de
+    // 3–4 px do boot não é gesto (ver JANELA_GESTO_MS).
+    if (!completoRef.current) return;
+    if (deslocamento.current <= el.clientWidth * DESLOCAMENTO_MIN) return;
     const max = el.scrollWidth - el.clientWidth;
     if (el.scrollLeft < el.clientWidth || el.scrollLeft > max - el.clientWidth * 1.5) {
       posicaoAoLigar.current = el.scrollLeft;
+      deslocamento.current = 0;
       setLooping(true);
     }
   };
@@ -176,7 +234,7 @@ export function SectionCarousel({
       observer.disconnect();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [medir, children]);
+  }, [medir, children, liberados]);
 
   // Ao ligar a volta, a MESMA vista passa para a cópia do meio: nada se mexe
   // na tela, só ganha fila dos dois lados.
@@ -203,6 +261,7 @@ export function SectionCarousel({
 
   const scrollBy = (direction: 1 | -1): void => {
     const el = scrollerRef.current;
+    marcarGesto();
     el?.scrollBy({ left: direction * el.clientWidth * 0.9, behavior: 'smooth' });
   };
 
@@ -241,13 +300,26 @@ export function SectionCarousel({
 
       <div
         ref={scrollerRef}
+        onPointerDown={marcarGesto}
+        onWheel={marcarGesto}
+        onKeyDown={marcarGesto}
         onScroll={() => {
+          const el = scrollerRef.current;
+          if (el) {
+            if (gestoVivo()) {
+              deslocamento.current += Math.abs(el.scrollLeft - ultimaPosicao.current);
+              marcarGesto();
+            }
+            ultimaPosicao.current = el.scrollLeft;
+          }
+          completarSeFalta();
           updateArrows();
           pertoDaBorda();
           quandoParar();
         }}
         onTouchStart={() => {
           tocando.current = true;
+          marcarGesto();
         }}
         onTouchEnd={() => {
           tocando.current = false;
@@ -263,12 +335,12 @@ export function SectionCarousel({
           Array.from({ length: copias }, (_, i) => (
             // Só a do meio é lida por leitor de tela: as outras são eco.
             <div key={i} data-copia={i} aria-hidden={i !== meio || undefined} className="contents">
-              {children}
+              {conteudo}
             </div>
           ))
         ) : (
           <div data-copia={0} className="contents">
-            {children}
+            {conteudo}
           </div>
         )}
       </div>

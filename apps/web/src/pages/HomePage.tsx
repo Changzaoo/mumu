@@ -4,7 +4,7 @@
  * artist/genre, albums, genres and artists. No external 30s-preview catalog —
  * only real, user-added songs.
  */
-import { useEffect, useState, useSyncExternalStore } from 'react';
+import { memo, useEffect, useState, useSyncExternalStore } from 'react';
 import { motion } from 'framer-motion';
 import { Link } from 'react-router';
 import type { IconType } from 'react-icons';
@@ -41,8 +41,6 @@ import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
 
-const EMPTY: localLibrary.LibraryEntry[] = [];
-
 function localGreeting(): string {
   const hour = new Date().getHours();
   if (hour < 6) return 'Boa noite';
@@ -66,17 +64,32 @@ interface QuickTile {
  * Spotify-style quick-access grid: 2×4 tiles with the REAL artwork of the
  * user's own spaces — Curtidas (gradient), latest playlists, top artists.
  */
-function QuickAccess({
-  playlists,
+/** Capa de uma playlist: a da primeira faixa que tem uma. */
+function capaDaPlaylist(trackIds: string[]): string | null {
+  for (const id of trackIds) {
+    const cover = localLibrary.entryFor(id)?.track.coverUrl;
+    if (cover) return cover;
+  }
+  return null;
+}
+
+/**
+ * A GRADE DE ATALHOS É QUEM ASSINA AS CURTIDAS E AS PLAYLISTS — não a página.
+ *
+ * Antes `HomePage` assinava `localLikes.count`, e cada curtida re-renderizava a
+ * Home inteira: ~1.300 cartões reconciliados por causa de um número de 8
+ * pixels (INP de 648 ms no moto g34 emulado, com atraso de entrada de 32 ms —
+ * era render, não evento). Com a assinatura aqui, curtir redesenha só estes
+ * oito atalhos. `memo`: a página só muda `artists` quando tira foto nova.
+ */
+const QuickAccess = memo(function QuickAccess({
   artists,
-  likedCount,
-  cover,
 }: {
-  playlists: localPlaylists.LocalPlaylist[];
   artists: localLibrary.LocalArtist[];
-  likedCount: number;
-  cover: (trackIds: string[]) => string | null;
 }) {
+  const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
+  const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
+  const cover = capaDaPlaylist;
   const tiles: QuickTile[] = [
     {
       key: 'liked',
@@ -147,7 +160,7 @@ function QuickAccess({
       ))}
     </div>
   );
-}
+});
 
 function cnTile(gradient?: boolean): string {
   return [
@@ -216,16 +229,8 @@ function montarHome(
       })
     : [];
 
-  const letras = new Map(lyricsCacheEntries());
-  const prateleirasDeAgentes = construirPrateleirasDeAgentes(
-    { entries, history, liked, now: new Date() },
-    (trackId) => {
-      const l = letras.get(trackId);
-      return l ? l.lines.map((x) => x.text).join(' ') : null;
-    },
-  );
-
   return {
+    insumos: { entries, history },
     vazia: entries.length === 0,
     entriesCount: entries.length,
     artistasDoAcervo,
@@ -236,34 +241,72 @@ function montarHome(
     outrosGeneros,
     ramos,
     daSemente: prateleiraDaSemente(faixas, semente.artistas),
-    recos: buildRecommendations(),
-    albumRecos: buildAlbumRecommendations(),
-    prateleirasDeAgentes,
-    semanticRecos: buildSemanticMixes({ entries, history, liked }),
   };
 }
 
 type FotoDaHome = ReturnType<typeof montarHome>;
 
+/**
+ * O QUE NÃO É DA PRIMEIRA DOBRA, calculado DEPOIS do primeiro desenho.
+ *
+ * As recomendações do motor, os álbuns sugeridos, os "momentos" dos agentes e
+ * os mixes semânticos ficam abaixo do gênero-tronco, dos ramos e dos recentes:
+ * ninguém os vê no primeiro quadro, e juntos eram o grosso dos ~450 ms de
+ * `montarHome` no boot do moto g34 emulado. Saem numa folga da thread, com os
+ * mesmos insumos da foto (a foto continua UMA só: nada muda debaixo do dedo).
+ */
+function montarTardia(foto: FotoDaHome) {
+  const { entries, history } = foto.insumos;
+  const liked = localLikes.list();
+  const letras = new Map(lyricsCacheEntries());
+  return {
+    deFoto: foto,
+    recos: buildRecommendations(),
+    albumRecos: buildAlbumRecommendations(),
+    prateleirasDeAgentes: construirPrateleirasDeAgentes(
+      { entries, history, liked, now: new Date() },
+      (trackId) => {
+        const l = letras.get(trackId);
+        return l ? l.lines.map((x) => x.text).join(' ') : null;
+      },
+    ),
+    semanticRecos: buildSemanticMixes({ entries, history, liked }),
+  };
+}
+
+type PrateleirasTardias = ReturnType<typeof montarTardia>;
+
+/** Cartões montados por prateleira no começo; o resto entra ao rolar. */
+const CARTOES_INICIAIS = 15;
+
+function aoOcioso(fn: () => void): () => void {
+  const w = window as Window & {
+    requestIdleCallback?: (cb: () => void, o?: { timeout: number }) => number;
+    cancelIdleCallback?: (id: number) => void;
+  };
+  if (w.requestIdleCallback) {
+    const id = w.requestIdleCallback(fn, { timeout: 1500 });
+    return () => w.cancelIdleCallback?.(id);
+  }
+  const id = setTimeout(fn, 250);
+  return () => clearTimeout(id);
+}
+
 export default function HomePage() {
-  const entries = useSyncExternalStore(localLibrary.subscribe, localLibrary.list, () => EMPTY);
+  // A página só assina o que decide a FOTO: se a biblioteca assentou e se tem
+  // música. Playlists, curtidas e histórico NÃO são dela — a grade de atalhos
+  // assina as duas primeiras (ver `QuickAccess`) e o histórico é lido na hora
+  // de tirar a foto. Assinar `entries` inteiro, ou o histórico (que cresce a
+  // cada faixa tocada), re-renderizava ~1.300 cartões à toa.
+  const temMusica = useSyncExternalStore(
+    localLibrary.subscribe,
+    () => localLibrary.list().length > 0,
+    () => false,
+  );
   const assentada = useSyncExternalStore(
     localLibrary.subscribe,
     localLibrary.bibliotecaAssentada,
     () => false,
-  );
-  const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
-  // O HISTÓRICO É DA CONTA, NÃO DO APARELHO (listForCurrentUser).
-  const history = useSyncExternalStore(
-    localHistory.subscribe,
-    localHistory.listForCurrentUser,
-    () => [],
-  );
-  const likedCount = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
-  const semente = useSyncExternalStore(
-    gostoInicial.subscribe,
-    gostoInicial.snapshot,
-    gostoInicial.snapshot,
   );
 
   const playQueue = usePlayerStore((s) => s.playQueue);
@@ -275,9 +318,18 @@ export default function HomePage() {
   // com a biblioteca já assentada, a foto sai no primeiro quadro, sem piscar
   // o esqueleto.
   const [foto, setFoto] = useState<FotoDaHome | null>(null);
-  if (assentada && (foto === null || (foto.vazia && entries.length > 0))) {
-    setFoto(montarHome(entries, history, semente));
+  if (assentada && (foto === null || (foto.vazia && temMusica))) {
+    setFoto(
+      montarHome(localLibrary.list(), localHistory.listForCurrentUser(), gostoInicial.snapshot()),
+    );
   }
+
+  // As prateleiras de fora da primeira dobra (ver `montarTardia`).
+  const [tardia, setTardia] = useState<PrateleirasTardias | null>(null);
+  useEffect(() => {
+    if (!foto) return;
+    return aoOcioso(() => setTardia(montarTardia(foto)));
+  }, [foto]);
 
   // Vetorização em segundo plano: alimenta a PRÓXIMA foto, não repinta esta.
   useEffect(() => {
@@ -308,19 +360,12 @@ export default function HomePage() {
     outrosGeneros,
     ramos,
     daSemente,
-    recos,
-    albumRecos,
-    prateleirasDeAgentes,
-    semanticRecos,
   } = foto;
-
-  const playlistCover = (trackIds: string[]): string | null => {
-    for (const id of trackIds) {
-      const cover = localLibrary.entryFor(id)?.track.coverUrl;
-      if (cover) return cover;
-    }
-    return null;
-  };
+  const doTempo = tardia?.deFoto === foto ? tardia : null;
+  const recos = doTempo?.recos ?? [];
+  const albumRecos = doTempo?.albumRecos ?? [];
+  const prateleirasDeAgentes = doTempo?.prateleirasDeAgentes ?? [];
+  const semanticRecos = doTempo?.semanticRecos ?? [];
 
   return (
     <div className="relative space-y-8 py-4">
@@ -341,12 +386,7 @@ export default function HomePage() {
       </motion.h1>
 
       <div className="relative">
-        <QuickAccess
-          playlists={playlists}
-          artists={meusArtistas}
-          likedCount={likedCount}
-          cover={playlistCover}
-        />
+        <QuickAccess artists={meusArtistas} />
       </div>
 
       {/* ── O GÊNERO QUE ELA MAIS OUVE, E OS RAMOS DELE ──────────────────
@@ -357,6 +397,7 @@ export default function HomePage() {
           dado mais fácil de mostrar e o menos interessante de olhar. */}
       {generoTronco && (
         <SectionCarousel
+          inicial={CARTOES_INICIAIS}
           title={generoTronco.genre}
           subtitle={generoTronco.motivo ?? 'O que mais toca por aqui'}
           href={`/genero/${encodeURIComponent(generoTronco.genre)}`}
@@ -383,7 +424,12 @@ export default function HomePage() {
       {/* As ramificações do tronco. Cada uma diz por que está ali — é o
           "Explain" do Explore-Exploit-Explain (ver lib/reco/ramificacoes). */}
       {ramos.map((ramo) => (
-        <SectionCarousel key={ramo.key} title={ramo.titulo} subtitle={ramo.explicacao}>
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          key={ramo.key}
+          title={ramo.titulo}
+          subtitle={ramo.explicacao}
+        >
           {ramo.tracks.map((track, index) => (
             <CartaoDeFaixa
               key={track.id}
@@ -402,7 +448,7 @@ export default function HomePage() {
 
       {/* Recently played on THIS profile. */}
       {recentTracks.length > 0 && (
-        <SectionCarousel title="Tocadas recentemente" href="/history">
+        <SectionCarousel inicial={CARTOES_INICIAIS} title="Tocadas recentemente" href="/history">
           {recentTracks.map((track, index) => (
             <CartaoDeFaixa
               key={track.id}
@@ -419,7 +465,11 @@ export default function HomePage() {
 
       {/* O que a pessoa escolheu ao entrar (lib/reco/semente). */}
       {daSemente.length > 0 && (
-        <SectionCarousel title="Dos seus artistas" subtitle="Escolhidos por você ao entrar">
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          title="Dos seus artistas"
+          subtitle="Escolhidos por você ao entrar"
+        >
           {daSemente.map((track, index) => (
             <CartaoDeFaixa
               key={track.id}
@@ -436,7 +486,11 @@ export default function HomePage() {
 
       {/* Recomendações do motor local — renovam a cada dia, estáveis no dia. */}
       {recos.length > 0 && (
-        <SectionCarousel title="Feito para você" subtitle="Do seu jeito de ouvir">
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          title="Feito para você"
+          subtitle="Do seu jeito de ouvir"
+        >
           {recos.map((rec) => (
             <MediaCard
               key={rec.key}
@@ -460,7 +514,11 @@ export default function HomePage() {
           gosto (hora do dia × tipo de dia, rotina da semana, faixa avulsa,
           assunto das letras). Agente sem sinal não aparece. */}
       {prateleirasDeAgentes.length > 0 && (
-        <SectionCarousel title="Seus momentos" subtitle="Cada um pega um lado do seu gosto">
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          title="Seus momentos"
+          subtitle="Cada um pega um lado do seu gosto"
+        >
           {prateleirasDeAgentes.map((p) => (
             <MediaCard
               key={p.key}
@@ -478,7 +536,11 @@ export default function HomePage() {
           gênero. Só aparece quando há vetor suficiente — some sozinha se a IA
           não estiver configurada, sem deixar buraco na página. */}
       {semanticRecos.length > 0 && (
-        <SectionCarousel title="Combina com você" subtitle="Pelo som, não pelo rótulo">
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          title="Combina com você"
+          subtitle="Pelo som, não pelo rótulo"
+        >
           {semanticRecos.map((rec) => (
             <MediaCard
               key={rec.key}
@@ -497,7 +559,11 @@ export default function HomePage() {
           na página própria. */}
 
       {albumRecos.length > 0 && (
-        <SectionCarousel title="Álbuns para você" subtitle="Baseado no que você curte e escuta">
+        <SectionCarousel
+          inicial={CARTOES_INICIAIS}
+          title="Álbuns para você"
+          subtitle="Baseado no que você curte e escuta"
+        >
           {albumRecos.map((album) => (
             <MediaCard
               key={`reco-album:${album.key}`}
@@ -518,7 +584,7 @@ export default function HomePage() {
 
       {/* Real albums in the library (capped — o resto vive em "Mostrar tudo"). */}
       {albums.length > 0 && (
-        <SectionCarousel title="Seus álbuns" href="/library">
+        <SectionCarousel inicial={CARTOES_INICIAIS} title="Seus álbuns" href="/library">
           {albums.slice(0, 60).map((album) => (
             <MediaCard
               key={album.key}
@@ -538,6 +604,7 @@ export default function HomePage() {
           tronco não se repete aqui: ele já abriu a página. */}
       {outrosGeneros.map((g) => (
         <SectionCarousel
+          inicial={CARTOES_INICIAIS}
           key={g.genre}
           title={g.genre}
           subtitle={g.motivo}
@@ -561,7 +628,7 @@ export default function HomePage() {
 
       {/* Your artists (capped — a página /artistas tem todos). */}
       {artistasDoAcervo.length > 0 && (
-        <SectionCarousel title="Seus artistas" href="/artistas">
+        <SectionCarousel inicial={CARTOES_INICIAIS} title="Seus artistas" href="/artistas">
           {artistasDoAcervo.slice(0, 60).map((artist) => (
             <LocalArtistCard
               key={artist.name}

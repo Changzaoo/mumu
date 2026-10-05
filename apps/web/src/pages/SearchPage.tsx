@@ -4,7 +4,7 @@
  * Sections: your OWN library first (músicas / artistas / álbuns), then the
  * free catalog (Audius). Recent searches + voice input when the query is empty.
  */
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useDeferredValue, useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useSearchParams } from 'react-router';
 import { motion } from 'framer-motion';
 import { Mic, MicVocal, Music, Quote, Search, SearchX, X } from 'lucide-react';
@@ -80,6 +80,33 @@ function indexar(entries: readonly localLibrary.LibraryEntry[]): FaixaIndexada[]
     });
   }
   return saida;
+}
+
+/** Artista e álbum com o texto já normalizado — o mesmo princípio das faixas. */
+interface ArtistaIndexado {
+  artist: localLibrary.LocalArtist;
+  nome: string;
+}
+interface AlbumIndexado {
+  album: localLibrary.LocalAlbum;
+  titulo: string;
+  artista: string;
+}
+
+/**
+ * Antes cada tecla rodava `norm` (NFD + regex) em TODOS os artistas e álbuns do
+ * acervo — ~190 ms por 14 teclas num celular de entrada. Agora é uma vez por
+ * versão do acervo; a tecla só faz `includes` em texto pronto.
+ */
+function indexarArtistas(artistas: readonly localLibrary.LocalArtist[]): ArtistaIndexado[] {
+  return artistas.map((artist) => ({ artist, nome: norm(artist.name) }));
+}
+function indexarAlbuns(albuns: readonly localLibrary.LocalAlbum[]): AlbumIndexado[] {
+  return albuns.map((album) => ({
+    album,
+    titulo: norm(album.title),
+    artista: norm(album.artist),
+  }));
 }
 
 const EMPTY_ENTRIES: localLibrary.LibraryEntry[] = [];
@@ -167,6 +194,9 @@ export default function SearchPage() {
   const likes = useTrackLikes();
 
   const hasQuery = query.length > 0;
+  // O campo (na TopBar) atualiza `query` na hora; a varredura do acervo roda
+  // com o valor ADIADO, em prioridade baixa — a digitação nunca espera por ela.
+  const consulta = useDeferredValue(query);
 
   // Record a search once the user commits to a result set (small delay).
   useEffect(() => {
@@ -184,8 +214,20 @@ export default function SearchPage() {
   // Só com consulta: abrir /search sem nada digitado não normaliza 5 mil
   // títulos à toa (medido: 1 s a mais para a página ficar de pé a 6×).
   const indice = useMemo(() => (hasQuery ? indexar(entries) : []), [entries, hasQuery]);
+  // `entries` muda a cada gravação do acervo; `artists()`/`albumGroups()` são
+  // memoizados por versão, então estes índices só refazem quando o acervo muda.
+  const indiceArtistas = useMemo(
+    () => (hasQuery ? indexarArtistas(localLibrary.artists()) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- entries marca a versão do acervo
+    [entries, hasQuery],
+  );
+  const indiceAlbuns = useMemo(
+    () => (hasQuery ? indexarAlbuns(localLibrary.albumGroups()) : []),
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- entries marca a versão do acervo
+    [entries, hasQuery],
+  );
   const local = useMemo(() => {
-    const nq = norm(query);
+    const nq = norm(consulta);
     if (!nq) return { tracks: [], artists: [], albums: [] };
     const tracks: TrackDto[] = [];
     for (const f of indice) {
@@ -194,28 +236,34 @@ export default function SearchPage() {
         if (tracks.length >= 10) break;
       }
     }
-    const artists = localLibrary
-      .artists()
-      .filter((a) => norm(a.name).includes(nq))
-      .slice(0, 10);
-    const albums = localLibrary
-      .albumGroups()
-      .filter((al) => norm(al.title).includes(nq) || norm(al.artist).includes(nq))
-      .slice(0, 10);
+    const artists: localLibrary.LocalArtist[] = [];
+    for (const a of indiceArtistas) {
+      if (a.nome.includes(nq)) {
+        artists.push(a.artist);
+        if (artists.length >= 10) break;
+      }
+    }
+    const albums: localLibrary.LocalAlbum[] = [];
+    for (const al of indiceAlbuns) {
+      if (al.titulo.includes(nq) || al.artista.includes(nq)) {
+        albums.push(al.album);
+        if (albums.length >= 10) break;
+      }
+    }
     return { tracks, artists, albums };
-  }, [indice, query]);
+  }, [indice, indiceArtistas, indiceAlbuns, consulta]);
 
   // ── busca por TRECHO DE LETRA (digitado ou falado no microfone) ──
   // Assíncrona + fatiada (nunca trava) e cancelável: cada tecla aborta a
   // varredura anterior antes de começar a nova.
   const [lyricMatches, setLyricMatches] = useState<Array<{ track: TrackDto; excerpt: string }>>([]);
   useEffect(() => {
-    if (!query) {
+    if (!consulta) {
       setLyricMatches([]);
       return;
     }
     const controller = new AbortController();
-    void searchByLyrics(query, 8, controller.signal).then((matches) => {
+    void searchByLyrics(consulta, 8, controller.signal).then((matches) => {
       if (controller.signal.aborted) return;
       const byId = new Map(indice.map((f) => [f.track.id, f.track]));
       setLyricMatches(
@@ -226,7 +274,7 @@ export default function SearchPage() {
       );
     });
     return () => controller.abort();
-  }, [query, indice]);
+  }, [consulta, indice]);
 
   // Indexador em segundo plano: completa o cache de letras da biblioteca aos
   // poucos (15 por visita, pausado) — cada visita torna mais faixas acháveis.
@@ -247,7 +295,7 @@ export default function SearchPage() {
   // música/single → a faixa. Pontuação por proximidade do nome, com desempate
   // artista > álbum > faixa (quem digita só "Matuê" quer o artista).
   const best = useMemo(() => {
-    const nq = norm(query);
+    const nq = norm(consulta);
     if (!nq) return null;
     const nameScore = (name: string): number => {
       const n = norm(name);
@@ -290,7 +338,7 @@ export default function SearchPage() {
       }
     }
     return bestScore >= 40 ? result : null;
-  }, [query, local]);
+  }, [consulta, local]);
 
   const isEmpty =
     hasQuery &&

@@ -17,7 +17,7 @@
  * (`Network.emulateNetworkConditions`) vale para o catálogo, as imagens e os
  * assets, inclusive os pedidos do service worker.
  *
- * FIXTURES (em `test-results/g34/fixtures`, fora do git):
+ * FIXTURES (em `.g34/fixtures`, fora do git):
  *   catalogo.json   cópia do `GET /catalogo` de produção (leitura anônima)
  *   api/<hash>.json respostas de GET /api/v1/* gravadas
  *   cdn/<hash>      imagens gravadas
@@ -41,7 +41,7 @@ import { fileURLToPath } from 'node:url';
 const aqui = dirname(fileURLToPath(import.meta.url));
 const RAIZ = resolve(aqui, '..');
 const DIST = process.env.G34_DIST ? resolve(process.env.G34_DIST) : join(RAIZ, 'dist');
-const FIX = join(RAIZ, 'test-results', 'g34', 'fixtures');
+const FIX = join(RAIZ, '.g34', 'fixtures');
 const PORTA_HTTP = Number(process.env.G34_PORTA ?? 4180);
 const PORTA_HTTPS = Number(process.env.G34_PORTA_HTTPS ?? 4443);
 const GRAVAR = process.env.G34_GRAVAR === '1';

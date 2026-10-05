@@ -62,6 +62,29 @@ export default defineConfig({
         skipWaiting: true,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
+        /**
+         * O QUE NÃO ENTRA NO PRECACHE.
+         *
+         * O precache é baixado INTEIRO na instalação do worker (e de novo a cada
+         * deploy, para o que mudou): era ~3 MB em 91 arquivos, disputando banda
+         * com a primeira abertura. Estes chunks são pesados E raros — a maioria
+         * das sessões nunca os usa:
+         *  - hls (~520 kB): só toca stream HLS;
+         *  - firebase (~700 kB): visitante anônimo nem o carrega (lib/firebase.ts);
+         *  - Telemetry/Admin/Device: telas de administração.
+         * Eles continuam disponíveis offline: o `runtimeCaching` abaixo guarda cada
+         * um na PRIMEIRA vez em que é baixado. O instalador do app (radinho.apk,
+         * ~4,7 MB) nunca foi nem deve ser precacheado — o glob padrão não casa
+         * `.apk`; a regra abaixo só torna isso explícito e à prova de mudança.
+         */
+        globIgnores: [
+          '**/assets/hls-*.js',
+          '**/assets/firebase-*.js',
+          '**/assets/TelemetryPage-*.js',
+          '**/assets/AdminPage-*.js',
+          '**/assets/DevicePage-*.js',
+          '**/*.apk',
+        ],
         // Never serve the SPA shell for API / importer-proxy calls.
         // Arquivos de SEO não são rotas do app: servir o index.html no lugar
         // deles quebraria o sitemap para quem abre pelo navegador.
@@ -74,6 +97,21 @@ export default defineConfig({
           /^\/radinho\.apk$/,
         ],
         runtimeCaching: [
+          {
+            // Os chunks pesados e raros fora do precache (ver `globIgnores`).
+            // Nome com hash do conteúdo = imutável → CacheFirst é seguro; a
+            // expiração por quantidade joga fora as versões antigas.
+            urlPattern: ({ url }: { url: URL }) =>
+              /^\/assets\/(hls|firebase|TelemetryPage|AdminPage|DevicePage)-[^/]+\.js$/.test(
+                url.pathname,
+              ),
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'aurial-chunks-raros',
+              expiration: { maxEntries: 12, maxAgeSeconds: 60 * 60 * 24 * 60 },
+              cacheableResponse: { statuses: [200] },
+            },
+          },
           {
             urlPattern: ({ request }) => request.destination === 'image',
             handler: 'CacheFirst',

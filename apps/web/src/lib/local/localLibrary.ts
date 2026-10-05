@@ -2269,12 +2269,31 @@ function vista(): LibraryEntry[] {
   return (derivados.vista ??= collapseForDisplay(read()));
 }
 
+/**
+ * Cada agrupamento nasce na PRIMEIRA consulta, não os quatro juntos: a Home
+ * pede álbuns, artistas e gêneros e nunca selos — e cada um varre as ~5,7 mil
+ * faixas (medido no boot do moto g34 emulado: `ensureGroups` 333 ms). O
+ * resultado de cada um é o mesmo de antes; só deixa de ser calculado o que
+ * ninguém lê.
+ */
 function agrupar(vistaDasFaixas: readonly LibraryEntry[]): Grupos {
+  let albums: LocalAlbum[] | undefined;
+  let artistas: LocalArtist[] | undefined;
+  let genres: LocalGenre[] | undefined;
+  let labels: LocalLabel[] | undefined;
   return {
-    albums: computeAlbumGroups(vistaDasFaixas),
-    artists: computeArtists(vistaDasFaixas),
-    genres: computeGenreGroups(vistaDasFaixas),
-    labels: computeLabelGroups(vistaDasFaixas),
+    get albums() {
+      return (albums ??= computeAlbumGroups(vistaDasFaixas));
+    },
+    get artists() {
+      return (artistas ??= computeArtists(vistaDasFaixas));
+    },
+    get genres() {
+      return (genres ??= computeGenreGroups(vistaDasFaixas));
+    },
+    get labels() {
+      return (labels ??= computeLabelGroups(vistaDasFaixas));
+    },
   };
 }
 
@@ -2689,8 +2708,19 @@ function preferredEntry(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
 function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
   const porChave = new Map<string, LibraryEntry>();
   const ordem: string[] = [];
+  // `dedupeParts` (título canônico + marcas de versão + artista principal) é a
+  // parte cara por faixa e era feita DUAS vezes: na 1ª passada e de novo na 3ª.
+  // O resultado depende só da faixa (e de `separadasPeloUsuario`, estável durante
+  // uma chamada), então a 3ª passada reaproveita o da 1ª.
+  const partes = new Map<TrackDto, ReturnType<typeof dedupeParts>>();
+  const partesDe = (track: TrackDto): ReturnType<typeof dedupeParts> => {
+    if (partes.has(track)) return partes.get(track) ?? null;
+    const p = dedupeParts(track);
+    partes.set(track, p);
+    return p;
+  };
   for (const e of entries) {
-    const p = dedupeParts(e.track);
+    const p = partesDe(e.track);
     // Faixa sem chave segura (título genérico) nunca colide com nada — cada
     // uma fica com a própria chave e nenhuma corre risco de sumir da tela.
     if (!p) {
@@ -2746,7 +2776,7 @@ function collapseForDisplay(entries: readonly LibraryEntry[]): LibraryEntry[] {
   for (const key of ordem) {
     const e = porChave.get(key);
     if (!e) continue;
-    const p = dedupeParts(e.track);
+    const p = partesDe(e.track);
     if (!p) continue;
     const irmas = porBase.get(p.base) ?? [];
     const dur = e.track.durationMs || 0;

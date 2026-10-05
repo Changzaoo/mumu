@@ -38,7 +38,7 @@ import { anotarCorrecaoDeSaida, type MotivoDeCorrecao } from '@/lib/telemetry/av
 export type PlaybackErrorKind = 'source' | 'load' | 'play';
 
 export interface AudioEngineEventMap {
-  /** Emitted at rAF rate while playing (throttle on the consumer side). */
+  /** Emitido a ~5 Hz com a tela acesa (1 Hz apagada) enquanto toca; quem quer 60 fps lê `getPosition()`. */
   timeupdate: { position: number; duration: number };
   loaded: { track: TrackDto; duration: number };
   ended: { track: TrackDto | null };
@@ -212,6 +212,12 @@ const PLAYBACK_ERROR = 'Não foi possível reproduzir esta faixa.';
 /** Teto para o slot de saída seguir vivo (mudo) esperando o novo pegar. */
 const RETIRE_MAX_MS = 10_000;
 const RETIRE_POLL_MS = 200;
+/**
+ * Cadência do pulso de progresso. 200 ms = os ~5 Hz com que a store grava
+ * progresso; e metade dos 400 ms mínimos de `garantirSaidaAudivel`, de modo que
+ * o invariante continua rodando a cada ~400 ms mesmo com a folga do timer.
+ */
+const TICK_MS = 200;
 /** Sinal zerado no analisador por tanto, com o tempo andando: o elemento renasce. */
 const SILENCIO_ATE_RENASCER_MS = 6_000;
 /** Abaixo disto (desvio de 128 no domínio do tempo) é silêncio digital. */
@@ -368,7 +374,8 @@ export class AudioEngine {
   private eqEnabled = false;
   private eqGains: readonly number[] = EQ_BANDS_HZ.map(() => 0);
   private normalize = true;
-  private rafId: number | null = null;
+  /** Pulso do primeiro plano (nome histórico: já foi um rAF). Ver `tick`. */
+  private rafId: ReturnType<typeof setTimeout> | null = null;
   private hiddenTicker: ReturnType<typeof setInterval> | null = null;
   private fadeTimers = new Set<ReturnType<typeof setTimeout>>();
   /** Rampas de volume próprias (sem grafo) por slot — ver `rampFade`. */
@@ -770,6 +777,34 @@ export class AudioEngine {
     if (idle.track?.id === track.id || !source) return;
     this.resetSlot(idle);
     this.prepareSlot(idle, track, resolveMediaUrl(source));
+  }
+
+  /**
+   * O slot ocioso está VAZIO? A pré-carga antecipada (logo que a faixa atual
+   * começa) só pode usar slot vazio: ele pode ser a faixa anterior ainda
+   * soando por baixo da nova (mistura; `deixarTerminar` no iPhone) ou uma
+   * pré-carga já feita — e `preloadNext` derruba o que estiver lá. A pré-carga
+   * de perto do fim não pergunta isto e segue trocando o que houver.
+   */
+  slotOciosoLivre(): boolean {
+    const idle = this.slots[this.activeIndex === 0 ? 1 : 0];
+    return idle.source === null && idle.track === null;
+  }
+
+  /**
+   * A faixa `id` já está pré-carregada e viva no slot ocioso? Devolve o DTO com
+   * que ela foi preparada (a fonte resolvida), ou `null`.
+   *
+   * É o que deixa "próxima" começar sem refazer a resolução de fonte: promover o
+   * slot é só `load()` (síncrono), sem esperar cofre local nem `GET /catalogo`.
+   * Fonte que já falhou como pré-carga NÃO conta — a store refaz o caminho
+   * completo e troca de fonte em vez de promover um elemento morto.
+   */
+  faixaPreCarregada(id: string): TrackDto | null {
+    const idle = this.slots[this.activeIndex === 0 ? 1 : 0];
+    if (!idle.track || idle.track.id !== id || idle.source === null) return null;
+    if (idle.falhouAoCarregar) return null;
+    return idle.track;
   }
 
   /** 10-band EQ (dB gains aligned with EQ_BANDS_HZ). Disabled = flat, zero cost. */
@@ -1535,20 +1570,47 @@ export class AudioEngine {
 
   // ── Ticker ─────────────────────────────────────────────────────
 
+  /**
+   * O PULSO DE PROGRESSO É DE ~5 Hz, NÃO DE 60.
+   *
+   * Era um `requestAnimationFrame`: 60 chamadas/s do `emit` até o ouvinte da
+   * store, que só grava progresso a cada 200 ms e ainda roda ali o invariante de
+   * saída, a conferência de duração e as decisões de preload/crossfade. No
+   * Moto G34 emulado isso era a maior fatia da thread principal com a música
+   * tocando e a tela parada (~450 ms de CPU a cada 15 s só neste caminho).
+   *
+   * Quem precisa de resolução fina não depende deste pulso: a letra lê
+   * `getPosition()` no rAF dela, e o disparo do crossfade/troca antecipada é um
+   * temporizador único mirado no instante exato (ver `armCrossfadeTimer` na
+   * store). Este pulso virou rede de segurança e relógio do progresso.
+   *
+   * É `setTimeout` encadeado, e só com a tela acesa: com ela apagada quem
+   * trabalha é o ticker oculto (1 s), e nenhum temporizador repetido novo pode
+   * surgir em segundo plano — o rAF congelava sozinho ali, aqui a cadeia
+   * simplesmente não se reagenda quando `document.hidden`.
+   */
   private tick = (): void => {
     this.rafId = null;
     if (!this.playing) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
     try {
       this.emit('timeupdate', { position: this.getPosition(), duration: this.getDuration() });
       this.garantirSaidaAudivel();
     } finally {
-      // O próximo quadro é agendado MESMO se um ouvinte (ou o invariante) lançar:
+      // O próximo pulso é agendado MESMO se um ouvinte (ou o invariante) lançar:
       // uma exceção aqui parava o ticker de vez — progresso, temporizador de fim
       // e preload congelavam com a música ainda tocando, e nada o religava
       // enquanto `playing` seguisse true.
-      if (this.playing && this.rafId === null) this.rafId = requestAnimationFrame(this.tick);
+      this.agendarPulso();
     }
   };
+
+  /** Agenda o próximo pulso (idempotente; nada com a tela apagada ou pausado). */
+  private agendarPulso(): void {
+    if (this.destroyed || !this.playing || this.rafId !== null) return;
+    if (typeof document !== 'undefined' && document.hidden) return;
+    this.rafId = setTimeout(this.tick, TICK_MS);
+  }
 
   private masterAte = 0;
   private ultimaConferencia = 0;
@@ -1748,8 +1810,8 @@ export class AudioEngine {
 
   private syncTicker(): void {
     if (this.playing) {
-      this.rafId ??= requestAnimationFrame(this.tick);
-      // rAF freezes in background tabs — keep a coarse heartbeat for
+      this.agendarPulso();
+      // O pulso do primeiro plano não roda em segundo plano — keep a coarse heartbeat for
       // play-recording / gapless preload triggers.
       this.hiddenTicker ??= setInterval(() => {
         if (this.playing && document.hidden) {
@@ -1774,7 +1836,7 @@ export class AudioEngine {
   }
 
   private stopTicker(): void {
-    if (this.rafId !== null) cancelAnimationFrame(this.rafId);
+    if (this.rafId !== null) clearTimeout(this.rafId);
     this.rafId = null;
     if (this.hiddenTicker !== null) clearInterval(this.hiddenTicker);
     this.hiddenTicker = null;

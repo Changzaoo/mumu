@@ -1,5 +1,10 @@
-import { describe, expect, it } from 'vitest';
-import { transformInverso, type Caixa } from '@/lib/perf/giroDeTela';
+import { afterEach, describe, expect, it, vi } from 'vitest';
+import {
+  _reiniciarGiroParaTeste,
+  instalarGiroDeTela,
+  transformInverso,
+  type Caixa,
+} from '@/lib/perf/giroDeTela';
 
 const caixa = (left: number, top: number, width: number, height: number): Caixa => ({
   left,
@@ -44,5 +49,39 @@ describe('transformInverso', () => {
 
   it('medida podre (sem tamanho) não anima', () => {
     expect(transformInverso(caixa(0, 0, 0, 0), caixa(10, 10, 50, 50), 'item')).toBeNull();
+  });
+});
+
+describe('instalarGiroDeTela — sem remedição por intervalo', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+    vi.unstubAllGlobals();
+    _reiniciarGiroParaTeste();
+  });
+
+  it('mede uma vez ao instalar e não agenda timer nenhum depois', () => {
+    vi.useFakeTimers();
+    const ler = vi.spyOn(Element.prototype, 'getBoundingClientRect');
+    vi.stubGlobal(
+      'matchMedia',
+      (q: string) =>
+        ({
+          matches: q.includes('coarse'),
+          addEventListener: () => {},
+          removeEventListener: () => {},
+        }) as unknown as MediaQueryList,
+    );
+    document.body.innerHTML = '<div data-giro="item"></div><div data-giro="item"></div>';
+    instalarGiroDeTela();
+    // A medição inicial sai no próximo quadro/folga; depois disso, silêncio.
+    vi.advanceTimersByTime(1_000);
+    const lidasNoBoot = ler.mock.calls.length;
+    expect(lidasNoBoot).toBeLessThanOrEqual(2);
+    expect(vi.getTimerCount()).toBe(0);
+    // Um minuto parado: nenhuma leitura nova de layout.
+    vi.advanceTimersByTime(60_000);
+    expect(ler.mock.calls.length).toBe(lidasNoBoot);
+    expect(vi.getTimerCount()).toBe(0);
+    ler.mockRestore();
   });
 });

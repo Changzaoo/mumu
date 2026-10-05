@@ -10,6 +10,7 @@ import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
+import { VirtualList } from '@/components/media/VirtualList';
 import { tracksToShare } from '@/lib/share/share';
 import { useTrackLikes } from '@/features/library/api';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -170,19 +171,26 @@ export default function MixPage() {
         </div>
       </header>
 
+      {/* VIRTUALIZADA como as páginas de gênero/artista: um mix por gênero tem
+          milhares de faixas, e uma linha por faixa era ~30 mil nós no celular.
+          `playAt` continua passando `mix.tracks` INTEIRO à fila — só o DOM é
+          limitado ao que cabe na tela. */}
       <TrackList header aria-label={mix.title}>
-        {mix.tracks.map((track, index) => (
-          <TrackRow
-            key={track.id}
-            track={track}
-            index={index}
-            active={track.id === currentTrack?.id}
-            playing={track.id === currentTrack?.id && isPlaying}
-            liked={likes.isLiked(track)}
-            onToggleLike={(liked) => likes.toggle(track, liked)}
-            onPlay={() => playAt(index)}
-          />
-        ))}
+        <VirtualList
+          items={mix.tracks}
+          estimateSize={56}
+          renderItem={(track, index) => (
+            <TrackRow
+              track={track}
+              index={index}
+              active={track.id === currentTrack?.id}
+              playing={track.id === currentTrack?.id && isPlaying}
+              liked={likes.isLiked(track)}
+              onToggleLike={(liked) => likes.toggle(track, liked)}
+              onPlay={() => playAt(index)}
+            />
+          )}
+        />
       </TrackList>
     </div>
   );
