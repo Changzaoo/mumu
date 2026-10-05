@@ -173,7 +173,9 @@ export default function SearchPage() {
   };
 
   // ── your OWN library, searched locally (instant) ──
-  const indice = useMemo(() => indexar(entries), [entries]);
+  // Só com consulta: abrir /search sem nada digitado não normaliza 5 mil
+  // títulos à toa (medido: 1 s a mais para a página ficar de pé a 6×).
+  const indice = useMemo(() => (hasQuery ? indexar(entries) : []), [entries, hasQuery]);
   const local = useMemo(() => {
     const nq = norm(query);
     if (!nq) return { tracks: [], artists: [], albums: [] };
@@ -221,7 +223,7 @@ export default function SearchPage() {
   // Indexador em segundo plano: completa o cache de letras da biblioteca aos
   // poucos (15 por visita, pausado) — cada visita torna mais faixas acháveis.
   useEffect(() => {
-    void indexLyricsInBackground(indexar(entries).map((f) => f.track));
+    void indexLyricsInBackground(entries.flatMap((e) => (e?.track?.id ? [e.track] : [])));
     // eslint-disable-next-line react-hooks/exhaustive-deps -- uma vez por visita
   }, []);
 
