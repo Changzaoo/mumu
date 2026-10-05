@@ -311,6 +311,11 @@ export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday
  */
 const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
 
+function dentroDoAppNativo(): boolean {
+  const cap = (window as Window & { Capacitor?: { isNativePlatform?: () => boolean } }).Capacitor;
+  return Boolean(cap?.isNativePlatform?.()) || /RadinhoApp\//.test(navigator.userAgent);
+}
+
 function telaDeToque(): boolean {
   try {
     return window.matchMedia('(pointer: coarse)').matches;
@@ -330,7 +335,12 @@ export async function signInGoogle(): Promise<UserCredential & { accessToken: st
   // particiona armazenamento, nem volta. Com o login no próprio domínio, vai e
   // volta do Google NA MESMA ABA; o SDK conclui o login ao recarregar (ver
   // `lerSessaoSalva`). A promessa não resolve: a página está saindo.
-  if (loginNoProprioDominio && telaDeToque()) {
+  //
+  // DENTRO DO APP DE ANDROID NÃO: o WebView entrega a ida ao Google para o
+  // navegador do sistema, o login termina LÁ e o app fica parado numa página
+  // preta. O Google não aceita login dentro de WebView; no app o caminho certo
+  // é o login nativo (ainda por fazer) — até lá, fica como era antes.
+  if (loginNoProprioDominio && telaDeToque() && !dentroDoAppNativo()) {
     await signInWithRedirect(instance, provider);
     return new Promise(() => {});
   }
