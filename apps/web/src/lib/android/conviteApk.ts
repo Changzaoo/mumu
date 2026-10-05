@@ -9,7 +9,6 @@
  * Só aparece para quem pode usar: Android, fora do app nativo. Não há "agora
  * não" nem silêncio: a barra é estática e reaparece a cada abertura.
  */
-import { toast } from 'sonner';
 import { pushNotification } from '@/stores/notificationsStore';
 
 export const APK_URL =
@@ -21,22 +20,6 @@ export function deveConvidar(opcoes: { userAgent: string; nativo: boolean }): bo
   // Quest/TV/Chromebook dizem "Android" mas não instalam APK por aqui.
   if (/OculusBrowser|SmartTV|\bTV\b|CrOS/i.test(opcoes.userAgent)) return false;
   return true;
-}
-
-function ler(chave: string): string | null {
-  try {
-    return window.localStorage.getItem(chave);
-  } catch {
-    return null;
-  }
-}
-
-function gravar(chave: string, valor: string): void {
-  try {
-    window.localStorage.setItem(chave, valor);
-  } catch {
-    /* sem storage: no pior caso o aviso volta na próxima abertura */
-  }
 }
 
 export function ehNativo(): boolean {
@@ -58,39 +41,37 @@ export function versaoDoApp(userAgent: string): number | null {
 
 /**
  * APP DESATUALIZADO? O site sempre vem novo (o app abre radinho.online), mas o
- * que é NATIVO — barra de status, downloads, permissões — só muda com APK novo.
- * `radinho-apk.json` diz a versão do APK publicado; se for maior que a deste
- * app, avisa uma vez por versão.
+ * que é NATIVO — ícone, barra de status, downloads, permissões — só muda com
+ * APK novo. `radinho-apk.json` diz a versão do APK publicado; se for maior que
+ * a deste app, a barra fixa "Atualizar" (ConviteApkBar) aparece e fica até a
+ * pessoa instalar. O Android não deixa um app de fora da loja se atualizar
+ * sozinho: o máximo é levar ao download com um toque.
  */
-export async function avisarAtualizacaoDoApp(): Promise<void> {
-  if (typeof window === 'undefined') return;
+export async function appDesatualizado(): Promise<boolean> {
+  if (typeof window === 'undefined') return false;
   const instalada = versaoDoApp(navigator.userAgent);
-  if (instalada === null) return;
-  let publicada = 0;
+  if (instalada === null) return false;
   try {
     const r = await fetch('/radinho-apk.json', { cache: 'no-store' });
-    if (r.ok) publicada = Number(((await r.json()) as { versionCode?: number }).versionCode) || 0;
+    if (!r.ok) return false;
+    const publicada = Number(((await r.json()) as { versionCode?: number }).versionCode) || 0;
+    return publicada > instalada;
   } catch {
-    return;
+    return false;
   }
-  if (publicada <= instalada) return;
-  const chave = `aurial:apk-avisado-${publicada}`;
-  if (ler(chave)) return;
-  gravar(chave, '1');
+}
+
+/** Endereço completo do APK: dentro do app o download sai pelo navegador do sistema. */
+export function urlDoApk(): string {
+  return new URL(APK_URL, window.location.origin).toString();
+}
+
+/** Deixa também um registro no sino, uma vez por abertura, para quem não viu a barra. */
+export async function avisarAtualizacaoDoApp(): Promise<void> {
+  if (!(await appDesatualizado())) return;
   pushNotification({
     type: 'update',
     title: 'Nova versão do app',
     body: 'Baixe e instale por cima: nada do que você salvou se perde.',
-  });
-  toast('Nova versão do radinho para Android', {
-    description: 'Instale por cima da atual — suas músicas e ajustes continuam.',
-    duration: Infinity,
-    action: {
-      label: 'Baixar',
-      // O app entrega o download ao navegador do sistema (MainActivity).
-      onClick: () => {
-        window.location.href = new URL(APK_URL, window.location.origin).toString();
-      },
-    },
   });
 }

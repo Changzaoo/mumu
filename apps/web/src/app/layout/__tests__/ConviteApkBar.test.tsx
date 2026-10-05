@@ -50,4 +50,28 @@ describe('ConviteApkBar', () => {
       vi.restoreAllMocks();
     }
   });
+  it('dentro do app com APK mais novo publicado: barra fixa "Atualizar"', async () => {
+    ambiente(`${ANDROID} RadinhoApp/4`, true);
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async () => new Response(JSON.stringify({ versionCode: 5 }), { status: 200 })),
+    );
+    render(<ConviteApkBar />);
+    const link = await screen.findByRole('link', { name: 'Atualizar' });
+    expect(link.getAttribute('href')).toBe(new URL(APK_URL, window.location.origin).toString());
+    expect(screen.queryByRole('button')).toBeNull();
+    vi.unstubAllGlobals();
+  });
+  it('dentro do app já na versão publicada: nada aparece', async () => {
+    ambiente(`${ANDROID} RadinhoApp/5`, true);
+    const busca = vi.fn(
+      async () => new Response(JSON.stringify({ versionCode: 5 }), { status: 200 }),
+    );
+    vi.stubGlobal('fetch', busca);
+    const { container } = render(<ConviteApkBar />);
+    await vi.waitFor(() => expect(busca).toHaveBeenCalled());
+    await Promise.resolve();
+    expect(container.innerHTML).toBe('');
+    vi.unstubAllGlobals();
+  });
 });
