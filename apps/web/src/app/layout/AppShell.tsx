@@ -21,7 +21,8 @@ import { QueuePanel } from '@/app/layout/QueuePanel';
 import { ScrollContainerContext } from '@/app/layout/scroll-context';
 import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
-import { avisarAtualizacaoDoApp, convidarParaApk } from '@/lib/android/conviteApk';
+import { avisarAtualizacaoDoApp } from '@/lib/android/conviteApk';
+import { ConviteApkBar } from '@/app/layout/ConviteApkBar';
 
 /**
  * ROTAS QUE NUNCA SAO INTERROMPIDAS PELO ONBOARDING.
@@ -104,11 +105,10 @@ export function AppShell() {
     recordNavigation(location.pathname);
   }, [location.pathname]);
 
-  // Convite para o APK (Android pelo navegador). Espera a abertura assentar:
-  // aviso na mesma hora competiria com a primeira música. Ver conviteApk.ts.
+  // Aviso de APK novo (só dentro do app). Espera a abertura assentar. O convite
+  // para INSTALAR é a barra fixa (ConviteApkBar), sem timer.
   useEffect(() => {
     const t = window.setTimeout(() => {
-      convidarParaApk();
       void avisarAtualizacaoDoApp();
     }, 20_000);
     return () => window.clearTimeout(t);
@@ -166,6 +166,9 @@ export function AppShell() {
           <span className="aurora-blob aurora-2" />
           <span className="aurora-blob aurora-3" />
         </div>
+        {/* Barra fixa "instalar o app" (Android pelo navegador): linha própria do
+            flex, empurra o conteúdo em vez de cobri-lo. */}
+        <ConviteApkBar />
         <div className="flex min-h-0 flex-1 md:gap-2">
           {temMenuLateral && <Sidebar />}
 
