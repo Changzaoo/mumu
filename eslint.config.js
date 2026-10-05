@@ -18,6 +18,8 @@ export default tseslint.config(
       'apps/api/prisma/migrations/**',
       // Cópia do dist que o `cap sync` joga dentro do projeto Android.
       'apps/web/android/app/src/main/assets/**',
+      // Worktrees de sessão: cópias inteiras do repo, com dist e tudo.
+      '.claude/**',
     ],
   },
   js.configs.recommended,
