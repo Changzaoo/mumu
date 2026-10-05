@@ -5,7 +5,8 @@
  *     promove no meio de uma rampa de volume rumo a 0: a rampa seguia e a faixa
  *     pedida tocava muda.
  *  2. Uma pré-carga que falha ENQUANTO ociosa não avisava ninguém (os handlers de
- *     erro só falam pelo slot ativo). Promovida, era silêncio sem causa.
+ *     erro só falam pelo slot ativo). Promovida, era silêncio sem causa — e,
+ *     reusada pela troca de fonte, silêncio PARA SEMPRE: hoje é refeita do zero.
  *  3. O ticker do rAF era reagendado DEPOIS dos ouvintes: um que lançasse parava o
  *     progresso, o temporizador de fim e o preload com a música ainda tocando.
  */
@@ -17,6 +18,7 @@ interface Falso {
   node: { volume: number; currentTime: number; paused: boolean; ended: boolean; duration: number };
   _sounds: Array<{ _node: Falso['node']; _volume: number }>;
   _volume: number;
+  unload: ReturnType<typeof vi.fn>;
 }
 const howls: Falso[] = [];
 
@@ -94,21 +96,81 @@ describe('promoção de slot sem grafo (Android)', () => {
 });
 
 describe('pré-carga que falhou enquanto ociosa', () => {
-  it('avisa o erro de carga quando é PROMOVIDA — e não antes', async () => {
+  it('promover a faixa REFAZ o slot do zero — nunca reusa o elemento morto', async () => {
+    // SEMÂNTICA MUDADA DE PROPÓSITO. Antes a promoção reusava o slot morto e
+    // emitia 'error' para a store trocar de fonte; mas a troca de fonte (e a
+    // retentativa) pedia a MESMA faixa, caía no mesmo atalho e reusava o
+    // elemento morto outra vez: o título trocava e a música nunca começava
+    // (cofre com 503 passageiro, fim natural de uma faixa). Agora o slot que
+    // não serve é refeito: a carga nova vai à rede e, se falhar, falha como
+    // faixa ATIVA — que é o que a store sabe tratar (fonte alternativa, pular).
     const engine = await novoMotor();
     const erros: Array<{ kind: string; track: { id: string } | null }> = [];
     engine.on('error', (e) => erros.push(e));
 
     engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
     engine.preloadNext(makeTrack('b', { streamUrl: 'https://x/morta.mp3' }));
-    // A fonte da pré-carga morre (404) com o slot ocioso: ninguém pode reagir
+    // A fonte da pré-carga morre (503) com o slot ocioso: ninguém pode reagir
     // a uma faixa que nem começou.
     howls[1]!.handlers.get('loaderror')?.();
     expect(erros).toHaveLength(0);
+    expect(engine.faixaPreCarregada('b')).toBeNull(); // a store não promove morta
 
     engine.load(makeTrack('b', { streamUrl: 'https://x/morta.mp3' }));
+    expect(howls).toHaveLength(3); // um Howl NOVO, e não o morto
+    expect(howls[1]!.unload).toHaveBeenCalled();
+    expect(erros).toHaveLength(0); // a tentativa nova ainda não falhou
+    // Falhando de novo, agora é a faixa ativa: o erro chega à store.
+    howls[2]!.handlers.get('loaderror')?.();
     expect(erros).toHaveLength(1);
     expect(erros[0]).toMatchObject({ kind: 'load', track: { id: 'b' } });
+    engine.destroy();
+  });
+
+  it('a fonte alternativa da mesma faixa NÃO cai no slot morto', async () => {
+    const engine = await novoMotor();
+    engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
+    engine.preloadNext(makeTrack('b', { streamUrl: 'https://x/borda.mp3' }));
+    howls[1]!.handlers.get('loaderror')?.();
+    // A store trocou de fonte: mesma faixa, endereço novo.
+    engine.load(makeTrack('b', { streamUrl: 'https://x/origem.mp3' }));
+    expect(howls).toHaveLength(3);
+    engine.destroy();
+  });
+
+  it('pré-carga viva com ENDEREÇO DIFERENTE do pedido também é refeita', async () => {
+    const engine = await novoMotor();
+    engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
+    engine.preloadNext(makeTrack('b', { streamUrl: 'https://x/velha.mp3' }));
+    engine.load(makeTrack('b', { streamUrl: 'https://x/nova.mp3' }));
+    expect(howls).toHaveLength(3);
+    engine.destroy();
+  });
+
+  it('elemento em erro sem evento (slot ocioso) não conta como pré-carga', async () => {
+    const engine = await novoMotor();
+    engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
+    engine.preloadNext(makeTrack('b', { streamUrl: 'https://x/b.mp3' }));
+    expect(engine.faixaPreCarregada('b')).not.toBeNull();
+    // O navegador marcou o erro no elemento e o evento nunca chegou.
+    (howls[1]!.node as { error?: unknown }).error = { code: 4 };
+    expect(engine.faixaPreCarregada('b')).toBeNull();
+    engine.load(makeTrack('b', { streamUrl: 'https://x/b.mp3' }));
+    expect(howls).toHaveLength(3);
+    engine.destroy();
+  });
+
+  it('preloadNext refaz uma pré-carga que morreu (segunda chance perto do fim)', async () => {
+    const engine = await novoMotor();
+    engine.load(makeTrack('a', { streamUrl: 'https://x/a.mp3' }));
+    const b = makeTrack('b', { streamUrl: 'https://x/b.mp3' });
+    engine.preloadNext(b);
+    howls[1]!.handlers.get('loaderror')?.();
+    engine.preloadNext(b); // o preload de ~12 s antes do fim
+    expect(howls).toHaveLength(3);
+    expect(engine.faixaPreCarregada('b')).not.toBeNull();
+    engine.preloadNext(b); // viva: não refaz de novo
+    expect(howls).toHaveLength(3);
     engine.destroy();
   });
 

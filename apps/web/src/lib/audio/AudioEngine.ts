@@ -511,7 +511,14 @@ export class AudioEngine {
     const from = this.slots[fromIndex];
     const to = this.slots[toIndex];
 
-    const preloaded = to.track?.id === track.id && to.source !== null;
+    // SÓ SE A PRÉ-CARGA ESTÁ VIVA E É DESTA FONTE. Promover um slot cuja fonte já
+    // morreu (503/404 do cofre, token vencido) o deixava MUDO: o `load` seguinte
+    // da store — a troca de fonte, a retentativa, o caminho completo — pedia a
+    // mesma faixa, caía de novo neste atalho e reusava o elemento morto em vez de
+    // ir à rede. A fila trocava o título e a música nunca começava, sem fim.
+    // O mesmo vale para o endereço diferente do que foi pré-carregado: a pedida
+    // vence. Slot que não serve é refeito do zero.
+    const preloaded = this.preCargaViva(to, track, url);
     if (preloaded) {
       to.track = track; // refresh DTO (isLiked etc.)
     } else {
@@ -523,7 +530,6 @@ export class AudioEngine {
     // nunca recebeu 'loaded'/'buffering:false' para ele. Sem re-emitir aqui, o
     // isBuffering fica true para sempre: o player parece TRAVADO no spinner.
     const promotedLoaded = preloaded && to.loaded;
-    const promotedFalhou = preloaded && to.falhouAoCarregar === true;
     const esperarCarregar = inicio !== null && this.posicionarAntesDeTocar(to, inicio);
 
     const querMisturar = crossfadeSeconds > 0 && this.playing && from.track !== null;
@@ -600,12 +606,26 @@ export class AudioEngine {
     if (promotedLoaded) {
       this.emit('loaded', { track, duration: this.getDuration() });
       this.emit('buffering', { buffering: false });
-    } else if (promotedFalhou) {
-      // A fonte já tinha morrido quando era só pré-carga e ninguém ficou
-      // sabendo: avisa agora, para a store trocar de fonte em vez de esperar o
-      // watchdog (ou nada, na mistura) diante de um slot que nunca vai tocar.
-      this.emit('error', { message: PLAYBACK_ERROR, track, kind: 'load' });
     }
+  }
+
+  /**
+   * O slot `slot` já é UMA PRÉ-CARGA UTILIZÁVEL de `track` em `url`? Falso quando
+   * está vazio, é de outra faixa/fonte, já falhou ao carregar, ou o elemento
+   * está em erro (o navegador às vezes não dispara o evento no slot ocioso).
+   */
+  private preCargaViva(slot: Slot, track: TrackDto, url: string): boolean {
+    if (slot.track?.id !== track.id || slot.source === null) return false;
+    if (slot.falhouAoCarregar || slot.url !== url) return false;
+    return !this.elementoEmErro(slot);
+  }
+
+  private elementoEmErro(slot: Slot): boolean {
+    const no =
+      slot.source?.kind === 'howl'
+        ? (slot.source.howl as unknown as HowlInternals)._sounds?.[0]?._node
+        : slot.source?.el;
+    return Boolean(no && no.error);
   }
 
   play(): void {
@@ -774,9 +794,14 @@ export class AudioEngine {
       return;
     }
     const source = this.sourceFor(track);
-    if (idle.track?.id === track.id || !source) return;
+    if (!source) return;
+    const url = resolveMediaUrl(source);
+    // Pré-carga viva da mesma faixa: nada a fazer. Uma que MORREU (503 do cofre
+    // aos 5 s) é refeita aqui — é a segunda chance, perto do fim, antes de o
+    // `load` ter de começar do zero.
+    if (this.preCargaViva(idle, track, url)) return;
     this.resetSlot(idle);
-    this.prepareSlot(idle, track, resolveMediaUrl(source));
+    this.prepareSlot(idle, track, url);
   }
 
   /**
@@ -803,7 +828,7 @@ export class AudioEngine {
   faixaPreCarregada(id: string): TrackDto | null {
     const idle = this.slots[this.activeIndex === 0 ? 1 : 0];
     if (!idle.track || idle.track.id !== id || idle.source === null) return null;
-    if (idle.falhouAoCarregar) return null;
+    if (idle.falhouAoCarregar || this.elementoEmErro(idle)) return null;
     return idle.track;
   }
 

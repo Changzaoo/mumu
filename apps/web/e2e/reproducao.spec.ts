@@ -278,6 +278,23 @@ test.describe('reprodução de ponta a ponta', () => {
     await expect(botao(page, 'Pausar')).toBeVisible();
   });
 
+  test('a seguinte PRÉ-CARREGADA também toca sozinha quando a faixa acaba', async ({ page }) => {
+    // 9 s: a pré-carga da seguinte só nasce aos 5 s de reprodução — com as
+    // faixas de 2 s do teste acima esse caminho nunca era exercitado.
+    const primeira = await abrirBibliotecaSemeada(page, 9);
+    await primeira.dblclick();
+    await expect(botao(page, 'Pausar')).toBeVisible({ timeout: 20_000 });
+    await expect(tituloNaBarra(page)).toHaveText('Faixa de prova 0', { timeout: 10_000 });
+
+    await expect(tituloNaBarra(page)).toHaveText('Faixa de prova 1', { timeout: 30_000 });
+    // Trocar o título não basta: o SOM da seguinte tem que andar.
+    await expect
+      .poll(async () => (await estadoDoAudio(page))?.tempo ?? 0, { timeout: 15_000 })
+      .toBeGreaterThan(1);
+    const estado = await estadoDoAudio(page);
+    expect(estado?.tocando).toBe(true);
+  });
+
   test('voltar para a faixa anterior funciona no meio da fila', async ({ page }) => {
     const primeira = await abrirBibliotecaSemeada(page);
     await primeira.dblclick();
