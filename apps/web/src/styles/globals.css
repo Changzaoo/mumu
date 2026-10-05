@@ -730,8 +730,10 @@
 .aura-play-leve[data-girando='true'] .aura-play-c-braco > canvas {
   animation-play-state: running;
 }
+/* …e é a ÚNICA névoa: a difusa, que não acompanha o guia, sai de cena. Com as
+   duas juntas o botão ficava com duas névoas, uma girando e outra parada. */
 .aura-play-leve[data-fase='girando'] .aura-play-c-difusa {
-  opacity: 0.9;
+  opacity: 0;
 }
 /* baixando: a névoa difusa recua e a sucção toma a cena */
 .aura-play-leve[data-fase='reunindo'] .aura-play-c-difusa {
