@@ -1,0 +1,11 @@
+name = "aurial-musicas"
+main = "worker.js"
+compatibility_date = "2026-09-01"
+
+[vars]
+DONO = "Changzaoo"
+
+# Segredo (não vai no repositório):
+#   npx wrangler secret put GITHUB_TOKEN
+# Token fine-grained do GitHub, só leitura de Contents, em "All repositories"
+# (contêineres novos aparecem sozinhos ao longo do envio).

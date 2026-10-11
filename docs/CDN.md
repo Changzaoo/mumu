@@ -71,6 +71,19 @@ cdn1.radinho.online {
 Para escalar geograficamente, suba o mesmo compose em outras máquinas (VPS
 perto dos ouvintes) e acrescente cada uma em `VITE_AUDIO_CDN`.
 
+## Borda do GitHub (sem depender do PC)
+
+O cofre também mora em repositórios **privados** do GitHub (`aurial-musicas-NNN`,
+~900 MB cada), enviados por `infra/scripts/musicas-para-o-git.mjs`. O Worker
+`infra/cdn/github-worker` serve o mesmo `/blob/<id>?k=` lendo de lá, com o índice
+de `aurial-indice-musicas` (id → contêiner, arquivo, token). Ele entra como
+borda em `VITE_AUDIO_CDN`; o importador fica por último, só como reserva.
+
+- Faixa que ainda não subiu → 404 da borda → o app toca da origem.
+- O token de leitura do GitHub é segredo do Worker; nunca vai para o app.
+- Faixa importada depois do envio só chega à borda quando o script roda de novo
+  (`--todas` é retomável e pula o que já subiu).
+
 ## Trade-offs conhecidos
 
 - Segmentos HLS da API ficam em cache sem o token na chave (são imutáveis);
