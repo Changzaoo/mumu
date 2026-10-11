@@ -49,7 +49,7 @@ borda**.
 
 ```bash
 cat > infra/docker/.env <<'EOF'
-ORIGIN_IMPORTER=https://importer.nexusholding.xyz
+ORIGIN_IMPORTER=https://importer.radinho.online
 ORIGIN_API=http://host.docker.internal:4000
 EDGE_CACHE_SIZE=20g
 CDN_PORT=8088

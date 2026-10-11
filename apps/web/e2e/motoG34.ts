@@ -65,7 +65,7 @@ export const ARGS_CHROMIUM = [
       'MAP *.mzstatic.com 127.0.0.1:4443',
       'MAP *.dzcdn.net 127.0.0.1:4443',
       'MAP *.googleusercontent.com 127.0.0.1:4443',
-      'MAP *.nexusholding.xyz 127.0.0.1:4443',
+      'MAP *.radinho.online 127.0.0.1:4443',
       'MAP itunes.apple.com 127.0.0.1:4443',
       'MAP lrclib.net 127.0.0.1:4443',
       'MAP * ~NOTFOUND',

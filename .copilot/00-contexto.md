@@ -59,7 +59,7 @@ docs/, .github/workflows/, firestore.rules, vercel.json
 ## Deploy existente
 
 - **Vercel** (`vercel.json`): framework vite, build filtrado shared+web, output `apps/web/dist`,
-  rewrites `/api/*` → `aurial-api.nexusholding.xyz`, `/importer/*` → `importer.nexusholding.xyz`,
+  rewrites `/api/*` → `api.radinho.online`, `/importer/*` → `importer.radinho.online`,
   SPA fallback, cache imutável em `/assets`, headers de segurança.
   ⚠️ memória: rewrite da Vercel toma 403 do Cloudflare — navegador deve falar direto com o servidor.
 - API/importer em servidor próprio (nginx + systemd/pm2, `infra/`).

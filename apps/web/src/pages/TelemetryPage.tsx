@@ -1647,7 +1647,7 @@ function Diagnostics({ telemetria }: { telemetria: CheckStatus }) {
   useEffect(() => {
     const ctrl = new AbortController();
     const timer = setTimeout(() => ctrl.abort(), 5000);
-    fetch('https://importer.nexusholding.xyz/health', { signal: ctrl.signal })
+    fetch('https://importer.radinho.online/health', { signal: ctrl.signal })
       .then((r) => setImporter(r.ok ? 'ok' : 'falha'))
       .catch(() => setImporter('falha'))
       .finally(() => clearTimeout(timer));

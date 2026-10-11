@@ -11,7 +11,7 @@
  */
 import { afterEach, describe, expect, it, vi } from 'vitest';
 
-const API_DIRETA = 'https://aurial-api.nexusholding.xyz/api/v1';
+const API_DIRETA = 'https://api.radinho.online/api/v1';
 
 /** O módulo decide a base no import — cada caso precisa de uma carga limpa. */
 async function carregarCom(hostname: string, viteApiUrl?: string): Promise<string> {

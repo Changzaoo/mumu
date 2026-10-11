@@ -25,7 +25,7 @@ import { existsSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
 
 const ORIGEM = 'https://radinho.online';
-const API = (process.env.VITE_API_URL || 'https://aurial-api.nexusholding.xyz/api/v1').replace(
+const API = (process.env.VITE_API_URL || 'https://api.radinho.online/api/v1').replace(
   /\/+$/,
   '',
 );

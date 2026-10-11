@@ -92,13 +92,13 @@ para não misturar bump de dependência com correção de player — vão para R
 
 ## Deploy
 
-| Parte          | Destino                                            | Como                                                                                                    |
-| -------------- | -------------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
-| Frontend       | **Vercel** (aurial.vercel.app)                     | `vercel.json`: build filtrado `shared`+`web`, output `apps/web/dist`, SPA fallback, `/assets` imutável. |
-| API            | **servidor próprio** `aurial-api.nexusholding.xyz` | nginx + systemd/pm2 (`infra/`).                                                                         |
-| Importer       | **servidor próprio** `importer.nexusholding.xyz`   | binários yt-dlp/ffmpeg, systemd de usuário, cofre em disco externo.                                     |
-| Postgres/Redis | mesmo servidor (docker em `infra/`)                | migrações via `pnpm db:migrate`.                                                                        |
-| Android        | Capacitor 8 embrulhando a web                      | fora do escopo verificável desta entrega.                                                               |
+| Parte          | Destino                                        | Como                                                                                                    |
+| -------------- | ---------------------------------------------- | ------------------------------------------------------------------------------------------------------- |
+| Frontend       | **Vercel** (aurial.vercel.app)                 | `vercel.json`: build filtrado `shared`+`web`, output `apps/web/dist`, SPA fallback, `/assets` imutável. |
+| API            | **servidor próprio** `api.radinho.online`      | nginx + systemd/pm2 (`infra/`).                                                                         |
+| Importer       | **servidor próprio** `importer.radinho.online` | binários yt-dlp/ffmpeg, systemd de usuário, cofre em disco externo.                                     |
+| Postgres/Redis | mesmo servidor (docker em `infra/`)            | migrações via `pnpm db:migrate`.                                                                        |
+| Android        | Capacitor 8 embrulhando a web                  | fora do escopo verificável desta entrega.                                                               |
 
 ⚠️ **Rewrite da Vercel toma 403 do Cloudflare** (memória): chamada de áudio/API que
 importa para reprodução deve ir **direto** do navegador ao servidor, não pelo rewrite.

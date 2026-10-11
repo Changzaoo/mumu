@@ -210,7 +210,7 @@ export default defineConfig({
       // Dev mirror of the Vercel rewrite: /importer/* → Cloudflare tunnel → home
       // importer. Keeps the app same-origin in dev too (no CORS locally).
       '/importer': {
-        target: 'https://importer.nexusholding.xyz',
+        target: 'https://importer.radinho.online',
         changeOrigin: true,
         secure: true,
         rewrite: (p) => p.replace(/^\/importer/, ''),

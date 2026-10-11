@@ -2,7 +2,7 @@
  * De onde o app fala com a API do radinho.online — UM lugar só.
  *
  * POR QUE NÃO É MAIS `/api/v1`. O caminho relativo saía pelo rewrite da Vercel
- * (`/api/:path*` → `aurial-api.nexusholding.xyz`, ver `vercel.json`). Isso faz
+ * (`/api/:path*` → `api.radinho.online`, ver `vercel.json`). Isso faz
  * o pedido partir de um IP de datacenter da Vercel — e o Cloudflare que protege
  * o servidor responde a ESSE salto com a página de desafio "Just a moment...":
  * HTTP 403, corpo HTML, sem CORS. Como o acervo INTEIRO chega por um único
@@ -21,8 +21,10 @@
  * em que o desafio sair da frente, e é o que serve o proxy do Vite em dev.
  */
 
+import { API_ORIGEM } from '@/lib/dominios';
+
 /** Servidor da API, alcançável direto do navegador (CORS liberado por origem). */
-const API_DIRETA = 'https://aurial-api.nexusholding.xyz/api/v1';
+const API_DIRETA = `${API_ORIGEM}/api/v1`;
 
 /** Mesma origem — proxy do Vite em dev, rewrite da Vercel em produção. */
 const API_MESMA_ORIGEM = '/api/v1';

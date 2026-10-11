@@ -49,6 +49,7 @@ import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
 import { candidatosDaCopia, marcarBordaFora, viaCdn } from '@/lib/audio/cdn';
+import { migrarDominio } from '@/lib/dominios';
 import { antecedenciaDoPreload } from '@/lib/perf/adaptacao';
 import { confirmarRedeMorta, redeSabidamenteMorta } from '@/lib/offline/redeMorta';
 
@@ -182,7 +183,11 @@ async function ensurePlayableSource(track: TrackDto): Promise<TrackDto> {
     const url = viaCdn(remote);
     return url === track.streamUrl ? track : { ...track, streamUrl: url };
   }
-  if (track.streamUrl) return track;
+  if (track.streamUrl) {
+    // Fila e retomada guardadas com o domínio antigo (ver lib/dominios.ts).
+    const atual = migrarDominio(track.streamUrl);
+    return atual === track.streamUrl ? track : { ...track, streamUrl: atual };
+  }
   const sourceUrl = sourceUrlFor(track.id);
   if (!sourceUrl) return track;
   try {

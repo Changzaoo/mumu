@@ -10,7 +10,7 @@
 #   docker compose -f infra/docker/docker-compose.cdn.yml restart lb
 #
 # Variáveis (no .env ao lado ou no ambiente):
-#   ORIGIN_IMPORTER   https://importer.nexusholding.xyz
+#   ORIGIN_IMPORTER   https://importer.radinho.online
 #   ORIGIN_API        http://host.docker.internal:4000
 #   EDGE_CACHE_SIZE   20g   (POR nó — o total do PoP é a soma, graças ao hash)
 #   CDN_PORT          8088
@@ -24,7 +24,7 @@ services:
     extra_hosts:
       - 'host.docker.internal:host-gateway'
     environment:
-      ORIGIN_IMPORTER: ${ORIGIN_IMPORTER:-https://importer.nexusholding.xyz}
+      ORIGIN_IMPORTER: ${ORIGIN_IMPORTER:-https://importer.radinho.online}
       ORIGIN_API: ${ORIGIN_API:-http://host.docker.internal:4000}
       EDGE_CACHE_SIZE: ${EDGE_CACHE_SIZE:-20g}
       CORS_ORIGIN_REGEX: ${CORS_ORIGIN_REGEX:-^(https://([a-z0-9-]+\.)*(radinho\.online|vercel\.app)|https?://(localhost|127\.0\.0\.1)(:[0-9]+)?|capacitor://localhost)$$}

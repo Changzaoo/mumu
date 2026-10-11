@@ -53,13 +53,13 @@ function entradasDoAparelho(): unknown[] {
     track: {
       ...e.track,
       // O registro próprio guarda as URLs de verdade (o acervo chega magro).
-      streamUrl: `https://aurial-api.nexusholding.xyz/blob/${e.track.id}?t=${'x'.repeat(48)}`,
+      streamUrl: `https://api.radinho.online/blob/${e.track.id}?t=${'x'.repeat(48)}`,
     },
     addedAt: new Date(Date.now() - i * 60_000).toISOString(),
     sizeBytes: 4_200_000 + i,
     mimeType: 'audio/mpeg',
     sourceUrl: `https://www.youtube.com/watch?v=${e.track.id.slice(-11)}`,
-    remoteUrl: `https://aurial-api.nexusholding.xyz/blob/${e.track.id}?t=${'y'.repeat(48)}`,
+    remoteUrl: `https://api.radinho.online/blob/${e.track.id}?t=${'y'.repeat(48)}`,
     contentHash: 'a'.repeat(64),
     tocavel: undefined,
     origem: undefined,

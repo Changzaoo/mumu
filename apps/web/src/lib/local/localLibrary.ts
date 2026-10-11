@@ -12,6 +12,7 @@
  */
 import type { SharedTrackMeta, TrackDto } from '@radinho/shared';
 import { duracaoDoMp3, tamanhoDoId3 } from '@radinho/shared';
+import { migrarDominio } from '@/lib/dominios';
 import {
   allAudioIds,
   allCoverIds,
@@ -2081,7 +2082,8 @@ export function sourceUrlFor(id: string): string | null {
 
 /** The uploaded-audio stream URL for a local track, if it was uploaded. */
 export function remoteUrlFor(id: string): string | null {
-  return porId(id)?.remoteUrl ?? null;
+  // Cópia gravada no domínio antigo toca pelo atual (ver lib/dominios.ts).
+  return migrarDominio(porId(id)?.remoteUrl) ?? null;
 }
 
 /** Os bytes desta faixa estão mesmo no cofre deste aparelho? Diferente de

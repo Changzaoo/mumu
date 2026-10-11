@@ -16,6 +16,7 @@ import { faixaDoVideo } from '@/lib/local/sourceArtist';
 import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { qualidadeEfetiva } from '@/lib/perf/adaptacao';
+import { IMPORTADOR } from '@/lib/dominios';
 
 /**
  * Erro de uma chamada ao helper que carrega o status HTTP da resposta. A fila
@@ -61,7 +62,7 @@ function preferredQuality(paraOuvirAgora = false): string {
 // proxy also exists (Vercel rewrite + Vite dev proxy) for a future zero-CORS
 // setup, but it's bypassed for now because Cloudflare Bot Fight Mode challenges
 // the server-side Vercel→tunnel hop. Overridable via the ⚙ config (localStorage).
-const DEFAULT_HELPER_URL = 'https://importer.nexusholding.xyz';
+const DEFAULT_HELPER_URL = IMPORTADOR;
 const STORAGE_KEY = 'aurial:importerUrl';
 const TOKEN_KEY = 'aurial:importerToken';
 
@@ -146,7 +147,7 @@ const UNREACHABLE_OVERRIDE =
 
 // Retired public endpoints a device may still carry from an older build. We drop
 // them so the device self-heals onto the current same-origin default.
-const STALE_OVERRIDE = /ngrok|prance-mummified-subscript/i;
+const STALE_OVERRIDE = /ngrok|prance-mummified-subscript|nexusholding.xyz/i;
 
 export function helperUrl(): string {
   try {

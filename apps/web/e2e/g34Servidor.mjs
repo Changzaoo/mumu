@@ -45,7 +45,7 @@ const FIX = join(RAIZ, '.g34', 'fixtures');
 const PORTA_HTTP = Number(process.env.G34_PORTA ?? 4180);
 const PORTA_HTTPS = Number(process.env.G34_PORTA_HTTPS ?? 4443);
 const GRAVAR = process.env.G34_GRAVAR === '1';
-const API_REAL = 'https://aurial-api.nexusholding.xyz';
+const API_REAL = 'https://api.radinho.online';
 
 for (const d of ['api', 'cdn']) mkdirSync(join(FIX, d), { recursive: true });
 
@@ -58,7 +58,7 @@ if (!existsSync(CERT)) {
   execFileSync('openssl', [
     'req', '-x509', '-newkey', 'rsa:2048', '-nodes', '-keyout', CHAVE, '-out', CERT,
     '-days', '365', '-subj', '/CN=g34.local',
-    '-addext', 'subjectAltName=DNS:*.ytimg.com,DNS:i.ytimg.com,DNS:*.mzstatic.com,DNS:*.dzcdn.net,DNS:*.nexusholding.xyz,DNS:itunes.apple.com,DNS:lrclib.net,DNS:*.googleusercontent.com,DNS:localhost',
+    '-addext', 'subjectAltName=DNS:*.ytimg.com,DNS:i.ytimg.com,DNS:*.mzstatic.com,DNS:*.dzcdn.net,DNS:*.radinho.online,DNS:itunes.apple.com,DNS:lrclib.net,DNS:*.googleusercontent.com,DNS:localhost',
   ], { stdio: 'ignore' });
 }
 

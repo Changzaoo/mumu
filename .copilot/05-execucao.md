@@ -129,13 +129,13 @@ daqui; **não é a mesma coisa que um celular na mão**, e fica registrado como 
 ```
 home:                200   https://aurial.vercel.app/
 sw.js contém a regra nova de /api/v1/stream/:   1 ocorrência
-catálogo DIRETO:     200   https://aurial-api.nexusholding.xyz/api/v1/catalogo
+catálogo DIRETO:     200   https://api.radinho.online/api/v1/catalogo
 ```
 
 Cadeia completa de uma faixa de verdade ("TUDO BEM", Brandão85), do acervo até os bytes:
 
 ```
-GET /catalogo/local:2c8c83a3-…  → 200, streamUrl = https://importer.nexusholding.xyz/blob/…?k=98561505…
+GET /catalogo/local:2c8c83a3-…  → 200, streamUrl = https://importer.radinho.online/blob/…?k=98561505…
 GET esse blob, Range: bytes=0-0 → HTTP/1.1 206 Partial Content
                                   Content-Type: audio/mpeg
                                   content-range: bytes 0-0/6286607
@@ -147,7 +147,7 @@ GET esse blob, Range: bytes=0-0 → HTTP/1.1 206 Partial Content
 - **Duração correta:** o catálogo traz `durationMs: 143264.938` (2:23) — a fonte primária de RF2
   tem dado de verdade para essa faixa.
 - **Direto ao servidor, sem o rewrite da Vercel:** `apiBase.ts` resolve a base absoluta
-  `aurial-api.nexusholding.xyz` em produção, e o áudio sai de `importer.nexusholding.xyz`.
+  `api.radinho.online` em produção, e o áudio sai de `importer.radinho.online`.
   Nenhum dos dois passa pelo salto que toma 403 do Cloudflare (memória `rewrite-vercel-toma-403`).
 
 **Não verificado daqui:** o som saindo do alto-falante. Isto é uma conferência de rede e de
