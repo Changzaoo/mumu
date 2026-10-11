@@ -7,11 +7,11 @@
   "rewrites": [
     {
       "source": "/importer/:path*",
-      "destination": "https://importer.nexusholding.xyz/:path*"
+      "destination": "https://importer.radinho.online/:path*"
     },
     {
       "source": "/api/:path*",
-      "destination": "https://aurial-api.nexusholding.xyz/api/:path*"
+      "destination": "https://api.radinho.online/api/:path*"
     },
     {
       "source": "/__/:path*",
