@@ -84,7 +84,22 @@ async function etiquetas(bin) {
   }
 }
 
-const limpar = (s) => s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
+/** Faixa sem tag ID3: o nome sai da página de origem (o acervo mora no servidor). */
+async function etiquetasDaOrigem(url) {
+  if (!url) return { titulo: null, artista: null };
+  try {
+    const { stdout } = await sh('yt-dlp', ['--skip-download', '--no-warnings', '--print', '%(artist|)s\t%(track|)s\t%(uploader|)s\t%(title|)s', url], { timeout: 60_000 });
+    // Sem trim: os campos vazios do começo são tabulações, e cortá-las desloca tudo.
+    const [artista, faixa, canal, titulo] = stdout.replace(/\r?\n$/, '').split('\t');
+    if (faixa) return { titulo: faixa, artista: artista || null };
+    // "Artista - Título" já é o nome; o canal só entra quando o título não diz quem é.
+    return titulo?.includes(' - ') ? { titulo, artista: null } : { titulo: titulo || null, artista: (canal || '').replace(/VEVO$|\s*- Topic$/, '') || null };
+  } catch {
+    return { titulo: null, artista: null };
+  }
+}
+
+const limpar =(s) => s.replace(/[<>:"/\\|?*\x00-\x1f]/g, '').replace(/\s+/g, ' ').trim().slice(0, 120);
 
 async function tamanhoDoConteiner(dir) {
   const ind = await lerJson(path.join(dir, 'indice.json'), { faixas: [] });
@@ -167,9 +182,12 @@ for (const pedido of pedidos) {
     c = await criarConteiner(Number(c.nome.slice(PREFIXO.length)) + 1);
   }
   const meta = await lerJson(bin.replace(/\.bin$/, '.json'), {});
-  const { titulo, artista } = await etiquetas(bin);
+  let { titulo, artista } = await etiquetas(bin);
+  if (!titulo) ({ titulo, artista } = await etiquetasDaOrigem(meta.sourceUrl));
   const ext = meta.contentType === 'audio/mpeg' || !meta.contentType ? '.mp3' : '.' + meta.contentType.split('/')[1];
-  const nomeBase = limpar([artista, titulo].filter(Boolean).join(' - ')) || id.replace(/[:]/g, '-');
+  // Título que já começa pelo artista ("Katy Perry - I Kissed...") não repete o nome.
+  const comArtista = artista && !titulo?.toLowerCase().startsWith(artista.toLowerCase()) ? [artista, titulo] : [titulo];
+  const nomeBase = limpar(comArtista.filter(Boolean).join(' - ')) || id.replace(/[:]/g, '-');
   const pasta = path.join('faixas', ...(lote ? [limpar(lote)] : []));
   await mkdir(path.join(c.dir, pasta), { recursive: true });
   let arquivo = path.join(pasta, nomeBase + ext);
