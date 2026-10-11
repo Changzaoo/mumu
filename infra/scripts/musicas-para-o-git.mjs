@@ -76,6 +76,19 @@ const quem = async (k) => (await sh('git', ['-C', import.meta.dirname, 'config',
 const IDENTIDADE = ['-c', `user.name=${(await quem('user.name')) || 'Aurial'}`, '-c', `user.email=${(await quem('user.email')) || 'aurial@local'}`];
 const git = (dir, ...a) => sh('git', [...IDENTIDADE, '-C', dir, ...a], { maxBuffer: 1 << 26 });
 
+/** Rede de horas falha às vezes: até 5 tentativas, esperando 10s, 20s, 40s... */
+async function insistir(fazer) {
+  for (let i = 0; ; i++) {
+    try {
+      return await fazer();
+    } catch (e) {
+      if (i >= 4) throw e;
+      console.log(`! falhou (${(e.stderr || e.message).trim().split('\n')[0]}), tentando de novo`);
+      await new Promise((r) => setTimeout(r, 10_000 * 2 ** i));
+    }
+  }
+}
+
 /** `local:<uuid>`, `local%3A<uuid>`, `local%3A<uuid>.bin` ou caminho → id e .bin */
 function localizar(pedido) {
   const base = path.basename(pedido).replace(/\.(bin|json)$/, '');
@@ -137,8 +150,14 @@ async function criarConteiner(n) {
     await sh('git', ['init', '-b', 'main', dir]);
     await git(dir, 'add', '-A');
     await git(dir, 'commit', '-m', `${nome}: contêiner novo`);
-    await gh(['repo', 'create', remoto, PUBLICO ? '--public' : '--private', '--source', dir, '--push',
-      '--description', 'Contêiner de faixas do Aurial para os vídeos']);
+    // Criar e empurrar em passos separados: o GitHub solta 499/502 de vez em quando,
+    // e a criação às vezes vale mesmo quando a resposta vem com erro.
+    await insistir(async () => {
+      const existe = await gh(['repo', 'view', remoto, '--json', 'name']).then(() => true, () => false);
+      if (!existe) await gh(['repo', 'create', remoto, PUBLICO ? '--public' : '--private', '--description', 'Contêiner de faixas do Aurial para os vídeos']);
+    });
+    await git(dir, 'remote', 'add', 'origin', `${process.env.GIT_REMOTO_BASE ?? 'https://github.com/' + DONO}/${nome}`);
+    await insistir(() => git(dir, 'push', '-u', 'origin', 'main'));
   }
   return { nome, dir, bytes: await tamanhoDoConteiner(dir) };
 }
@@ -162,7 +181,7 @@ async function publicar(c, novas) {
   if (!novas && !(await git(c.dir, 'status', '--porcelain')).stdout.trim()) return;
   await git(c.dir, 'add', '-A');
   await git(c.dir, 'commit', '-m', `${c.nome}: +${novas} faixa(s)${lote ? ` — ${lote}` : ''}`);
-  await git(c.dir, 'push', '-u', 'origin', 'main');
+  await insistir(() => git(c.dir, 'push', '-u', 'origin', 'main'));
   console.log(`✓ ${c.nome}: ${novas} faixa(s) enviadas (${(c.bytes / 1024 / 1024).toFixed(0)} MB no contêiner)`);
 }
 
