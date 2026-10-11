@@ -58,12 +58,14 @@ const PUBLICO = args.includes('--publico');
 if (PUBLICO) args.splice(args.indexOf('--publico'), 1);
 const lote = opcao('--lote');
 const lista = opcao('--lista');
+const SO_INDICE = args.includes('--so-indice');
+if (SO_INDICE) args.splice(args.indexOf('--so-indice'), 1);
 const TODAS = args.includes('--todas');
 if (TODAS) args.splice(args.indexOf('--todas'), 1);
 const pedidos = [...args];
 if (TODAS) pedidos.push(...(await readdir(COFRE)).filter((n) => n.endsWith('.bin')).sort());
 if (lista) pedidos.push(...(await readFile(lista, 'utf8')).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
-if (!pedidos.length) {
+if (!pedidos.length && !SO_INDICE) {
   console.error('uso: musicas-para-o-git.mjs <id> [...] | --lista ids.txt | --todas  [--lote nome] [--publico]');
   process.exit(1);
 }
@@ -185,7 +187,50 @@ async function publicar(c, novas) {
   console.log(`✓ ${c.nome}: ${novas} faixa(s) enviadas (${(c.bytes / 1024 / 1024).toFixed(0)} MB no contêiner)`);
 }
 
+/**
+ * O ÍNDICE QUE O APP USA. O Worker da Cloudflare (infra/cdn/github-worker) atende
+ * `/blob/<id>?k=` lendo daqui onde a faixa mora e qual token a libera. Mora num
+ * repositório privado à parte (`aurial-indice-musicas`) — o nome não começa com o
+ * prefixo dos contêineres de propósito, senão viraria "o contêiner aberto".
+ * O token é relido do cofre a cada publicação: um reenvio troca o token.
+ */
+const INDICE_REPO = 'aurial-indice-musicas';
+async function publicarIndice(geral) {
+  const dir = path.join(RAIZ, '_' + INDICE_REPO);
+  const remoto = `${DONO}/${INDICE_REPO}`;
+  if (!(await existe(path.join(dir, '.git')))) {
+    const jaExiste = await gh(['repo', 'view', remoto, '--json', 'name']).then(() => true, () => false);
+    if (jaExiste) await gh(['repo', 'clone', remoto, dir]);
+    else {
+      await mkdir(dir, { recursive: true });
+      await sh('git', ['init', '-b', 'main', dir]);
+      await insistir(async () => {
+        const ok = await gh(['repo', 'view', remoto, '--json', 'name']).then(() => true, () => false);
+        if (!ok) await gh(['repo', 'create', remoto, '--private', '--description', 'Índice das faixas do Aurial nos contêineres (lido pelo Worker)']);
+      });
+      await git(dir, 'remote', 'add', 'origin', `${process.env.GIT_REMOTO_BASE ?? 'https://github.com/' + DONO}/${INDICE_REPO}`);
+    }
+  }
+  const saida = {};
+  for (const [id, f] of Object.entries(geral)) {
+    const meta = await lerJson(path.join(COFRE, encodeURIComponent(id) + '.json'), null).catch(() => null);
+    if (meta?.token) [f.k, f.t] = [meta.token, meta.contentType || 'audio/mpeg'];
+    if (f.k) saida[id] = { c: f.conteiner, a: f.arquivo, k: f.k, t: f.t || 'audio/mpeg' };
+  }
+  await writeFile(path.join(dir, 'indice.json'), JSON.stringify(saida));
+  if (!(await git(dir, 'status', '--porcelain')).stdout.trim()) return;
+  await git(dir, 'add', '-A');
+  await git(dir, 'commit', '-m', `${Object.keys(saida).length} faixas`);
+  await insistir(() => git(dir, 'push', '-u', 'origin', 'main'));
+  console.log(`✓ índice: ${Object.keys(saida).length} faixas`);
+}
+
 const geral = await lerJson(path.join(RAIZ, 'indice.json'), {});
+if (SO_INDICE) {
+  await publicarIndice(geral);
+  await gravarJson(path.join(RAIZ, 'indice.json'), geral);
+  process.exit(0);
+}
 let c = await conteinerAtual();
 let novas = 0;
 let pendentes = 0;
@@ -216,6 +261,7 @@ for (const pedido of pedidos) {
     const cheio = c.dir;
     c = await criarConteiner(Number(c.nome.slice(PREFIXO.length)) + 1);
     await rm(cheio, { recursive: true, force: true });
+    await publicarIndice(geral);
   }
   const meta = await lerJson(bin.replace(/\.bin$/, '.json'), {});
   let { titulo, artista } = await etiquetas(bin);
@@ -252,6 +298,7 @@ for (const pedido of pedidos) {
 }
 
 await publicar(c, novas);
+await publicarIndice(geral);
 await salvarGeral();
 if (falhas.length) {
   console.log(`\n${falhas.length} faixa(s) não foram:`);
