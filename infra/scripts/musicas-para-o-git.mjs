@@ -22,10 +22,14 @@
  * Uso:
  *   node infra/scripts/musicas-para-o-git.mjs <id> [<id> ...] [--lote nome] [--publico]
  *   node infra/scripts/musicas-para-o-git.mjs --lista ids.txt [--lote nome]
+ *   node infra/scripts/musicas-para-o-git.mjs --todas      — o cofre inteiro; retomável
+ * Envio longo: o progresso é salvo a cada faixa e o push sai a cada PEDACO_MB
+ * (200). Rodar de novo continua de onde parou. Contêiner cheio é apagado do
+ * disco depois do push — o cofre não cabe duas vezes no D:.
  * O id é o da faixa no acervo (`local:<uuid>`), o nome do .bin no cofre, ou o
  * caminho do .bin. `--lote` vira subpasta (ex.: o vídeo onde a faixa entra).
  */
-import { readFile, writeFile, mkdir, copyFile, stat, access, rm } from 'node:fs/promises';
+import { readFile, writeFile, mkdir, copyFile, stat, access, rm, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
@@ -39,6 +43,8 @@ const PREFIXO = 'aurial-musicas-';
 const gh = (a) => (process.env.GH_BIN ? sh(process.execPath, [process.env.GH_BIN, ...a]) : sh('gh', a));
 const TETO = Number(process.env.TETO_MB ?? 900) * 1024 * 1024;
 const MAX_ARQUIVO = 95 * 1024 * 1024; // o GitHub recusa a partir de 100 MB
+// Push em pedaços: um envio de horas que cair perde no máximo isto.
+const PEDACO = Number(process.env.PEDACO_MB ?? 200) * 1024 * 1024;
 
 const args = process.argv.slice(2);
 const opcao = (nome) => {
@@ -52,10 +58,13 @@ const PUBLICO = args.includes('--publico');
 if (PUBLICO) args.splice(args.indexOf('--publico'), 1);
 const lote = opcao('--lote');
 const lista = opcao('--lista');
+const TODAS = args.includes('--todas');
+if (TODAS) args.splice(args.indexOf('--todas'), 1);
 const pedidos = [...args];
+if (TODAS) pedidos.push(...(await readdir(COFRE)).filter((n) => n.endsWith('.bin')).sort());
 if (lista) pedidos.push(...(await readFile(lista, 'utf8')).split(/\r?\n/).map((l) => l.trim()).filter(Boolean));
 if (!pedidos.length) {
-  console.error('uso: musicas-para-o-git.mjs <id> [...] [--lista ids.txt] [--lote nome] [--publico]');
+  console.error('uso: musicas-para-o-git.mjs <id> [...] | --lista ids.txt | --todas  [--lote nome] [--publico]');
   process.exit(1);
 }
 
@@ -149,7 +158,8 @@ async function conteinerAtual() {
 }
 
 async function publicar(c, novas) {
-  if (!novas) return;
+  // Arquivo copiado num envio que caiu também sobe aqui: o status diz se há o que mandar.
+  if (!novas && !(await git(c.dir, 'status', '--porcelain')).stdout.trim()) return;
   await git(c.dir, 'add', '-A');
   await git(c.dir, 'commit', '-m', `${c.nome}: +${novas} faixa(s)${lote ? ` — ${lote}` : ''}`);
   await git(c.dir, 'push', '-u', 'origin', 'main');
@@ -159,12 +169,16 @@ async function publicar(c, novas) {
 const geral = await lerJson(path.join(RAIZ, 'indice.json'), {});
 let c = await conteinerAtual();
 let novas = 0;
+let pendentes = 0;
+let feitas = 0;
 const falhas = [];
+const salvarGeral = () => gravarJson(path.join(RAIZ, 'indice.json'), geral);
 
 for (const pedido of pedidos) {
+  feitas++;
   const { id, bin } = localizar(pedido);
   if (geral[id]) {
-    console.log(`= já está em ${geral[id].conteiner}: ${geral[id].arquivo}`);
+    if (!TODAS) console.log(`= já está em ${geral[id].conteiner}: ${geral[id].arquivo}`);
     continue;
   }
   if (!(await existe(bin))) {
@@ -178,8 +192,11 @@ for (const pedido of pedidos) {
   }
   if (c.bytes + size > TETO) {
     await publicar(c, novas);
-    novas = 0;
+    novas = pendentes = 0;
+    // O disco não comporta o cofre duas vezes: contêiner cheio e enviado sai daqui.
+    const cheio = c.dir;
     c = await criarConteiner(Number(c.nome.slice(PREFIXO.length)) + 1);
+    await rm(cheio, { recursive: true, force: true });
   }
   const meta = await lerJson(bin.replace(/\.bin$/, '.json'), {});
   let { titulo, artista } = await etiquetas(bin);
@@ -192,20 +209,31 @@ for (const pedido of pedidos) {
   await mkdir(path.join(c.dir, pasta), { recursive: true });
   let arquivo = path.join(pasta, nomeBase + ext);
   if (await existe(path.join(c.dir, arquivo))) arquivo = path.join(pasta, `${nomeBase} [${id.slice(-8)}]${ext}`);
-  await copyFile(bin, path.join(c.dir, arquivo));
+  try {
+    await copyFile(bin, path.join(c.dir, arquivo));
+  } catch (e) {
+    falhas.push(`${id}: ${e.code ?? e.message} (podada durante o envio?)`);
+    continue;
+  }
   arquivo = arquivo.split(path.sep).join('/');
 
   const ind = await lerJson(path.join(c.dir, 'indice.json'), { conteiner: c.nome, faixas: [] });
   ind.faixas.push({ id, titulo, artista, arquivo, bytes: size, lote, origem: meta.sourceUrl ?? null });
   await gravarJson(path.join(c.dir, 'indice.json'), ind);
   geral[id] = { conteiner: c.nome, arquivo };
+  await salvarGeral();
   c.bytes += size;
+  pendentes += size;
   novas++;
-  console.log(`+ ${arquivo}`);
+  console.log(`+ [${feitas}/${pedidos.length}] ${arquivo}`);
+  if (pendentes >= PEDACO) {
+    await publicar(c, novas);
+    novas = pendentes = 0;
+  }
 }
 
 await publicar(c, novas);
-await gravarJson(path.join(RAIZ, 'indice.json'), geral);
+await salvarGeral();
 if (falhas.length) {
   console.log(`\n${falhas.length} faixa(s) não foram:`);
   for (const f of falhas) console.log('  - ' + f);
