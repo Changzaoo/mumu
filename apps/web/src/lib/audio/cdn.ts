@@ -15,8 +15,15 @@
 const FORA_MS = 60_000;
 const COPIA_DO_COFRE = /^\/blob\/[^/?]+$/;
 
+/**
+ * A borda do GitHub (infra/cdn/github-worker): toca a cópia dos repositórios
+ * privados sem passar pelo PC do importador. É o padrão; `VITE_AUDIO_CDN`
+ * definida (mesmo vazia) manda no lugar dela.
+ */
+const BORDA_PADRAO = 'https://musicas.radinho.online';
+
 function lerBordas(): string[] {
-  const bruto = (import.meta.env.VITE_AUDIO_CDN ?? '') as string;
+  const bruto = (import.meta.env.VITE_AUDIO_CDN ?? BORDA_PADRAO) as string;
   return bruto
     .split(',')
     .map((s) => s.trim().replace(/\/+$/, ''))
