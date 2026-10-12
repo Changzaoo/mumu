@@ -26,8 +26,11 @@ export const DURACAO_MAX_SEG = 15 * 60;
 
 const CACHE_TTL_MS = 10 * 60_000;
 const CACHE_MAX_TERMOS = 500;
-/** Por quem pergunta: 10 buscas NOVAS por minuto é folga para quem digita. */
-const LIMITE_POR_JANELA = 10;
+/**
+ * Por quem pergunta: cada termo novo custa DUAS idas ao YouTube (as músicas e
+ * os artistas), então 20 por minuto são as mesmas ~10 buscas de quem digita.
+ */
+const LIMITE_POR_JANELA = 20;
 const JANELA_MS = 60_000;
 /** yt-dlp simultâneos só desta rota — o resto do importador precisa de CPU. */
 const MAX_SIMULTANEAS = 3;
@@ -35,6 +38,12 @@ const TIMEOUT_MS = 25_000;
 const TERMO_MAX = 120;
 
 const ID_VIDEO = /^[A-Za-z0-9_-]{11}$/;
+/** Id de canal do YouTube: "UC" + 22. É o que a página do artista leva na URL. */
+export const ID_CANAL = /^UC[A-Za-z0-9_-]{22}$/;
+/** Filtro "só canais" da busca do YouTube (o `sp` da página de resultados). */
+const SO_CANAIS = 'EgIQAg%3D%3D';
+/** Canal do artista não muda de minuto em minuto: guarda por mais tempo. */
+const CACHE_CANAL_MS = 60 * 60_000;
 
 /** Espaços colapsados, tamanho limitado. Vazio = não há o que buscar. */
 export function normalizarTermo(termo) {
@@ -81,15 +90,22 @@ export function pareceMusica(entrada) {
  * Aceita o texto cru ou o objeto já lido; entrada estranha vira lista vazia
  * (nunca lança — a rota responde "nada achado", não 500).
  */
-export function parseResultados(bruto) {
-  let dados = bruto;
-  if (typeof bruto === 'string') {
-    try {
-      dados = JSON.parse(bruto);
-    } catch {
-      return [];
-    }
+function lerJson(bruto) {
+  if (typeof bruto !== 'string') return bruto;
+  try {
+    return JSON.parse(bruto);
+  } catch {
+    return null;
   }
+}
+
+export function parseResultados(bruto) {
+  const dados = lerJson(bruto);
+  // Na lista de vídeos de um canal as entradas não trazem o canal: ele vem uma
+  // vez só, no topo — e é ele que vira o artista da faixa.
+  const canalDaLista = [dados?.channel, dados?.uploader].find(
+    (c) => typeof c === 'string' && c.trim(),
+  );
   const entradas = Array.isArray(dados?.entries) ? dados.entries : [];
   const vistos = new Set();
   const resultados = [];
@@ -103,7 +119,9 @@ export function parseResultados(bruto) {
     vistos.add(id);
     const titulo = typeof e.title === 'string' ? e.title.trim() : '';
     if (!titulo) continue;
-    const canal = [e.channel, e.uploader].find((c) => typeof c === 'string' && c.trim());
+    const canal = [e.channel, e.uploader, canalDaLista].find(
+      (c) => typeof c === 'string' && c.trim(),
+    );
     resultados.push({
       url: `https://www.youtube.com/watch?v=${id}`,
       titulo,
@@ -115,17 +133,46 @@ export function parseResultados(bruto) {
   return resultados;
 }
 
+/**
+ * ARTISTAS = CANAIS. Quem canta no bairro e sobe as músicas no próprio canal
+ * não está em catálogo nenhum — o canal é o único lugar onde ele existe. A
+ * busca com filtro de canal traz nome, foto e inscritos numa página só.
+ *
+ * O canal "<Nome> - Topic" é o espelho automático das distribuidoras: mesma
+ * pessoa, sem vídeo próprio na aba de vídeos. Sai da lista — repetiria o
+ * artista e abriria uma página vazia.
+ */
+export function parseCanais(bruto) {
+  const dados = lerJson(bruto);
+  const entradas = Array.isArray(dados?.entries) ? dados.entries : [];
+  const vistos = new Set();
+  const canais = [];
+  for (const e of entradas) {
+    if (!e || typeof e !== 'object') continue;
+    const id = String(e.channel_id ?? e.id ?? '');
+    if (!ID_CANAL.test(id) || vistos.has(id)) continue;
+    const nome = [e.channel, e.title, e.uploader].find((c) => typeof c === 'string' && c.trim());
+    if (!nome || / - Topic$/i.test(nome.trim())) continue;
+    vistos.add(id);
+    const miniaturas = Array.isArray(e.thumbnails) ? e.thumbnails : [];
+    let foto = miniaturas.length ? String(miniaturas[miniaturas.length - 1]?.url ?? '') : '';
+    if (foto.startsWith('//')) foto = `https:${foto}`;
+    const inscritos = Number(e.channel_follower_count);
+    canais.push({
+      id,
+      nome: nome.trim(),
+      foto: /^https:\/\//.test(foto) ? foto : null,
+      inscritos: Number.isFinite(inscritos) && inscritos >= 0 ? inscritos : null,
+    });
+  }
+  return canais;
+}
+
 /** Roda o yt-dlp e devolve o stdout (JSON). Rejeita com o fim do stderr. */
 function rodarYtdlpPadrao({ binario, argsExtras }) {
-  return (termo, quantos) =>
+  const rodarAlvo = (alvo, extras = []) =>
     new Promise((resolve, reject) => {
-      const args = [
-        '--flat-playlist',
-        '--no-warnings',
-        '-J',
-        ...argsExtras(),
-        `ytsearch${quantos}:${termo}`,
-      ];
+      const args = ['--flat-playlist', '--no-warnings', '-J', ...argsExtras(), ...extras, alvo];
       const p = spawn(binario(), args, { windowsHide: true });
       let out = '';
       let err = '';
@@ -148,6 +195,10 @@ function rodarYtdlpPadrao({ binario, argsExtras }) {
         else reject(new Error(err.trim().split('\n').pop() || `yt-dlp saiu com ${code}`));
       });
     });
+  const porTermo = (termo, quantos) => rodarAlvo(`ytsearch${quantos}:${termo}`);
+  // Página de resultados ou aba de um canal: o tamanho vem do --playlist-end.
+  porTermo.url = (url, quantos) => rodarAlvo(url, ['--playlist-end', String(quantos)]);
+  return porTermo;
 }
 
 /**
@@ -199,12 +250,14 @@ export function criarBuscaYoutube({
   binario,
   argsExtras = () => [],
   rodar,
+  rodarUrl,
   agora = () => Date.now(),
   quantos = 10,
   // Com `rodar` injetado (testes) não sai pedido de rede para conferir capa.
   conferirCapa = rodar ? null : conferirCapaPadrao,
 } = {}) {
   const executar = rodar ?? rodarYtdlpPadrao({ binario, argsExtras });
+  const executarUrl = rodarUrl ?? executar.url;
   /** termo normalizado (minúsculo) → { em, resultados } */
   const cache = new Map();
   /** Mesma busca chegando duas vezes enquanto a primeira roda: um processo só. */
@@ -229,14 +282,15 @@ export function criarBuscaYoutube({
     }
   }
 
-  async function buscar(termoCru, chaveUsuario = 'anonimo') {
-    const termo = normalizarTermo(termoCru);
-    if (!termo) return [];
-    const chave = termo.toLowerCase();
+  /**
+   * Cache → mesma pergunta em curso → limite → teto de simultaneidade → yt-dlp.
+   * Igual para as três perguntas; só muda a chave, a validade e quem produz.
+   */
+  async function comCache(chave, chaveUsuario, validadeMs, produzir) {
     const guardado = cache.get(chave);
     // Cache ANTES do limite: repetir a mesma busca (voltar à tela, outra aba)
     // não custa nada ao YouTube e não deve custar nada a quem busca.
-    if (guardado && agora() - guardado.em < CACHE_TTL_MS) return guardado.resultados;
+    if (guardado && agora() - guardado.em < validadeMs) return guardado.resultados;
     const pendente = emCurso.get(chave);
     if (pendente) return pendente;
 
@@ -246,8 +300,7 @@ export function criarBuscaYoutube({
     rodando += 1;
     const promessa = (async () => {
       try {
-        let resultados = parseResultados(await executar(termo, quantos));
-        if (conferirCapa) resultados = await capasSemFaixaPreta(resultados, conferirCapa);
+        const resultados = await produzir();
         cache.set(chave, { em: agora(), resultados });
         if (cache.size > CACHE_MAX_TERMOS) cache.delete(cache.keys().next().value);
         return resultados;
@@ -260,5 +313,37 @@ export function criarBuscaYoutube({
     return promessa;
   }
 
-  return { buscar };
+  async function buscar(termoCru, chaveUsuario = 'anonimo') {
+    const termo = normalizarTermo(termoCru);
+    if (!termo) return [];
+    return comCache(termo.toLowerCase(), chaveUsuario, CACHE_TTL_MS, async () => {
+      const resultados = parseResultados(await executar(termo, quantos));
+      return conferirCapa ? capasSemFaixaPreta(resultados, conferirCapa) : resultados;
+    });
+  }
+
+  /** Canais (artistas) para o termo — inclusive os sem catálogo nenhum. */
+  async function buscarArtistas(termoCru, chaveUsuario = 'anonimo') {
+    const termo = normalizarTermo(termoCru);
+    if (!termo) return [];
+    const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(termo)}&sp=${SO_CANAIS}`;
+    return comCache(`artistas:${termo.toLowerCase()}`, chaveUsuario, CACHE_TTL_MS, async () =>
+      parseCanais(await executarUrl(url, 8)),
+    );
+  }
+
+  /** As músicas que o próprio artista subiu no canal, das mais novas às antigas. */
+  async function musicasDoCanal(canal, chaveUsuario = 'anonimo') {
+    if (!ID_CANAL.test(String(canal ?? ''))) return { nome: '', musicas: [] };
+    const url = `https://www.youtube.com/channel/${canal}/videos`;
+    return comCache(`canal:${canal}`, chaveUsuario, CACHE_CANAL_MS, async () => {
+      const bruto = lerJson(await executarUrl(url, 60));
+      let musicas = parseResultados(bruto);
+      if (conferirCapa) musicas = await capasSemFaixaPreta(musicas, conferirCapa);
+      const nome = [bruto?.channel, bruto?.uploader].find((c) => typeof c === 'string' && c.trim());
+      return { nome: nome ? nome.trim() : '', musicas };
+    });
+  }
+
+  return { buscar, buscarArtistas, musicasDoCanal };
 }

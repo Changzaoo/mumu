@@ -38,6 +38,7 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/catalogo/playlist', 'CatalogPlaylistPage'],
   ['/catalogo/artista', 'CatalogArtistPage'],
   ['/album-apple', 'AppleAlbumPage'],
+  ['/artista-yt', 'ArtistaYoutubePage'],
   ['/artista', 'ArtistLocalPage'],
   ['/gravadora', 'LabelLocalPage'],
   ['/gravadoras', 'LabelsPage'],
@@ -256,6 +257,7 @@ export const router = createBrowserRouter([
           { path: '/artist/:id', element: page('ArtistPage', 'detail') },
           // Local library (Spotify-style) — grouped from on-device metadata.
           { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
+          { path: '/artista-yt/:canal', element: page('ArtistaYoutubePage', 'detail') },
           { path: '/gravadora/:name', element: page('LabelLocalPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
           { path: '/mix/:key', element: page('MixPage', 'detail') },

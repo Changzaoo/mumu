@@ -12,7 +12,7 @@
  * O que já aparece na tela (as músicas do acervo) não se repete aqui, nem as
  * versões do mesmo vídeo (clipe, áudio, letra) entre si.
  */
-import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useSyncExternalStore } from 'react';
 import { useQuery } from '@tanstack/react-query';
 import { SearchX } from 'lucide-react';
 import { Link } from 'react-router';
@@ -23,44 +23,12 @@ import { useAuthUser } from '@/hooks/useAuthUser';
 import { aquecerFontes, buscarNoYoutube, faixaDoYoutube } from '@/lib/local/importerHelper';
 import * as importQueue from '@/lib/local/importQueue';
 import * as localLibrary from '@/lib/local/localLibrary';
-import { trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import type { TrackDto } from '@radinho/shared';
+import { chaveDaMusica, maisDoArtista, VERSAO_ALTERADA } from './filaDoArtista';
+import { useTermoAssentado } from './useTermoAssentado';
 
 const SEM_ITENS: importQueue.ImportItem[] = [];
-/** Espera o dedo parar: cada tecla na barra de cima troca o `q` da URL. */
-const PAUSA_DE_DIGITACAO_MS = 700;
-const DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
-
-function useTermoAssentado(termo: string): string {
-  const [assentado, setAssentado] = useState(termo);
-  useEffect(() => {
-    const t = setTimeout(() => setAssentado(termo), PAUSA_DE_DIGITACAO_MS);
-    return () => clearTimeout(t);
-  }, [termo]);
-  return assentado;
-}
-
-/** "Mantém" de "Matuê" — a mesma música em qualquer grafia/versão. */
-function chaveDaMusica(t: TrackDto): string {
-  const norm = (s: string): string =>
-    s
-      .normalize('NFD')
-      .replace(DIACRITICOS, '')
-      .toLowerCase()
-      .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-      .replace(/[^a-z0-9]+/g, ' ')
-      .trim();
-  return `${norm(trackArtistNames(t))}|${norm(t.title)}`;
-}
-
-/**
- * Versão mexida por terceiros (acelerada, "8D", karaokê, reação…): quem busca
- * "Mantém" quer a música, não o "speed up + grave" de um canal qualquer. Só
- * aparece se a própria busca pedir por ela.
- */
-const VERSAO_ALTERADA =
-  /\b(?:speed ?up|sped ?up|slowed|reverb|8d|nightcore|bass ?boost(?:ed)?|karaok[eê]|instrumental|cover|reac(?:t|tion|ting)|reagindo|react|tutorial|aula|remix)\b/i;
 
 /**
  * Resultado da busca por baixo: distingue "não achou nada" de "a fonte caiu"
@@ -106,7 +74,7 @@ export function MaisMusicas({
   const { user, loading: carregandoConta } = useAuthUser();
   const logado = Boolean(user && !user.isAnonymous);
   const assentado = useTermoAssentado(termo);
-  const playQueue = usePlayerStore((s) => s.playQueue);
+  const playTrack = usePlayerStore((s) => s.playTrack);
   const currentTrack = usePlayerStore((s) => s.currentTrack);
   const isPlaying = usePlayerStore((s) => s.isPlaying);
   const itens = useSyncExternalStore(importQueue.subscribe, importQueue.list, () => SEM_ITENS);
@@ -149,8 +117,14 @@ export function MaisMusicas({
   const tocar = (indice: number): void => {
     const alvo = faixas[indice];
     if (!alvo) return;
-    // A fila leva TODAS — uma fila de uma faixa só pararia no fim da música.
-    playQueue(faixas, indice, { source: 'search', sourceId: termo });
+    // A fila NÃO é o resultado da busca (as outras versões, os covers, outros
+    // artistas com o mesmo título): é o MESMO artista. Toca já e, assim que a
+    // lista dele chega, ela vira o que vem depois — se ainda for esta a tocar.
+    playTrack(alvo, { source: 'search', sourceId: termo });
+    void maisDoArtista(alvo).then((proximas) => {
+      const player = usePlayerStore.getState();
+      if (proximas.length > 0 && player.currentTrack?.id === alvo.id) player.setUpNext(proximas);
+    });
     // E por baixo ela vem para o acervo: baixa, vai para o cofre, e a próxima
     // vez toca a cópia. Uma vez só por link.
     const fonte = alvo.sourceUrl;

@@ -17,6 +17,7 @@ import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { useTrackLikes } from '@/features/library/api';
 import { useRecentSearches } from '@/features/search/api';
+import { ArtistasDaInternet } from '@/features/search/ArtistasDaInternet';
 import { MaisMusicas } from '@/features/search/MaisMusicas';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { indexLyricsInBackground, searchByLyrics } from '@/lib/search/lyricsSearch';
@@ -665,6 +666,9 @@ export default function SearchPage() {
 
       {/* Fora do bloco acima de propósito: continua valendo quando o catálogo
           grátis está fora do ar (isError) ou não achou nada. */}
+      {hasQuery && showArtists && (
+        <ArtistasDaInternet termo={query} jaNaTela={local.artists.map((a) => a.name)} />
+      )}
       {hasQuery && showTracks && (
         <MaisMusicas termo={query} jaNaTela={jaNaTela} semNadaNoAcervo={isEmpty} />
       )}

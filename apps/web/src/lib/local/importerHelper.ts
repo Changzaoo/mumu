@@ -1147,6 +1147,89 @@ export async function buscarNoYoutube(termo: string, signal?: AbortSignal): Prom
 }
 
 /**
+ * Um artista achado na internet — um CANAL do YouTube (ver `GET /buscar-artistas`).
+ * É onde existe quem não está em catálogo nenhum: o MC do bairro que sobe as
+ * músicas no próprio canal.
+ */
+export interface ArtistaYoutube {
+  canal: string;
+  nome: string;
+  foto: string | null;
+  inscritos: number | null;
+}
+
+export type BuscaArtistasYoutube =
+  { ok: true; artistas: ArtistaYoutube[] } | { ok: false; motivo: 'login' | 'limite' | 'falha' };
+
+const ID_CANAL_YOUTUBE = /^UC[A-Za-z0-9_-]{22}$/;
+
+export function parseArtistasYoutube(data: unknown): ArtistaYoutube[] {
+  const lista = (data as { artistas?: unknown } | null)?.artistas;
+  if (!Array.isArray(lista)) return [];
+  const saida: ArtistaYoutube[] = [];
+  for (const bruto of lista) {
+    const a = bruto as Record<string, unknown> | null;
+    if (!a || typeof a.id !== 'string' || !ID_CANAL_YOUTUBE.test(a.id)) continue;
+    const nome = typeof a.nome === 'string' ? a.nome.trim() : '';
+    if (!nome) continue;
+    const inscritos = Number(a.inscritos);
+    saida.push({
+      canal: a.id,
+      nome,
+      foto: typeof a.foto === 'string' && /^https:\/\//.test(a.foto) ? a.foto : null,
+      inscritos: a.inscritos != null && Number.isFinite(inscritos) ? inscritos : null,
+    });
+  }
+  return saida;
+}
+
+/** Pergunta autenticada ao importador; `login`/`limite`/`falha` como na busca. */
+async function perguntarAoImportador(
+  caminho: string,
+  signal?: AbortSignal,
+): Promise<{ ok: true; data: unknown } | { ok: false; motivo: 'login' | 'limite' | 'falha' }> {
+  const headers = await baseHeaders();
+  if (!headers.Authorization) return { ok: false, motivo: 'login' };
+  try {
+    const res = await fetch(`${helperUrl()}${caminho}`, { headers, signal });
+    if (res.status === 401 || res.status === 403) return { ok: false, motivo: 'login' };
+    if (res.status === 429) return { ok: false, motivo: 'limite' };
+    if (!res.ok) return { ok: false, motivo: 'falha' };
+    return { ok: true, data: await res.json() };
+  } catch {
+    return { ok: false, motivo: 'falha' };
+  }
+}
+
+/** Artistas (canais) com esse nome no YouTube. Nunca lança. */
+export async function buscarArtistasNoYoutube(
+  termo: string,
+  signal?: AbortSignal,
+): Promise<BuscaArtistasYoutube> {
+  const r = await perguntarAoImportador(`/buscar-artistas?q=${encodeURIComponent(termo)}`, signal);
+  return r.ok ? { ok: true, artistas: parseArtistasYoutube(r.data) } : r;
+}
+
+/** As músicas que o artista subiu no próprio canal. Nunca lança. */
+export async function musicasDoCanal(
+  canal: string,
+  signal?: AbortSignal,
+): Promise<
+  | { ok: true; nome: string; resultados: ResultadoYoutube[] }
+  | { ok: false; motivo: 'login' | 'limite' | 'falha' }
+> {
+  if (!ID_CANAL_YOUTUBE.test(canal)) return { ok: false, motivo: 'falha' };
+  const r = await perguntarAoImportador(`/artista-youtube?canal=${canal}`, signal);
+  if (!r.ok) return r;
+  const nome = (r.data as { nome?: unknown } | null)?.nome;
+  return {
+    ok: true,
+    nome: typeof nome === 'string' ? nome : '',
+    resultados: parseResultadosYoutube(r.data),
+  };
+}
+
+/**
  * Faixa TEMPORÁRIA para tocar um resultado do YouTube na hora, sem importar.
  *
  * O id `youtube:<videoId>` é de propósito NÃO-`local:`: o player carrega a

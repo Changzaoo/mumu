@@ -55,7 +55,7 @@ import { criarIaChat } from './iaChat.mjs';
 import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
-import { criarBuscaYoutube, LimiteDeBusca } from './buscaYoutube.mjs';
+import { criarBuscaYoutube, ID_CANAL, LimiteDeBusca } from './buscaYoutube.mjs';
 import { soMusicas } from './ehMusica.mjs';
 import { analisarLinkDeMusica } from './linkDeMusica.mjs';
 import { criarResolvedorDeMusica, NaoAchei } from './resolverDeMusica.mjs';
@@ -3460,13 +3460,23 @@ async function main() {
       // Candidatos já filtrados (sem live, sem short, sem compilação) para a
       // pessoa tocar na hora via /stream ou mandar para a fila de import. A
       // lógica, o cache e o limite moram em buscaYoutube.mjs.
-      if (req.method === 'GET' && pathname === '/buscar-youtube') {
+      //
+      // Mesma porta, três perguntas: as músicas (`/buscar-youtube`), os
+      // artistas — canais, onde mora quem não está em catálogo nenhum
+      // (`/buscar-artistas`) — e as músicas de um artista (`/artista-youtube`).
+      if (
+        req.method === 'GET' &&
+        (pathname === '/buscar-youtube' ||
+          pathname === '/buscar-artistas' ||
+          pathname === '/artista-youtube')
+      ) {
         if (!(await authorize(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Entre na sua conta para buscar no YouTube.' }));
           return;
         }
-        const termo = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('q');
+        const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
+        const termo = pathname === '/artista-youtube' ? params.get('canal') : params.get('q');
         if (!termo || !termo.trim()) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Busca vazia.' }));
@@ -3489,9 +3499,22 @@ async function main() {
           quem = `ip:${encaminhado || req.socket.remoteAddress || '?'}`;
         }
         try {
-          const resultados = await buscaYoutube.buscar(termo, quem);
+          let corpo;
+          if (pathname === '/buscar-artistas') {
+            corpo = { artistas: await buscaYoutube.buscarArtistas(termo, quem) };
+          } else if (pathname === '/artista-youtube') {
+            if (!ID_CANAL.test(termo)) {
+              res.writeHead(400, { 'Content-Type': 'application/json' });
+              res.end(JSON.stringify({ error: 'Canal inválido.' }));
+              return;
+            }
+            const { nome, musicas } = await buscaYoutube.musicasDoCanal(termo, quem);
+            corpo = { nome, resultados: musicas };
+          } else {
+            corpo = { resultados: await buscaYoutube.buscar(termo, quem) };
+          }
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
-          res.end(JSON.stringify({ resultados }));
+          res.end(JSON.stringify(corpo));
         } catch (err) {
           if (err instanceof LimiteDeBusca) {
             res.writeHead(429, {
