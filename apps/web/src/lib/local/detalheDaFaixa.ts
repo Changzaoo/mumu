@@ -144,6 +144,22 @@ export async function garantirDetalhe(id: string): Promise<boolean> {
   return p;
 }
 
+/**
+ * O LINK DE ORIGEM desta faixa (o `watch?v=` do YouTube), buscando no acervo
+ * se a entrada chegou magra. É o que o modo clipe precisa — e o único caso em
+ * que o `sourceUrl` interessa por si só, sem a cópia do cofre.
+ *
+ * `garantirDetalhe` não serve aqui: ele volta na hora quando a faixa já TOCA,
+ * e uma faixa que toca pode muito bem não ter recebido o link de origem.
+ */
+export async function origemDaFaixa(id: string): Promise<string | null> {
+  const ja = entradaDe(id)?.sourceUrl;
+  if (ja) return ja;
+  if (!entradaDe(id) || prontos.has(id)) return null;
+  await buscar(id).catch(() => false);
+  return entradaDe(id)?.sourceUrl ?? null;
+}
+
 /** Já foi hidratada (ou já nasceu completa)? Usado pelo assimilador. */
 export function temDetalhe(id: string): boolean {
   return prontos.has(id) || jaTemConteudo(entradaDe(id));

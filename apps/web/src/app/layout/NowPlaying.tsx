@@ -7,6 +7,7 @@ import { AnimatePresence, motion } from 'framer-motion';
 import {
   AudioLines,
   ChevronDown,
+  Clapperboard,
   Gauge,
   ListMusic,
   MicVocal,
@@ -29,6 +30,8 @@ import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
+import { ClipeView } from '@/components/media/ClipeView';
+import { aquecerClipe } from '@/lib/clipe/youtubeApi';
 import { OpcoesRemotas } from '@/components/media/OpcoesRemotas';
 import { useTrackLikes } from '@/features/library/api';
 import { SeekSlider } from '@/components/media/SeekSlider';
@@ -130,6 +133,9 @@ export function NowPlaying() {
   const setOpen = useUiStore((s) => s.setNowPlayingOpen);
   const lyricsOpen = useUiStore((s) => s.lyricsOpen);
   const toggleLyrics = useUiStore((s) => s.toggleLyrics);
+  const clipeOpen = useUiStore((s) => s.clipeOpen);
+  const toggleClipe = useUiStore((s) => s.toggleClipe);
+  const setClipeOpen = useUiStore((s) => s.setClipeOpen);
   const toggleQueue = useUiStore((s) => s.toggleQueue);
   const setActiveModal = useUiStore((s) => s.setActiveModal);
 
@@ -190,6 +196,15 @@ export function NowPlaying() {
   const setSleepTimer = useSettingsStore((s) => s.setSleepTimer);
 
   const [visualizer, setVisualizer] = useState(false);
+  // O clipe é do áudio DESTE aparelho; com o remoto no comando não há o que casar.
+  const clipeAtivo = clipeOpen && Boolean(faixaLocal) && !visualizer;
+  // Abriu a tela cheia: já abre as conexões e baixa a API do YouTube, para o
+  // clipe aparecer no instante do clique em vez de esperar o aperto de mão.
+  useEffect(() => {
+    if (!open || !faixaLocal) return;
+    const t = window.setTimeout(aquecerClipe, clipeOpen ? 0 : 1_500);
+    return () => window.clearTimeout(t);
+  }, [open, faixaLocal, clipeOpen]);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);
   const likes = useTrackLikes();
   const isTouch = useMediaQuery('(pointer: coarse)');
@@ -372,7 +387,9 @@ export function NowPlaying() {
               <div
                 className={cn(
                   'relative overflow-hidden rounded-xl bg-fg/6 shadow-2xl',
-                  lyricsOpen && !visualizer
+                  // O clipe ocupa o quadro da capa, no mesmo tamanho: a tela
+                  // não pula ao entrar nem ao sair do modo.
+                  lyricsOpen && !visualizer && !clipeAtivo
                     ? 'min-h-0 w-full flex-1'
                     : 'aspect-square w-[min(70vw,340px)]',
                 )}
@@ -381,6 +398,8 @@ export function NowPlaying() {
                   <div className="absolute inset-0 grid place-items-end bg-bg-elevated p-6">
                     <SpectrumVisualizer className="h-3/4" />
                   </div>
+                ) : clipeAtivo && faixaLocal ? (
+                  <ClipeView track={faixaLocal} className="absolute inset-0" />
                 ) : lyricsOpen && faixaLocal ? (
                   <LyricsView track={faixaLocal} className="h-full px-2" />
                 ) : lyricsOpen && remoto && faixaRemota ? (
@@ -573,6 +592,21 @@ export function NowPlaying() {
                       <MicVocal />
                     </IconButton>
                     <IconButton
+                      aria-label={clipeOpen ? 'Voltar para a capa' : 'Clipe'}
+                      title={clipeOpen ? 'Voltar para a capa' : 'Ver o clipe'}
+                      size="sm"
+                      active={clipeOpen}
+                      onPointerEnter={aquecerClipe}
+                      onFocus={aquecerClipe}
+                      onClick={() => {
+                        aquecerClipe();
+                        toggleClipe();
+                        setVisualizer(false);
+                      }}
+                    >
+                      <Clapperboard />
+                    </IconButton>
+                    <IconButton
                       aria-label="Visualizador de espectro"
                       size="sm"
                       active={visualizer}
@@ -580,6 +614,7 @@ export function NowPlaying() {
                         const next = !visualizer;
                         setVisualizer(next);
                         if (next && lyricsOpen) toggleLyrics();
+                        if (next) setClipeOpen(false);
                       }}
                     >
                       <AudioLines />

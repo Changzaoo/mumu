@@ -13,6 +13,8 @@ export interface UiState {
   nowPlayingOpen: boolean;
   /** Lyrics pane inside NowPlaying. */
   lyricsOpen: boolean;
+  /** Modo clipe: o vídeo do YouTube da faixa, mudo, casado com o som. */
+  clipeOpen: boolean;
   commandOpen: boolean;
   activeModal: ActiveModal;
   /**
@@ -35,6 +37,8 @@ export interface UiState {
   toggleNowPlaying: () => void;
   setLyricsOpen: (open: boolean) => void;
   toggleLyrics: () => void;
+  setClipeOpen: (open: boolean) => void;
+  toggleClipe: () => void;
   setCommandOpen: (open: boolean) => void;
   toggleCommand: () => void;
   setActiveModal: (modal: ActiveModal) => void;
@@ -58,14 +62,14 @@ export type DirecaoDaTroca = 1 | -1 | 0;
  * continua começando fechado.
  */
 const TELA_KEY = 'aurial:tela-ao-recarregar';
-type TelaSalva = Pick<UiState, 'nowPlayingOpen' | 'lyricsOpen' | 'queueOpen'>;
+type TelaSalva = Pick<UiState, 'nowPlayingOpen' | 'lyricsOpen' | 'clipeOpen' | 'queueOpen'>;
 
 export function guardarTelaParaRecarregar(): void {
   try {
-    const { nowPlayingOpen, lyricsOpen, queueOpen } = useUiStore.getState();
+    const { nowPlayingOpen, lyricsOpen, clipeOpen, queueOpen } = useUiStore.getState();
     window.sessionStorage.setItem(
       TELA_KEY,
-      JSON.stringify({ nowPlayingOpen, lyricsOpen, queueOpen } satisfies TelaSalva),
+      JSON.stringify({ nowPlayingOpen, lyricsOpen, clipeOpen, queueOpen } satisfies TelaSalva),
     );
   } catch {
     /* sem sessionStorage: volta fechada, como antes */
@@ -80,6 +84,7 @@ function lerTelaSalva(): Partial<TelaSalva> {
     return {
       nowPlayingOpen: t.nowPlayingOpen === true,
       lyricsOpen: t.lyricsOpen === true,
+      clipeOpen: t.clipeOpen === true,
       queueOpen: t.queueOpen === true,
     };
   } catch {
@@ -94,6 +99,7 @@ export const useUiStore = create<UiState>()(
       queueOpen: false,
       nowPlayingOpen: false,
       lyricsOpen: false,
+      clipeOpen: false,
       commandOpen: false,
       activeModal: null,
       direcaoDaTroca: 0,
@@ -105,8 +111,14 @@ export const useUiStore = create<UiState>()(
       toggleQueue: () => set({ queueOpen: !get().queueOpen }),
       setNowPlayingOpen: (nowPlayingOpen) => set({ nowPlayingOpen }),
       toggleNowPlaying: () => set({ nowPlayingOpen: !get().nowPlayingOpen }),
-      setLyricsOpen: (lyricsOpen) => set({ lyricsOpen }),
-      toggleLyrics: () => set({ lyricsOpen: !get().lyricsOpen }),
+      setLyricsOpen: (lyricsOpen) =>
+        set(lyricsOpen ? { lyricsOpen, clipeOpen: false } : { lyricsOpen }),
+      // Letra e clipe disputam o mesmo espaço: abrir um fecha o outro.
+      toggleLyrics: () => set({ lyricsOpen: !get().lyricsOpen, clipeOpen: false }),
+      setClipeOpen: (clipeOpen) =>
+        set(clipeOpen ? { clipeOpen, lyricsOpen: false } : { clipeOpen }),
+      toggleClipe: () =>
+        set(get().clipeOpen ? { clipeOpen: false } : { clipeOpen: true, lyricsOpen: false }),
       setCommandOpen: (commandOpen) => set({ commandOpen }),
       toggleCommand: () => set({ commandOpen: !get().commandOpen }),
       setActiveModal: (activeModal) => set({ activeModal }),
@@ -126,6 +138,7 @@ if (typeof window !== 'undefined') {
     if (
       s.nowPlayingOpen !== antes.nowPlayingOpen ||
       s.lyricsOpen !== antes.lyricsOpen ||
+      s.clipeOpen !== antes.clipeOpen ||
       s.queueOpen !== antes.queueOpen
     ) {
       guardarTelaParaRecarregar();
