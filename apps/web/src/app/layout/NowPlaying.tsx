@@ -32,6 +32,7 @@ import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
 import { ClipeView } from '@/components/media/ClipeView';
 import { aquecerClipe } from '@/lib/clipe/youtubeApi';
+import { origemDaFaixa } from '@/lib/local/detalheDaFaixa';
 import { OpcoesRemotas } from '@/components/media/OpcoesRemotas';
 import { useTrackLikes } from '@/features/library/api';
 import { SeekSlider } from '@/components/media/SeekSlider';
@@ -200,9 +201,18 @@ export function NowPlaying() {
   const clipeAtivo = clipeOpen && Boolean(faixaLocal) && !visualizer;
   // Abriu a tela cheia: já abre as conexões e baixa a API do YouTube, para o
   // clipe aparecer no instante do clique em vez de esperar o aperto de mão.
+  // E já pergunta ao acervo o link de origem da faixa, para o id do vídeo
+  // estar em mãos no clique (uma busca por faixa, só se a entrada veio magra).
   useEffect(() => {
     if (!open || !faixaLocal) return;
-    const t = window.setTimeout(aquecerClipe, clipeOpen ? 0 : 1_500);
+    const id = faixaLocal.id;
+    const t = window.setTimeout(
+      () => {
+        aquecerClipe();
+        if (!faixaLocal.sourceUrl) void origemDaFaixa(id).catch(() => null);
+      },
+      clipeOpen ? 0 : 1_500,
+    );
     return () => window.clearTimeout(t);
   }, [open, faixaLocal, clipeOpen]);
   const [queueSheetOpen, setQueueSheetOpen] = useState(false);

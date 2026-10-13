@@ -109,17 +109,24 @@ function entradaDe(id: string): LibraryEntry | undefined {
   return list().find((e) => e.track.id === id);
 }
 
-async function buscar(id: string): Promise<boolean> {
+/** O detalhe cru da faixa no acervo, ou `null` se o acervo não a tem. */
+async function pedirDetalhe(id: string): Promise<Partial<LibraryEntry> | null> {
   const res = await fetch(`${API_BASE_URL}/catalogo/${encodeURIComponent(id)}`, {
     headers: { Accept: 'application/json' },
   });
-  if (!res.ok) return false;
+  if (!res.ok) return null;
   const corpo = (await res.json()) as { data?: Partial<LibraryEntry> } | Partial<LibraryEntry>;
   // A API responde `{ data: ... }`; aceitar as duas formas evita que uma
   // mudança de envelope quebre a reprodução em silêncio.
   const detalhe =
     (corpo as { data?: Partial<LibraryEntry> }).data ?? (corpo as Partial<LibraryEntry>);
-  if (!detalhe || typeof detalhe !== 'object') return false;
+  if (!detalhe || typeof detalhe !== 'object') return null;
+  return detalhe;
+}
+
+async function buscar(id: string): Promise<boolean> {
+  const detalhe = await pedirDetalhe(id);
+  if (!detalhe) return false;
   hidratarEntrada(id, detalhe);
   prontos.add(id);
   return true;
@@ -144,6 +151,11 @@ export async function garantirDetalhe(id: string): Promise<boolean> {
   return p;
 }
 
+/** Origem já respondida pelo acervo nesta sessão, por id — inclusive "não tem". */
+const origens = new Map<string, string | null>();
+/** Buscas de origem em voo: a tela cheia e o clipe pedindo juntos é UMA busca. */
+const emVooDeOrigem = new Map<string, Promise<string | null>>();
+
 /**
  * O LINK DE ORIGEM desta faixa (o `watch?v=` do YouTube), buscando no acervo
  * se a entrada chegou magra. É o que o modo clipe precisa — e o único caso em
@@ -151,13 +163,34 @@ export async function garantirDetalhe(id: string): Promise<boolean> {
  *
  * `garantirDetalhe` não serve aqui: ele volta na hora quando a faixa já TOCA,
  * e uma faixa que toca pode muito bem não ter recebido o link de origem.
+ *
+ * Vale também para uma faixa que NÃO está na biblioteca deste aparelho (veio
+ * da busca, de um link compartilhado): o acervo é perguntado do mesmo jeito, e
+ * a resposta fica guardada aqui, já que não há entrada onde gravá-la.
  */
 export async function origemDaFaixa(id: string): Promise<string | null> {
   const ja = entradaDe(id)?.sourceUrl;
   if (ja) return ja;
-  if (!entradaDe(id) || prontos.has(id)) return null;
-  await buscar(id).catch(() => false);
-  return entradaDe(id)?.sourceUrl ?? null;
+  if (origens.has(id)) return origens.get(id) ?? null;
+  if (entradaDe(id) && prontos.has(id)) return null;
+  const voando = emVooDeOrigem.get(id);
+  if (voando) return voando;
+  const p = pedirDetalhe(id)
+    .then((detalhe) => {
+      if (detalhe) {
+        hidratarEntrada(id, detalhe);
+        if (entradaDe(id)) prontos.add(id);
+      }
+      const url = entradaDe(id)?.sourceUrl ?? detalhe?.sourceUrl ?? null;
+      origens.set(id, url);
+      return url;
+    })
+    .catch(() => null)
+    .finally(() => {
+      emVooDeOrigem.delete(id);
+    });
+  emVooDeOrigem.set(id, p);
+  return p;
 }
 
 /** Já foi hidratada (ou já nasceu completa)? Usado pelo assimilador. */
