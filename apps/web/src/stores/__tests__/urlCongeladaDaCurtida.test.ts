@@ -152,6 +152,25 @@ function urlCarregada(): string | null {
   return (ultima?.[0] as TrackDto | undefined)?.streamUrl ?? null;
 }
 
+/**
+ * QUAL CÓPIA foi carregada — caminho e token, sem a origem.
+ *
+ * A cópia do cofre toca primeiro pela borda (ver lib/audio/cdn.ts), com o
+ * mesmo caminho e o mesmo token da URL gravada; só o host muda. O que estes
+ * testes guardam é o TOKEN (o do registro × o da foto), não por onde passa.
+ */
+function copiaCarregada(): string | null {
+  const url = urlCarregada();
+  if (!url) return null;
+  const u = new URL(url);
+  return `${u.pathname}${u.search}`;
+}
+
+function copiaDe(url: string): string {
+  const u = new URL(url);
+  return `${u.pathname}${u.search}`;
+}
+
 /** Entrega ao player o mesmo evento que o elemento de áudio produz quando a
  *  fonte não carrega — é ele que dispara a busca pela próxima fonte. */
 function emitirErroDeCarga(): void {
@@ -168,6 +187,15 @@ initPlayerEngine();
 beforeEach(() => {
   usePlayerStore.setState(initialState, true);
   vi.clearAllMocks();
+  // SEM REDE DE VERDADE. A sonda do player (`sondarFonteEmParalelo`) faz um
+  // `fetch` real da URL carregada — e desde que a cópia toca pela borda do
+  // GitHub, essa URL é um host que EXISTE e responde 404. O teste passava a
+  // depender da internet e a sonda corria contra os erros simulados aqui.
+  // Rede indisponível é o que a sonda trata como "não é prova de nada".
+  vi.stubGlobal(
+    'fetch',
+    vi.fn(() => Promise.reject(new TypeError('sem rede no teste'))),
+  );
   remoteUrlFor.mockReturnValue(null);
   sourceUrlFor.mockReturnValue(null);
   buildStreamUrl.mockResolvedValue(null);
@@ -183,7 +211,7 @@ describe('a curtida guarda uma fotografia, não o endereço atual', () => {
     await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
 
     // ANTES: carregava URL_CONGELADA e o cofre respondia 403.
-    expect(urlCarregada()).toBe(URL_VIVA);
+    expect(copiaCarregada()).toBe(copiaDe(URL_VIVA));
   });
 
   it('entrada ainda MAGRA: busca o detalhe em vez de confiar na fotografia', async () => {
@@ -198,7 +226,7 @@ describe('a curtida guarda uma fotografia, não o endereço atual', () => {
     await vi.waitFor(() => expect(audioEngine.load).toHaveBeenCalled());
 
     expect(garantirDetalhe).toHaveBeenCalledWith(ID);
-    expect(urlCarregada()).toBe(URL_VIVA);
+    expect(copiaCarregada()).toBe(copiaDe(URL_VIVA));
   });
 
   it('sem nada melhor no registro, a URL da curtida ainda é tentada', async () => {
@@ -232,8 +260,10 @@ describe('quando a URL congelada morre, ainda há para onde cair', () => {
 
     // A cura projetada em `reportDeadRemote`: confirmado o 403, a URL podre é
     // apagada da entrada JUSTAMENTE para que a próxima busca traga a atual.
-    reportDeadRemote.mockImplementation(() => {
-      remoteUrlFor.mockReturnValue(null);
+    // Como no registro de verdade, só a URL GRAVADA (a da origem) é prova de
+    // morte: o 404 de uma borda nunca apaga a cópia.
+    reportDeadRemote.mockImplementation((_id, deadUrl) => {
+      if (deadUrl === remoteUrlFor(ID)) remoteUrlFor.mockReturnValue(null);
     });
     garantirDetalhe.mockImplementation(() => {
       remoteUrlFor.mockReturnValue(URL_VIVA);
@@ -241,13 +271,20 @@ describe('quando a URL congelada morre, ainda há para onde cair', () => {
     });
 
     usePlayerStore.getState().playTrack(faixaCurtida(), { source: 'library' });
+    await vi.waitFor(() => expect(copiaCarregada()).toBe(copiaDe(URL_CONGELADA)));
+
+    // A cópia velha toca primeiro pela borda; a borda também a recusa, e o
+    // player tenta a mesma cópia direto na origem — só a origem é prova de
+    // morte (um 404 de borda nunca apaga a cópia gravada).
+    emitirErroDeCarga();
     await vi.waitFor(() => expect(urlCarregada()).toBe(URL_CONGELADA));
 
-    // O cofre recusa a URL velha (403) — o player reporta e procura a próxima.
+    // O cofre recusa o token velho (403) — o player reporta e procura a próxima.
     emitirErroDeCarga();
 
     // ANTES: `resolveNextSource` lia o registro (agora vazio), achava null e o
     // player parava com "Faixa indisponível" — com a cópia boa viva no cofre.
-    await vi.waitFor(() => expect(urlCarregada()).toBe(URL_VIVA));
+    await vi.waitFor(() => expect(copiaCarregada()).toBe(copiaDe(URL_VIVA)));
+    expect(reportDeadRemote).toHaveBeenCalledWith(ID, URL_CONGELADA);
   });
 });
