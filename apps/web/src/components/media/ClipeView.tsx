@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Clapperboard, Music } from 'lucide-react';
 import type { TrackDto } from '@radinho/shared';
 import { audioEngine } from '@/lib/audio/AudioEngine';
@@ -10,6 +10,7 @@ import {
   LIMITE_S,
 } from '@/lib/clipe/sincronia';
 import { acoplarPlayer, criarIframeDoClipe, ESTADO, type YtPlayer } from '@/lib/clipe/youtubeApi';
+import { clipeAlternativo, MAX_TENTATIVAS } from '@/lib/clipe/clipeAlternativo';
 import { origemDaFaixa } from '@/lib/local/detalheDaFaixa';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { cn } from '@/lib/utils';
@@ -36,33 +37,48 @@ const BATIDA_MS = 250;
  * 3. O link de origem (o `watch?v=`) já é buscado quando a tela cheia abre,
  *    então no clique o id do vídeo normalmente já está em mãos.
  *
+ * ── QUANDO O OFICIAL NÃO ENTRA ──
+ *
+ * Clipe com embed desligado pelo dono (erro 101/150), vídeo removido, ou faixa
+ * sem link de origem: o modo procura a MESMA música em outro vídeo que aceite
+ * embed (ver `lib/clipe/clipeAlternativo`) e tenta os candidatos em ordem, no
+ * mesmo player. Só depois de esgotá-los é que diz que não há clipe.
+ *
  * A capa segura a tela até o vídeo estar tocando; na pausa do som, ela volta
  * (o embed pausado mostra a bandeja de "mais vídeos" do YouTube — a capa é
  * mais limpa). Na troca de faixa o clipe some antes, e a capa nova segura a
  * tela enquanto o clipe novo carrega no mesmo player (sem recriar o iframe).
  */
 export function ClipeView({ track, className }: { track: TrackDto; className?: string }) {
-  // 1. Qual vídeo? O link de origem da faixa — buscado no acervo se faltar.
-  //    `undefined` = ainda buscando; `null` = a faixa não veio do YouTube.
-  const direto = useMemo(
-    () => idDoVideo(track.sourceUrl ?? localLibrary.sourceUrlFor(track.id)),
-    [track.id, track.sourceUrl],
-  );
-  const [buscado, setBuscado] = useState<{ trackId: string; id: string | null } | null>(null);
+  // 1. Qual vídeo? O link de origem da faixa (buscado no acervo se faltar) —
+  //    e, se ele falhar ou não existir, a mesma música em outro vídeo.
+  //    `undefined` = ainda escolhendo; `null` = não há clipe para esta faixa.
+  const trackRef = useRef(track);
+  trackRef.current = track;
+  /** Vídeos desta faixa que já deram erro no player: não voltam. */
+  const evitadosRef = useRef<{ trackId: string; ids: Set<string> }>({
+    trackId: track.id,
+    ids: new Set(),
+  });
+  /** Sobe a cada erro do YouTube: pede o próximo candidato. */
+  const [tentativa, setTentativa] = useState(0);
+  const [escolha, setEscolha] = useState<Escolha | null>(null);
   useEffect(() => {
-    if (direto) return;
+    if (evitadosRef.current.trackId !== track.id) {
+      evitadosRef.current = { trackId: track.id, ids: new Set() };
+    }
+    const evitar = evitadosRef.current.ids;
     let vivo = true;
-    void origemDaFaixa(track.id)
-      .catch(() => null)
-      .then((url) => {
-        if (vivo) setBuscado({ trackId: track.id, id: idDoVideo(url) });
-      });
+    void escolherVideo(trackRef.current, evitar).then((r) => {
+      if (vivo) setEscolha({ trackId: track.id, tentativa, ...r });
+    });
     return () => {
       vivo = false;
     };
-  }, [track.id, direto]);
+  }, [track.id, track.sourceUrl, tentativa]);
   const videoId: string | null | undefined =
-    direto ?? (buscado?.trackId === track.id ? buscado.id : undefined);
+    escolha?.trackId === track.id && escolha.tentativa === tentativa ? escolha.videoId : undefined;
+  const motivo = videoId === null ? escolha?.motivo : undefined;
 
   const tocando = usePlayerStore((s) => s.isPlaying);
   const [visivel, setVisivel] = useState(false);
@@ -139,8 +155,19 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
       },
       onStateChange: () => conferir(),
       onError: () => {
-        setFalhou(true);
+        // Este vídeo não entra (embed desligado, removido…): risca e pede o
+        // próximo candidato da mesma música. Esgotou: desiste de vez.
+        const chave = carregadoRef.current;
+        if (!chave) return;
+        const [trackId, vid] = chave.split('|') as [string, string];
+        if (trackId !== trackRef.current.id) return;
         setVisivel(false);
+        evitadosRef.current.ids.add(vid);
+        if (evitadosRef.current.ids.size >= MAX_TENTATIVAS) {
+          setFalhou(true);
+          return;
+        }
+        setTentativa((t) => t + 1);
       },
     })
       .then((p) => {
@@ -275,7 +302,7 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
       {semClipe && (
         <div className="absolute inset-x-0 bottom-0 flex items-center justify-center gap-2 bg-gradient-to-t from-black/70 to-transparent p-4 text-sm text-white/85">
           <Clapperboard className="size-4" />
-          {falhou ? 'O clipe desta faixa não pode ser exibido aqui' : 'Esta faixa não tem clipe'}
+          {mensagemSemClipe(falhou, motivo)}
         </div>
       )}
       {esperando && (
@@ -285,4 +312,33 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
       )}
     </div>
   );
+}
+
+interface Escolha {
+  trackId: string;
+  tentativa: number;
+  videoId: string | null;
+  motivo?: 'login' | 'limite' | 'falha';
+}
+
+/**
+ * O vídeo a mostrar para esta faixa, fora dos que já falharam: o de origem,
+ * se ainda vale; senão a mesma música em outro vídeo, pela busca.
+ */
+async function escolherVideo(
+  track: TrackDto,
+  evitar: ReadonlySet<string>,
+): Promise<Omit<Escolha, 'trackId' | 'tentativa'>> {
+  const origem =
+    idDoVideo(track.sourceUrl ?? localLibrary.sourceUrlFor(track.id)) ??
+    idDoVideo(await origemDaFaixa(track.id).catch(() => null));
+  if (origem && !evitar.has(origem)) return { videoId: origem };
+  return clipeAlternativo(track, evitar);
+}
+
+function mensagemSemClipe(falhou: boolean, motivo: Escolha['motivo']): string {
+  if (falhou) return 'Nenhum vídeo desta música pôde ser exibido aqui';
+  if (motivo === 'login') return 'Entre na conta para procurar o clipe desta música';
+  if (motivo === 'limite') return 'Muitas buscas agora — o clipe volta a procurar em um minuto';
+  return 'Não achamos um clipe desta música';
 }
