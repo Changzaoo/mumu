@@ -10,6 +10,7 @@ import { initPlayerEngine } from '@/stores/playerStore';
 import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/stores/settingsStore';
 import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
 import { router } from '@/app/router';
+import { instalarVigiaDoMenu } from '@/lib/telemetry/menuTravado';
 import { ligarCacheDePaginas } from '@/lib/perf/cacheDePaginas';
 
 const queryClient = new QueryClient({
@@ -58,6 +59,8 @@ export default function App() {
     // O player é o único que sobe na hora: ele restaura "de onde parou" e
     // precisa estar de pé antes de qualquer toque no botão de play.
     initPlayerEngine();
+    // Toque no menu que não troca a tela: anota o flagrante e destrava.
+    instalarVigiaDoMenu(router);
     // No app de Android: serviço de reprodução enquanto toca — é o que impede o
     // sistema de matar o app com a tela desligada (ver lib/android/tocadorNativo).
     void import('@/lib/android/tocadorNativo').then((m) => m.iniciarTocadorNativo());

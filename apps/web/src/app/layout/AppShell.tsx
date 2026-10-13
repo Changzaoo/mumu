@@ -1,4 +1,4 @@
-import { Suspense, lazy, useEffect, useState, useSyncExternalStore } from 'react';
+import { Suspense, lazy, useEffect, useLayoutEffect, useState, useSyncExternalStore } from 'react';
 import { Navigate, Outlet, useLocation } from 'react-router';
 import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
@@ -23,6 +23,7 @@ import { Sidebar } from '@/app/layout/Sidebar';
 import { TopBar } from '@/app/layout/TopBar';
 import { avisarAtualizacaoDoApp } from '@/lib/android/conviteApk';
 import { ConviteApkBar } from '@/app/layout/ConviteApkBar';
+import { marcarRotaPintada } from '@/lib/telemetry/menuTravado';
 import { modoLeve } from '@/lib/perf/dispositivo';
 
 /**
@@ -170,6 +171,12 @@ export function AppShell() {
   useEffect(() => {
     recordNavigation(location.pathname);
   }, [location.pathname]);
+
+  // A rota que o React DESENHOU — não a da URL. É por ela que o vigia do menu
+  // sabe se um toque trocou a tela de verdade (ver lib/telemetry/menuTravado).
+  useLayoutEffect(() => {
+    marcarRotaPintada(`${location.pathname}${location.search}`);
+  }, [location.pathname, location.search]);
 
   // Aviso de APK novo (só dentro do app). Espera a abertura assentar. O convite
   // para INSTALAR é a barra fixa (ConviteApkBar), sem timer.
