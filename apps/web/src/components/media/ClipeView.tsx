@@ -210,8 +210,12 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
     const audio = audioEngine.getPosition();
     const duracao = p.getDuration();
 
-    // O clipe pode acabar antes do áudio (créditos cortados): fica no último quadro.
-    if (duracao > 0 && audio + ADIANTO_DO_OUVIDO_S >= duracao - 0.3) return;
+    // O clipe pode acabar antes do áudio (créditos cortados): a capa assume —
+    // o embed que acabou desenha o botão de "assistir de novo" por cima.
+    if (duracao > 0 && audio + ADIANTO_DO_OUVIDO_S >= duracao - 0.3) {
+      setVisivel(false);
+      return;
+    }
 
     if (!somSaindo) {
       // Som parado: o vídeo para junto e a capa volta. Enquanto isso ele já
@@ -225,7 +229,12 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
       return;
     }
     if (estado !== ESTADO.TOCANDO) {
-      if (estado !== ESTADO.CARREGANDO) p.playVideo();
+      // Pronto, pausado ou acabado com o som andando: o embed mostra o botão
+      // grande de play do YouTube — a capa cobre até ele voltar a tocar.
+      if (estado !== ESTADO.CARREGANDO) {
+        setVisivel(false);
+        p.playVideo();
+      }
       return;
     }
 

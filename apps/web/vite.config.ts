@@ -206,7 +206,14 @@ export default defineConfig({
   },
   server: {
     proxy: {
-      '/api': 'http://localhost:4000',
+      // `DEV_API_PROXY=https://api.radinho.online` aponta o dev para a API de
+      // produção (só leitura anônima) quando não há API local — a API recusa
+      // a origem localhost, então tem que ser pelo proxy, que não manda Origin.
+      '/api': {
+        target: process.env.DEV_API_PROXY || 'http://localhost:4000',
+        changeOrigin: true,
+        secure: true,
+      },
       // Dev mirror of the Vercel rewrite: /importer/* → Cloudflare tunnel → home
       // importer. Keeps the app same-origin in dev too (no CORS locally).
       '/importer': {
