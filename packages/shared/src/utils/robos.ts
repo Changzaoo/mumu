@@ -19,7 +19,10 @@ const ROBO =
 /**
  * Navegador de verdade SEMPRE diz o sistema em que roda. O Googlebot de desktop
  * e os que o imitam mandam `Chrome/…` sem sistema nenhum — era exatamente isso
- * que o painel exibia como "Outro · Chrome".
+ * que o painel exibia como "Outro · Chrome". Medido na produção (2026-10-16):
+ * 6.186 aparelhos anônimos com plataforma "Outro", 6.177 deles renderizando com
+ * SwiftShader (GPU por software, a do Chrome sem cabeça) — e nenhuma das contas
+ * de verdade nessa situação.
  */
 const SISTEMA = /windows|macintosh|mac os|linux|android|iphone|ipad|ipod|cros|x11|fuchsia/i;
 
@@ -35,5 +38,6 @@ export function ehRobo(userAgent: string | null | undefined): boolean {
   // "CUBOT" é marca de celular Android, não robô — sai antes da regra do "bot".
   const semMarcas = ua.replace(/cubot/gi, '');
   if (ROBO.test(semMarcas)) return true;
-  return /Chrome\//.test(ua) && !SISTEMA.test(ua);
+  // Sem sistema operacional não é navegador de gente — com `Chrome/` ou sem.
+  return !SISTEMA.test(ua);
 }

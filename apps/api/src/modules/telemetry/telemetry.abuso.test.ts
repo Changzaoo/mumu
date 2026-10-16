@@ -233,6 +233,22 @@ describe('escrita aberta — robôs não viram linha', () => {
     expect(upsert).not.toHaveBeenCalled();
   });
 
+  it('visitante com GPU por software (Chrome sem cabeça) é ignorado', async () => {
+    const swift =
+      'Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver';
+    const { status } = await registrar('aparelho-swift', { dados: { gpu: swift } });
+    expect(status).toBe(204);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('mas COM conta a mesma GPU grava — gente real também cai nela', async () => {
+    const swift =
+      'Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver';
+    const { status } = await registrar('aparelho-vm', { dados: { gpu: swift } }, { id: 'dono' });
+    expect(status).toBe(204);
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+
   it('navegador de verdade continua gravando', async () => {
     const { status } = await registrar('aparelho-real', { dados: { sessions: { __inc: 1 } } });
     expect(status).toBe(204);

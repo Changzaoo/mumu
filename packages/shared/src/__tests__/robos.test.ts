@@ -22,6 +22,8 @@ describe('ehRobo', () => {
       'curl/8.4.0',
       'python-requests/2.31.0',
       'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+      // O "Outro · Outro" do painel: nem sistema, nem navegador conhecido.
+      'Mozilla/5.0 (compatible; Renderizador/1.0)',
     ]) {
       expect(ehRobo(ua), ua).toBe(true);
     }

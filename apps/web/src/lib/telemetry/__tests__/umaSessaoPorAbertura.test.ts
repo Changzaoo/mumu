@@ -51,6 +51,14 @@ async function puts(): Promise<Array<Record<string, unknown>>> {
     .map(([, init]) => JSON.parse(String(init?.body)).dados);
 }
 
+/** O user-agent do jsdom não diz sistema — é tratado como robô. Aqui, gente. */
+function usarUserAgent(ua: string): void {
+  Object.defineProperty(window.navigator, 'userAgent', { value: ua, configurable: true });
+}
+
+const CHROME_WINDOWS =
+  'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36';
+
 describe('telemetria: uma sessão por abertura', () => {
   beforeEach(() => {
     vi.resetModules();
@@ -58,6 +66,17 @@ describe('telemetria: uma sessão por abertura', () => {
     ouvinte = null;
     vi.stubGlobal('fetch', fetchMock);
     window.localStorage.clear();
+    usarUserAgent(CHROME_WINDOWS);
+  });
+
+  it('robô rastreando o site não mede nem envia nada', async () => {
+    usarUserAgent(
+      'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/130.0.6723.69 Safari/537.36',
+    );
+    const { initTelemetry } = await import('@/lib/telemetry/telemetry');
+    initTelemetry();
+    await new Promise((r) => setTimeout(r, 50));
+    expect(fetchMock.mock.calls.filter(([, init]) => init?.method === 'PUT')).toHaveLength(0);
   });
 
   it('o aviso inicial do login (mesmo visitante) não reinicia a sessão', async () => {

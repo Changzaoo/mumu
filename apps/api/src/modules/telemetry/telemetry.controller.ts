@@ -84,12 +84,20 @@ function recusarPedacoAbusivo(dados: Record<string, unknown>): void {
  *    WebView do app), e navegador põe `Origin` em todo método que não é GET.
  *    Quem não manda é script — curl, cron, um processo do próprio servidor.
  *
+ *  - visitante SEM conta desenhando com SwiftShader — a GPU por software do
+ *    Chrome sem cabeça. Medido na produção (2026-10-16): 6.177 dos ~6.200
+ *    aparelhos-robô tinham essa GPU, inclusive os que se diziam "Windows"; das
+ *    14 contas, nenhuma. Com conta, grava mesmo assim: gente real também cai
+ *    nessa GPU (PC sem aceleração, máquina virtual), e conta é prova de gente.
+ *
  * A resposta continua 204: o robô não tem por que tentar de novo, e ninguém
  * ganha nada sabendo que foi ignorado.
  */
-function deveIgnorar(req: Request): boolean {
+function deveIgnorar(req: Request, dados: Record<string, unknown>): boolean {
   if (ehRobo(req.get('user-agent'))) return true;
-  return !req.get('origin');
+  if (!req.get('origin')) return true;
+  const gpu = typeof dados.gpu === 'string' ? dados.gpu : '';
+  return !req.user && /swiftshader/i.test(gpu);
 }
 
 export const telemetryController = {
@@ -100,7 +108,7 @@ export const telemetryController = {
     recusarPedacoAbusivo(dados);
     // Depois da validação (que não custa banco e mantém o 422 de sempre para
     // entrada malformada), antes de qualquer leitura no Postgres.
-    if (deveIgnorar(req)) {
+    if (deveIgnorar(req, dados)) {
       res.status(204).end();
       return;
     }

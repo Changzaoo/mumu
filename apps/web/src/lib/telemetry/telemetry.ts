@@ -666,7 +666,8 @@ export function initTelemetry(): void {
   // rastreia, sempre com o armazenamento zerado — um `deviceId` novo por página,
   // e o painel enchia de "Usuário · Outro · Chrome" com 1 sessão e 0 plays.
   // Navegador controlado por automação (`webdriver`) entra na mesma regra.
-  // A API filtra também (ver telemetry.controller.ts); aqui é para nem gastar.
+  // A API filtra também (ver telemetry.controller.ts), inclusive pela GPU por
+  // software — lá, porque só o servidor sabe se o aparelho tem conta.
   if (ehRobo(navigator.userAgent) || navigator.webdriver) return;
 
   // COMEÇA JÁ, sem esperar login. Era `if (user) start(user)`, e essa linha é a
