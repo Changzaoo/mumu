@@ -158,15 +158,53 @@ export interface TelemetryRow {
  * gravar pela metade: telemetria truncada mente, e mentira em painel é pior que
  * lacuna.
  */
+/**
+ * Campos de DIAGNÓSTICO, do mais pesado para o mais leve — os que saem primeiro
+ * quando o documento passa do teto.
+ *
+ * Sem esta válvula, a recusa caía exatamente em quem mais usa o app: é o
+ * documento dele que cresce (diário de bordo, métricas ao vivo, últimas
+ * reproduções, um mapa de aparelhos). Passado o teto UMA vez, toda escrita
+ * seguinte era recusada para sempre — o `lastSeenAt` parava, as sessões paravam
+ * de somar e a pessoa sumia do painel como "inativa", enquanto o robô, com o
+ * documento minúsculo, sempre cabia.
+ *
+ * Nada aqui é acumulado: são retratos do momento que o próximo envio repõe.
+ * Contadores (`totalSeconds`, `sessions`, cliques) nunca entram nesta lista.
+ */
+const DESCARTAVEIS_QUANDO_CHEIO = [
+  'diario',
+  'aoVivo',
+  'recentPlays',
+  'lastSessionActions',
+  'recentSessions',
+  'vitals',
+  'devices',
+  'topTracks',
+  'topArtists',
+] as const;
+
+/** Tira campos de diagnóstico até o documento caber; `null` se nem assim. */
+function caberNoTeto(doc: Record<string, unknown>): Record<string, unknown> | null {
+  if (tamanhoAceitavel(JSON.stringify(doc))) return doc;
+  const enxuto = { ...doc };
+  for (const chave of DESCARTAVEIS_QUANDO_CHEIO) {
+    if (!(chave in enxuto)) continue;
+    delete enxuto[chave];
+    if (tamanhoAceitavel(JSON.stringify(enxuto))) return enxuto;
+  }
+  return null;
+}
+
 export async function mesclar(
   deviceId: string,
   userId: string | null,
   pedaco: Record<string, unknown>,
 ): Promise<'ok' | 'grande-demais'> {
   const atual = await prisma.telemetryDevice.findUnique({ where: { deviceId } });
-  const fundido = fundir((atual?.data as Record<string, unknown>) ?? {}, pedaco);
+  const fundido = caberNoTeto(fundir((atual?.data as Record<string, unknown>) ?? {}, pedaco));
 
-  if (!tamanhoAceitavel(JSON.stringify(fundido))) return 'grande-demais';
+  if (!fundido) return 'grande-demais';
 
   // `userId` só AVANÇA DE NULO para uma conta, e agora o código faz o que o
   // comentário sempre prometeu. O `...(userId ? { userId } : {})` SOBRESCREVIA
@@ -184,12 +222,31 @@ export async function mesclar(
   return 'ok';
 }
 
-/** O painel: aparelhos por atividade recente, anônimos incluídos. */
+/**
+ * O painel: aparelhos por atividade recente, anônimos incluídos.
+ *
+ * AS CONTAS VÊM SEMPRE, e o limite vale só para os anônimos. Antes era um
+ * `take` único por `updatedAt`: com centenas de aparelhos anônimos recentes
+ * (robôs, na maioria), as contas de verdade ficavam além do corte e o painel
+ * dizia "Nenhuma conta ativa aqui" com gente usando o app.
+ */
 export async function listar(limite = 200): Promise<TelemetryRow[]> {
-  const linhas = await prisma.telemetryDevice.findMany({
-    orderBy: { updatedAt: 'desc' },
-    take: Math.min(Math.max(limite, 1), 500),
-  });
+  const take = Math.min(Math.max(limite, 1), 500);
+  const [contas, anonimos] = await Promise.all([
+    prisma.telemetryDevice.findMany({
+      where: { userId: { not: null } },
+      orderBy: { updatedAt: 'desc' },
+      take: 1000,
+    }),
+    prisma.telemetryDevice.findMany({
+      where: { userId: null },
+      orderBy: { updatedAt: 'desc' },
+      take,
+    }),
+  ]);
+  const linhas = [...contas, ...anonimos].sort(
+    (a, b) => b.updatedAt.getTime() - a.updatedAt.getTime(),
+  );
   return linhas.map((l) => ({
     deviceId: l.deviceId,
     userId: l.userId,

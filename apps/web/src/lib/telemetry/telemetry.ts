@@ -23,6 +23,7 @@
  * A leitura do painel exige ADMIN (ver as rotas em modules/telemetry).
  */
 import type { User } from 'firebase/auth';
+import { ehRobo } from '@radinho/shared';
 import { getDownloads } from '@/features/downloads/registry';
 import { deviceLabel, getDeviceId } from '@/lib/devices/presence';
 import { getIdToken, subscribeAuth } from '@/lib/firebase';
@@ -660,6 +661,13 @@ function stop(): void {
 export function initTelemetry(): void {
   if (initialized || typeof window === 'undefined') return;
   initialized = true;
+
+  // ROBÔ NÃO É VISITANTE. O Googlebot roda o JavaScript de cada página que
+  // rastreia, sempre com o armazenamento zerado — um `deviceId` novo por página,
+  // e o painel enchia de "Usuário · Outro · Chrome" com 1 sessão e 0 plays.
+  // Navegador controlado por automação (`webdriver`) entra na mesma regra.
+  // A API filtra também (ver telemetry.controller.ts); aqui é para nem gastar.
+  if (ehRobo(navigator.userAgent) || navigator.webdriver) return;
 
   // COMEÇA JÁ, sem esperar login. Era `if (user) start(user)`, e essa linha é a
   // razão de o painel nunca ter mostrado um visitante: quem abria o app sem

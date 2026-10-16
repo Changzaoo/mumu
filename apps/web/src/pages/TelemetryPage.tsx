@@ -868,9 +868,16 @@ function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDo
   );
 }
 
-/** Sem e-mail = aparelho que nunca fez login. */
+/**
+ * Aparelho que nunca fez login: sem e-mail E sem conta vinculada.
+ *
+ * Só o e-mail não basta: o servidor vincula o aparelho à conta pelo token, e um
+ * documento pode ter `userId` sem ter (ainda) o e-mail gravado — login por
+ * telefone, conta sem e-mail, ou o primeiro envio antes do perfil chegar. Essa
+ * pessoa é usuário de verdade e ia parar no meio dos anônimos.
+ */
 function naoIdentificado(t: TelemetryDoc): boolean {
-  return !t.email;
+  return !t.email && t.uid.startsWith('anon:');
 }
 
 /** Lista recolhível — guarda o que só polui a tela principal. */

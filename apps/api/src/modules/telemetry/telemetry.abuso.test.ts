@@ -26,12 +26,21 @@ const { mesclar, fundirParaTeste, profundidadeAceitavel, tamanhoAceitavel, MAX_B
   await import('./telemetry.repository.js');
 const { telemetryController } = await import('./telemetry.controller.js');
 
+/** Cabeçalhos de um navegador de verdade abrindo o app. */
+const NAVEGADOR = {
+  origin: 'https://radinho.online',
+  'user-agent':
+    'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+};
+
 /** Roda o handler do controlador como o Express roda: erro vai para `next`. */
 async function registrar(
   deviceId: string,
   body: unknown,
   user?: { id: string },
+  cabecalhos: Record<string, string> = NAVEGADOR,
 ): Promise<{ status: number; erro?: Error }> {
+  const get = (nome: string): string | undefined => cabecalhos[nome.toLowerCase()];
   let status = 0;
   const res = {
     status(s: number) {
@@ -42,7 +51,7 @@ async function registrar(
   let erro: Error | undefined;
   await new Promise<void>((resolve) => {
     void telemetryController.registrar(
-      { params: { deviceId }, body, user } as never,
+      { params: { deviceId }, body, user, get } as never,
       res as never,
       ((e?: Error) => {
         erro = e;
@@ -127,7 +136,8 @@ describe('escrita aberta — teto de tamanho', () => {
 
   it('ainda recusa quando é a FUSÃO que passa do teto, não o pedaço', async () => {
     // O pedaço cabe; o documento acumulado é que não. Este teto continua no
-    // repositório porque só ele conhece o que já estava gravado.
+    // repositório porque só ele conhece o que já estava gravado. Aqui o excesso
+    // está em campos que NÃO são diagnóstico, então não há o que descartar.
     findUnique.mockResolvedValue({ data: { antigo: 'y'.repeat(MAX_BYTES - 100) } });
     const resultado = await mesclar('aparelho-1', null, { novo: 'z'.repeat(500) });
     expect(resultado).toBe('grande-demais');
@@ -200,6 +210,50 @@ describe('escrita aberta — chaves envenenadas', () => {
     const envenenado = JSON.parse('{"toString":{"x":1},"toJSON":{"y":2},"hasOwnProperty":1}');
     const saida = fundirParaTeste({}, envenenado);
     expect(() => JSON.stringify({ data: [{ data: saida }] })).not.toThrow();
+  });
+});
+
+describe('escrita aberta — robôs não viram linha', () => {
+  it('o Googlebot (o "Outro · Chrome" do painel) é ignorado sem tocar no banco', async () => {
+    const { status } = await registrar('aparelho-do-robo', { dados: { sessions: 1 } }, undefined, {
+      origin: 'https://radinho.online',
+      'user-agent':
+        'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/130.0.6723.69 Safari/537.36',
+    });
+    expect(status).toBe(204);
+    expect(findUnique).not.toHaveBeenCalled();
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('pedido sem Origin (script, curl, processo do servidor) é ignorado', async () => {
+    const { status } = await registrar('aparelho-script', { dados: { sessions: 1 } }, undefined, {
+      'user-agent': 'node',
+    });
+    expect(status).toBe(204);
+    expect(upsert).not.toHaveBeenCalled();
+  });
+
+  it('navegador de verdade continua gravando', async () => {
+    const { status } = await registrar('aparelho-real', { dados: { sessions: { __inc: 1 } } });
+    expect(status).toBe(204);
+    expect(upsert).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('escrita aberta — documento acumulado grande', () => {
+  it('quem USA o app não some do painel: o diagnóstico sai, os contadores ficam', async () => {
+    // O documento de quem usa o app de verdade é o que cresce (diário de bordo,
+    // métricas ao vivo, últimas reproduções). Recusar a fusão inteira congelava
+    // justamente essas pessoas — o robô, com documento minúsculo, sempre cabia.
+    findUnique.mockResolvedValue({
+      data: { totalSeconds: 3600, diario: { linhas: 'd'.repeat(MAX_BYTES) } },
+      userId: 'dono',
+    });
+    const resultado = await mesclar('aparelho-1', 'dono', { totalSeconds: { __inc: 30 } });
+    expect(resultado).toBe('ok');
+    const gravado = upsert.mock.calls[0]![0] as { update: { data: Record<string, unknown> } };
+    expect(gravado.update.data.totalSeconds).toBe(3630);
+    expect(gravado.update.data.diario).toBeUndefined();
   });
 });
 

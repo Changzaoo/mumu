@@ -250,8 +250,35 @@ describe('papéis', () => {
     bancoFalso.telemetryDevice.upsert.mockResolvedValue({});
     const res = await request(app)
       .put('/api/v1/telemetria/aparelho-de-visitante')
+      .set('Origin', 'http://localhost:5173')
+      .set(
+        'User-Agent',
+        'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+      )
       .send({ dados: { aberturas: 1 } });
     expect(res.status).toBe(204);
+    expect(bancoFalso.telemetryDevice.upsert).toHaveBeenCalledTimes(1);
+  });
+
+  it('robô rastreando o site NÃO vira aparelho na telemetria', async () => {
+    const res = await request(app)
+      .put('/api/v1/telemetria/aparelho-do-googlebot')
+      .set('Origin', 'http://localhost:5173')
+      .set(
+        'User-Agent',
+        'Mozilla/5.0 AppleWebKit/537.36 (KHTML, like Gecko; compatible; Googlebot/2.1; +http://www.google.com/bot.html) Chrome/130.0.6723.69 Safari/537.36',
+      )
+      .send({ dados: { aberturas: 1 } });
+    expect(res.status).toBe(204);
+    expect(bancoFalso.telemetryDevice.upsert).not.toHaveBeenCalled();
+  });
+
+  it('pedido sem Origin (script do servidor, curl) NÃO vira aparelho', async () => {
+    const res = await request(app)
+      .put('/api/v1/telemetria/aparelho-de-script')
+      .send({ dados: { aberturas: 1 } });
+    expect(res.status).toBe(204);
+    expect(bancoFalso.telemetryDevice.upsert).not.toHaveBeenCalled();
   });
 });
 

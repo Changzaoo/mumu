@@ -13,6 +13,8 @@
  * A LEITURA continua restrita — é painel de administração.
  */
 import { z } from 'zod';
+import type { Request } from 'express';
+import { ehRobo } from '@radinho/shared';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { ok } from '../../core/http/respond.js';
 import { ValidationError } from '../../core/errors/index.js';
@@ -68,12 +70,40 @@ function recusarPedacoAbusivo(dados: Record<string, unknown>): void {
   }
 }
 
+/**
+ * QUEM NÃO É O APP NÃO VIRA LINHA.
+ *
+ * Aberto para visitante não quer dizer aberto para robô: cada página que o
+ * Googlebot renderizava chegava com um `deviceId` novo e virava um "Usuário ·
+ * Outro · Chrome" no painel — centenas deles, empurrando as contas de verdade
+ * para fora da listagem.
+ *
+ * Duas portas:
+ *  - user-agent de robô / automação (regra única em `@radinho/shared`);
+ *  - pedido SEM `Origin`. O app sempre manda: é um PUT de outra origem (ou do
+ *    WebView do app), e navegador põe `Origin` em todo método que não é GET.
+ *    Quem não manda é script — curl, cron, um processo do próprio servidor.
+ *
+ * A resposta continua 204: o robô não tem por que tentar de novo, e ninguém
+ * ganha nada sabendo que foi ignorado.
+ */
+function deveIgnorar(req: Request): boolean {
+  if (ehRobo(req.get('user-agent'))) return true;
+  return !req.get('origin');
+}
+
 export const telemetryController = {
   /** Funde um pedaço de telemetria no documento do aparelho. Sem login. */
   registrar: asyncHandler(async (req, res) => {
     const deviceId = deviceIdSchema.parse(req.params.deviceId);
     const { dados } = corpoSchema.parse(req.body);
     recusarPedacoAbusivo(dados);
+    // Depois da validação (que não custa banco e mantém o 422 de sempre para
+    // entrada malformada), antes de qualquer leitura no Postgres.
+    if (deveIgnorar(req)) {
+      res.status(204).end();
+      return;
+    }
 
     // Lê `req.user` DIRETO em vez de `currentUser(req)`, que estoura sem conta.
     // O middleware `authenticate` já preenche o campo quando vem um token
