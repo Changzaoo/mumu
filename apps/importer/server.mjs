@@ -192,6 +192,7 @@ const VERSION = (() => {
     return execFileSync('git', ['rev-parse', '--short', 'HEAD'], {
       cwd: HERE,
       stdio: ['ignore', 'pipe', 'ignore'],
+      windowsHide: true,
     })
       .toString()
       .trim();
@@ -300,7 +301,7 @@ async function resolveYtdlp() {
   if (existsSync(localBin)) return localBin;
   // Fall back to PATH: try running `yt-dlp --version`.
   const onPath = await new Promise((res) => {
-    const p = spawn(isWin ? 'yt-dlp.exe' : 'yt-dlp', ['--version']);
+    const p = spawn(isWin ? 'yt-dlp.exe' : 'yt-dlp', ['--version'], { windowsHide: true });
     p.on('error', () => res(false));
     p.on('close', (code) => res(code === 0));
   });

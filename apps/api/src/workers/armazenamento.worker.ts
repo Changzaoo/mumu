@@ -15,13 +15,13 @@
  * refazem sozinhos.
  */
 import { statfs } from 'node:fs/promises';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 
 const log = logger.child({ worker: 'armazenamento' });
-const run = promisify(exec);
+const run = promisify(execFile);
 
 /** Acima disto o worker começa a avisar em toda volta. */
 const ALERTA = 0.85;
@@ -82,9 +82,13 @@ function gb(bytes: number): string {
  * blob, banco ou volume.
  */
 async function recolherLixoSeguro(): Promise<void> {
-  for (const comando of ['docker builder prune -af', 'docker image prune -f']) {
+  const limpezas = [
+    { args: ['builder', 'prune', '-af'], comando: 'docker builder prune -af' },
+    { args: ['image', 'prune', '-f'], comando: 'docker image prune -f' },
+  ];
+  for (const { args, comando } of limpezas) {
     try {
-      const { stdout } = await run(comando, { timeout: 120_000 });
+      const { stdout } = await run('docker', args, { timeout: 120_000, windowsHide: true });
       const liberado = /Total reclaimed space:\s*(.+)/.exec(stdout)?.[1]?.trim();
       log.info({ comando, liberado }, 'lixo recolhido');
     } catch (err) {
