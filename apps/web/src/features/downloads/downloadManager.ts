@@ -72,9 +72,35 @@ export function downloadsSupported(): boolean {
   return cacheSupported();
 }
 
-/** True when the track carries a downloadable single-file source. */
+/**
+ * FONTE DE ARQUIVO ÚNICO de uma faixa, ou `null` quando não há nenhuma.
+ *
+ * `downloadUrl` é o caminho desenhado: o original de um upload/importação
+ * (`GET /tracks/:id/download`) ou o arquivo cheio de um catálogo externo. Mas
+ * as faixas do ACERVO LOCAL nascem com `downloadUrl: null` — a única cópia de
+ * arquivo único que elas carregam é a `remoteUrl` gravada pelo envio ao cofre
+ * (`<importador>/blob/<id>?k=...`, um MP3 cru com token na query).
+ *
+ * A armadilha é a `streamUrl` das faixas do SERVIDOR: ela aponta para
+ * `manifest.m3u8`, que é uma PLAYLIST de segmentos HLS, não um arquivo. Guardar
+ * o texto da playlist como "áudio" cria uma faixa baixada que não toca — e
+ * offline não há como descobrir. Por isso o `.m3u8` é recusado aqui, e o
+ * download dessas faixas continua dependendo do `downloadUrl` (o original).
+ *
+ * Prévia de 30s (Apple etc.) nunca é baixável: o clipe não é a música.
+ */
+function fonteDeArquivoUnico(track: TrackDto): string | null {
+  if (track.downloadUrl) return track.downloadUrl;
+  if (track.previewOnly) return null;
+  const url = track.streamUrl;
+  if (!url) return null;
+  if (/\.m3u8(\?|$)/.test(url)) return null;
+  return url;
+}
+
+/** True when the track has a single-file source and IndexedDB is usable. */
 export function isDownloadable(track: TrackDto): boolean {
-  return Boolean(track.downloadUrl) && cacheSupported();
+  return Boolean(fonteDeArquivoUnico(track)) && cacheSupported();
 }
 
 export function downloadStateOf(trackId: string): DownloadState {
@@ -307,8 +333,8 @@ export function rebaixarAoFalhar(track: TrackDto): void {
 }
 
 export async function downloadTrack(track: TrackDto): Promise<void> {
-  const downloadUrl = track.downloadUrl;
-  if (!downloadUrl || !cacheSupported()) return;
+  const fonte = fonteDeArquivoUnico(track);
+  if (!fonte || !cacheSupported()) return;
   if (inFlight.has(track.id) || isDownloaded(track.id)) return;
 
   failed.delete(track.id);
@@ -322,7 +348,7 @@ export async function downloadTrack(track: TrackDto): Promise<void> {
 
   await pegarVaga();
   try {
-    if (corridas.get(track.id) === corrida) await baixarComVaga(track, downloadUrl, corrida);
+    if (corridas.get(track.id) === corrida) await baixarComVaga(track, fonte, corrida);
   } finally {
     devolverVaga();
     if (corridas.get(track.id) === corrida) corridas.delete(track.id);

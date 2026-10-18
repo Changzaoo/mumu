@@ -305,6 +305,77 @@ describe('download: o que chega NÃO é áudio de verdade', () => {
   });
 });
 
+describe('download: fonte de arquivo único (downloadUrl x streamUrl)', () => {
+  /** Faixa do ACERVO LOCAL: nasce sem downloadUrl; a streamUrl é o blob cru
+   *  do importador (MP3 com token na query), gravado pelo envio ao cofre. */
+  const faixaLocal = (id: string): TrackDto =>
+    ({
+      id,
+      title: `Faixa local ${id}`,
+      artists: [],
+      durationMs: 1000,
+      downloadUrl: null,
+      streamUrl: `https://cofre.exemplo/blob/${id}?k=TOKEN`,
+    }) as unknown as TrackDto;
+
+  it('faixa local (sem downloadUrl, streamUrl é arquivo cru) é baixável e baixa da streamUrl', async () => {
+    const { dm, reg } = await montar();
+    const f = vi.fn(async () => resposta({ corpo: [new Uint8Array(100)] }));
+    vi.stubGlobal('fetch', f);
+
+    expect(dm.isDownloadable(faixaLocal('l'))).toBe(true);
+    await dm.downloadTrack(faixaLocal('l'));
+
+    expect(reg.isDownloaded('l')).toBe(true);
+    expect((f.mock.calls[0] as unknown as [string])[0]).toBe(
+      'https://cofre.exemplo/blob/l?k=TOKEN',
+    );
+  });
+
+  it('streamUrl apontando para manifest.m3u8 (HLS) NÃO é baixável — playlist não é arquivo', async () => {
+    const { dm } = await montar();
+    const faixaServidor = {
+      id: 'hls',
+      title: 'Faixa do servidor',
+      artists: [],
+      durationMs: 1000,
+      downloadUrl: null,
+      streamUrl: 'https://api.aurial/api/v1/stream/hls/manifest.m3u8?token=x',
+    } as unknown as TrackDto;
+
+    expect(dm.isDownloadable(faixaServidor)).toBe(false);
+
+    const f = vi.fn();
+    vi.stubGlobal('fetch', f);
+    await dm.downloadTrack(faixaServidor);
+    expect(f).not.toHaveBeenCalled();
+  });
+
+  it('prévia de 30s (previewOnly) nunca é baixável, mesmo com arquivo cru na streamUrl', async () => {
+    const { dm } = await montar();
+    const previa = {
+      ...faixaLocal('p'),
+      previewOnly: true,
+    } as unknown as TrackDto;
+
+    expect(dm.isDownloadable(previa)).toBe(false);
+  });
+
+  it('sem nenhuma fonte (tudo nulo) não é baixável', async () => {
+    const { dm } = await montar();
+    const semFonte = {
+      id: 'n',
+      title: 'Sem fonte',
+      artists: [],
+      durationMs: 1000,
+      downloadUrl: null,
+      streamUrl: null,
+    } as unknown as TrackDto;
+
+    expect(dm.isDownloadable(semFonte)).toBe(false);
+  });
+});
+
 describe('download: apagar e reler', () => {
   it('apagar ENQUANTO baixa: a faixa não ressuscita quando o download termina', async () => {
     const { dm, reg, cache } = await montar();

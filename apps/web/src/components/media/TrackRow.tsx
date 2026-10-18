@@ -18,10 +18,13 @@ import {
 } from 'react';
 import { Link, useNavigate } from 'react-router';
 import {
+  ArrowDownToLine,
+  CircleCheckBig,
   Clock3,
   Disc3,
   ListEnd,
   ListPlus,
+  Loader2,
   MicVocal,
   MoreHorizontal,
   Music,
@@ -32,6 +35,12 @@ import type { TrackDto } from '@radinho/shared';
 import { LikeButton } from '@/components/media/LikeButton';
 import { openShare } from '@/components/media/ShareDialog';
 import { albumKeyForTrack, sourceUrlFor } from '@/lib/local/localLibrary';
+import {
+  downloadTrack,
+  isDownloadable,
+  removeDownloadedTrack,
+} from '@/features/downloads/downloadManager';
+import { useDownloadState } from '@/features/downloads/useDownloads';
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -101,6 +110,16 @@ function useItensDaFaixa(
   const navigate = useNavigate();
   const addToQueue = usePlayerStore((s) => s.addToQueue);
   const playNextInQueue = usePlayerStore((s) => s.playNext);
+  const download = useDownloadState(track.id);
+  const canDownload = isDownloadable(track);
+
+  const handleDownload = (): void => {
+    toast.promise(downloadTrack(track), {
+      loading: `Baixando ${track.title}…`,
+      success: 'Disponível offline',
+      error: 'Não foi possível baixar',
+    });
+  };
 
   return (Item, Separator) => (
     <>
@@ -128,6 +147,40 @@ function useItensDaFaixa(
       >
         <ListPlus /> Adicionar à playlist
       </Item>
+      {canDownload && download.status !== 'downloaded' && (
+        // Sem `disabled` (o tipo do Item aqui não o aceita): o próprio onSelect
+        // recusa o segundo clique enquanto baixa.
+        <Item
+          onSelect={() => {
+            if (download.status === 'downloading') return;
+            handleDownload();
+          }}
+        >
+          {download.status === 'downloading' ? (
+            <>
+              <Loader2 className="animate-spin" /> Baixando…
+            </>
+          ) : download.status === 'error' ? (
+            <>
+              <ArrowDownToLine /> Tentar baixar de novo
+            </>
+          ) : (
+            <>
+              <ArrowDownToLine /> Baixar para ouvir offline
+            </>
+          )}
+        </Item>
+      )}
+      {download.status === 'downloaded' && (
+        <Item
+          onSelect={() => {
+            void removeDownloadedTrack(track.id);
+            toast('Download removido');
+          }}
+        >
+          <CircleCheckBig className="text-accent" /> Baixada — remover
+        </Item>
+      )}
       <Separator />
       <Item
         onSelect={() =>
@@ -260,6 +313,9 @@ export function TrackRow({
   };
 
   const itensDoMenu = useItensDaFaixa(track, onAddToPlaylist);
+  // Estado do download para o ícone da linha (baixada / baixando) — mesmo
+  // gancho do menu, assinado duas vezes é barato (store síncrono).
+  const download = useDownloadState(track.id);
 
   if (!permitida) return null;
   return (
@@ -436,6 +492,18 @@ export function TrackRow({
                 liked && 'opacity-100',
               )}
             />
+            {download.status === 'downloaded' && (
+              <ArrowDownToLine
+                aria-label="Disponível offline"
+                className="size-3.5 shrink-0 text-accent"
+              />
+            )}
+            {download.status === 'downloading' && (
+              <Loader2
+                aria-label="Baixando"
+                className="size-3.5 shrink-0 animate-spin text-fg-muted"
+              />
+            )}
             <span className="w-12 text-right font-mono text-[13px] tabular-nums text-fg-muted">
               {formatDuration(track.durationMs)}
             </span>
