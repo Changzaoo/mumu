@@ -32,6 +32,7 @@ import { undergroundRoutes } from './modules/underground/index.js';
 import { catalogRoutes } from './modules/catalog/index.js';
 import { collectionsRoutes } from './modules/collections/index.js';
 import { telemetryRoutes } from './modules/telemetry/index.js';
+import { categoriesRoutes } from './modules/categories/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -54,7 +55,7 @@ export function createApp(): Express {
         // Origem de fora da lista é recusa esperada, não defeito do servidor.
         // Um `Error` cru caía no ramo final do errorHandler: 500 `INTERNAL` e
         // uma linha de log em nível de erro COM PILHA por requisição — qualquer
-        // varredura automática enchia o log e escondia erro de verdade.
+        // varredura automática encha o log e escondia erro de verdade.
         else cb(new ForbiddenError('Origin not allowed'));
       },
       credentials: true,
@@ -114,6 +115,8 @@ export function createApp(): Express {
   api.use('/me/colecoes', collectionsRoutes);
   // Escrita aberta (visitante conta), leitura só para ADMIN — ver as rotas.
   api.use('/telemetria', telemetryRoutes);
+  // NOVA: categorias organizada pela curadoria AI
+  api.use('/categorias', categoriesRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());
