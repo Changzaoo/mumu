@@ -130,6 +130,74 @@ const CAMERA: readonly (readonly [number, number, number, number])[] = [
 ];
 const ORIGEM_DA_CAMERA = [500, 280] as const;
 
+/**
+ * SEGUIR O SINAL: entre a saída da antena e a chegada na pessoa a câmera não
+ * vai de ponto fixo a ponto fixo — ela fica colada no sinal, com zoom de
+ * `ZOOM_NO_SINAL`×, para o rádio sair do quadro antes de sumir (pedido do
+ * Vinicius: "dá pra ver o rádio sumindo e ficando só a antena").
+ */
+const SINAL_INICIO_MS = 3900;
+const SINAL_DURACAO_MS = 2000;
+const ZOOM_NO_SINAL = 5;
+/** Entrada no zoom (do quadro aberto até colar no sinal). */
+const ENTRADA_MS = [3895, 4400] as const;
+/** Saída (do sinal até o enquadramento da pessoa). */
+const SAIDA_DO_SINAL_MS = [5850, 6460] as const;
+
+/** cubic-bezier(x1, y1, x2, y2) no instante f — o mesmo `keySplines` do sinal. */
+function bezier(f: number, x1: number, y1: number, x2: number, y2: number): number {
+  const cx = (t: number, a: number, b: number): number =>
+    3 * a * t * (1 - t) ** 2 + 3 * b * t ** 2 * (1 - t) + t ** 3;
+  let t = f;
+  for (let i = 0; i < 8; i++) {
+    const x = cx(t, x1, x2) - f;
+    const d = 3 * x1 * (1 - t) ** 2 + 6 * (x2 - x1) * t * (1 - t) + 3 * (1 - x2) * t ** 2;
+    if (Math.abs(d) < 1e-6) break;
+    t = Math.min(1, Math.max(0, t - x / d));
+  }
+  return cx(t, y1, y2);
+}
+const suave = (f: number): number => bezier(Math.min(1, Math.max(0, f)), 0.45, 0, 0.25, 1);
+
+type Quadro = [number, number, number, number];
+const quadroDe = (vb: string): Quadro => vb.split(' ').map(Number) as Quadro;
+function misturar(a: Quadro, b: Quadro, f: number): Quadro {
+  return a.map((v, i) => v + ((b[i] as number) - v) * f) as Quadro;
+}
+const texto = (q: Quadro): string => q.map((v) => v.toFixed(2)).join(' ');
+
+/**
+ * O enquadramento no instante `ms`: a tabela `CAMERA` fora do trecho do sinal
+ * e, nele, um quadro centrado no sinal (posição real na trilha).
+ */
+function enquadramento(
+  ms: number,
+  base: readonly [number, number, number, number],
+  trilha: SVGPathElement | null,
+): string {
+  if (!trilha || ms <= ENTRADA_MS[0] || ms >= SAIDA_DO_SINAL_MS[1]) {
+    return viewBoxDaCamera(ms, base);
+  }
+  const total = trilha.getTotalLength();
+  const f = Math.min(1, Math.max(0, (ms - SINAL_INICIO_MS) / SINAL_DURACAO_MS));
+  const pt = trilha.getPointAtLength(total * bezier(f, 0.4, 0, 0.6, 1));
+  const w = base[2] / ZOOM_NO_SINAL;
+  const h = base[3] / ZOOM_NO_SINAL;
+  const noSinal: Quadro = [pt.x - w / 2, pt.y - h / 2, w, h];
+  if (ms < ENTRADA_MS[1]) {
+    const a = quadroDe(viewBoxDaCamera(ENTRADA_MS[0], base));
+    return texto(
+      misturar(a, noSinal, suave((ms - ENTRADA_MS[0]) / (ENTRADA_MS[1] - ENTRADA_MS[0]))),
+    );
+  }
+  if (ms > SAIDA_DO_SINAL_MS[0]) {
+    const b = quadroDe(viewBoxDaCamera(SAIDA_DO_SINAL_MS[1], base));
+    const g = suave((ms - SAIDA_DO_SINAL_MS[0]) / (SAIDA_DO_SINAL_MS[1] - SAIDA_DO_SINAL_MS[0]));
+    return texto(misturar(noSinal, b, g));
+  }
+  return texto(noSinal);
+}
+
 /** O enquadramento (viewBox) no instante `ms`, a partir do enquadramento base. */
 function viewBoxDaCamera(ms: number, base: readonly [number, number, number, number]): string {
   let i = 0;
@@ -302,9 +370,22 @@ export function AberturaAnimada() {
     const inicio = performance.now();
     let raf = 0;
     const quadro = (): void => {
-      const relogio = svg.getAnimations?.({ subtree: true })[0]?.currentTime;
-      const ms = typeof relogio === 'number' ? relogio : performance.now() - inicio;
-      svg.setAttribute('viewBox', viewBoxDaCamera(ms, base));
+      // O relógio é o INÍCIO da animação contra o relógio do documento — não o
+      // `currentTime` dela: a primeira animação da cena dura 0,6 s e, acabada,
+      // o `currentTime` para no fim (a câmera ficava presa no quadro inicial).
+      // Pausada (inspeção quadro a quadro), vale o `currentTime`.
+      const anim = svg.getAnimations?.({ subtree: true })[0];
+      const agora = document.timeline?.currentTime;
+      const ms =
+        anim && anim.startTime !== null && typeof agora === 'number'
+          ? agora - Number(anim.startTime)
+          : anim && typeof anim.currentTime === 'number'
+            ? anim.currentTime
+            : performance.now() - inicio;
+      svg.setAttribute(
+        'viewBox',
+        enquadramento(ms, base, svg.querySelector<SVGPathElement>('#trilha')),
+      );
       if (ms < DURACAO_DA_CENA_MS + 200) raf = requestAnimationFrame(quadro);
     };
     raf = requestAnimationFrame(quadro);
@@ -919,7 +1000,7 @@ const estilos = `
 .abertura .p3 { animation-delay: 2.8s } .abertura .p4 { animation-delay: 3.05s } .abertura .p5 { animation-delay: 3.25s }
 .abertura .p6 { animation-delay: 3.45s }
 .abertura .ponteiro { transform-box: fill-box; transform-origin: 50% 50%; animation: ab-ponteiro 2.6s ease-in-out 2.2s infinite alternate }
-.abertura .radio { animation: ab-sumir 0.9s ease-in 4.5s forwards }
+.abertura .radio { animation: ab-sumir 0.8s ease-in 5s forwards }
 .abertura .trilha { stroke-dashoffset: 1; opacity: 0; animation: ab-tracar 2s cubic-bezier(.4,0,.6,1) 3.9s forwards, ab-meia 0.05s linear 3.9s forwards, ab-sumir 0.6s ease 6.4s forwards }
 .abertura .sinal { opacity: 0; animation: ab-aparecer 0.2s linear 3.9s forwards, ab-sumir 0.5s ease 6.1s forwards }
 .abertura .halo { opacity: 0.35; animation: ab-halo 0.9s ease-out 3.9s infinite }
