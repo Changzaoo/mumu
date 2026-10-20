@@ -33,6 +33,26 @@ export interface CollectionDelta {
 /** Teto por resposta: uma biblioteca grande chega em páginas, não de uma vez. */
 const PAGINA = 500;
 
+/**
+ * CAMPOS DO SERVIDOR NÃO VIAJAM PARA O APARELHO.
+ *
+ * O `dna` (vetor de 2048 números que a curadoria grava, ~40 KB por faixa) ia
+ * inteiro para cada aparelho dentro de `data`: uma biblioteca de 5 mil faixas
+ * eram 200 MB no localStorage do celular — e, pior, o aparelho devolvia tudo
+ * ao publicar no acervo e ao sincronizar a biblioteca (100 faixas ≈ 4 MB), o
+ * que o servidor recusa com 413 (teto de 1 MB). Medido em 20/10/2026: 41 KB
+ * por item com `dna`, 1,3 KB sem. Sai aqui, na saída; e na entrada o que o
+ * aparelho manda sem `dna` NÃO apaga o `dna` que o servidor já tinha.
+ */
+const CAMPOS_DO_SERVIDOR = ['dna'] as const;
+
+export function semCamposDoServidor(data: unknown): unknown {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  const copia = { ...(data as Record<string, unknown>) };
+  for (const campo of CAMPOS_DO_SERVIDOR) delete copia[campo];
+  return copia;
+}
+
 export async function listDelta(
   userId: string,
   collection: string,
@@ -51,7 +71,7 @@ export async function listDelta(
   return {
     itens: itens.map((i) => ({
       id: i.itemId,
-      data: i.data,
+      data: semCamposDoServidor(i.data),
       deleted: i.deleted,
       updatedAt: i.updatedAt.toISOString(),
     })),
@@ -66,20 +86,24 @@ export async function upsertItems(
   itens: Array<{ id: string; data: unknown }>,
 ): Promise<number> {
   if (itens.length === 0) return 0;
+  // Upsert em SQL para PRESERVAR o `dna` do servidor: o aparelho nunca o tem
+  // (ver `semCamposDoServidor`), e um `update: { data }` do Prisma trocaria o
+  // documento inteiro, apagando o vetor que a curadoria levou horas para gravar.
   await prisma.$transaction(
-    itens.map((item) =>
-      prisma.userCollectionItem.upsert({
-        where: { userId_collection_itemId: { userId, collection, itemId: item.id } },
-        create: {
-          userId,
-          collection,
-          itemId: item.id,
-          data: item.data as object,
-          deleted: false,
-        },
-        update: { data: item.data as object, deleted: false },
-      }),
-    ),
+    itens.map((item) => {
+      const json = JSON.stringify(item.data ?? {});
+      return prisma.$executeRaw`
+        INSERT INTO "UserCollectionItem" ("userId", "collection", "itemId", "data", "deleted", "updatedAt", "createdAt")
+        VALUES (${userId}, ${collection}, ${item.id}, ${json}::jsonb, false, (now() AT TIME ZONE 'UTC'), (now() AT TIME ZONE 'UTC'))
+        ON CONFLICT ("userId", "collection", "itemId") DO UPDATE SET
+          "data" = CASE
+            WHEN EXCLUDED."data" ? 'dna' OR NOT ("UserCollectionItem"."data" ? 'dna') THEN EXCLUDED."data"
+            ELSE EXCLUDED."data" || jsonb_build_object('dna', "UserCollectionItem"."data" -> 'dna')
+          END,
+          "deleted" = false,
+          "updatedAt" = (now() AT TIME ZONE 'UTC')
+      `;
+    }),
   );
   return itens.length;
 }

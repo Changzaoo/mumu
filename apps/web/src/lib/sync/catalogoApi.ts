@@ -331,16 +331,53 @@ export async function publicarEntrada(entry: LibraryEntry): Promise<void> {
  * A reconciliação sobe o que falta, e um aparelho com trezentas faixas faria
  * trezentas requisições — cada uma com ida e volta pelo túnel. Em lote é uma só.
  */
+/**
+ * Teto do corpo por requisição. O servidor aceita 1 MB (express.json); um
+ * lote de 100 faixas passou disso quando as entradas carregavam o `dna` do
+ * servidor (413, "não consegui publicar no acervo" — 20/10/2026). O `dna` já
+ * não entra (ver `entradaPublicavel`), e o lote é cortado por BYTES, não por
+ * contagem: o tamanho de uma entrada varia com letra, capa e crédito.
+ */
+const TETO_DO_CORPO = 700_000;
+
+/** O que o acervo recebe de uma entrada: nunca campos do servidor nem alças de blob. */
+function entradaPublicavel(entry: LibraryEntry): LibraryEntry {
+  const copia = { ...(entry as LibraryEntry & { dna?: unknown }) };
+  delete copia.dna;
+  return copia;
+}
+
 export async function publicarLote(entradas: LibraryEntry[]): Promise<number> {
   if (entradas.length === 0) return 0;
-  const res = await fetch(`${BASE_URL}/catalogo/bulk`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', ...(await cabecalhoAutenticado()) },
-    body: JSON.stringify({ entradas }),
-  });
-  if (!res.ok) throw new Error(`acervo: HTTP ${res.status}`);
-  const corpo = (await res.json()) as { data?: { publicadas?: number } };
-  return corpo.data?.publicadas ?? entradas.length;
+  const limpas = entradas.map(entradaPublicavel);
+  // Divide em pedaços que cabem no teto (uma entrada sozinha sempre vai).
+  const pedacos: LibraryEntry[][] = [];
+  let atual: LibraryEntry[] = [];
+  let bytes = 0;
+  for (const e of limpas) {
+    const tamanho = JSON.stringify(e).length + 1;
+    if (atual.length > 0 && bytes + tamanho > TETO_DO_CORPO) {
+      pedacos.push(atual);
+      atual = [];
+      bytes = 0;
+    }
+    atual.push(e);
+    bytes += tamanho;
+  }
+  if (atual.length > 0) pedacos.push(atual);
+
+  let publicadas = 0;
+  for (const pedaco of pedacos) {
+    const res = await fetch(`${BASE_URL}/catalogo/bulk`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await cabecalhoAutenticado()) },
+      body: JSON.stringify({ entradas: pedaco }),
+    });
+    if (!res.ok) throw new Error(`acervo: HTTP ${res.status}`);
+    const corpo = (await res.json()) as { data?: { publicadas?: number } };
+    publicadas += corpo.data?.publicadas ?? pedaco.length;
+  }
+  return publicadas;
 }
 
 /** Tira uma faixa do acervo (o admin apagou de vez). */

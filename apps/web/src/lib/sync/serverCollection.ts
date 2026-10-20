@@ -110,6 +110,21 @@ interface ItemRemoto {
   updatedAt: string;
 }
 
+/**
+ * CAMPOS DO SERVIDOR FICAM NO SERVIDOR. O `dna` (vetor da curadoria, ~40 KB
+ * por faixa) chegava dentro de `data` e ia para o localStorage — 5 mil faixas
+ * eram 200 MB — e voltava inteiro em cada envio (100 faixas ≈ 4 MB: 413 no
+ * servidor, "não consegui publicar no acervo"). Tirado na entrada e na saída.
+ */
+const CAMPOS_DO_SERVIDOR = ['dna'] as const;
+
+export function semCamposDoServidor<T>(data: T): T {
+  if (!data || typeof data !== 'object' || Array.isArray(data)) return data;
+  const copia = { ...(data as Record<string, unknown>) };
+  for (const campo of CAMPOS_DO_SERVIDOR) delete copia[campo];
+  return copia as T;
+}
+
 export function serverCollection<T>(config: ServerCollectionConfig<T>): ServerCollection<T> {
   let uid: string | null = null;
   let timer: ReturnType<typeof setTimeout> | null = null;
@@ -136,7 +151,9 @@ export function serverCollection<T>(config: ServerCollectionConfig<T>): ServerCo
         const res = await fetch(`${BASE_URL}/me/colecoes/${config.name}`, {
           method: 'POST',
           headers: cabecalho,
-          body: JSON.stringify({ itens: lote.map((p) => ({ id: p.id, data: p.data })) }),
+          body: JSON.stringify({
+            itens: lote.map((p) => ({ id: p.id, data: semCamposDoServidor(p.data) })),
+          }),
         });
         if (!res.ok) throw new Error(`HTTP ${res.status}`);
         // Confirma LOTE A LOTE: se o próximo falhar, o que já subiu não volta
@@ -209,7 +226,7 @@ export function serverCollection<T>(config: ServerCollectionConfig<T>): ServerCo
       const deletes: string[] = [];
       for (const item of itens) {
         if (item.deleted) deletes.push(item.id);
-        else upserts.push([item.id, item.data as T]);
+        else upserts.push([item.id, semCamposDoServidor(item.data) as T]);
       }
       if (config.onRemoteBatch) {
         config.onRemoteBatch(upserts, deletes);
