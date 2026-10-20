@@ -578,7 +578,7 @@ export function AberturaAnimada() {
               />
               <path
                 className="peca p3"
-                d="M700 306 Q708 338 740 318"
+                d="M700 306 Q708 340 734 328"
                 stroke={COR.pele}
                 strokeWidth="22"
                 strokeLinecap="round"
@@ -698,33 +698,49 @@ export function AberturaAnimada() {
                   rx="1"
                   fill={COR.celularBorda}
                 />
-                {/* dedos sobre a lateral do celular */}
+                {/* a mão: palma atrás da borda e três dedos juntos sobre ela — nenhum
+                    dedo solto fora da mão */}
                 <rect
                   className="peca p6"
-                  x="-8"
-                  y="52"
-                  width="16"
-                  height="9"
-                  rx="4.5"
+                  x="-15"
+                  y="46"
+                  width="20"
+                  height="40"
+                  rx="10"
                   fill={COR.pele}
                 />
                 <rect
                   className="peca p6"
-                  x="-8"
-                  y="64"
-                  width="16"
-                  height="9"
-                  rx="4.5"
+                  x="-7"
+                  y="49"
+                  width="14"
+                  height="11"
+                  rx="5.5"
                   fill={COR.pele}
+                  stroke={COR.peleSombra}
+                  strokeWidth="1"
                 />
                 <rect
                   className="peca p6"
-                  x="-8"
-                  y="76"
-                  width="16"
-                  height="9"
-                  rx="4.5"
+                  x="-7"
+                  y="60"
+                  width="14"
+                  height="11"
+                  rx="5.5"
                   fill={COR.pele}
+                  stroke={COR.peleSombra}
+                  strokeWidth="1"
+                />
+                <rect
+                  className="peca p6"
+                  x="-7"
+                  y="71"
+                  width="14"
+                  height="11"
+                  rx="5.5"
+                  fill={COR.pele}
+                  stroke={COR.peleSombra}
+                  strokeWidth="1"
                 />
                 <circle className="brilho" cx="30" cy="59" r="74" fill="url(#ab-brilho)" />
                 {/* o nosso logo, na tela */}
