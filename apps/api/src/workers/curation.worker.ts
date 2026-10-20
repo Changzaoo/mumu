@@ -94,6 +94,10 @@ interface LibraryEntry {
   [DNA_FIELD]?: unknown;
   /** Última conferência da CATEGORIA — o rodízio de `auditarGeneros`. */
   generoAuditadoEm?: number;
+  /** Última tentativa (ISO) de achar gênero para quem não tem — o rodízio de `preencherGeneros`. */
+  generoTentadoEm?: unknown;
+  /** Quantas tentativas sem rótulo a faixa acumulou desde que ficou sem gênero. */
+  generoTentativas?: unknown;
 }
 
 /** Extrai os fatos que os agentes consomem. */
@@ -1203,17 +1207,47 @@ async function auditarGeneros(docs: LibraryDoc[]): Promise<number> {
 /**
  * Preenche o gênero de quem está sem. Alimenta as prateleiras por gênero da
  * Home — faixa sem gênero simplesmente não aparece em nenhuma delas.
+ *
+ * RODÍZIO: sem ele, a faixa que o modelo responde DESCONHECIDO (ou que o veto do
+ * artista recusa) era a primeira da fila em toda volta, e as seguintes nunca
+ * eram alcançadas. Cada tentativa sem rótulo grava `generoTentadoEm` (ISO) e
+ * `generoTentativas`; a fila vai de quem foi tentado há mais tempo (ou nunca) e
+ * quem já acumulou `GENERO_TENTATIVAS_MAX` tentativas descansa
+ * `GENERO_DESCANSO_DIAS` dias. Ao ganhar gênero, os dois campos são zerados.
  */
+const GENERO_TENTATIVAS_MAX = 3;
+const GENERO_DESCANSO_DIAS = 7;
+
 async function preencherGeneros(docs: LibraryDoc[]): Promise<number> {
+  const agora = Date.now();
+  const descanso = GENERO_DESCANSO_DIAS * 24 * 3600_000;
+
   const semGenero = docs
-    .map((doc) => ({ doc, facts: factsOf((doc.data() as LibraryEntry).track ?? {}) }))
+    .map((doc) => {
+      const entry = doc.data() as LibraryEntry;
+      const quando =
+        typeof entry.generoTentadoEm === 'string' ? Date.parse(entry.generoTentadoEm) : NaN;
+      return {
+        doc,
+        facts: factsOf(entry.track ?? {}),
+        tentadoEm: Number.isFinite(quando) ? quando : 0,
+        tentativas:
+          typeof entry.generoTentativas === 'number' && entry.generoTentativas > 0
+            ? entry.generoTentativas
+            : 0,
+      };
+    })
     .filter(({ facts }) => facts.title && facts.artists.length > 0 && !facts.genre)
+    .filter((c) => !(c.tentativas >= GENERO_TENTATIVAS_MAX && agora - c.tentadoEm < descanso))
+    // Nunca tentadas (0) primeiro, depois a mais antiga: toda faixa tem a sua vez.
+    .sort((a, b) => a.tentadoEm - b.tentadoEm)
     .slice(0, loteEmVigor());
 
   if (semGenero.length === 0) return 0;
 
   const generos = await generista(semGenero.map((x) => x.facts));
   const faixas = faixasMinimas(docs);
+  const iso = new Date(agora).toISOString();
 
   let gravados = 0;
   for (let i = 0; i < semGenero.length; i += 1) {
@@ -1222,12 +1256,22 @@ async function preencherGeneros(docs: LibraryDoc[]): Promise<number> {
     const alvo = semGenero[i]!;
     const voto = generoDoArtista(faixas, alvo.facts.artists[0] ?? '', alvo.doc.id);
     const genero = aceitarSugestao(generos[i] ?? null, voto);
-    if (!genero) continue;
     try {
-      await semGenero[i]!.doc.ref.update({ 'track.genre': genero });
-      gravados += 1;
+      if (genero) {
+        await alvo.doc.ref.update({
+          'track.genre': genero,
+          generoTentadoEm: null,
+          generoTentativas: 0,
+        });
+        gravados += 1;
+      } else {
+        await alvo.doc.ref.update({
+          generoTentadoEm: iso,
+          generoTentativas: alvo.tentativas + 1,
+        });
+      }
     } catch (err) {
-      log.warn({ err, doc: semGenero[i]!.doc.id }, 'falha ao gravar gênero');
+      log.warn({ err, doc: alvo.doc.id }, 'falha ao gravar gênero');
     }
   }
 
