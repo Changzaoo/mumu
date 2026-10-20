@@ -29,6 +29,7 @@
  * app está pronto.
  */
 import { createContext, useContext, useEffect, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useSemMovimento } from '@/hooks/useSemMovimento';
@@ -410,6 +411,22 @@ export function AberturaAnimada() {
     return () => clearTimeout(t);
   }, [podeSair, saindo]);
 
+  // ENQUANTO A ABERTURA COBRE A TELA, O APP NÃO PINTA. Ele continua montando,
+  // buscando dados e carregando imagens por baixo (`visibility` não para nada
+  // disso), mas o navegador não gasta quadro repintando o que ninguém vê. No
+  // Moto G34 (20/10/2026) o app repintando por baixo disputava a GPU com a
+  // animação e a tela inteira piscava. Na saída (fade) o app volta a aparecer.
+  useEffect(() => {
+    if (fechada || saindo) {
+      delete document.documentElement.dataset.abrindo;
+      return;
+    }
+    document.documentElement.dataset.abrindo = '1';
+    return () => {
+      delete document.documentElement.dataset.abrindo;
+    };
+  }, [fechada, saindo]);
+
   if (fechada) return null;
 
   const classe = [
@@ -420,7 +437,7 @@ export function AberturaAnimada() {
     .filter(Boolean)
     .join(' ');
 
-  return (
+  return createPortal(
     <div
       role="status"
       aria-live="polite"
@@ -433,6 +450,10 @@ export function AberturaAnimada() {
         transition: `opacity ${SAIDA_MS}ms ease`,
         opacity: saindo ? 0 : 1,
         pointerEvents: saindo ? 'none' : 'auto',
+        // Camada própria e isolada: nada de fora invalida a pintura dela.
+        contain: 'strict',
+        isolation: 'isolate',
+        willChange: 'opacity',
       }}
     >
       <style>{estilos}</style>
@@ -968,7 +989,8 @@ export function AberturaAnimada() {
           </g>
         </svg>
       </PaletaCtx.Provider>
-    </div>
+    </div>,
+    document.body,
   );
 }
 
@@ -999,13 +1021,13 @@ const estilos = `
 .abertura .p0 { animation-delay: 2.2s } .abertura .p1 { animation-delay: 2.3s } .abertura .p2 { animation-delay: 2.55s }
 .abertura .p3 { animation-delay: 2.8s } .abertura .p4 { animation-delay: 3.05s } .abertura .p5 { animation-delay: 3.25s }
 .abertura .p6 { animation-delay: 3.45s }
-.abertura .ponteiro { transform-box: fill-box; transform-origin: 50% 50%; animation: ab-ponteiro 2.6s ease-in-out 2.2s infinite alternate }
-.abertura .radio { animation: ab-sumir 0.8s ease-in 5s forwards }
-.abertura .trilha { stroke-dashoffset: 1; opacity: 0; animation: ab-tracar 2s cubic-bezier(.4,0,.6,1) 3.9s forwards, ab-meia 0.05s linear 3.9s forwards, ab-sumir 0.6s ease 6.4s forwards }
-.abertura .sinal { opacity: 0; animation: ab-aparecer 0.2s linear 3.9s forwards, ab-sumir 0.5s ease 6.1s forwards }
-.abertura .halo { opacity: 0.35; animation: ab-halo 0.9s ease-out 3.9s infinite }
+.abertura .ponteiro { transform-box: fill-box; transform-origin: 50% 50%; animation: ab-ponteiro 1.3s ease-in-out 2.2s 2 alternate }
+.abertura .radio { animation: ab-sumir-de-vez 0.8s ease-in 5s forwards }
+.abertura .trilha { stroke-dashoffset: 1; opacity: 0; animation: ab-tracar 2s cubic-bezier(.4,0,.6,1) 3.9s forwards, ab-meia 0.05s linear 3.9s forwards, ab-sumir-de-vez 0.6s ease 6.4s forwards }
+.abertura .sinal { opacity: 0; animation: ab-aparecer 0.2s linear 3.9s forwards, ab-sumir-de-vez 0.5s ease 6.1s forwards }
+.abertura .halo { opacity: 0.35; animation: ab-halo 0.9s ease-out 3.9s 2 }
 .abertura .tela { opacity: 0; animation: ab-acender 0.6s ease-out 6.3s forwards }
-.abertura .brilho { opacity: 0; animation: ab-aparecer 0.8s ease-out 6.4s forwards, ab-pulsar 2s ease-in-out 7.2s infinite }
+.abertura .brilho { opacity: 0; animation: ab-aparecer 0.8s ease-out 6.4s forwards }
 .abertura .nota { opacity: 0; transform: translate(30px, 70px); animation: ab-nota 1.7s ease-out forwards }
 .abertura .n1 { animation-delay: 6.6s } .abertura .n2 { animation-delay: 6.9s }
 .abertura .n3 { animation-delay: 7.2s } .abertura .n4 { animation-delay: 7.5s }
@@ -1016,9 +1038,11 @@ const estilos = `
 @keyframes ab-tracar { to { stroke-dashoffset: 0 } }
 @keyframes ab-aparecer { to { opacity: 1 } }
 @keyframes ab-meia { to { opacity: 0.45 } }
-@keyframes ab-sumir { to { opacity: 0 } }
+/* Sumiu: fora da pintura (visibility), não só transparente — o celular fraco agradece. */
+@keyframes ab-sumir-de-vez { 99% { visibility: visible } to { opacity: 0; visibility: hidden } }
+/* O app por baixo não pinta enquanto a abertura cobre a tela (ver o efeito). */
+html[data-abrindo] #root { visibility: hidden }
 @keyframes ab-acender { to { opacity: 1 } }
-@keyframes ab-pulsar { 0%,100% { opacity: 1 } 50% { opacity: 0.45 } }
 @keyframes ab-ponteiro { from { transform: translateX(-34px) } to { transform: translateX(36px) } }
 @keyframes ab-halo { from { transform: scale(0.5); opacity: 0.5 } to { transform: scale(1.9); opacity: 0 } }
 @keyframes ab-logo { from { opacity: 0; transform: scale(0.4) } to { opacity: 1; transform: scale(1) } }
@@ -1029,7 +1053,6 @@ const estilos = `
 }
 
 /* Esperando o app: o brilho da tela continua, nada mais mexe. */
-.abertura--esperando .brilho { animation-duration: 1.2s }
 
 /* Reduzir movimento: a cena pronta, parada. */
 .abertura--parada * { animation: none !important }
