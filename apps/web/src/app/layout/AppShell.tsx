@@ -4,7 +4,7 @@ import { EqualizerPanel } from '@/components/media/EqualizerPanel';
 import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner';
 import { ShareDialogHost } from '@/components/media/ShareDialog';
 import { AdicionarAPlaylistHost } from '@/components/media/AdicionarAPlaylist';
-import { PerguntaDeIdade } from '@/components/media/PerguntaDeIdade';
+import { AberturaAnimada } from '@/components/brand/AberturaAnimada';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import * as gostoInicial from '@/lib/local/gostoInicial';
@@ -294,10 +294,12 @@ export function AppShell() {
         <EqualizerPanel />
         <ShareDialogHost />
         <AdicionarAPlaylistHost />
-        {/* Idade da pessoa: decide o que ela pode ouvir (lib/conteudo/faixaEtaria). */}
-        <PerguntaDeIdade />
+        {/* A idade NÃO é perguntada ao abrir o app (decisão do dono, 20/10/2026):
+            vem da conta Google no login, e quem quiser informa em Configurações. */}
         <ResumeElsewhereBanner />
         <TrackAnnouncer />
+        {/* A abertura: o rádio manda o sinal enquanto o app sobe por baixo. */}
+        <AberturaAnimada />
       </div>
     </ScrollContainerContext.Provider>
   );
