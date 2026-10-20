@@ -28,7 +28,7 @@
  * "Reduzir movimento" ligado: a cena vira um quadro parado e sai assim que o
  * app está pronto.
  */
-import { createContext, useContext, useEffect, useState } from 'react';
+import { createContext, useContext, useEffect, useRef, useState } from 'react';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useSemMovimento } from '@/hooks/useSemMovimento';
@@ -106,6 +106,46 @@ const COR_CLARO: Paleta = {
 
 /** As peças (lâminas, escala, notas) leem a paleta do tema daqui. */
 const PaletaCtx = createContext<Paleta>(COR_ESCURO);
+
+/**
+ * A CÂMERA, quadro a quadro: (instante em ms, translate x, translate y, escala),
+ * com origem em (500, 280) — os mesmos números da antiga animação CSS.
+ *
+ * Por que não CSS: a câmera era um `transform` no <g class="cena"> que chegava
+ * a scale(18). O navegador rasteriza a cena INTEIRA nessa escala, e celular
+ * de GPU fraca (Moto G34, 20/10/2026) se perde: ladrilhos sem pintar,
+ * pedaços sumindo, travadas. Mexer no `viewBox` dá o mesmo enquadramento, mas
+ * o SVG é redesenhado sempre no tamanho da tela — o zoom de 18× custa o mesmo
+ * que o quadro parado.
+ */
+const CAMERA: readonly (readonly [number, number, number, number])[] = [
+  [0, 0, 0, 1],
+  [3895, 0, 0, 1],
+  [4655, -134, 209, 2.2],
+  [5605, -352, 484, 2.2],
+  [6460, -445, -80, 1.6],
+  [7600, -445, -80, 1.6],
+  [8550, -2126, -279, 8],
+  [9500, -4784, -628, 18],
+];
+const ORIGEM_DA_CAMERA = [500, 280] as const;
+
+/** O enquadramento (viewBox) no instante `ms`, a partir do enquadramento base. */
+function viewBoxDaCamera(ms: number, base: readonly [number, number, number, number]): string {
+  let i = 0;
+  while (i < CAMERA.length - 2 && ms >= (CAMERA[i + 1] as readonly number[])[0]!) i++;
+  const [t0, x0, y0, s0] = CAMERA[i] as readonly [number, number, number, number];
+  const [t1, x1, y1, s1] = CAMERA[i + 1] as readonly [number, number, number, number];
+  const f = Math.min(1, Math.max(0, (ms - t0) / (t1 - t0)));
+  const tx = x0 + (x1 - x0) * f;
+  const ty = y0 + (y1 - y0) * f;
+  const esc = s0 + (s1 - s0) * f;
+  const [ox, oy] = ORIGEM_DA_CAMERA;
+  const [bx, by, bw, bh] = base;
+  const vx = ox + (bx - tx - ox) / esc;
+  const vy = oy + (by - ty - oy) / esc;
+  return `${vx.toFixed(2)} ${vy.toFixed(2)} ${(bw / esc).toFixed(2)} ${(bh / esc).toFixed(2)}`;
+}
 
 /** O tema que o app está mostrando (a classe `dark` no <html>), ao vivo. */
 function useTemaEscuro(): boolean {
@@ -247,6 +287,30 @@ export function AberturaAnimada() {
   const [teto, setTeto] = useState(false);
   const [saindo, setSaindo] = useState(false);
   const [fechada, setFechada] = useState(false);
+  const svgRef = useRef<SVGSVGElement>(null);
+  const base: readonly [number, number, number, number] = retrato
+    ? [100, 0, 780, 560]
+    : [0, 0, 1000, 560];
+  const baseTexto = base.join(' ');
+
+  // A câmera anda no relógio das animações CSS da própria cena (o primeiro
+  // `Animation` dela): as peças e o enquadramento nunca se desencontram, nem
+  // quando o celular engasga.
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg || semMovimento) return;
+    const inicio = performance.now();
+    let raf = 0;
+    const quadro = (): void => {
+      const relogio = svg.getAnimations?.({ subtree: true })[0]?.currentTime;
+      const ms = typeof relogio === 'number' ? relogio : performance.now() - inicio;
+      svg.setAttribute('viewBox', viewBoxDaCamera(ms, base));
+      if (ms < DURACAO_DA_CENA_MS + 200) raf = requestAnimationFrame(quadro);
+    };
+    raf = requestAnimationFrame(quadro);
+    return () => cancelAnimationFrame(raf);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `base` deriva de `retrato`
+  }, [retrato, semMovimento]);
 
   useEffect(() => {
     const a = setTimeout(() => setCenaAcabou(true), semMovimento ? 0 : DURACAO_DA_CENA_MS);
@@ -293,7 +357,8 @@ export function AberturaAnimada() {
       <style>{estilos}</style>
       <PaletaCtx.Provider value={COR}>
         <svg
-          viewBox={retrato ? '100 0 780 560' : '0 0 1000 560'}
+          ref={svgRef}
+          viewBox={baseTexto}
           className={classe}
           width="100%"
           height="100%"
@@ -836,7 +901,7 @@ export function AberturaAnimada() {
  *   7,6–8,5  ZOOM na tela, o logo aparece
  *   8,5–9,5  ZOOM no logo; o app abre por baixo com fade
  *
- * A câmera é o <g class="cena"> com transform; a origem é o centro do
+ * A câmera é o viewBox (ver CAMERA), não um transform; a origem é o centro do
  * viewBox (500, 280): para centrar um ponto P na escala s, o translate é
  * −s·(P − C). Pontos: ponta da antena (538, 98); meio do caminho (660, 60);
  * pessoa (778, 300); centro da tela do celular ≈ (748, 316).
@@ -864,10 +929,6 @@ const estilos = `
 .abertura .n1 { animation-delay: 6.6s } .abertura .n2 { animation-delay: 6.9s }
 .abertura .n3 { animation-delay: 7.2s } .abertura .n4 { animation-delay: 7.5s }
 .abertura .logo { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: ab-logo 0.8s cubic-bezier(.2,.8,.2,1) 7.8s forwards }
-.abertura .cena {
-  transform-box: view-box; transform-origin: 500px 280px;
-  animation: ab-camera 9.5s linear forwards;
-}
 
 @keyframes ab-pop { from { opacity: 0; transform: scale(0.7) translateY(14px) } to { opacity: 1; transform: none } }
 @keyframes ab-estender { to { transform: scaleY(1) } }
@@ -884,18 +945,6 @@ const estilos = `
   0% { opacity: 0; transform: translate(30px, 70px) scale(0.6) }
   20% { opacity: 1 }
   100% { opacity: 0; transform: translate(-14px, -72px) scale(1.1) rotate(-14deg) }
-}
-/* A câmera, por cento dos 9,5 s. Pontos (P − C), com C = (500, 280):
-   ponta da antena (61, -95); meio do caminho (160, −220); pessoa (278, 50);
-   centro da tela do celular (266, 35), já com a rotação do celular. */
-@keyframes ab-camera {
-  0%, 41% { transform: translate(0px, 0px) scale(1) }
-  49% { transform: translate(-134px, 209px) scale(2.2) }
-  59% { transform: translate(-352px, 484px) scale(2.2) }
-  68% { transform: translate(-445px, -80px) scale(1.6) }
-  80% { transform: translate(-445px, -80px) scale(1.6) }
-  90% { transform: translate(-2126px, -279px) scale(8) }
-  100% { transform: translate(-4784px, -628px) scale(18) }
 }
 
 /* Esperando o app: o brilho da tela continua, nada mais mexe. */
