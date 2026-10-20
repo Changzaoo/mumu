@@ -32,12 +32,15 @@ import { normalizarLetra } from '@/lib/lyrics/grafia';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /**
- * Antecipação: a linha tem que acender JUNTO com o vocal. O currentTime do
- * <audio> está ~100-200 ms atrás do que o ouvido escuta (buffer de saída,
- * Bluetooth) e ainda há o quadro de render + a troca de estilo; com 0 o
- * destaque sempre chega depois da voz.
+ * Acerto do relógio da letra, em ms (positivo adianta, negativo atrasa).
+ *
+ * Era +180 ("o currentTime está atrás do que o ouvido escuta"), e a letra
+ * acendia ANTES da voz — reclamação do Vinicius em 20/10/2026. Medido no mesmo
+ * dia contra a voz ISOLADA (HDemucs) em 80 linhas de 12 músicas do cofre: o
+ * alinhamento já começa a linha 55 ms antes do ataque da voz (mediana). Com os
+ * 180 somados, a linha acendia ~235 ms adiantada. −50 cancela o viés medido.
  */
-const LEAD_MS = 180;
+const LEAD_MS = -50;
 /** Clicar numa palavra entra este tanto antes dela (o ataque da sílaba). */
 const INICIO_DA_PALAVRA_MS = 60;
 /** Confiança mínima para a palavra ouvida entrar na letra ao vivo. */

@@ -95,8 +95,8 @@ describe('LyricsView: posição e destaque', () => {
     expect(ativa()).toBe('três');
   });
 
-  it('antecipa 180 ms: a linha acende junto com o vocal', async () => {
-    motor.pos = 0.82; // 820 + 180 = 1000 = tempo da 1ª linha
+  it('atrasa 50 ms: o alinhamento já começa a linha antes da voz (medido)', async () => {
+    motor.pos = 1.05; // 1050 − 50 = 1000 = tempo da 1ª linha
     vi.mocked(fetchLyrics).mockResolvedValue(letra(['um', 'dois']));
     montar(faixa('a'));
     await screen.findByText('um');
@@ -104,8 +104,8 @@ describe('LyricsView: posição e destaque', () => {
     expect(ativa()).toBe('um');
   });
 
-  it('um instante antes do lead ainda não acendeu', async () => {
-    motor.pos = 0.81;
+  it('um instante antes do acerto ainda não acendeu', async () => {
+    motor.pos = 1.04;
     vi.mocked(fetchLyrics).mockResolvedValue(letra(['um', 'dois']));
     montar(faixa('a'));
     await screen.findByText('um');
@@ -114,7 +114,7 @@ describe('LyricsView: posição e destaque', () => {
   });
 
   it('timestamps iguais: acende a última delas e não quebra', async () => {
-    motor.pos = 2;
+    motor.pos = 2.05;
     vi.mocked(fetchLyrics).mockResolvedValue(
       letra(['a1', 'b1', 'b2', 'c1'], [1000, 2000, 2000, 3000]),
     );
@@ -197,7 +197,7 @@ describe('LyricsView: o que aparece na tela', () => {
   });
 
   it('letra enorme (3 mil linhas) monta e acende a certa', async () => {
-    motor.pos = 1500;
+    motor.pos = 1500.05;
     vi.mocked(fetchLyrics).mockResolvedValue(
       letra(
         Array.from({ length: 3000 }, (_, i) => `linha ${i}`),
