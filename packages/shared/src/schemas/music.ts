@@ -57,7 +57,17 @@ export const trackSchema = z.object({
   /** Integrated loudness (LUFS) for ReplayGain — null until processed. */
   loudnessLufs: z.number().nullable(),
   isLiked: z.boolean().optional(),
-  album: albumSchema.pick({ id: true, title: true, slug: true, coverUrl: true }).nullable(),
+  album: albumSchema
+    .pick({ id: true, title: true, slug: true, coverUrl: true })
+    .extend({
+      /**
+       * Quantas faixas o disco tem no catálogo. É o que diz que um álbum com UMA
+       * faixa na biblioteca é um disco de verdade (e não um single) mesmo quando
+       * a faixa é a número 1 — ver computeAlbumGroups no app.
+       */
+      trackCount: z.number().int().nullable().optional(),
+    })
+    .nullable(),
   artists: z.array(artistSchema.pick({ id: true, name: true, slug: true, imageUrl: true })),
   /** Where playback should request audio from (adaptive HLS). */
   streamUrl: z.string().nullable(),

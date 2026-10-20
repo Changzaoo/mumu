@@ -2307,7 +2307,11 @@ function computeAlbumGroups(vista: readonly LibraryEntry[]): LocalAlbum[] {
   const albuns = [...byKey.values()].filter((a) => {
     if (MARCA_DE_SINGLE.test(a.title)) return false;
     if (a.tracks.length >= 2) return true;
-    return (a.tracks[0]?.trackNumber ?? 0) >= 2;
+    // Uma faixa só: é disco de verdade se ela não é a primeira (há outras
+    // antes) OU se o catálogo diz que o disco tem mais faixas (`trackCount`,
+    // preenchido pela curadoria no servidor — ver preencherAlbuns).
+    const unica = a.tracks[0];
+    return (unica?.trackNumber ?? 0) >= 2 || (unica?.album?.trackCount ?? 0) >= 2;
   });
   // NA ORDEM DO DISCO, não na ordem em que as faixas entraram na biblioteca —
   // ouvir o álbum é ouvir na sequência que o artista escolheu. Faixa sem número

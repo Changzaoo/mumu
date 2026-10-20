@@ -67,6 +67,7 @@ import {
   identificador,
   type TrackFacts,
 } from './agents.js';
+import { procurarAlbum, type AlbumEncontrado } from './albuns.js';
 
 const log = logger.child({ worker: 'curation' });
 
@@ -98,6 +99,9 @@ interface LibraryEntry {
   generoTentadoEm?: unknown;
   /** Quantas tentativas sem rótulo a faixa acumulou desde que ficou sem gênero. */
   generoTentativas?: unknown;
+  /** Última tentativa (ISO) de achar o álbum — o rodízio de `preencherAlbuns`. */
+  albumTentadoEm?: unknown;
+  albumTentativas?: unknown;
 }
 
 /** Extrai os fatos que os agentes consomem. */
@@ -358,7 +362,186 @@ async function curarCategorias(docs: LibraryDoc[]): Promise<number> {
   corrigidas += await auditarGeneros(docs); // confere o que já tem categoria
   corrigidas += await preencherGeneros(docs); // preenche quem está sem
   corrigidas += await forcarGenerosReaisEmDocs(docs); // discografia espalhada sem maioria
+  corrigidas += await preencherAlbuns(docs); // álbum, número da faixa e total do disco
   return corrigidas;
+}
+
+// ── Álbuns ──────────────────────────────────────────────────────────────────
+
+const ALBUM_TENTATIVAS_MAX = 3;
+const ALBUM_DESCANSO_DIAS = 30;
+
+/** O que a faixa tem hoje de álbum, lido do JSON cru. */
+function albumDe(track: LibraryTrack): {
+  title: string;
+  trackNumber: number | null;
+  trackCount: number | null;
+} {
+  const album =
+    track.album && typeof track.album === 'object'
+      ? (track.album as Record<string, unknown>)
+      : null;
+  const t = track as Record<string, unknown>;
+  return {
+    title: album && typeof album.title === 'string' ? album.title.trim() : '',
+    trackNumber: typeof t.trackNumber === 'number' && t.trackNumber > 0 ? t.trackNumber : null,
+    trackCount: album && typeof album.trackCount === 'number' ? album.trackCount : null,
+  };
+}
+
+/** Normalização só para comparar nomes de álbum. */
+function chaveDeAlbum(s: string): string {
+  return s
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/\s*[-–—([]\s*(single|ep|deluxe.*|edição.*|edition.*)\s*[)\]]?\s*$/i, '')
+    .replace(/[^a-z0-9]+/g, ' ')
+    .trim();
+}
+
+/**
+ * O patch de álbum para uma faixa, ou null quando não há nada seguro a gravar.
+ * Puro, para testar: respeita o álbum que a curadoria já fixou (só completa o
+ * número quando o disco encontrado é o MESMO) e nunca apaga capa existente.
+ */
+export function patchDeAlbum(
+  track: LibraryTrack,
+  docId: string,
+  achado: AlbumEncontrado,
+): Record<string, unknown> | null {
+  const atual = albumDe(track);
+  const t = track as Record<string, unknown>;
+  const patch: Record<string, unknown> = {};
+  const mesmoDisco = atual.title && chaveDeAlbum(atual.title) === chaveDeAlbum(achado.album);
+  if (!atual.title) {
+    patch['track.album'] = {
+      id: `local-album:${docId}`,
+      title: achado.album,
+      slug: '',
+      coverUrl: achado.coverUrl ?? (typeof t.coverUrl === 'string' ? t.coverUrl : null),
+      ...(achado.trackCount ? { trackCount: achado.trackCount } : {}),
+    };
+  } else if (mesmoDisco) {
+    if (achado.trackCount && atual.trackCount !== achado.trackCount) {
+      patch['track.album.trackCount'] = achado.trackCount;
+    }
+  } else {
+    // Disco diferente do que a curadoria fixou: não se mexe no álbum, e o
+    // número encontrado é de OUTRO disco — não serve.
+    return null;
+  }
+  if (!atual.trackNumber && achado.trackNumber) {
+    patch['track.trackNumber'] = achado.trackNumber;
+    if (achado.discNumber) patch['track.discNumber'] = achado.discNumber;
+  }
+  if (typeof t.releaseYear !== 'number' && achado.releaseYear)
+    patch['track.releaseYear'] = achado.releaseYear;
+  if (!(typeof t.coverUrl === 'string' && t.coverUrl) && achado.coverUrl)
+    patch['track.coverUrl'] = achado.coverUrl;
+  return Object.keys(patch).length > 0 ? patch : null;
+}
+
+/** Faixa que ainda precisa de álbum ou de número: candidata ao rodízio. */
+export function precisaDeAlbum(track: LibraryTrack): boolean {
+  const atual = albumDe(track);
+  return !atual.title || !atual.trackNumber;
+}
+
+/**
+ * ÁLBUM, NÚMERO DA FAIXA E TOTAL DO DISCO para quem não tem.
+ *
+ * Um terço das faixas estava sem álbum e dois terços sem número (medido em
+ * 20/10/2026) — e sem número a ficha do artista esconde o disco. O catálogo
+ * (Deezer, depois iTunes) devolve tudo isso com prova de título, artista e
+ * duração (ver albuns.ts). Mesmo rodízio de `preencherGeneros`: nunca tentadas
+ * primeiro, 3 tentativas = 30 dias de descanso, contador zera quando grava.
+ */
+async function preencherAlbuns(
+  docs: LibraryDoc[],
+  deps: { procurar?: typeof procurarAlbum } = {},
+): Promise<number> {
+  const lote = env.CURATION_ALBUM_BATCH;
+  if (lote <= 0) return 0;
+  const agora = Date.now();
+  const descanso = ALBUM_DESCANSO_DIAS * 24 * 3600_000;
+  const procurar = deps.procurar ?? procurarAlbum;
+
+  const candidatas = docs
+    .map((doc) => {
+      const entry = doc.data() as LibraryEntry;
+      const track = entry.track ?? {};
+      const quando =
+        typeof entry.albumTentadoEm === 'string' ? Date.parse(entry.albumTentadoEm) : NaN;
+      return {
+        doc,
+        track,
+        facts: factsOf(track),
+        tentadoEm: Number.isFinite(quando) ? quando : 0,
+        tentativas:
+          typeof entry.albumTentativas === 'number' && entry.albumTentativas > 0
+            ? entry.albumTentativas
+            : 0,
+      };
+    })
+    .filter(
+      ({ facts, track }) =>
+        facts.title &&
+        facts.artists.length > 0 &&
+        facts.artists[0] !== 'Desconhecido' &&
+        precisaDeAlbum(track),
+    )
+    .filter((c) => !(c.tentativas >= ALBUM_TENTATIVAS_MAX && agora - c.tentadoEm < descanso))
+    .sort((a, b) => a.tentadoEm - b.tentadoEm)
+    .slice(0, lote);
+  if (candidatas.length === 0) return 0;
+
+  const iso = new Date(agora).toISOString();
+  let gravados = 0;
+  for (const alvo of candidatas) {
+    const durationMs =
+      typeof (alvo.track as Record<string, unknown>).durationMs === 'number'
+        ? ((alvo.track as Record<string, unknown>).durationMs as number)
+        : null;
+    const achado = await procurar(
+      { title: alvo.facts.title, artists: alvo.facts.artists, durationMs },
+      { log: (m) => log.debug(m), pausaItunesMs: 3_000 },
+    );
+    const patch = achado ? patchDeAlbum(alvo.track, alvo.doc.id, achado) : null;
+    try {
+      if (patch) {
+        await alvo.doc.ref.update({ ...patch, albumTentadoEm: null, albumTentativas: 0 });
+        gravados += 1;
+      } else {
+        await alvo.doc.ref.update({ albumTentadoEm: iso, albumTentativas: alvo.tentativas + 1 });
+      }
+    } catch (err) {
+      log.warn({ err, doc: alvo.doc.id }, 'falha ao gravar álbum');
+    }
+  }
+  if (gravados > 0) log.info({ gravados, pendentes: candidatas.length }, 'álbuns preenchidos');
+  return gravados;
+}
+
+/** O acervo como documentos, para as passagens que já falam `LibraryDoc`. */
+function docDoAcervo(linha: { id: string; data: unknown }): LibraryDoc {
+  let dados = (linha.data ?? {}) as LibraryEntry;
+  return {
+    id: linha.id,
+    data: () => dados,
+    ref: {
+      async update(patch) {
+        dados = aplicarPatch(dados, patch);
+        await prisma.catalogTrack.update({
+          where: { id: linha.id },
+          data: { data: dados as object },
+        });
+      },
+      async delete() {
+        /* o acervo não se apaga por aqui */
+      },
+    },
+  };
 }
 
 /** slug de artista no formato que o arquivo grava. */
@@ -735,6 +918,9 @@ async function curarAcervo(): Promise<number> {
   for (const mudanca of await revisoesDeGeneroReal(faixas, amostras)) {
     if (await gravar(mudanca)) corrigidas += 1;
   }
+
+  // Os álbuns do acervo — o que todo usuário vê na ficha do artista.
+  corrigidas += await preencherAlbuns(linhas.map(docDoAcervo));
 
   if (corrigidas > 0) log.info({ corrigidas, faixas: linhas.length }, 'acervo curado');
   return corrigidas;

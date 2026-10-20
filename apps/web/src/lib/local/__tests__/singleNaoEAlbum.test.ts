@@ -82,6 +82,13 @@ describe('álbum de verdade x single', () => {
     expect(albuns[0]?.tracks).toHaveLength(2);
   });
 
+  it('a faixa 1 de um disco de 13 (trackCount do catálogo) é álbum, mesmo sozinha', async () => {
+    const e = entrada('local:1', { titulo: 'Abertura', album: 'In the Zone', trackNumber: 1 });
+    e.track.album = { ...e.track.album!, trackCount: 13 };
+    const lib = await montar([e]);
+    expect(lib.albumGroups().map((a) => a.title)).toEqual(['In the Zone']);
+  });
+
   it('faixa numerada a partir da segunda veio de um disco, mesmo sozinha', async () => {
     const lib = await montar([
       entrada('local:1', { titulo: 'A Quarta', album: 'O Disco', trackNumber: 4 }),

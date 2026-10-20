@@ -49,6 +49,9 @@ vi.mock('../infra/db/prisma.js', () => ({
     $executeRaw: (s: TemplateStringsArray, ...v: unknown[]) => executeRaw(s, ...v),
   },
 }));
+// O passo de álbuns vem depois do de gêneros na mesma passagem: sem o mock ele
+// iria à rede (Deezer/iTunes) e estouraria o tempo do teste.
+vi.mock('./albuns.js', () => ({ procurarAlbum: async () => null }));
 vi.mock('./agents.js', () => ({
   auditor: vi.fn(async () => true),
   auditorDeGenero: vi.fn(async () => []),

@@ -154,6 +154,12 @@ const envSchema = z
       .default(5 * 60_000),
     /** Só re-audita uma faixa depois disso (evita reprocessar a mesma sempre). */
     CURATION_RECHECK_DAYS: z.coerce.number().int().min(1).default(30),
+    /**
+     * Quantas faixas sem álbum (ou sem número de faixa) cada volta procura no
+     * Deezer/iTunes, por conta e para o acervo. O Deezer aceita ~50 chamadas
+     * a cada 5 s e cada faixa custa até 3; 120 por volta são ~1 min.
+     */
+    CURATION_ALBUM_BATCH: z.coerce.number().int().min(0).max(1000).default(120),
 
     // ── Varredura de madrugada (ver varreduraNoturna.worker) ────────────────
     /**
