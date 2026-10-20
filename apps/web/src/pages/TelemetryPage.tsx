@@ -52,6 +52,7 @@ import { getIdToken } from '@/lib/firebase';
 import { API_BASE_URL } from '@/lib/apiBase';
 import { computeInsights } from '@/lib/telemetry/insights';
 import { SINTOMAS, type Canal, type Linha, type ResumoDoDiario } from '@/lib/telemetry/diario';
+import { TIPOS_DE_RELATO, type Relato } from '@/lib/telemetry/relatos';
 import { cn, formatBytes } from '@/lib/utils';
 import type {
   RecentPlay,
@@ -142,6 +143,8 @@ interface TelemetryDoc {
   downloadsCount?: number;
   /** O diário de bordo do aparelho: a sequência do que aconteceu (ver lib/telemetry/diario). */
   diario?: { linhas: Linha[]; resumo: ResumoDoDiario };
+  /** O que a pessoa relatou pelo botão do player (ver lib/telemetry/relatos). */
+  relatos?: Relato[];
   // ── agrupamento por conta (preenchido em `agruparPorConta`) ──
   /** Os aparelhos desta conta, quando ela tem mais de um. */
   aparelhos?: AparelhoDaConta[];
@@ -399,6 +402,7 @@ function categorize(t: TelemetryDoc): UserSegment {
   else if (t.canal === 'navegador') chips.push('Pelo navegador');
   if ((t.jsErrors ?? 0) > 0) chips.push('Com erros');
   if ((t.diario?.resumo.sintomas ?? 0) > 0) chips.push('Sintomas no diário');
+  if ((t.relatos?.length ?? 0) > 0) chips.push(`${t.relatos!.length} relato(s)`);
 
   // Proporção de tempo em busca/descobrir → perfil explorador.
   const pageTotal = Object.values(t.pageSeconds ?? {}).reduce((a, b) => a + b, 0);
@@ -737,6 +741,57 @@ const COR_DO_CANAL: Record<Canal, string> = {
   erro: 'bg-danger/15 text-danger',
   app: 'bg-fg/6 text-fg-subtle',
 };
+
+/** O que a pessoa relatou pelo botão "Reportar problema" do player. */
+function RelatosDoOuvinte({ relatos }: { relatos: Relato[] }) {
+  const [aberto, setAberto] = useState<string | null>(null);
+  const rotulo = (tipo: string): string =>
+    TIPOS_DE_RELATO.find((t) => t.id === tipo)?.rotulo ?? tipo;
+  return (
+    <div>
+      <SectionTitle icon={AlertTriangle}>Relatos do ouvinte</SectionTitle>
+      <ul className="space-y-1">
+        {relatos.map((r) => (
+          <li key={r.id} className="rounded-lg bg-danger/10 px-3 py-2 text-[12px] text-fg">
+            <div className="flex flex-wrap items-center gap-x-2">
+              <span className="font-semibold text-danger">{rotulo(r.tipo)}</span>
+              <span className="text-fg-muted">{new Date(r.em).toLocaleString('pt-BR')}</span>
+              {r.titulo && (
+                <span className="truncate">
+                  {r.titulo}
+                  {r.artista ? ` — ${r.artista}` : ''}
+                  {r.posicaoSeg !== null
+                    ? ` · ${Math.floor(r.posicaoSeg / 60)}:${String(r.posicaoSeg % 60).padStart(2, '0')}`
+                    : ''}
+                </span>
+              )}
+              {r.diario.length > 0 && (
+                <button
+                  type="button"
+                  className="ml-auto font-medium underline-offset-2 hover:underline"
+                  onClick={() => setAberto((v) => (v === r.id ? null : r.id))}
+                >
+                  {aberto === r.id ? 'Ocultar diário' : `Diário (${r.diario.length})`}
+                </button>
+              )}
+            </div>
+            {r.detalhe && <p className="mt-1 text-fg-muted">“{r.detalhe}”</p>}
+            {aberto === r.id && (
+              <ol className="mt-2 max-h-56 space-y-0.5 overflow-auto font-mono text-[11px] text-fg-muted">
+                {r.diario.map((l, i) => (
+                  <li key={i}>
+                    {l.em} [{l.c}] {l.e}
+                    {l.d ? ` ${typeof l.d === 'string' ? l.d : JSON.stringify(l.d)}` : ''}
+                  </li>
+                ))}
+              </ol>
+            )}
+          </li>
+        ))}
+      </ul>
+    </div>
+  );
+}
 
 function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDoDiario } }) {
   const [aberto, setAberto] = useState(false);
@@ -1553,6 +1608,8 @@ function UserCard({ t }: { t: TelemetryDoc }) {
           {t.jsErrors} erro(s) de JavaScript{t.lastError ? ` — último: "${t.lastError}"` : ''}
         </div>
       )}
+
+      {t.relatos && t.relatos.length > 0 && <RelatosDoOuvinte relatos={t.relatos} />}
 
       {t.diario && t.diario.linhas.length > 0 && <DiarioDeBordo diario={t.diario} />}
 

@@ -30,6 +30,7 @@ import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
 import { LyricsView } from '@/components/media/LyricsView';
+import { ReportarProblema } from '@/components/media/ReportarProblema';
 import { ClipeView } from '@/components/media/ClipeView';
 import { aquecerClipe } from '@/lib/clipe/youtubeApi';
 import { origemDaFaixa } from '@/lib/local/detalheDaFaixa';
@@ -636,6 +637,9 @@ export function NowPlaying() {
                     >
                       <SlidersHorizontal />
                     </IconButton>
+
+                    {/* O que deu errado, dito por quem ouve (ver lib/telemetry/relatos). */}
+                    <ReportarProblema />
 
                     <DropdownMenu>
                       <DropdownMenuTrigger asChild>

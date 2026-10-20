@@ -36,6 +36,7 @@ import { useSettingsStore } from '@/stores/settingsStore';
 import { getVitals, initVitals } from './vitals';
 import { coletarAoVivo, instalarAoVivo } from './aoVivo';
 import { anotar, coletarDiario, instalarConsoleDoDiario } from './diario';
+import { relatosParaEnviar } from './relatos';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { API_BASE_URL } from '@/lib/apiBase';
 
@@ -507,8 +508,18 @@ function snapshot(): Record<string, unknown> {
     aoVivo: coletarAoVivo(),
     // A sequência do que aconteceu (ver `diario.ts`): é o que aponta ONDE quebrou.
     diario: coletarDiario(),
+    // O que a pessoa relatou pelo botão do player (ver `relatos.ts`).
+    relatos: relatosParaEnviar(),
     ...stats,
   };
+}
+
+/**
+ * Um relato acabou de ser feito: vai para o painel AGORA, com o diário que o
+ * acompanha — não no flush de saída, que pode nunca vir (aba que fica aberta).
+ */
+export function enviarRelatosAgora(): void {
+  void push({ relatos: relatosParaEnviar(), diario: coletarDiario() });
 }
 
 function flush(): void {

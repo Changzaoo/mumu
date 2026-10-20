@@ -182,6 +182,8 @@ const DESCARTAVEIS_QUANDO_CHEIO = [
   'devices',
   'topTracks',
   'topArtists',
+  // Por último, e só se nada mais coube: é o que a pessoa relatou de propósito.
+  'relatos',
 ] as const;
 
 /** Tira campos de diagnóstico até o documento caber; `null` se nem assim. */
