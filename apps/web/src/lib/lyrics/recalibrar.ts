@@ -201,6 +201,27 @@ function confianca(l: LinhaAlinhada | undefined): number {
 const LINHA_CONFIAVEL = 0.3;
 
 /**
+ * ALINHAMENTO SUSPEITO: abaixo desta confiança média, a letra pode não ser
+ * desta música — e o alinhamento forçado não tem como dizer, porque ele
+ * encaixa QUALQUER texto no áudio (só a confiança cai).
+ *
+ * Medido em 17/10/2026 sobre os 673 alinhamentos do cofre de produção: a
+ * confiança média fica entre 0,50 e 0,75 na maioria (p50 = 0,61) e há uma
+ * cauda abaixo de 0,45 (~12% das faixas). Só 35 eram rejeitadas pela regra
+ * das linhas confiáveis — as outras entravam no cache como "alinhadas" com a
+ * letra de outra música. Abaixo deste corte a letra vai à prova da voz
+ * (ver calibragem.ts / confirmarPelaVoz.ts) antes de ficar.
+ */
+export const ALINHAMENTO_SUSPEITO = 0.42;
+
+/** Confiança média do alinhamento inteiro (0–1), sobre as linhas enviadas. */
+export function confiancaDoAlinhamento(indices: number[], alinhadas: LinhaAlinhada[]): number {
+  if (indices.length === 0 || alinhadas.length !== indices.length) return 0;
+  const soma = alinhadas.reduce((s, l) => s + confianca(l), 0);
+  return soma / alinhadas.length;
+}
+
+/**
  * Aplica o alinhamento à letra. Nunca troca o texto.
  *
  * Letra COM tempo: cada linha bem alinhada é uma âncora (tempo real); as outras

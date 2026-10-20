@@ -11,6 +11,7 @@ import { instalarBootPerf, marcarBoot } from '@/lib/telemetry/bootPerf';
 import { instalarSyncDiagnostico } from '@/lib/sync/syncStatus';
 import { preconectarFontesDeAudio } from '@/lib/perf/preconectar';
 import { instalarGiroDeTela } from '@/lib/perf/giroDeTela';
+import { instalarCapasResilientes } from '@/lib/perf/capasResilientes';
 
 // Primeira linha executável do app: daqui para trás é download + parse do
 // bundle, e é isso que esta marca mede. `radinhoPerf()` imprime a linha do
@@ -44,6 +45,11 @@ instalarSyncDiagnostico();
 // Girar o aparelho assenta o layout novo em vez de fazê-lo saltar (ver o
 // módulo). Instalado cedo: o primeiro giro pode vir antes de o app terminar.
 instalarGiroDeTela();
+
+// Capa que não carrega (sem rede, túnel fora, blob de outra sessão) vira um
+// fundo neutro em vez do ícone quebrado, e é tentada de novo quando a rede
+// volta. Ver lib/perf/capasResilientes.ts.
+instalarCapasResilientes();
 
 // Abre a conexão com os servidores de áudio ANTES de o usuário apertar play:
 // medido, o aperto de mão (DNS + TCP + TLS) com o nó do Audius custa ~0,7s num

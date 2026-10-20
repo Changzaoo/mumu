@@ -10,7 +10,7 @@
  * concentram a informação, então cortar em 512 e renormalizar preserva quase
  * toda a qualidade com 1/4 do espaço (5 mil faixas ≈ 10 MB em vez de 40 MB).
  */
-import type { TrackDto } from '@radinho/shared';
+import { EMBED_MODEL, type TrackDto } from '@radinho/shared';
 import { aiEmbed } from '@/lib/local/importerHelper';
 import { normalize, trackEmbeddingText } from '@/lib/reco/semantic';
 
@@ -80,11 +80,21 @@ function tx<T>(
   );
 }
 
-/** Hash estável e barato (FNV-1a) do texto da faixa. */
+/**
+ * Hash estável e barato (FNV-1a) do texto da faixa — E DO MODELO.
+ *
+ * O modelo de embedding trocou em 25/08/2026 (o anterior morreu com 410) e o
+ * hash só olhava o texto: todo vetor gravado antes continuava "válido" e era
+ * comparado por cosseno com vetores do modelo novo, que vivem noutro espaço.
+ * "Na sua vibe" e "Parecidas com X" misturavam os dois sem ninguém ver. Com o
+ * modelo no hash, vetor de outro modelo é obsoleto e é refeito aos poucos
+ * (`ensureVectors`, 120 por rodada), como quando a metadata muda.
+ */
 function hashText(text: string): string {
+  const texto = `${EMBED_MODEL}|${text}`;
   let h = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    h ^= text.charCodeAt(i);
+  for (let i = 0; i < texto.length; i++) {
+    h ^= texto.charCodeAt(i);
     h = Math.imul(h, 0x01000193);
   }
   return (h >>> 0).toString(36);

@@ -112,11 +112,25 @@ export function definirEmUso(cofre: Cofre, fonte: (() => Iterable<string>) | nul
 }
 
 function urlsEmUso(cofre: Cofre): Set<string> {
+  let urls: Set<string>;
   try {
-    return new Set(emUso[cofre]?.() ?? []);
+    urls = new Set(emUso[cofre]?.() ?? []);
   } catch {
-    return new Set();
+    urls = new Set();
   }
+  // CAPA NA TELA NÃO É DESPEJADA. Ninguém registra `definirEmUso('capa')`, e
+  // o `coverUrl` copiado para o estado do player, da fila e das listas
+  // continuava apontando para a alça revogada — imagem quebrada no meio da
+  // tela, sem rede nenhuma ter caído. O DOM sabe quais alças estão sendo
+  // mostradas agora; a varredura é barata (algumas centenas de <img>) e só
+  // roda quando há despejo, que é raro.
+  if (cofre === 'capa' && typeof document !== 'undefined') {
+    for (const img of Array.from(document.images)) {
+      const src = img.currentSrc || img.src;
+      if (src.startsWith('blob:')) urls.add(src);
+    }
+  }
+  return urls;
 }
 
 const cofres: Record<Cofre, Map<string, Alca>> = {

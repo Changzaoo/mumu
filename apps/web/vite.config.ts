@@ -115,13 +115,87 @@ export default defineConfig({
               cacheableResponse: { statuses: [200] },
             },
           },
+          /**
+           * CAPAS: CacheFirst, mas só do que É IMAGEM.
+           *
+           * A regra antiga aceitava `statuses: [0, 200]`. Como nenhum <img> de
+           * capa pede CORS, toda capa das CDNs (iTunes, Deezer, YouTube) chegava
+           * ao worker como resposta OPACA (status 0) — e opaca esconde o status
+           * real: o 404 do YouTube para vídeo sem miniatura, o JSON de erro do
+           * iTunes, a página de login de um Wi-Fi de hotel, tudo entrava no
+           * cache como "capa" e era servido por 30 dias, inclusive com rede.
+           * É a "imagem corrompida que não volta". Resposta opaca ainda cobra
+           * ~7 MB de cota cada no Chrome (até 300 → a cota da origem inteira,
+           * a mesma do áudio offline).
+           *
+           * Agora: pedido de outra origem vira CORS (as três CDNs mandam
+           * `Access-Control-Allow-Origin: *`, conferido em 17/10/2026), então o
+           * status é real; só 200 com `Content-Type: image/*` entra no cache;
+           * CDN sem CORS cai para o pedido opaco de sempre, sem cachear; e sem
+           * rede nem cache o erro chega ao <img>, onde a capa vira um fundo
+           * neutro e é tentada de novo quando a rede volta
+           * (lib/perf/capasResilientes.ts).
+           */
           {
             urlPattern: ({ request }) => request.destination === 'image',
             handler: 'CacheFirst',
             options: {
-              cacheName: 'aurial-images',
+              cacheName: 'aurial-images-v2',
               expiration: { maxEntries: 300, maxAgeSeconds: 60 * 60 * 24 * 30 },
-              cacheableResponse: { statuses: [0, 200] },
+              cacheableResponse: { statuses: [200] },
+              plugins: [
+                {
+                  requestWillFetch: async ({ request }: { request: Request }) => {
+                    const url = new URL(request.url);
+                    if (url.origin === self.location.origin || request.mode === 'cors') {
+                      return request;
+                    }
+                    return new Request(request.url, {
+                      mode: 'cors',
+                      credentials: 'omit',
+                      referrerPolicy: 'no-referrer',
+                    });
+                  },
+                  fetchDidSucceed: async ({ response }: { response: Response }) => {
+                    // Com CORS o status é real. O 404 do YouTube vem com um JPEG
+                    // cinza no corpo: o <img> "carrega" um quadrado cinza e
+                    // ninguém sabe que a capa não existe. Status ruim vira erro,
+                    // e o erro chega ao <img> (lib/perf/capasResilientes.ts).
+                    if (response.type !== 'opaque' && !response.ok) {
+                      const erro = new Error(`capa ${response.status}`);
+                      erro.name = 'CapaIndisponivel';
+                      throw erro;
+                    }
+                    return response;
+                  },
+                  cacheWillUpdate: async ({ response }: { response: Response }) => {
+                    const tipo = response.headers.get('content-type') ?? '';
+                    return response.status === 200 && tipo.startsWith('image/') ? response : null;
+                  },
+                  handlerDidError: async ({
+                    request,
+                    error,
+                  }: {
+                    request: Request;
+                    error?: Error;
+                  }) => {
+                    // Status ruim já foi julgado acima: não insiste.
+                    if (error?.name === 'CapaIndisponivel') return undefined;
+                    // CDN que não fala CORS: o pedido opaco de sempre, sem cache.
+                    // Sem rede, devolve nada: o erro chega ao <img>, e é lá
+                    // (lib/perf/capasResilientes.ts) que a capa vira fundo neutro
+                    // e é tentada de novo quando a rede volta — um fundo servido
+                    // daqui como "200" enganaria o app, que nunca tentaria.
+                    try {
+                      const opaca = await fetch(request.url, { mode: 'no-cors' });
+                      if (opaca.type === 'opaque') return opaca;
+                    } catch {
+                      /* sem rede */
+                    }
+                    return undefined;
+                  },
+                },
+              ],
             },
           },
           /**

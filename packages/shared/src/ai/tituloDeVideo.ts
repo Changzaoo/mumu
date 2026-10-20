@@ -109,6 +109,14 @@ const RUIDO_SO_ENTRE_PARENTESES = [
   'audio',
   'mv',
   'prod',
+  // "(Web Clipe)", "(Clipe Animado)", "(Clipe)": o canal anunciando o formato.
+  // "clipe" solto só é ruído entre parênteses — "Clipe" pode ser nome de música.
+  'clipe',
+  'web clipe',
+  'webclipe',
+  'web clip',
+  'clipe animado',
+  'lyric video',
 ];
 
 /**
@@ -185,11 +193,48 @@ function limparParenteses(texto: string): string {
 }
 
 /** Remove o ruído de um pedaço de texto, preservando acentos e caixa. */
+/**
+ * Parêntese DENTRO de parêntese vira um só: "(LIVE FROM COACHELLA (Weekend I)
+ * / Audio)". O leitor de parênteses casa do primeiro "(" ao primeiro ")", então
+ * o pedaço de fora ("/ Audio)") sobrava grudado no nome da música —
+ * "ALL THE WAY / Audio)". Achatado, o grupo inteiro é julgado de uma vez.
+ */
+function achatarParenteses(texto: string): string {
+  let atual = texto;
+  for (let i = 0; i < 4; i += 1) {
+    const proximo = atual.replace(/\(([^()]*)\(([^()]*)\)([^()]*)\)/g, '($1$2$3)');
+    if (proximo === atual) break;
+    atual = proximo;
+  }
+  return atual;
+}
+
+/**
+ * Crédito de produção SOLTO, sem parênteses: "Doutora … Prod.LtnoBeat e DJ
+ * Murillo", "… prod. by X". Entre parênteses ele já saía (`prod` em
+ * RUIDO_SO_ENTRE_PARENTESES); solto, e principalmente sem espaço depois do
+ * ponto, ficava dentro do nome da música. Come daqui até o fim.
+ */
+// Exige o ponto, o "by" ou os dois-pontos depois de "prod": sem isso
+// "The Prodigy" e "Menó Prodígio" eram lidos como crédito de produção.
+const PRODUCAO_SOLTA = /\s*[-–—|]?\s*\bprod(?:\.|\s+by\b|\s*:)\s*\S.*$/i;
+
 function limpar(texto: string): string {
   return (
     // A descrição vem PRIMEIRO: ela leva o separador junto, e sem separador a
     // divisão "Artista - Música" nem chega a acontecer no lado errado.
-    limparParenteses(texto.replace(DESCRICAO_DO_CANAL, ' '))
+    limparParenteses(
+      achatarParenteses(
+        texto
+          // Emoji grudado no separador ("FALA NA CARA 2🌹- MC Paiva") impedia a
+          // divisão "Música - Artista" de acontecer: o travessão exige espaço.
+          .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu, ' ')
+          .replace(/\u{FE0F}/gu, '')
+          // Número da faixa no DVD ("… Faixa 6 - DVD Mundão Girou").
+          .replace(/\s*\bfaixa\s+\d{1,3}\b/gi, ' '),
+      ).replace(DESCRICAO_DO_CANAL, ' '),
+    )
+      .replace(PRODUCAO_SOLTA, ' ')
       // Resolução de vídeo colada ("640x360"), marca registrada, hashtags.
       // Vêm ANTES do ruído solto: com "640x360" ainda no fim da frase, o "HD"
       // que estava logo antes não era o último pedaço e escapava da limpeza —
@@ -456,9 +501,11 @@ export function separarArtistasGrudados(
  * Era exatamente esse formato que entrava trocado, com a lista de cantores no
  * campo do título e a música no campo do artista.
  */
-const ASPAS = /["“”]([^"“”]{2,60})["“”]|‘([^’]{2,60})’/;
+// O fecho pode ser dois apóstrofos ("Conto Demais''): canal que digita a
+// aspa de abrir e não acha a de fechar no teclado.
+const ASPAS = /["“”]([^"“”]{2,60})(?:["“”]|'')|‘([^’]{2,60})’/;
 /** As mesmas aspas, para apagar o trecho citado do resto da frase. */
-const ASPAS_TODAS = /["“”][^"“”]*["“”]|‘[^’]*’/g;
+const ASPAS_TODAS = /["“”][^"“”]*(?:["“”]|'')|‘[^’]*’/g;
 
 /**
  * O APÓSTROFO NÃO É ASPA — e tratá-lo como aspa destruía nomes clássicos.
@@ -494,9 +541,62 @@ const CONVIDADOS = /\s*[-–—|([]?\s*\b(?:feat|ft|part|participacao|participa�
 function extrairConvidados(titulo: string): { titulo: string; convidados: string[] } {
   const m = CONVIDADOS.exec(titulo);
   if (!m) return { titulo, convidados: [] };
-  const convidados = separarNomes(m[1]!.replace(/[)\]]+\s*$/, '')).filter((n) => !ehGravadora(n));
+  // O convidado acaba no próximo separador: em "Saudades Feat. MC IG e MC PH -
+  // DVD Mundão Girou" o nome do DVD não é gente.
+  const trecho = m[1]!.split(SEPARADOR)[0]!;
+  const convidados = separarNomes(trecho.replace(/[)\]]+\s*$/, '')).filter((n) => !ehGravadora(n));
   if (convidados.length === 0) return { titulo, convidados: [] };
   return { titulo: limpar(titulo.slice(0, m.index)), convidados };
+}
+
+/** Crédito de MC/DJ: "MC Kevin", "Mc's Magal", "DJ Nenê MPC", "Djs Murillo". */
+const CREDITO_DE_FUNK = /^(?:mc|dj)['’`´]?s?\s+\S/i;
+
+function ehCreditoDeFunk(nome: string): boolean {
+  return CREDITO_DE_FUNK.test(nome.trim());
+}
+
+/**
+ * O pedaço é uma LISTA DE CANTORES, não o nome de uma música? Dois créditos de
+ * MC/DJ ("MC Tuto, Meno K, FR da Norte e MC Joãozinho VT"), ou um só e curto
+ * ("MC Kevin"). "DJ Got Us Fallin' in Love" é música: um crédito só, e longo.
+ */
+function ehListaDeCreditos(texto: string): boolean {
+  const nomes = separarNomes(texto);
+  if (nomes.length === 0) return false;
+  // "Saudades feat. MC IG e MC PH" é MÚSICA com convidados: o que abre o
+  // pedaço não é crédito. Lista de cantores começa por um cantor.
+  if (!ehCreditoDeFunk(nomes[0]!)) return false;
+  const creditos = nomes.filter(ehCreditoDeFunk).length;
+  if (creditos >= 2) return true;
+  // "MC Menor da VG, GP, IG, Kadu, Cebezinho, Lele JP": só o primeiro leva o
+  // "MC", os outros vêm pelo apelido. Três nomes ou mais atrás de um MC é lista.
+  if (nomes.length >= 3) return true;
+  return creditos === 1 && nomes.length === 1 && texto.trim().split(/\s+/).length <= 4;
+}
+
+/** "(DJ Boy)", "(DJs Murillo e LT, Fepache)": crédito de produção, sai do texto. */
+function tirarDjsEntreParenteses(texto: string): string {
+  return texto
+    .replace(PARENTESES, (todo, dentro: string) => (/^\s*djs?\b/i.test(dentro) ? ' ' : todo))
+    .replace(/\s{2,}/g, ' ')
+    .trim();
+}
+
+/**
+ * DJ SOLTO NO FIM DO NOME DA MÚSICA é crédito de produção: "Uma Maluca (GR6
+ * Explode) DJ Nenê", "Lancha do Bololô (Clipe Oficial) DJ Oreia", "… DJ Nenê
+ * MPC". Sai do título, como o "(DJ Boy)" entre parênteses. Só no fim, só com
+ * nome curto (até duas palavras depois de "DJ") e só quando sobra música antes.
+ */
+const DJ_NO_FIM = /\s+[-–—|,]?\s*\bdjs?\s+\S+(?:\s+\S{1,6})?\s*$/i;
+
+function tirarDjNoFim(titulo: string): string {
+  const m = DJ_NO_FIM.exec(titulo);
+  if (!m) return titulo;
+  const antes = titulo.slice(0, m.index).trim();
+  if (antes.split(/\s+/).length < 2) return titulo;
+  return limpar(antes);
 }
 
 /** Junta o resultado tirando os convidados de dentro do nome da música. */
@@ -506,7 +606,7 @@ function montar(titulo: string, artistas: string[], label: string | null): Parte
   for (const c of convidados) {
     if (!nomes.some((n) => chave(n) === chave(c))) nomes.push(c);
   }
-  return { title: nome, artists: nomes, label };
+  return { title: tirarDjNoFim(nome), artists: nomes, label };
 }
 
 /**
@@ -529,11 +629,19 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
     // crédito de produção, e ele grudava no último cantor da lista —
     // "Neguinho do Kaxeta - (DJ Boy)" virava UM artista com esse nome.
     const fora = limpo.replace(ASPAS_TODAS, ' ').replace(PARENTESES, ' ');
-    const artistas = separarNomes(limpar(fora)).filter((n) => !ehGravadora(n));
+    // Os nomes de fora podem vir dos dois lados do separador ("Justin Bieber -
+    // Justin Bieber - “Somebody”"): cada lado é uma lista, e o separador não
+    // faz parte de nome nenhum.
+    const artistas = deduplicarNomes(
+      fora
+        .split(SEPARADOR)
+        .flatMap((lado) => separarNomes(limpar(lado)))
+        .filter((n) => !ehGravadora(n)),
+    );
     return montar(limpar(citado), artistas, label);
   }
 
-  // 2) O separador clássico "Artista - Música".
+  // 2) O separador clássico "Artista - Música" — e as suas inversões.
   const partes = limpo
     .split(SEPARADOR)
     .map((p) => limpar(p))
@@ -543,6 +651,30 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
     // O primeiro pedaço nunca sai: a banda LIVE se chama LIVE.
     .filter((p, i) => i === 0 || !SO_RUIDO.test(chave(p)));
   if (partes.length >= 2) {
+    // QUEM É LISTA DE MC/DJ É GENTE, de qualquer lado do travessão. Nos canais
+    // de funk a música vem primeiro e os cantores depois ("COMEDINHA FICOU
+    // BRAVO 2 - MC Negão Original, MC Meno K (DJ Japa NK)"), ou os DJs abrem,
+    // a música fica no meio e os MCs fecham ("DJ ARANA, DJ BLAKES - BERIMBAU
+    // ITALIANO - MC GEDAI, MC MENO DANI"). Lidos como "Artista - Música",
+    // esses títulos entravam com os campos trocados — e a lista de cantores
+    // virava "a música". Quando exatamente UM pedaço não é lista de créditos,
+    // ele é a música e os outros são quem canta. O "(DJ Fulano)" é crédito de
+    // produção, como nos outros formatos: sai, e não vira artista.
+    const avaliadas = partes.map((p) => tirarDjsEntreParenteses(p));
+    const naoCredito = avaliadas.filter((p) => !ehListaDeCreditos(p));
+    if (naoCredito.length === 1) {
+      const musica = naoCredito[0]!;
+      const artistas = deduplicarNomes(
+        avaliadas
+          .filter((p) => p !== musica)
+          .flatMap((p) => separarNomes(p))
+          .filter((n) => !ehGravadora(n)),
+      );
+      return montar(musica, artistas, label);
+    }
+    // "Brenninho VJ - Proibido Amar - DJ Boy e DJ Gu": os DJs que FECHAM o
+    // título são crédito de produção, como o "(DJ Boy)" entre parênteses.
+    while (partes.length > 2 && ehListaDeCreditos(partes[partes.length - 1]!)) partes.pop();
     const [esquerda, ...resto] = partes;
     const direita = resto.join(' - ');
     const artistas = separarNomes(esquerda!).filter((n) => !ehGravadora(n));

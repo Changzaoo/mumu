@@ -17,13 +17,22 @@
  * atrasar quem chamou: é sempre best-effort, fora do caminho crítico.
  */
 import type { TrackDto } from '@radinho/shared';
-import { cachedLyrics, fetchLyrics, writeLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
+import {
+  cachedLyrics,
+  cachedLyricsFor,
+  fetchLyrics,
+  recusarLetra,
+  writeLyrics,
+  type Lyrics,
+} from '@/lib/lyrics/lyrics';
 import { garantirDetalhe } from '@/lib/local/detalheDaFaixa';
 import { dicaDeIdioma } from '@/lib/lyrics/syncFromAudio';
 import {
+  ALINHAMENTO_SUSPEITO,
   aplicarAlinhamento,
   buscarAlinhamento,
   buscarTempo,
+  confiancaDoAlinhamento,
   linhasParaAlinhar,
   palavrasEmLinhas,
   recalibrarLetra,
@@ -33,7 +42,11 @@ import {
   urlDoTempo,
 } from '@/lib/lyrics/recalibrar';
 import { remoteUrlFor } from '@/lib/local/localLibrary';
-import { letraConfirmadaPelaVoz, palavrasOuvidas } from '@/lib/lyrics/confirmarPelaVoz';
+import {
+  julgarPelaVoz,
+  letraConfirmadaPelaVoz,
+  palavrasOuvidas,
+} from '@/lib/lyrics/confirmarPelaVoz';
 import { aprenderComATranscricao } from '@/lib/lyrics/aprendizado';
 
 /**
@@ -108,6 +121,10 @@ export type LetraAlinhada = Lyrics & {
   alinhada?: boolean;
   /** Transcrição que já procurou a letra de verdade (e não achou). */
   procuradaPelaVoz?: boolean;
+  /** Confiança média do alinhamento (0–1) — ver ALINHAMENTO_SUSPEITO. */
+  confianca?: number;
+  /** O que a voz disse desta letra quando o alinhamento ficou suspeito. */
+  verificadaPelaVoz?: 'confirmada' | 'inconclusiva';
 };
 
 /** Uma entrada por faixa em voo — o que impede o pedido duplicado. */
@@ -150,8 +167,14 @@ async function usarLetraConfirmada(
   publicar(trackId, { fase: 'alinhando', letra });
   aprenderComATranscricao(track.artists[0]?.name, ouvidas, letra.lines);
   const url = urlDoAlinhamento(remota, idiomaPara(letra));
-  const alinhada = url ? await alinharAteChegar(trackId, url, letra, manterVivo) : null;
-  return alinhada ?? letra;
+  const r = url ? await alinharAteChegar(trackId, url, letra, manterVivo) : null;
+  if (!r) return letra;
+  if ('pronta' in r) return r.pronta;
+  // A voz JÁ confirmou esta letra: alinhamento fraco aqui é o autotune, não
+  // a música errada. Fica como veio.
+  const pronta: LetraAlinhada = { ...r.suspeita, verificadaPelaVoz: 'confirmada' };
+  writeLyrics(trackId, pronta);
+  return pronta;
 }
 
 async function perguntarAteChegar(
@@ -229,13 +252,20 @@ async function perguntarAteChegar(
  * sem gastar mais uma pergunta — é o que a próxima faixa da fila vira "não
  * vale mais a pena" quando a pessoa pula adiante de novo.
  */
+/**
+ * O alinhamento chegou e é bom (`pronta`, já gravada), ou chegou fraco/duvidoso
+ * (`suspeita`: a letra como ficaria, SEM gravar — quem decide é a voz).
+ */
+type ResultadoDoAlinhamento =
+  { pronta: LetraAlinhada } | { suspeita: LetraAlinhada; confianca: number };
+
 /** Pede o alinhamento da letra conhecida até ele chegar (ou desistir). */
 async function alinharAteChegar(
   trackId: string,
   url: string,
   letra: Lyrics,
   manterVivo: () => boolean,
-): Promise<Lyrics | null> {
+): Promise<ResultadoDoAlinhamento | null> {
   const indices = linhasParaAlinhar(letra);
   const textos = indices.map((i) => letra.lines[i]?.text ?? '');
   if (textos.length === 0) return null;
@@ -244,10 +274,23 @@ async function alinharAteChegar(
     const r = await buscarAlinhamento(url, textos);
     if (r.tipo === 'pronto') {
       const nova = aplicarAlinhamento(letra, indices, r.linhas);
-      // Alinhamento fraco: fica a letra como estava (e não se pergunta de novo).
-      const pronta: LetraAlinhada = { ...(nova ?? letra), calibrada: true, alinhada: true };
-      writeLyrics(trackId, pronta);
-      return pronta;
+      const confianca = confiancaDoAlinhamento(indices, r.linhas);
+      const pronta: LetraAlinhada = {
+        ...(nova ?? letra),
+        calibrada: true,
+        alinhada: true,
+        confianca,
+      };
+      // ALINHAMENTO FRACO NÃO É PROVA. O alinhador encaixa qualquer texto no
+      // áudio; quando poucas linhas ficam confiáveis (`nova === null`) ou a
+      // confiança média cai abaixo de ALINHAMENTO_SUSPEITO, a letra pode ser
+      // de outra música — e era gravada como "alinhada" para sempre. Agora
+      // ela sai daqui como suspeita e vai à prova da voz (verificarPelaVoz).
+      if (nova && confianca >= ALINHAMENTO_SUSPEITO) {
+        writeLyrics(trackId, pronta);
+        return { pronta };
+      }
+      return { suspeita: pronta, confianca };
     }
     if (r.tipo !== 'esperar') return null;
     publicar(trackId, { fase: 'alinhando' });
@@ -263,6 +306,101 @@ async function alinharAteChegar(
   return null;
 }
 
+/**
+ * A PROVA DA VOZ para uma letra que o alinhamento não conseguiu sustentar.
+ *
+ * Pede a transcrição livre do áudio (`/tempo`) e compara: se a maioria das
+ * palavras ouvidas com confiança está na letra, ela é desta música e fica
+ * (alinhada como deu); se quase nada bate, é letra de OUTRA música — procura
+ * a certa entre as candidatas do mesmo título (`letraConfirmadaPelaVoz`),
+ * senão mostra só o que o modelo ouviu, senão recusa a letra (entrada
+ * negativa por uma semana). Ouviu pouco (autotune, intro longa): fica como
+ * estava — sem prova não se apaga letra.
+ */
+async function verificarPelaVoz(
+  track: TrackDto,
+  remota: string,
+  letra: Lyrics,
+  suspeita: LetraAlinhada,
+  manterVivo: () => boolean,
+): Promise<Lyrics | null> {
+  const trackId = track.id;
+  const url = urlDoTempo(remota, idiomaPara(letra), track.artists[0]?.name);
+  // Sem como ouvir o áudio, vale o que o alinhamento deu — como sempre foi.
+  const manter = (verificadaPelaVoz?: 'confirmada' | 'inconclusiva'): LetraAlinhada => {
+    const pronta: LetraAlinhada = verificadaPelaVoz ? { ...suspeita, verificadaPelaVoz } : suspeita;
+    writeLyrics(trackId, pronta);
+    return pronta;
+  };
+  if (!url) return manter();
+  let tentativas = 0;
+  let julgouCedo = false;
+  const limite = Date.now() + 10 * 60_000;
+  while (manterVivo()) {
+    const r = await buscarTempo(url);
+    if (r.tipo === 'pronto') {
+      const { veredito } = julgarPelaVoz(letra, r.words);
+      if (veredito === 'inconclusiva') return manter('inconclusiva');
+      if (veredito === 'confirmada') {
+        // É ela. Se o alinhamento forçado tinha desistido, as palavras ouvidas
+        // ainda reancoram o relógio (o caminho antigo, palavra por palavra).
+        if (suspeita.lines !== letra.lines) return manter('confirmada');
+        const nova = recalibrarLetra(letra, r.words);
+        const pronta: LetraAlinhada = {
+          ...(nova ?? letra),
+          calibrada: true,
+          alinhada: true,
+          confianca: suspeita.confianca,
+          verificadaPelaVoz: 'confirmada',
+        };
+        writeLyrics(trackId, pronta);
+        return pronta;
+      }
+      // RECUSADA: é letra de outra música. A certa pode estar no LRCLIB com
+      // outro artista/duração — a voz escolhe entre as candidatas do título.
+      const certa = await letraConfirmadaPelaVoz(track, r.words);
+      if (certa && manterVivo()) {
+        return usarLetraConfirmada(track, remota, certa, r.words, manterVivo);
+      }
+      const ouvidas = transcricaoConfiavel(r.words);
+      if (ouvidas) {
+        const pronta: LetraAlinhada = {
+          synced: true,
+          lines: palavrasEmLinhas(ouvidas),
+          source: TRANSCRICAO_AUTOMATICA,
+          calibrada: true,
+          alinhada: true,
+          procuradaPelaVoz: true,
+        };
+        if (pronta.lines.length > 0) {
+          writeLyrics(trackId, pronta);
+          return pronta;
+        }
+      }
+      recusarLetra(track);
+      return null;
+    }
+    if (r.tipo !== 'esperar') return manter();
+    // CEDO: com o começo já ouvido, se a letra já cobre o que o modelo ouviu,
+    // não há por que esperar a música inteira ser transcrita.
+    if (
+      !julgouCedo &&
+      r.parcial &&
+      palavrasOuvidas(r.parcial.words).length >= OUVIDAS_PARA_CONFIRMAR
+    ) {
+      julgouCedo = true;
+      if (julgarPelaVoz(letra, r.parcial.words).veredito === 'confirmada') {
+        return manter('confirmada');
+      }
+    }
+    publicar(trackId, { fase: r.processando ? 'alinhando' : 'na-fila', letra: suspeita });
+    if (!r.processando && ++tentativas >= TENTATIVAS_MAX) return manter();
+    if (Date.now() > limite) return manter();
+    await new Promise((resolve) => setTimeout(resolve, r.processando ? AO_VIVO_MS : INTERVALO_MS));
+  }
+  return manter();
+}
+
 export function pedirCalibracao(
   track: TrackDto,
   manterVivo: () => boolean = () => true,
@@ -270,7 +408,9 @@ export function pedirCalibracao(
   const emAndamento = emVoo.get(track.id);
   if (emAndamento) return emAndamento;
 
-  const emCache = cachedLyrics(track.id);
+  // Pelo fingerprint: a faixa que ganhou outro artista/título na curadoria
+  // não calibra a letra buscada para a identidade antiga (ver cachedLyricsFor).
+  const emCache = cachedLyricsFor(track);
   // `alinhada`, e não só `calibrada`: a calibração antiga (reconhecimento livre
   // com o modelo `base`) errava com sotaque e autotune e deixava a letra no
   // lugar errado — ela é refeita UMA vez pelo alinhamento.
@@ -311,7 +451,11 @@ export function pedirCalibracao(
     // só com o que o modelo ouviu com confiança (ver `transcricaoConfiavel`).
     if (letra && letra.lines.length > 0) {
       const url = urlDoAlinhamento(remota, idiomaPara(letra));
-      return url ? alinharAteChegar(track.id, url, letra, manterVivo) : null;
+      if (!url) return null;
+      const r = await alinharAteChegar(track.id, url, letra, manterVivo);
+      if (!r) return null;
+      if ('pronta' in r) return r.pronta;
+      return manterVivo() ? verificarPelaVoz(track, remota, letra, r.suspeita, manterVivo) : null;
     }
     // Vocabulário do artista (ver vocabulario.mjs no importador) só faz
     // sentido aqui: é a TRANSCRIÇÃO livre, o único caminho onde o modelo

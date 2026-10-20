@@ -27,7 +27,14 @@ const writeLyrics = vi.fn();
 // A busca da letra (para escolher o idioma) devolve o que o cache tiver —
 // igual ao app, onde o prefetch já a deixou lá ou está em voo.
 const fetchLyrics = vi.fn(async (t: TrackDto) => cachedLyrics(t.id));
-vi.mock('@/lib/lyrics/lyrics', () => ({ cachedLyrics, writeLyrics, fetchLyrics }));
+const recusarLetra = vi.fn();
+vi.mock('@/lib/lyrics/lyrics', () => ({
+  cachedLyrics,
+  cachedLyricsFor: (t: TrackDto) => cachedLyrics(t.id),
+  writeLyrics,
+  fetchLyrics,
+  recusarLetra,
+}));
 const garantirDetalhe = vi.fn(async () => true);
 vi.mock('@/lib/local/detalheDaFaixa', () => ({ garantirDetalhe }));
 
@@ -70,9 +77,19 @@ const letra: Lyrics = {
     { timeMs: 24_240, text: 'Vem mais, mais vem' },
   ],
 };
+// Com palavras confiantes (0,9): é o alinhamento BOM. Sem palavra nenhuma a
+// confiança é 0 — e isso é exatamente o alinhamento fraco que vai à voz.
 const alinhadas: LinhaAlinhada[] = [
-  { startMs: 28_600, endMs: 30_000, words: [] },
-  { startMs: 35_800, endMs: 37_000, words: [] },
+  {
+    startMs: 28_600,
+    endMs: 30_000,
+    words: [{ text: 'Mantém', startMs: 28_600, endMs: 29_000, prob: 0.9 }],
+  },
+  {
+    startMs: 35_800,
+    endMs: 37_000,
+    words: [{ text: 'Vem', startMs: 35_800, endMs: 36_000, prob: 0.9 }],
+  },
 ];
 
 /** N palavras "ouvidas" com a confiança dada. */
@@ -166,18 +183,60 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
       ...reancorada,
       calibrada: true,
       alinhada: true,
+      confianca: 0.9,
     });
-    expect(resultado).toEqual({ ...reancorada, calibrada: true, alinhada: true });
+    expect(resultado).toEqual({ ...reancorada, calibrada: true, alinhada: true, confianca: 0.9 });
   });
 
-  it('alinhamento fraco: a letra fica como estava, e não se pergunta de novo', async () => {
+  it('alinhamento fraco: vai à prova da voz; sem como ouvir, fica como estava', async () => {
     const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
     cachedLyrics.mockReturnValue(letra);
     buscarAlinhamento.mockResolvedValue({ tipo: 'pronto', linhas: alinhadas });
     aplicarAlinhamento.mockReturnValue(null);
+    // O importador não consegue transcrever esta faixa: sem prova não se apaga.
+    buscarTempo.mockResolvedValue({ tipo: 'desistir' });
     const resultado = await pedirCalibracao(faixa());
+    expect(buscarTempo).toHaveBeenCalledWith(expect.stringContaining('/blob/t1/tempo'));
     expect(resultado?.lines).toEqual(letra.lines);
     expect(resultado).toMatchObject({ alinhada: true });
+    expect(recusarLetra).not.toHaveBeenCalled();
+  });
+
+  it('alinhamento fraco + voz que NÃO reconhece a letra: recusa (letra de outra música)', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(null);
+    // 30 palavras ouvidas com confiança, nenhuma delas na letra; e poucas
+    // passam no filtro da transcrição (0,2) — não há o que mostrar no lugar.
+    buscarTempo.mockResolvedValue({
+      tipo: 'pronto',
+      words: [...ouvidas(30, 0.9), ...ouvidas(40, 0.2).map((w) => ({ ...w, text: `x${w.text}` }))],
+    });
+    const resultado = await pedirCalibracao(faixa());
+    expect(resultado).toBeNull();
+    expect(recusarLetra).toHaveBeenCalledWith(expect.objectContaining({ id: 't1' }));
+    expect(writeLyrics).not.toHaveBeenCalled();
+  });
+
+  it('alinhamento fraco + voz que CONFIRMA a letra: fica, marcada como confirmada', async () => {
+    const { pedirCalibracao } = await import('@/lib/lyrics/calibragem');
+    cachedLyrics.mockReturnValue(letra);
+    buscarAlinhamento.mockResolvedValue({ tipo: 'pronto', linhas: alinhadas });
+    aplicarAlinhamento.mockReturnValue(null);
+    // As palavras da própria letra, ouvidas com confiança (20+ distintas).
+    const texto =
+      'mantem mantem vem mais mais vem outra palavra forte cantada aqui agora sempre nunca tudo nada alguem ninguem cidade noite dia sol lua mar';
+    const words = texto.split(' ').map((text, i) => ({ text, startMs: i * 400, prob: 0.95 }));
+    const comLetra: Lyrics = {
+      ...letra,
+      lines: [{ timeMs: 1000, text: texto }, ...letra.lines],
+    };
+    cachedLyrics.mockReturnValue(comLetra);
+    buscarTempo.mockResolvedValue({ tipo: 'pronto', words });
+    const resultado = await pedirCalibracao(faixa());
+    expect(resultado).toMatchObject({ alinhada: true, verificadaPelaVoz: 'confirmada' });
+    expect(recusarLetra).not.toHaveBeenCalled();
   });
 
   it('sem letra: a transcrição CONFIÁVEL vira a letra, rotulada', async () => {

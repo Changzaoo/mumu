@@ -1,6 +1,12 @@
 /**
- * "QUANDO VOCÊ NASCEU?" — perguntado uma vez, para o app saber o que a pessoa
- * pode ouvir (ver lib/conteudo/faixaEtaria.ts).
+ * A IDADE VEM DA CONTA GOOGLE — este diálogo não pergunta "quando você nasceu?".
+ *
+ * Decisão do dono (20/10/2026): ninguém escolhe mês e ano. No login a data já
+ * entra sozinha (escopo do aniversário, ver firebase.ts/nascimentoGoogle.ts).
+ * Quem já estava logado antes disso vê UM botão — "Usar a data da minha conta
+ * Google" — porque o navegador só abre a janela do Google a partir de um
+ * toque. Os seletores de mês e ano só aparecem quando a conta não tem a data
+ * (ou não é Google): é a saída de emergência, não a pergunta.
  *
  * Mês e ano bastam (a idade não precisa do dia, e é menos dado pessoal).
  * Fechar sem responder não libera nada: enquanto a idade é desconhecida vale a
@@ -61,6 +67,9 @@ export function PerguntaDeIdade({
   const [mes, setMes] = useState('');
   const [ano, setAno] = useState('');
   const [erro, setErro] = useState('');
+  // Só depois de a conta Google não ter a data é que se mostra o seletor.
+  const [manual, setManual] = useState(false);
+  const mostrarSeletor = !contaGoogle || manual;
 
   useEffect(() => {
     if (!aberta) setErro('');
@@ -79,6 +88,7 @@ export function PerguntaDeIdade({
       const token = await tokenGoogleComAniversario();
       const valor = token ? await lerNascimentoDoGoogle(token) : null;
       if (!valor) {
+        setManual(true);
         setErro('Sua conta Google não informa o ano de nascimento. Escolha abaixo.');
       } else if (!aplicarNascimento(valor)) {
         setErro('Para mudar para uma idade maior, peça a um responsável pela conta.');
@@ -86,6 +96,7 @@ export function PerguntaDeIdade({
         fechar();
       }
     } catch {
+      setManual(true);
       setErro('Não deu para ler da conta Google agora. Escolha abaixo.');
     } finally {
       setBuscando(false);
@@ -118,52 +129,57 @@ export function PerguntaDeIdade({
         onPointerDownOutside={(e) => e.preventDefault()}
       >
         <DialogHeader>
-          <DialogTitle>Quando você nasceu?</DialogTitle>
+          <DialogTitle>{contaGoogle ? 'Confirme sua idade' : 'Quando você nasceu?'}</DialogTitle>
           <DialogDescription>
-            Usamos só mês e ano, para mostrar músicas adequadas à sua idade. Menores de 18 não ouvem
-            músicas com palavrão ou conteúdo explícito.
+            {contaGoogle
+              ? 'Lemos só o mês e o ano de nascimento da sua conta Google, para mostrar músicas adequadas à sua idade. Menores de 18 não ouvem músicas com palavrão ou conteúdo explícito.'
+              : 'Usamos só mês e ano, para mostrar músicas adequadas à sua idade. Menores de 18 não ouvem músicas com palavrão ou conteúdo explícito.'}
           </DialogDescription>
         </DialogHeader>
         {contaGoogle && (
-          <>
-            <Button variant="accent" disabled={buscando} onClick={() => void usarGoogle()}>
-              {buscando ? 'Lendo da conta…' : 'Usar a data da minha conta Google'}
-            </Button>
-            <p className="text-center text-[11px] text-fg-subtle">ou escolha</p>
-          </>
+          <Button variant="accent" disabled={buscando} onClick={() => void usarGoogle()}>
+            {buscando ? 'Lendo da conta…' : 'Usar a data da minha conta Google'}
+          </Button>
         )}
-        <div className="flex gap-2">
-          <select
-            aria-label="Mês de nascimento"
-            value={mes}
-            onChange={(e) => setMes(e.target.value)}
-            className="h-10 flex-1 rounded-md border border-border bg-bg-elevated px-2 text-sm text-fg"
-          >
-            <option value="">Mês</option>
-            {MESES.map((m, i) => (
-              <option key={m} value={String(i + 1)}>
-                {m}
-              </option>
-            ))}
-          </select>
-          <select
-            aria-label="Ano de nascimento"
-            value={ano}
-            onChange={(e) => setAno(e.target.value)}
-            className="h-10 flex-1 rounded-md border border-border bg-bg-elevated px-2 text-sm text-fg"
-          >
-            <option value="">Ano</option>
-            {anos.map((a) => (
-              <option key={a} value={String(a)}>
-                {a}
-              </option>
-            ))}
-          </select>
-        </div>
+        {contaGoogle && mostrarSeletor && (
+          <p className="text-center text-[11px] text-fg-subtle">ou escolha</p>
+        )}
+        {mostrarSeletor && (
+          <div className="flex gap-2">
+            <select
+              aria-label="Mês de nascimento"
+              value={mes}
+              onChange={(e) => setMes(e.target.value)}
+              className="h-10 flex-1 rounded-md border border-border bg-bg-elevated px-2 text-sm text-fg"
+            >
+              <option value="">Mês</option>
+              {MESES.map((m, i) => (
+                <option key={m} value={String(i + 1)}>
+                  {m}
+                </option>
+              ))}
+            </select>
+            <select
+              aria-label="Ano de nascimento"
+              value={ano}
+              onChange={(e) => setAno(e.target.value)}
+              className="h-10 flex-1 rounded-md border border-border bg-bg-elevated px-2 text-sm text-fg"
+            >
+              <option value="">Ano</option>
+              {anos.map((a) => (
+                <option key={a} value={String(a)}>
+                  {a}
+                </option>
+              ))}
+            </select>
+          </div>
+        )}
         {erro && <p className="text-sm text-danger">{erro}</p>}
-        <Button variant={contaGoogle ? 'outline' : 'accent'} onClick={salvar}>
-          Confirmar
-        </Button>
+        {mostrarSeletor && (
+          <Button variant={contaGoogle ? 'outline' : 'accent'} onClick={salvar}>
+            Confirmar
+          </Button>
+        )}
       </DialogContent>
     </Dialog>
   );

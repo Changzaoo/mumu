@@ -5,7 +5,12 @@ import type { TrackDto } from '@radinho/shared';
 import { EmptyState } from '@/components/media/EmptyState';
 import { Skeleton } from '@/components/ui/skeleton';
 import { audioEngine } from '@/lib/audio/AudioEngine';
-import { cachedLyrics, fetchLyrics, type Lyrics } from '@/lib/lyrics/lyrics';
+import {
+  cachedLyricsFor,
+  fetchLyrics,
+  letraRecusadaPelaVoz,
+  type Lyrics,
+} from '@/lib/lyrics/lyrics';
 import {
   ehTranscricao,
   pedirCalibracao,
@@ -102,7 +107,9 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
     queryKey: ['lyrics', track.id],
     queryFn: () => fetchLyrics(track),
     // Já buscada quando a faixa começou (playerStore): aparece no primeiro quadro.
-    initialData: () => cachedLyrics(track.id) ?? undefined,
+    // Pelo fingerprint: metadado corrigido na curadoria refaz a busca em vez
+    // de mostrar para sempre a letra achada com o artista errado.
+    initialData: () => cachedLyricsFor(track) ?? undefined,
     staleTime: Infinity,
     retry: false,
   });
@@ -164,11 +171,19 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
     if (!terminouBusca || !isCurrent || (lyrics as LetraAlinhada | undefined)?.alinhada) return;
     let cancelado = false;
     void pedirCalibracao(track).then((pronta) => {
-      if (cancelado || !pronta) return;
+      if (cancelado) return;
       const naTela = queryClient.getQueryData<Lyrics | null>([
         'lyrics',
         track.id,
       ]) as LetraAlinhada | null;
+      if (!pronta) {
+        // A voz RECUSOU a letra que estava na tela (era de outra música) e
+        // nada a substituiu: o cache virou negativo — a tela acompanha.
+        if (naTela && letraRecusadaPelaVoz(track)) {
+          queryClient.setQueryData(['lyrics', track.id], null);
+        }
+        return;
+      }
       // Transcrição na tela perde para a letra de verdade que a voz confirmou.
       const jaTinha = naTela?.alinhada && !(ehTranscricao(naTela) && !ehTranscricao(pronta));
       if (!jaTinha) queryClient.setQueryData(['lyrics', track.id], pronta);

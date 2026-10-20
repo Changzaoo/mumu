@@ -38,6 +38,8 @@ interface CachedLyricsEntry {
    * uma chamada de IA —, e o resultado era o mesmo nada de sempre.
    */
   lyrics: Lyrics | null;
+  /** Entrada negativa que nasceu de uma letra RECUSADA pela voz (ver recusarLetra). */
+  recusadaPelaVoz?: boolean;
   /**
    * Fingerprint da faixa usada para buscar essa letra.
    * Quando título/artista mudam (ex.: metadado corrigido), uma letra antiga
@@ -316,6 +318,53 @@ function letraDaEntrada(cached: unknown): Lyrics | null {
 
 export function cachedLyrics(trackId: string): Lyrics | null {
   return letraDaEntrada(readCache()[trackId]);
+}
+
+/**
+ * A letra em cache DESTA faixa como ela é hoje — ou null quando o cache foi
+ * buscado para outro título/artista/duração.
+ *
+ * `cachedLyrics` (por id) não olha o fingerprint, e era ela que a tela da
+ * letra, o prefetch e a calibração usavam: a faixa ganhava o artista certo na
+ * curadoria e continuava mostrando a letra buscada com o artista errado, para
+ * sempre, porque `fetchLyrics` (que confere o fingerprint) nunca mais era
+ * chamada. Quem tem a faixa em mãos pergunta por aqui.
+ */
+export function cachedLyricsFor(track: TrackDto): Lyrics | null {
+  const guardada = readCache()[track.id];
+  if (!guardada || typeof guardada !== 'object') return null;
+  if ('lyrics' in guardada) {
+    const entrada = guardada as CachedLyricsEntry;
+    if (entrada.fingerprint && entrada.fingerprint !== trackFingerprint(track)) return null;
+  }
+  return letraDaEntrada(guardada);
+}
+
+/**
+ * A VOZ DISSE QUE NÃO É ESTA LETRA: o alinhamento ficou fraco e a transcrição
+ * do áudio quase não contém as palavras dela. Vira entrada negativa (com o
+ * prazo de `VALIDADE_DO_VAZIO_MS`, como "procuramos e não existe"): a tela
+ * para de mostrar letra de outra música, e a busca é refeita em uma semana —
+ * o LRCLIB ganha versões novas todo dia.
+ */
+/** A entrada em cache desta faixa é a recusa da voz (ver recusarLetra)? */
+export function letraRecusadaPelaVoz(track: TrackDto): boolean {
+  const guardada = readCache()[track.id];
+  if (!guardada || typeof guardada !== 'object' || !('lyrics' in guardada)) return false;
+  const entrada = guardada as CachedLyricsEntry;
+  return entrada.lyrics === null && entrada.recusadaPelaVoz === true;
+}
+
+export function recusarLetra(track: TrackDto): void {
+  writeCache({
+    ...readCache(),
+    [track.id]: {
+      lyrics: null,
+      fingerprint: trackFingerprint(track),
+      vazioEm: Date.now(),
+      recusadaPelaVoz: true,
+    } satisfies CachedLyricsEntry,
+  });
 }
 
 /**
@@ -678,6 +727,6 @@ export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
 
 /** Fire-and-forget prefetch (e.g. at download time) so lyrics are ready offline. */
 export function prefetchLyrics(track: TrackDto): void {
-  if (cachedLyrics(track.id)) return;
+  if (cachedLyricsFor(track)) return;
   void fetchLyrics(track).catch(() => undefined);
 }

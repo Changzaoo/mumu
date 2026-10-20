@@ -27,9 +27,16 @@
  *                   evidência e restaura a capa da fonte quando o crédito
  *                   antigo era alucinado.
  */
-import { cleanQuery, identifyByTitle, verifyIdentity, type EnrichedMeta } from '@/lib/local/enrich';
+import {
+  cleanQuery,
+  identifyByTitle,
+  verifyIdentity,
+  type CleanQuery,
+  type EnrichedMeta,
+} from '@/lib/local/enrich';
 import { fetchAlbumInfo } from '@/lib/local/importerHelper';
 import { comVersoesDe } from '@/lib/local/duplicadas';
+import { lerTituloDeVideo } from '@radinho/shared';
 
 // ── evidências e veredito ───────────────────────────────────────────────────
 
@@ -117,6 +124,31 @@ export function extrator(input: {
 
 // ── AGENTE 4 · JUIZ ─────────────────────────────────────────────────────────
 
+/**
+ * O NOME DO VÍDEO, LIDO PELO LEITOR DO ACERVO.
+ *
+ * `cleanQuery` só conhece "Artista - Título" (e o canal para desempatar o
+ * lado). O leitor de `@radinho/shared` (o mesmo que a curadoria do servidor
+ * usa) sabe os formatos de funk que são metade do que se importa — "MÚSICA -
+ * MC A, MC B (DJ X)", "DJ A, DJ B - MÚSICA - MC C", aspas, selo entre
+ * parênteses, DJ solto no fim, "Prod.X" — e era só no servidor que esses
+ * títulos ficavam certos; aqui, na importação, nasciam trocados. Medido em
+ * 17/10/2026 sobre 988 títulos reais do importador: 152 passam a ser lidos
+ * diferente, nenhum perde o artista.
+ *
+ * Quando o leitor não acha artista nenhum, vale o `cleanQuery` de antes, com a
+ * pista do canal (é ele que sabe inverter "ÚLTIMA VEZ - Alee").
+ */
+function lerTituloDoVideo(rawTitle: string, uploader: string | null): CleanQuery {
+  // Sem a extensão de arquivo ("Kenny G.mp3") e SEM o canal: o canal entra na
+  // precedência do JUIZ (procedência "uploader"), não escondido no título.
+  const lido = lerTituloDeVideo(rawTitle.replace(/\.[a-z0-9]{1,5}$/i, ''), null);
+  if (lido.artists.length > 0 && lido.title) {
+    return { title: lido.title, artist: lido.artists.join(', ') };
+  }
+  return cleanQuery(rawTitle, uploader);
+}
+
 const DIACRITICS = new RegExp('[\\u0300-\\u036f]', 'g');
 function norm(value: string): string {
   return value
@@ -137,7 +169,7 @@ function norm(value: string): string {
  *   5. "Desconhecido" — a única resposta honesta sem evidência.
  */
 export function juizDecideCredito(ev: Evidencia, atual?: { artist?: string | null }): Credito {
-  const parsed = ev.rawTitle ? cleanQuery(ev.rawTitle, ev.uploader) : { title: '' };
+  const parsed = ev.rawTitle ? lerTituloDoVideo(ev.rawTitle, ev.uploader) : { title: '' };
   // A limpeza de busca tira "(Ao Vivo)", "(Sped Up)", "(Slowed)" — o catálogo
   // cadastra só o nome. Gravado assim, o ao vivo virava indistinguível do de
   // estúdio e a deduplicação engolia um no outro. A marca volta para o título.

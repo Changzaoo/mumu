@@ -913,6 +913,15 @@ const NVIDIA_BASE = (process.env.NVIDIA_BASE ?? 'https://integrate.api.nvidia.co
   '',
 );
 const NVIDIA_MODEL = process.env.NVIDIA_MODEL ?? 'nvidia/nemotron-3-ultra-550b-a55b';
+// RESERVA quando o principal está lotado. O Ultra (550B) responde 503 em
+// rajadas — medido em 17/10/2026: 812 "NVIDIA respondeu 503" no log do
+// importador, e cada um era um título que ficou sem limpeza, um gênero sem
+// rótulo. O Lightning (30B) raramente lota, respondeu em ~6 s o mesmo JSON de
+// título limpo que o Ultra, e está na lista de modelos desta conta (conferido
+// com GET /v1/models). Modelos removidos da conta (super-120b, mistral-large)
+// respondem 404 e NÃO servem de reserva.
+const NVIDIA_MODEL_RESERVA =
+  process.env.NVIDIA_MODEL_RESERVA ?? 'nvidia/nemotron-3.5-lightning-30b-a3b';
 // Embeddings multilíngues (26 idiomas, inclui pt-BR) — 2048 dims, contexto 8k.
 // O modelo anterior (`llama-nemotron-embed-1b-v2`) chegou ao fim da vida em
 // 2026-08-25 e responde `410 Gone`. O substituto foi conferido contra a API:
@@ -928,25 +937,56 @@ const EMBED_MAX_BATCH = Number(process.env.NVIDIA_EMBED_BATCH ?? 32);
 // transcrição NÃO passam por aqui: o Claude não tem equivalente.
 async function nvidiaChat({ messages, model, maxTokens, temperature }) {
   if (!NVIDIA_API_KEY) return null;
-  const upstream = await fetch(`${NVIDIA_BASE}/chat/completions`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${NVIDIA_API_KEY}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: typeof model === 'string' && model ? model : NVIDIA_MODEL,
-      messages,
-      // O Nemotron gasta tokens raciocinando antes de responder, e esse
-      // gasto sai do mesmo teto. 512 truncava no meio do raciocínio.
-      max_tokens: Math.min(Number(maxTokens) || 2048, 4096),
-      temperature: typeof temperature === 'number' ? temperature : 0.2,
-      stream: false,
-    }),
-  });
-  const data = await upstream.json().catch(() => ({}));
-  if (!upstream.ok) throw new Error(`NVIDIA respondeu ${upstream.status}`);
-  return data?.choices?.[0]?.message?.content ?? '';
+  const pedirA = async (modelo) => {
+    const upstream = await fetch(`${NVIDIA_BASE}/chat/completions`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${NVIDIA_API_KEY}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        model: modelo,
+        messages,
+        // O Nemotron gasta tokens raciocinando antes de responder, e esse
+        // gasto sai do mesmo teto. 512 truncava no meio do raciocínio.
+        max_tokens: Math.min(Number(maxTokens) || 2048, 4096),
+        temperature: typeof temperature === 'number' ? temperature : 0.2,
+        stream: false,
+      }),
+      signal: AbortSignal.timeout(90_000),
+    });
+    const data = await upstream.json().catch(() => ({}));
+    return { status: upstream.status, content: data?.choices?.[0]?.message?.content ?? '' };
+  };
+  const principal = typeof model === 'string' && model ? model : NVIDIA_MODEL;
+  // Lotado (503/429/5xx) ou sumiu da conta (404/410): tenta a reserva antes
+  // de desistir. Uma única nova tentativa no principal cobre o soluço curto;
+  // o que persiste vai para a reserva, que é outro modelo e outra fila.
+  const ordem =
+    principal === NVIDIA_MODEL_RESERVA ? [principal] : [principal, NVIDIA_MODEL_RESERVA];
+  let ultimo = 0;
+  for (const [i, modelo] of ordem.entries()) {
+    for (let tentativa = 0; tentativa < (i === 0 ? 2 : 1); tentativa += 1) {
+      let r;
+      try {
+        r = await pedirA(modelo);
+      } catch (err) {
+        ultimo = 0;
+        log(`nvidia ${modelo}: ${err instanceof Error ? err.message : err}`);
+        continue;
+      }
+      if (r.status >= 200 && r.status < 300) {
+        if (modelo !== principal) log(`nvidia: ${principal} indisponível (${ultimo}) → ${modelo}`);
+        return r.content;
+      }
+      ultimo = r.status;
+      // 4xx que não é "lotado" nem "sumiu" (corpo inválido, chave errada):
+      // insistir não muda nada.
+      if (r.status !== 429 && r.status !== 404 && r.status !== 410 && r.status < 500) break;
+      if (tentativa === 0 && i === 0) await new Promise((res) => setTimeout(res, 1500));
+    }
+  }
+  throw new Error(`NVIDIA respondeu ${ultimo || 'erro de rede'}`);
 }
 const claudeCli = criarClaudeCli({ log: (...a) => log(...a) });
 const iaChat = criarIaChat({

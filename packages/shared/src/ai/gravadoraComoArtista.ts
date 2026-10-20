@@ -62,6 +62,20 @@ const GRAVADORAS = [
   'pineapple storm tv',
   'laboratorio fantasma',
   'boombap records',
+  // Produtoras de funk: metade do acervo importado vem dos canais delas, e o
+  // nome aparece entre parênteses no título ("Uma Maluca (GR6 Explode)") ou
+  // no campo do artista ("Alok, DJ Victor… / GR6 EXPLODE").
+  'gr6 explode',
+  'gr6 filmes',
+  'gr6 music',
+  'kondzilla',
+  'canal kondzilla',
+  'love funk',
+  'sete sete records',
+  'mano brown records',
+  'detona funk',
+  'funk total',
+  'cria de sp',
 ];
 
 /** Normaliza para comparar: sem acento, sem caixa, sem pontuação. */

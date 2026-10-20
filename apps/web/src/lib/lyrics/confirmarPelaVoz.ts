@@ -60,6 +60,33 @@ export function coberturaDaVoz(ouvidas: readonly string[], letra: string): numbe
   return ouvidas.filter((t) => daLetra.has(t)).length / ouvidas.length;
 }
 
+/**
+ * A letra que JÁ está na tela é desta música? O veredito da voz sobre uma
+ * letra conhecida (não sobre candidatas). Puro.
+ *
+ *   confirmada   — cobertura ≥ COBERTURA_MINIMA: é ela;
+ *   recusada     — o modelo ouviu o bastante e quase nada bate: outra música;
+ *   inconclusiva — ouviu pouco com confiança (autotune, instrumental longo,
+ *                  alfabeto que `tokens` não lê): não dá para dizer, fica.
+ */
+export type VereditoDaVoz = 'confirmada' | 'recusada' | 'inconclusiva';
+
+export function julgarPelaVoz(
+  letra: Lyrics,
+  words: readonly { text: string; prob?: number }[],
+): { veredito: VereditoDaVoz; cobertura: number; ouvidas: number } {
+  const ouvidas = palavrasOuvidas(words);
+  if (ouvidas.length < PALAVRAS_MINIMAS) {
+    return { veredito: 'inconclusiva', cobertura: 0, ouvidas: ouvidas.length };
+  }
+  const cobertura = coberturaDaVoz(ouvidas, letra.lines.map((l) => l.text).join(' '));
+  return {
+    veredito: cobertura >= COBERTURA_MINIMA ? 'confirmada' : 'recusada',
+    cobertura,
+    ouvidas: ouvidas.length,
+  };
+}
+
 function textoDa(row: LrclibRow): string {
   return row.plainLyrics?.trim() || row.syncedLyrics?.trim() || '';
 }

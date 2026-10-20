@@ -18,7 +18,20 @@ import { registerSW } from 'virtual:pwa-register';
 import { recarregarPreservandoMusica } from '@/lib/recarregar';
 import { usePlayerStore } from '@/stores/playerStore';
 
+/**
+ * O cache de capas antigo (`aurial-images`) guardava respostas opacas — 404,
+ * JSON de erro e página de login de Wi-Fi servidos como "capa" por 30 dias, e
+ * ~7 MB de cota cada. A regra nova grava em `aurial-images-v2` só o que é
+ * imagem de verdade (ver vite.config.ts); o velho é apagado uma vez, aqui,
+ * porque o Workbox só limpa o precache antigo, não os caches de runtime.
+ */
+function apagarCacheDeCapasAntigo(): void {
+  if (typeof caches === 'undefined') return;
+  void caches.delete('aurial-images').catch(() => undefined);
+}
+
 export function initPwaUpdater(): void {
+  apagarCacheDeCapasAntigo();
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     // Só é ATUALIZAÇÃO se já havia um worker no controle. Na primeira visita
     // (sem controller) o `clientsClaim` também dispara `controllerchange`, e

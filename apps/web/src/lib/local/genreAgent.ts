@@ -14,6 +14,7 @@
  *  - offline ou deslogado: dorme e tenta na próxima oportunidade.
  */
 import { aiClassifyGenre } from '@/lib/ai/ai';
+import { iaIndisponivel } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { modoLeve } from '@/lib/perf/dispositivo';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
@@ -299,6 +300,13 @@ async function run(): Promise<void> {
           indice.atualizar(minima);
         }
         delete attempts[t.id];
+      } else if (resposta === null && iaIndisponivel()) {
+        // FORA DO AR NÃO É "NÃO SEI": a IA não respondeu (503/502/rede). Não
+        // desconta tentativa da faixa — e para o plantão por esta sessão, que
+        // insistir agora só gasta o orçamento de todas as outras.
+        writeAttempts(attempts);
+        emit();
+        break;
       } else {
         attempts[t.id] = (attempts[t.id] ?? 0) + 1;
       }

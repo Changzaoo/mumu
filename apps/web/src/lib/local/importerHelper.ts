@@ -394,6 +394,24 @@ export interface AiMessage {
 }
 
 /**
+ * A IA ESTÁ FORA DO AR (não "não soube responder").
+ *
+ * `aiChat` devolve `null` tanto para "o modelo respondeu vazio" quanto para
+ * 502/503/rede caída — e os agentes que consomem (categorias, identidade)
+ * contavam os dois como tentativa gasta: três horas de NVIDIA lotada (812
+ * "respondeu 503" no log do importador em outubro de 2026) queimavam o
+ * orçamento de 3 tentativas de centenas de faixas, que ficavam sem gênero
+ * PARA SEMPRE neste aparelho. Aqui fica registrado até quando a IA esteve
+ * indisponível; quem conta tentativas pergunta antes de descontar.
+ */
+let iaIndisponivelAte = 0;
+const PAUSA_APOS_FALHA_MS = 5 * 60_000;
+
+export function iaIndisponivel(): boolean {
+  return Date.now() < iaIndisponivelAte;
+}
+
+/**
  * Server-side NVIDIA chat proxy — the API key stays on the importer, never in
  * the browser. Returns the assistant text, or null on any failure.
  */
@@ -412,10 +430,18 @@ export async function aiChat(
         ...(opts.temperature !== undefined ? { temperature: opts.temperature } : {}),
       }),
     });
-    if (!res.ok) return null;
+    if (!res.ok) {
+      // 5xx e 429 são "agora não", não "não sei": o importador sem provedor
+      // (503), os dois provedores falhando (502), a NVIDIA lotada.
+      if (res.status >= 500 || res.status === 429)
+        iaIndisponivelAte = Date.now() + PAUSA_APOS_FALHA_MS;
+      return null;
+    }
+    iaIndisponivelAte = 0;
     const data = (await res.json()) as { content?: string };
     return typeof data.content === 'string' && data.content.trim() ? data.content : null;
   } catch {
+    iaIndisponivelAte = Date.now() + PAUSA_APOS_FALHA_MS;
     return null;
   }
 }

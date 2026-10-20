@@ -297,6 +297,96 @@ describe('lerTituloDeVideo — regressões vistas em produção', () => {
     });
   });
 
+  it('funk 2026: a música vem ANTES da lista de MCs (log do importador, 17/10/2026)', () => {
+    // Entrava com os campos trocados: artista "COMEDINHA FICOU BRAVO 2".
+    expect(
+      lerTituloDeVideo('5. COMEDINHA FICOU BRAVO 2 - MC Negão Original, MC Meno K (DJ Japa NK)'),
+    ).toEqual({
+      title: 'COMEDINHA FICOU BRAVO 2',
+      artists: ['MC Negão Original', 'MC Meno K'],
+      label: null,
+    });
+    expect(
+      lerTituloDeVideo(
+        'Campeonato de Put4 - MC`s Tuto, Meno K, FR da Norte, Marks e MC Joãozinho VT (DJ Gu) [Clipe Oficial]',
+      ),
+    ).toMatchObject({ title: 'Campeonato de Put4', artists: expect.arrayContaining(['Meno K']) });
+    // Emoji grudado no travessão não impede a divisão.
+    expect(lerTituloDeVideo('FALA NA CARA 2🌹- MC Paiva (Love Funk) Fepache')).toMatchObject({
+      title: 'FALA NA CARA 2',
+      label: 'Love Funk',
+    });
+  });
+
+  it('funk 2026: DJs abrem, a música fica no meio, os MCs fecham', () => {
+    expect(
+      lerTituloDeVideo(
+        'DJ ARANA, DJ BLAKES - BERIMBAU ITALIANO - MC GEDAI, MC MENO DANI (VIDEO CLIPE OFICIAL)',
+      ),
+    ).toEqual({
+      title: 'BERIMBAU ITALIANO',
+      artists: ['DJ ARANA', 'DJ BLAKES', 'MC GEDAI', 'MC MENO DANI'],
+      label: null,
+    });
+    expect(
+      lerTituloDeVideo(
+        'DJ Victor - MC Menor da VG, GP, IG, Kadu, Cebezinho, Lele JP - PARAÍSO TROPICAL (GR6 Explode)',
+      ),
+    ).toMatchObject({
+      title: 'PARAÍSO TROPICAL',
+      artists: expect.arrayContaining(['DJ Victor', 'MC Menor da VG', 'Lele JP']),
+      label: 'GR6 Explode',
+    });
+    // Aspa fechada com dois apóstrofos.
+    expect(
+      lerTituloDeVideo(
+        `Dj Nene MPC, Dj Feijão "Conto Demais'' - Mc's Magal, Kadu, GP, Dena, Lele JP, SK`,
+      ),
+    ).toMatchObject({ title: 'Conto Demais', artists: expect.arrayContaining(['Kadu', 'SK']) });
+  });
+
+  it('crédito de DJ/produção no FIM do título não é música', () => {
+    expect(lerTituloDeVideo('MC DS e MC Menor da VG - Uma Maluca (GR6 Explode) DJ Nenê')).toEqual({
+      title: 'Uma Maluca',
+      artists: ['MC DS', 'MC Menor da VG'],
+      label: 'GR6 Explode',
+    });
+    expect(lerTituloDeVideo('MC Luuky - Lancha do Bololô (Clipe Oficial) DJ Oreia').title).toBe(
+      'Lancha do Bololô',
+    );
+    // "Prod." sem espaço depois do ponto.
+    expect(
+      lerTituloDeVideo(
+        'Mc Kevin - Doutora (Lyric Vídeo Sete Sete Records) Prod.LtnoBeat e DJ Murillo',
+      ),
+    ).toMatchObject({ title: 'Doutora', artists: ['Mc Kevin'] });
+    // DJs que fecham depois do segundo travessão.
+    expect(lerTituloDeVideo('Brenninho VJ - Proibido Amar - DJ Boy e DJ Gu')).toMatchObject({
+      title: 'Proibido Amar',
+      artists: ['Brenninho VJ'],
+    });
+  });
+
+  it('parênteses aninhados e o artista repetido antes das aspas', () => {
+    // Sobrava "ALL THE WAY / Audio)".
+    expect(
+      lerTituloDeVideo('Justin Bieber - ALL THE WAY (LIVE FROM COACHELLA (Weekend I) / Audio)')
+        .title,
+    ).toBe('ALL THE WAY');
+    expect(
+      lerTituloDeVideo(
+        'Justin Bieber - Justin Bieber - “Somebody” (Live from the 2021 Juno Awards)',
+      ),
+    ).toEqual({ title: 'Somebody', artists: ['Justin Bieber'], label: null });
+    // "Saudades feat. X" é música com convidados, não lista de cantores; e o
+    // convidado acaba no travessão.
+    expect(
+      lerTituloDeVideo(
+        'MC Hariel - Saudades Feat. MC IG e MC PH (GR6 Explode) Faixa 6 - DVD Mundão Girou',
+      ),
+    ).toMatchObject({ title: 'Saudades', artists: ['MC Hariel', 'MC IG', 'MC PH'] });
+  });
+
   it('o nome do canal entra limpo, como o de qualquer artista', () => {
     // Sem passar pela limpeza, "Matuê - Topic" e "Caetano Veloso Oficial"
     // viravam artistas PARALELOS do mesmo cantor — prateleira, foto e votação

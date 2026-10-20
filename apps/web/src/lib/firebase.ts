@@ -197,6 +197,11 @@ function carregarSdk(): Promise<void> {
       auth.languageCode = 'pt-BR';
       db = criarFirestore(app, storeMod);
       subiu = true;
+      // VOLTANDO DO GOOGLE PELO REDIRECIONAMENTO (celular): o login se conclui
+      // aqui, e só aqui existe o token OAuth com o escopo do aniversário. Sem
+      // esta leitura, o caminho do celular nunca preenchia a idade — e a
+      // pergunta voltava, mesmo com a data na conta. Fora do caminho crítico.
+      void concluirAniversarioDoRedirecionamento(authMod, auth);
     } catch {
       // Sem SDK o app continua inteiro no modo local: biblioteca, reprodução
       // e importação não dependem da nuvem. Só a sincronia fica de fora.
@@ -319,12 +324,16 @@ export async function getIdToken(forceRefresh = false): Promise<string | null> {
 export const ESCOPO_ANIVERSARIO = 'https://www.googleapis.com/auth/user.birthday.read';
 
 /**
- * Pedir o aniversário JÁ NO LOGIN só depois de o Google aprovar o escopo
- * (People API ativa + escopo verificado na tela de consentimento). Antes disso
- * todo login mostraria "app não verificado" — o botão no diálogo de idade
- * continua pedindo sob demanda. Liga com VITE_GOOGLE_ANIVERSARIO_NO_LOGIN=1.
+ * O ANIVERSÁRIO VEM NO PRÓPRIO LOGIN — ninguém pergunta "quando você nasceu?".
+ *
+ * Decisão do dono (20/10/2026): a idade sai da conta Google, não de um diálogo.
+ * O escopo entra no consentimento do login; o token OAuth que volta lê a data
+ * na People API e preenche a faixa etária em silêncio (nascimentoGoogle.ts).
+ * Enquanto o escopo não estiver verificado no console do Google, a tela de
+ * consentimento avisa "app não verificado" — é o preço de não perguntar.
+ * Desliga com VITE_GOOGLE_ANIVERSARIO_NO_LOGIN=0 se isso virar problema.
  */
-const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN === '1';
+const ANIVERSARIO_NO_LOGIN = import.meta.env.VITE_GOOGLE_ANIVERSARIO_NO_LOGIN !== '0';
 
 interface LoginGoogleNativo {
   entrar(): Promise<{ idToken: string }>;
@@ -354,6 +363,23 @@ function telaDeToque(): boolean {
     return window.matchMedia('(pointer: coarse)').matches;
   } catch {
     return false;
+  }
+}
+
+async function concluirAniversarioDoRedirecionamento(
+  authMod: typeof import('firebase/auth'),
+  instance: Auth,
+): Promise<void> {
+  try {
+    const result = await authMod.getRedirectResult(instance);
+    if (!result) return;
+    const accessToken =
+      authMod.GoogleAuthProvider.credentialFromResult(result)?.accessToken ?? null;
+    if (!accessToken) return;
+    const { preencherNascimentoDoLogin } = await import('@/lib/auth/nascimentoGoogle');
+    await preencherNascimentoDoLogin(accessToken);
+  } catch {
+    /* sem redirecionamento pendente, ou People API indisponível: a conta segue */
   }
 }
 
