@@ -67,7 +67,7 @@ import {
   identificador,
   type TrackFacts,
 } from './agents.js';
-import { procurarAlbum, type AlbumEncontrado } from './albuns.js';
+import { miniaturaDoVideo, procurarAlbum, type AlbumEncontrado } from './albuns.js';
 
 const log = logger.child({ worker: 'curation' });
 
@@ -87,6 +87,11 @@ interface LibraryTrack {
   /** Usados pelo faxineiro: duração confirma a gravação, capa desempata. */
   durationMs?: unknown;
   coverUrl?: unknown;
+  /** Preenchidos por `preencherAlbuns` (ver albuns.ts). */
+  trackNumber?: unknown;
+  discNumber?: unknown;
+  releaseYear?: unknown;
+  sourceUrl?: unknown;
 }
 interface LibraryEntry {
   track?: LibraryTrack;
@@ -102,6 +107,9 @@ interface LibraryEntry {
   /** Última tentativa (ISO) de achar o álbum — o rodízio de `preencherAlbuns`. */
   albumTentadoEm?: unknown;
   albumTentativas?: unknown;
+  /** Já se procurou uma capa própria (single/vídeo) para esta faixa — uma vez só. */
+  capaPropriaEm?: unknown;
+  sourceUrl?: unknown;
 }
 
 /** Extrai os fatos que os agentes consomem. */
@@ -322,11 +330,14 @@ async function curateUser(userId: string): Promise<number> {
   const docsCompletos = await bibliotecaSemDna(userId);
   corrigidas += await curarCategorias(docsCompletos);
 
-  // DNA e fusão de duplicatas seguem na janela: o primeiro tem custo de rede por
-  // faixa, e o segundo APAGA (com lápide) — alargar o alcance de quem remove sem
-  // pedido é o tipo de mudança que se faz de propósito, não de carona.
+  // O DNA segue na janela (custo de rede por faixa). A FUSÃO DE DUPLICATAS
+  // passa a ver a biblioteca inteira, de propósito: presa na janela de 160 e a
+  // 10 grupos por volta, uma conta com 165 duplicatas (medido em 20/10/2026)
+  // levaria dias para limpar — e o dono pediu o acervo sem repetidas. A regra
+  // de decisão continua a mesma e conservadora (faxineiro/duplicatas.ts); só o
+  // alcance e o teto por volta mudam.
   await gravarDna(docs);
-  corrigidas += await fundirDuplicatas(docs);
+  corrigidas += await fundirDuplicatas(docsCompletos, MAX_FUSOES_BIBLIOTECA);
 
   return corrigidas;
 }
@@ -409,23 +420,32 @@ export function patchDeAlbum(
   track: LibraryTrack,
   docId: string,
   achado: AlbumEncontrado,
+  sourceUrl: unknown = null,
 ): Record<string, unknown> | null {
   const atual = albumDe(track);
   const t = track as Record<string, unknown>;
   const patch: Record<string, unknown> = {};
   const mesmoDisco = atual.title && chaveDeAlbum(atual.title) === chaveDeAlbum(achado.album);
+  const capaAtual = typeof t.coverUrl === 'string' && t.coverUrl ? t.coverUrl : null;
+  const albumObj =
+    track.album && typeof track.album === 'object' ? (track.album as { coverUrl?: unknown }) : null;
+  const capaDoAlbumAtual =
+    albumObj && typeof albumObj.coverUrl === 'string' && albumObj.coverUrl
+      ? albumObj.coverUrl
+      : null;
   if (!atual.title) {
     patch['track.album'] = {
       id: `local-album:${docId}`,
       title: achado.album,
       slug: '',
-      coverUrl: achado.coverUrl ?? (typeof t.coverUrl === 'string' ? t.coverUrl : null),
+      coverUrl: achado.coverUrl ?? capaAtual,
       ...(achado.trackCount ? { trackCount: achado.trackCount } : {}),
     };
   } else if (mesmoDisco) {
     if (achado.trackCount && atual.trackCount !== achado.trackCount) {
       patch['track.album.trackCount'] = achado.trackCount;
     }
+    if (!capaDoAlbumAtual && achado.coverUrl) patch['track.album.coverUrl'] = achado.coverUrl;
   } else {
     // Disco diferente do que a curadoria fixou: não se mexe no álbum, e o
     // número encontrado é de OUTRO disco — não serve.
@@ -435,11 +455,45 @@ export function patchDeAlbum(
     patch['track.trackNumber'] = achado.trackNumber;
     if (achado.discNumber) patch['track.discNumber'] = achado.discNumber;
   }
-  if (typeof t.releaseYear !== 'number' && achado.releaseYear)
+  if (typeof t.releaseYear !== 'number' && achado.releaseYear) {
     patch['track.releaseYear'] = achado.releaseYear;
-  if (!(typeof t.coverUrl === 'string' && t.coverUrl) && achado.coverUrl)
-    patch['track.coverUrl'] = achado.coverUrl;
+  }
+
+  // A CAPA DA MÚSICA, não a do disco. Dez faixas do mesmo álbum com a mesma
+  // arte deixam a estante repetitiva; quando a música tem arte própria (o
+  // single com o nome dela), ela vale. Sem single, a miniatura do vídeo de
+  // origem é única por faixa. O álbum fica como reserva — e a capa que a
+  // faixa já tem só é trocada quando é a cópia da capa do disco (ou quando é
+  // uma miniatura e apareceu a arte do single, que é melhor).
+  const capaDoDisco = achado.coverUrl ?? capaDoAlbumAtual;
+  const propria = achado.capaDoSingle ?? miniaturaDoVideo(sourceUrl);
+  const repetida = !capaAtual || (capaDoDisco !== null && capaAtual === capaDoDisco);
+  const miniaturaPodeMelhorar =
+    Boolean(achado.capaDoSingle) && capaAtual !== achado.capaDoSingle && ehMiniatura(capaAtual);
+  if (propria && propria !== capaDoDisco && (repetida || miniaturaPodeMelhorar)) {
+    patch['track.coverUrl'] = propria;
+  } else if (!capaAtual && capaDoDisco) {
+    patch['track.coverUrl'] = capaDoDisco;
+  }
   return Object.keys(patch).length > 0 ? patch : null;
+}
+
+function ehMiniatura(url: string | null): boolean {
+  return typeof url === 'string' && /ytimg\.com\//.test(url);
+}
+
+/** A faixa tem álbum e número, mas a capa é a cópia da capa do disco. */
+export function precisaDeCapaPropria(
+  track: LibraryTrack,
+  entry: { capaPropriaEm?: unknown },
+): boolean {
+  if (typeof entry.capaPropriaEm === 'string') return false;
+  const t = track as Record<string, unknown>;
+  const capa = typeof t.coverUrl === 'string' ? t.coverUrl : '';
+  const album =
+    track.album && typeof track.album === 'object' ? (track.album as { coverUrl?: unknown }) : null;
+  const capaDoDisco = album && typeof album.coverUrl === 'string' ? album.coverUrl : '';
+  return !capa || (Boolean(capaDoDisco) && capa === capaDoDisco);
 }
 
 /** Faixa que ainda precisa de álbum ou de número: candidata ao rodízio. */
@@ -475,6 +529,7 @@ async function preencherAlbuns(
         typeof entry.albumTentadoEm === 'string' ? Date.parse(entry.albumTentadoEm) : NaN;
       return {
         doc,
+        entry,
         track,
         facts: factsOf(track),
         tentadoEm: Number.isFinite(quando) ? quando : 0,
@@ -482,38 +537,57 @@ async function preencherAlbuns(
           typeof entry.albumTentativas === 'number' && entry.albumTentativas > 0
             ? entry.albumTentativas
             : 0,
+        semAlbum: precisaDeAlbum(track),
+        semCapaPropria: precisaDeCapaPropria(track, entry),
       };
     })
     .filter(
-      ({ facts, track }) =>
-        facts.title &&
-        facts.artists.length > 0 &&
-        facts.artists[0] !== 'Desconhecido' &&
-        precisaDeAlbum(track),
+      ({ facts }) => facts.title && facts.artists.length > 0 && facts.artists[0] !== 'Desconhecido',
     )
-    .filter((c) => !(c.tentativas >= ALBUM_TENTATIVAS_MAX && agora - c.tentadoEm < descanso))
-    .sort((a, b) => a.tentadoEm - b.tentadoEm)
+    .filter((c) => c.semAlbum || c.semCapaPropria)
+    .filter(
+      (c) =>
+        !c.semAlbum || !(c.tentativas >= ALBUM_TENTATIVAS_MAX && agora - c.tentadoEm < descanso),
+    )
+    // Quem não tem álbum vem antes de quem só precisa de capa própria.
+    .sort((a, b) => Number(b.semAlbum) - Number(a.semAlbum) || a.tentadoEm - b.tentadoEm)
     .slice(0, lote);
   if (candidatas.length === 0) return 0;
 
   const iso = new Date(agora).toISOString();
   let gravados = 0;
   for (const alvo of candidatas) {
-    const durationMs =
-      typeof (alvo.track as Record<string, unknown>).durationMs === 'number'
-        ? ((alvo.track as Record<string, unknown>).durationMs as number)
-        : null;
+    const bruto = alvo.track as Record<string, unknown>;
+    const durationMs = typeof bruto.durationMs === 'number' ? bruto.durationMs : null;
     const achado = await procurar(
       { title: alvo.facts.title, artists: alvo.facts.artists, durationMs },
       { log: (m) => log.debug(m), pausaItunesMs: 3_000 },
     );
-    const patch = achado ? patchDeAlbum(alvo.track, alvo.doc.id, achado) : null;
+    let patch = achado ? patchDeAlbum(alvo.track, alvo.doc.id, achado, alvo.entry.sourceUrl) : null;
+    if (!patch && !alvo.semAlbum) {
+      // Só capa própria, sem catálogo: a miniatura do vídeo ainda é única.
+      const propria = miniaturaDoVideo(alvo.entry.sourceUrl);
+      const atual = typeof bruto.coverUrl === 'string' ? bruto.coverUrl : '';
+      if (propria && propria !== atual) patch = { 'track.coverUrl': propria };
+    }
     try {
+      const marcaDeCapa = alvo.semCapaPropria ? { capaPropriaEm: iso } : {};
       if (patch) {
-        await alvo.doc.ref.update({ ...patch, albumTentadoEm: null, albumTentativas: 0 });
+        await alvo.doc.ref.update({
+          ...patch,
+          ...marcaDeCapa,
+          albumTentadoEm: null,
+          albumTentativas: 0,
+        });
         gravados += 1;
+      } else if (alvo.semAlbum) {
+        await alvo.doc.ref.update({
+          ...marcaDeCapa,
+          albumTentadoEm: iso,
+          albumTentativas: alvo.tentativas + 1,
+        });
       } else {
-        await alvo.doc.ref.update({ albumTentadoEm: iso, albumTentativas: alvo.tentativas + 1 });
+        await alvo.doc.ref.update(marcaDeCapa);
       }
     } catch (err) {
       log.warn({ err, doc: alvo.doc.id }, 'falha ao gravar álbum');
@@ -922,8 +996,63 @@ async function curarAcervo(): Promise<number> {
   // Os álbuns do acervo — o que todo usuário vê na ficha do artista.
   corrigidas += await preencherAlbuns(linhas.map(docDoAcervo));
 
+  // DUPLICATAS DO ACERVO. O acervo é uma cópia das bibliotecas, e a fusão
+  // acima só limpava as bibliotecas: a faixa fundida na conta continuava no
+  // acervo (244 duplicatas estritas medidas em 20/10/2026). A mesma regra do
+  // faxineiro, com a mesma conservação; aqui a remoção é de verdade (o acervo
+  // não tem lápide — os aparelhos recarregam o snapshot quando a contagem muda).
+  corrigidas += await fundirDuplicatasDoAcervo(linhas);
+
   if (corrigidas > 0) log.info({ corrigidas, faixas: linhas.length }, 'acervo curado');
   return corrigidas;
+}
+
+async function fundirDuplicatasDoAcervo(
+  linhas: Array<{ id: string; data: unknown }>,
+): Promise<number> {
+  const faixas: FaixaComparavel[] = [];
+  for (const linha of linhas) {
+    const entry = (linha.data ?? {}) as LibraryEntry;
+    const track = entry.track;
+    if (!track || typeof track.title !== 'string' || !track.title.trim()) continue;
+    const dnaBruto = entry[DNA_FIELD];
+    faixas.push({
+      id: linha.id,
+      title: track.title,
+      artists: artistNames(track),
+      durationMs: typeof track.durationMs === 'number' ? track.durationMs : null,
+      dna:
+        Array.isArray(dnaBruto) && dnaBruto.length === EMBED_DIMS ? (dnaBruto as number[]) : null,
+      coverUrl: typeof track.coverUrl === 'string' ? track.coverUrl : null,
+      album: albumDe(track).title || null,
+      addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : null,
+    });
+  }
+  const grupos = faxineiro(faixas).slice(0, MAX_FUSOES_BIBLIOTECA);
+  if (grupos.length === 0) return 0;
+  let removidas = 0;
+  for (const grupo of grupos) {
+    const ids = grupo.remover.map((r) => r.id);
+    try {
+      await prisma.catalogTrack.deleteMany({ where: { id: { in: ids } } });
+      // A sobrevivente é tocada para o carimbo do acervo mudar e os aparelhos
+      // recarregarem o snapshot sem as fundidas.
+      const fica = linhas.find((l) => l.id === grupo.manter.id);
+      if (fica) {
+        const dados = (fica.data ?? {}) as Record<string, unknown>;
+        await prisma.catalogTrack.update({
+          where: { id: fica.id },
+          data: { data: { ...dados, duplicatasFundidas: grupo.remover.map((r) => r.title) } },
+        });
+      }
+      removidas += ids.length;
+    } catch (err) {
+      log.warn({ err, manter: grupo.manter.id }, 'falha ao fundir duplicatas do acervo');
+    }
+  }
+  if (removidas > 0)
+    log.info({ removidas, grupos: grupos.length }, 'duplicatas do acervo removidas');
+  return removidas;
 }
 
 /**
@@ -941,8 +1070,13 @@ async function curarAcervo(): Promise<number> {
  *    inteira antes de alguém perceber.
  */
 const MAX_FUSOES_POR_VOLTA = 10;
+/** Biblioteca inteira por volta: o que sobrar fica para a próxima hora. */
+const MAX_FUSOES_BIBLIOTECA = 100;
 
-async function fundirDuplicatas(docs: LibraryDoc[]): Promise<number> {
+async function fundirDuplicatas(
+  docs: LibraryDoc[],
+  maximo: number = MAX_FUSOES_POR_VOLTA,
+): Promise<number> {
   const porId = new Map<string, LibraryDoc>();
   const faixas: FaixaComparavel[] = [];
 
@@ -960,12 +1094,14 @@ async function fundirDuplicatas(docs: LibraryDoc[]): Promise<number> {
       dna:
         Array.isArray(dnaBruto) && dnaBruto.length === EMBED_DIMS ? (dnaBruto as number[]) : null,
       coverUrl: typeof track.coverUrl === 'string' ? track.coverUrl : null,
-      album: typeof track.album === 'string' ? track.album : null,
+      // O álbum é objeto ({title}) no JSON da faixa; antes era lido como string
+      // e saía sempre nulo — o desempate "quem tem álbum fica" nunca valia.
+      album: albumDe(track).title || null,
       addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : null,
     });
   }
 
-  const grupos = faxineiro(faixas).slice(0, MAX_FUSOES_POR_VOLTA);
+  const grupos = faxineiro(faixas).slice(0, maximo);
   if (grupos.length === 0) return 0;
 
   let fundidas = 0;

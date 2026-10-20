@@ -34,8 +34,44 @@ export interface AlbumEncontrado {
   discNumber: number | null;
   trackCount: number | null;
   releaseYear: number | null;
+  /** A capa do DISCO. */
   coverUrl: string | null;
+  /**
+   * A capa PRÓPRIA da música: a arte do single/EP com o nome dela, quando o
+   * catálogo tem um. É o que evita dez faixas do mesmo disco com a mesma cara
+   * (pedido do dono, 20/10/2026); o álbum fica de reserva.
+   */
+  capaDoSingle: string | null;
   fonte: 'deezer' | 'itunes';
+}
+
+/** Lançamento com o nome da própria faixa (single/EP): a capa é dela. */
+export function capaDoSingleEntre(faixa: FaixaParaAlbum, candidatos: Candidato[]): string | null {
+  for (const c of candidatos) {
+    if (!c.coverUrl || !mesmoTitulo(faixa.title, c.title) || !mesmoArtista(faixa.artists, c.artist))
+      continue;
+    if (mesmoTitulo(c.album, faixa.title) || (c.trackCount !== null && c.trackCount <= 2))
+      return c.coverUrl;
+  }
+  return null;
+}
+
+/** Miniatura do vídeo de origem — única por faixa, sempre existe para o YouTube. */
+export function miniaturaDoVideo(sourceUrl: unknown): string | null {
+  if (typeof sourceUrl !== 'string') return null;
+  try {
+    const u = new URL(sourceUrl);
+    const host = u.hostname.replace(/^www\./, '').replace(/^m\./, '');
+    let id: string | null = null;
+    if (host === 'youtu.be') id = u.pathname.slice(1).split('/')[0] || null;
+    else if (/(^|\.)youtube\.com$/.test(host)) {
+      id =
+        u.searchParams.get('v') ?? /^\/(?:embed|shorts|v)\/([^/?#]+)/.exec(u.pathname)?.[1] ?? null;
+    }
+    return id && /^[\w-]{11}$/.test(id) ? `https://i.ytimg.com/vi/${id}/hqdefault.jpg` : null;
+  } catch {
+    return null;
+  }
 }
 
 /** Um candidato já no formato comum, venha de onde vier. */
@@ -223,6 +259,7 @@ async function noDeezer(faixa: FaixaParaAlbum, f: Fetch): Promise<AlbumEncontrad
   }
   const escolhido = escolherCandidato(faixa, candidatos);
   if (!escolhido?.deezerTrackId) return null;
+  const capaDoSingle = capaDoSingleEntre(faixa, candidatos);
   const detalhe = (await json(
     f,
     `https://api.deezer.com/track/${escolhido.deezerTrackId}`,
@@ -246,6 +283,7 @@ async function noDeezer(faixa: FaixaParaAlbum, f: Fetch): Promise<AlbumEncontrad
     trackCount,
     releaseYear,
     coverUrl: detalhe.album?.cover_xl ?? detalhe.album?.cover_big ?? escolhido.coverUrl,
+    capaDoSingle,
     fonte: 'deezer',
   };
 }
@@ -289,7 +327,8 @@ async function noItunes(faixa: FaixaParaAlbum, f: Fetch): Promise<AlbumEncontrad
       f,
       `https://itunes.apple.com/search?media=music&entity=song&limit=25&country=${pais}&term=${termo}`,
     )) as ItunesBusca;
-    const escolhido = escolherCandidato(faixa, candidatosDoItunes(busca));
+    const candidatos = candidatosDoItunes(busca);
+    const escolhido = escolherCandidato(faixa, candidatos);
     if (escolhido) {
       return {
         album: escolhido.album,
@@ -298,6 +337,7 @@ async function noItunes(faixa: FaixaParaAlbum, f: Fetch): Promise<AlbumEncontrad
         trackCount: escolhido.trackCount,
         releaseYear: escolhido.releaseYear,
         coverUrl: escolhido.coverUrl,
+        capaDoSingle: capaDoSingleEntre(faixa, candidatos),
         fonte: 'itunes',
       };
     }

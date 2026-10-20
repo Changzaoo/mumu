@@ -13,7 +13,7 @@
  */
 import { env } from '../../config/index.js';
 import { logger } from '../../core/logger.js';
-import { EMBED_MODEL, type AiMessage } from '@radinho/shared';
+import { CHAT_MODELS, EMBED_MODEL, type AiMessage } from '@radinho/shared';
 
 const log = logger.child({ infra: 'nvidia' });
 
@@ -145,6 +145,21 @@ async function once(
   if (response.status === 429 || response.status >= 500) {
     if (response.status === 429) recusasPorCota += 1;
     throw new RetryableError(`NVIDIA respondeu ${response.status}`);
+  }
+  if (response.status === 404 || response.status === 410) {
+    // MODELO QUE SUMIU DA CONTA (404) OU MORREU (410) não é "não sei": é
+    // configuração morta. Foi assim que o super-120b parou toda a curadoria
+    // em silêncio. Tenta uma vez o modelo vivo mais barato antes de desistir.
+    const modelo = opts.model ?? env.NVIDIA_MODEL;
+    if (modelo !== CHAT_MODELS.nano) {
+      log.warn(
+        { status: response.status, modelo },
+        'NVIDIA: modelo indisponível, caindo para o nano',
+      );
+      return once(messages, { ...opts, model: CHAT_MODELS.nano });
+    }
+    log.warn({ status: response.status, modelo }, 'NVIDIA recusou a requisição');
+    return null;
   }
   if (!response.ok) {
     log.warn({ status: response.status }, 'NVIDIA recusou a requisição');

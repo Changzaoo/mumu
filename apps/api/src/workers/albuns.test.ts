@@ -106,6 +106,50 @@ describe('escolherCandidato', () => {
   });
 });
 
+describe('capa própria da música', () => {
+  it('a arte do single com o nome da faixa é a capa dela; sem single, null', async () => {
+    const { capaDoSingleEntre, miniaturaDoVideo } = await import('./albuns.js');
+    const faixa = { title: 'Toxic', artists: ['Britney Spears'] };
+    expect(
+      capaDoSingleEntre(faixa, [
+        cand({
+          title: 'Toxic',
+          artist: 'Britney Spears',
+          album: 'In the Zone',
+          coverUrl: 'album.jpg',
+          trackCount: 13,
+        }),
+        cand({
+          title: 'Toxic',
+          artist: 'Britney Spears',
+          album: 'Toxic',
+          coverUrl: 'single.jpg',
+          trackCount: 1,
+        }),
+      ]),
+    ).toBe('single.jpg');
+    expect(
+      capaDoSingleEntre(faixa, [
+        cand({
+          title: 'Toxic',
+          artist: 'Britney Spears',
+          album: 'In the Zone',
+          coverUrl: 'album.jpg',
+          trackCount: 13,
+        }),
+      ]),
+    ).toBeNull();
+    expect(miniaturaDoVideo('https://www.youtube.com/watch?v=LOZuxwVk7TU')).toBe(
+      'https://i.ytimg.com/vi/LOZuxwVk7TU/hqdefault.jpg',
+    );
+    expect(miniaturaDoVideo('https://youtu.be/LOZuxwVk7TU')).toBe(
+      'https://i.ytimg.com/vi/LOZuxwVk7TU/hqdefault.jpg',
+    );
+    expect(miniaturaDoVideo('https://soundcloud.com/x/y')).toBeNull();
+    expect(miniaturaDoVideo(null)).toBeNull();
+  });
+});
+
 describe('leitores das fontes', () => {
   it('Deezer: duração em segundos vira ms; álbum e capa vêm da busca', () => {
     const c = candidatosDoDeezer({
@@ -192,6 +236,7 @@ describe('procurarAlbum', () => {
       trackCount: 13,
       releaseYear: 2003,
       coverUrl: 'x.jpg',
+      capaDoSingle: null,
       fonte: 'deezer',
     });
     expect(chamadas.some((u) => u.includes('itunes'))).toBe(false);

@@ -43,6 +43,7 @@ const achado = {
   trackCount: 13,
   releaseYear: 2003,
   coverUrl: 'https://capa/600.jpg',
+  capaDoSingle: null,
   fonte: 'deezer' as const,
 };
 
@@ -119,6 +120,60 @@ describe('patchDeAlbum', () => {
       },
       'x1',
       achado,
+    );
+    expect(p).toBeNull();
+  });
+});
+
+describe('capa própria', () => {
+  it('a capa do single vale como capa da faixa; o álbum guarda a do disco', () => {
+    const p = patchDeAlbum({ title: 'Toxic', coverUrl: '' }, 'x1', {
+      ...achado,
+      capaDoSingle: 'https://capa/single.jpg',
+    });
+    expect(p?.['track.coverUrl']).toBe('https://capa/single.jpg');
+    expect((p?.['track.album'] as { coverUrl: string }).coverUrl).toBe('https://capa/600.jpg');
+  });
+
+  it('sem single, a miniatura do vídeo de origem é a capa da faixa', () => {
+    const p = patchDeAlbum(
+      {
+        title: 'Toxic',
+        coverUrl: 'https://capa/600.jpg',
+        album: { id: 'a', title: 'In the Zone', slug: '', coverUrl: 'https://capa/600.jpg' },
+        trackNumber: 6,
+        discNumber: 1,
+        releaseYear: 2003,
+      },
+      'x1',
+      { ...achado },
+      'https://www.youtube.com/watch?v=LOZuxwVk7TU',
+    );
+    expect(p).toEqual({
+      'track.album.trackCount': 13,
+      'track.coverUrl': 'https://i.ytimg.com/vi/LOZuxwVk7TU/hqdefault.jpg',
+    });
+  });
+
+  it('capa que já é própria (diferente da do disco) não é trocada pela miniatura', () => {
+    const p = patchDeAlbum(
+      {
+        title: 'Toxic',
+        coverUrl: 'https://minha/propria.jpg',
+        album: {
+          id: 'a',
+          title: 'In the Zone',
+          slug: '',
+          coverUrl: 'https://capa/600.jpg',
+          trackCount: 13,
+        },
+        trackNumber: 6,
+        discNumber: 1,
+        releaseYear: 2003,
+      },
+      'x1',
+      { ...achado },
+      'https://www.youtube.com/watch?v=LOZuxwVk7TU',
     );
     expect(p).toBeNull();
   });

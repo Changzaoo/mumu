@@ -40,8 +40,17 @@ export const CHAT_MODELS = {
    * que a medição original já dava como tão rápido quanto.
    */
   nano: 'nvidia/nemotron-3.5-lightning-30b-a3b',
-  /** Raciocínio de verdade (identidade, desambiguação). ~2s. */
-  super: 'nvidia/nemotron-3-super-120b-a12b',
+  /**
+   * Raciocínio de verdade (identidade, desambiguação).
+   *
+   * Era o `nemotron-3-super-120b-a12b`, que SUMIU desta conta: a API responde
+   * 404 ("Function not found for account") desde pelo menos 20/10/2026, e o
+   * worker de curadoria passou a registrar "NVIDIA recusou" em TODA chamada —
+   * gênero, identidade e auditoria pararam em silêncio no servidor. O Ultra é
+   * o degrau vivo acima; quando ele lota (503), `infra/ai/nvidia.ts` cai para
+   * o `nano` (lightning), que existe e responde.
+   */
+  super: 'nvidia/nemotron-3-ultra-550b-a55b',
   /** Escalação: só quando o `super` devolve nada aproveitável. ~4–17s. */
   ultra: 'nvidia/nemotron-3-ultra-550b-a55b',
   /** Texto de vitrine (descrição de mix, bio). */

@@ -2298,11 +2298,13 @@ function computeAlbumGroups(vista: readonly LibraryEntry[]): LocalAlbum[] {
     const key = albumKey(title, artist);
     let album = byKey.get(key);
     if (!album) {
-      album = { key, title, artist, coverUrl: t.coverUrl ?? null, tracks: [] };
+      // A capa do DISCO (track.album.coverUrl) antes da capa da faixa: a faixa
+      // pode ter arte própria (single/vídeo), e o álbum é outra coisa.
+      album = { key, title, artist, coverUrl: t.album?.coverUrl ?? t.coverUrl ?? null, tracks: [] };
       byKey.set(key, album);
     }
     album.tracks.push(t);
-    if (!album.coverUrl && t.coverUrl) album.coverUrl = t.coverUrl;
+    if (!album.coverUrl) album.coverUrl = t.album?.coverUrl ?? t.coverUrl ?? null;
   }
   const albuns = [...byKey.values()].filter((a) => {
     if (MARCA_DE_SINGLE.test(a.title)) return false;
