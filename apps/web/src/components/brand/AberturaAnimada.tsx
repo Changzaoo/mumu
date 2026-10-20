@@ -126,10 +126,13 @@ const CAMERA: readonly (readonly [number, number, number, number])[] = [
   [5605, -352, 484, 2.2],
   [6460, -445, -80, 1.6],
   [7600, -445, -80, 1.6],
-  [8550, -2126, -279, 8],
-  [9500, -4784, -628, 18],
+  // Fecha no celular sem passar de 2,4x — o mergulho na tela é a TelaGrande.
+  [8600, -595.2, -86.4, 2.4],
+  [9500, -595.2, -86.4, 2.4],
 ];
 const ORIGEM_DA_CAMERA = [500, 280] as const;
+/** A tela do celular cresce até cobrir a tela do aparelho (início, fim em ms). */
+const TELA_GRANDE_MS = [8600, 9500] as const;
 
 /**
  * SEGUIR O SINAL: entre a saída da antena e a chegada na pessoa a câmera não
@@ -139,7 +142,9 @@ const ORIGEM_DA_CAMERA = [500, 280] as const;
  */
 const SINAL_INICIO_MS = 3900;
 const SINAL_DURACAO_MS = 2000;
-const ZOOM_NO_SINAL = 5;
+const ZOOM_NO_SINAL = 2.6;
+/** O sinal fica um pouco à esquerda do centro: o quadro mostra para onde ele vai. */
+const ADIANTE_DO_SINAL = 0.16;
 /** Entrada no zoom (do quadro aberto até colar no sinal). */
 const ENTRADA_MS = [3895, 4400] as const;
 /** Saída (do sinal até o enquadramento da pessoa). */
@@ -184,7 +189,7 @@ function enquadramento(
   const pt = trilha.getPointAtLength(total * bezier(f, 0.4, 0, 0.6, 1));
   const w = base[2] / ZOOM_NO_SINAL;
   const h = base[3] / ZOOM_NO_SINAL;
-  const noSinal: Quadro = [pt.x - w / 2, pt.y - h / 2, w, h];
+  const noSinal: Quadro = [pt.x - w / 2 + w * ADIANTE_DO_SINAL, pt.y - h / 2, w, h];
   if (ms < ENTRADA_MS[1]) {
     const a = quadroDe(viewBoxDaCamera(ENTRADA_MS[0], base));
     return texto(
@@ -364,60 +369,128 @@ export function AberturaAnimada() {
 
   const cameraRef = useRef<HTMLDivElement>(null);
 
-  // A CÂMERA RODA NA PLACA DE VÍDEO. Mexer no `viewBox` a cada quadro (ou num
-  // `transform` dentro do SVG) é trabalho da linha principal — a mesma que
-  // monta o app por baixo. No Moto G34 ela fica entupida durante a abertura e
-  // o zoom virava "bugação": quadros pulados, peças tremendo. Aqui o caminho
-  // inteiro da câmera é calculado UMA vez (um quadro-chave a cada 40 ms, com o
-  // sinal seguido de perto) e entregue ao navegador como animação de
-  // `transform` num <div> — o compositor toca sozinho, sem depender do resto.
+  const telaGrandeRef = useRef<HTMLDivElement>(null);
+
+  // A CÂMERA RODA NA PLACA DE VÍDEO, E NUNCA AMPLIA MUITO.
+  // 1) Mexer no `viewBox` a cada quadro é trabalho da linha principal (a que
+  //    monta o app por baixo): no Moto G34 o zoom pulava e tremia.
+  // 2) Uma animação de `transform` que chega a 16x faz o navegador preparar a
+  //    cena INTEIRA nessa resolução desde o primeiro quadro: no Moto G34 a
+  //    antena e a pessoa nem apareciam (vídeo de 20/10/2026).
+  // Então: até o sinal sair, nenhuma animação de câmera existe; depois, uma só,
+  // com quadros-chave pré-calculados e zoom de no máximo 2,6x. O mergulho na
+  // tela do celular é a `TelaGrande` — uma peça pequena que cresce, e peça
+  // pequena o celular amplia sem esforço.
   useEffect(() => {
     const svg = svgRef.current;
     const camera = cameraRef.current;
+    const telaGrande = telaGrandeRef.current;
     if (!svg || !camera || semMovimento || typeof camera.animate !== 'function') return;
     const trilha = svg.querySelector<SVGPathElement>('#trilha');
-    let anim: Animation | null = null;
+    const telaRect = svg.querySelector<SVGGraphicsElement>('rect.tela');
+    const animacoes: Animation[] = [];
+    let espera = 0;
+    // Quanto da cena já passou (mesmo relógio das peças CSS).
+    const decorrido = (): number => {
+      const a = svg.getAnimations?.({ subtree: true })[0];
+      const agora = document.timeline?.currentTime;
+      if (a && a.startTime !== null && typeof agora === 'number') {
+        return agora - Number(a.startTime);
+      }
+      return a && typeof a.currentTime === 'number' ? a.currentTime : 0;
+    };
     const montar = (): void => {
+      for (const a of animacoes.splice(0)) a.cancel();
+      window.clearTimeout(espera);
+      // Medido SEM transform na câmera (as animações dela foram canceladas acima).
       const ctm = svg.getScreenCTM();
       const caixa = camera.getBoundingClientRect();
       if (!ctm || caixa.width === 0) return;
-      // px por unidade e onde cai a origem (0,0) do desenho, relativo ao <div>.
       const k = ctm.a;
       const ex = ctm.e - caixa.left;
       const ey = ctm.f - caixa.top;
       const [bx, by, bw] = base;
-      const quadros: Keyframe[] = [];
-      for (let ms = 0; ms <= DURACAO_DA_CENA_MS; ms += 40) {
+      const matriz = (ms: number): { esc: number; dx: number; dy: number } => {
         const [qx, qy, qw] = enquadramento(ms, base, trilha).split(' ').map(Number) as [
           number,
           number,
           number,
         ];
         const esc = bw / qw;
-        const dx = ex + k * bx - esc * ex - k * esc * qx;
-        const dy = ey + k * by - esc * ey - k * esc * qy;
+        return {
+          esc,
+          dx: ex + k * bx - esc * ex - k * esc * qx,
+          dy: ey + k * by - esc * ey - k * esc * qy,
+        };
+      };
+      const INICIO = CAMERA[1]?.[0] ?? 3895;
+      const quadros: Keyframe[] = [];
+      for (let ms = INICIO; ms <= DURACAO_DA_CENA_MS; ms += 40) {
+        const { esc, dx, dy } = matriz(ms);
         quadros.push({
-          offset: ms / DURACAO_DA_CENA_MS,
+          offset: (ms - INICIO) / (DURACAO_DA_CENA_MS - INICIO),
           transform: `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px) scale(${esc.toFixed(4)})`,
         });
       }
-      const ja = anim?.currentTime;
-      anim?.cancel();
-      anim = camera.animate(quadros, {
-        duration: DURACAO_DA_CENA_MS,
-        easing: 'linear',
-        fill: 'forwards',
-      });
-      // Mesmo relógio das peças da cena: começa junto com elas.
-      const primeira = svg.getAnimations?.({ subtree: true })[0];
-      if (typeof ja === 'number') anim.currentTime = ja;
-      else if (primeira && primeira.startTime !== null) anim.startTime = primeira.startTime;
+
+      // A tela do celular, do tamanho e no lugar exatos dela no quadro de 8,6 s.
+      let quadrosDaTela: Keyframe[] | null = null;
+      const telaCtm = telaRect?.getScreenCTM();
+      if (telaGrande && telaCtm) {
+        const { esc, dx, dy } = matriz(TELA_GRANDE_MS[0]);
+        // Coordenadas da tela (o retângulo começa em x=7, y=10 do celular) até a
+        // janela, passando pela câmera daquele instante.
+        const local = new DOMMatrix([
+          telaCtm.a,
+          telaCtm.b,
+          telaCtm.c,
+          telaCtm.d,
+          telaCtm.e - caixa.left,
+          telaCtm.f - caixa.top,
+        ]).translate(7, 10);
+        const cam = new DOMMatrix([esc, 0, 0, esc, dx, dy]);
+        const ini = cam.multiply(local);
+        const vw = caixa.width;
+        const vh = caixa.height;
+        const sc = Math.max(vw / 46, vh / 98) * 1.25;
+        const fim = new DOMMatrix([sc, 0, 0, sc, vw / 2 - 23 * sc, vh / 2 - 49 * sc]);
+        quadrosDaTela = [
+          { transform: ini.toString(), opacity: 0, offset: 0 },
+          { transform: ini.toString(), opacity: 1, offset: 0.12 },
+          { transform: fim.toString(), opacity: 1, offset: 1 },
+        ];
+      }
+
+      const iniciar = (): void => {
+        const ja = Math.max(0, decorrido() - INICIO);
+        const a = camera.animate(quadros, {
+          duration: DURACAO_DA_CENA_MS - INICIO,
+          easing: 'linear',
+          fill: 'forwards',
+        });
+        a.currentTime = ja;
+        animacoes.push(a);
+        if (telaGrande && quadrosDaTela) {
+          const t = telaGrande.animate(quadrosDaTela, {
+            duration: TELA_GRANDE_MS[1] - TELA_GRANDE_MS[0],
+            delay: TELA_GRANDE_MS[0] - INICIO,
+            easing: 'cubic-bezier(.55,0,.8,.2)',
+            fill: 'forwards',
+          });
+          t.currentTime = ja;
+          animacoes.push(t);
+        }
+      };
+      const falta = INICIO - decorrido();
+      if (falta > 0) espera = window.setTimeout(iniciar, falta);
+      else iniciar();
     };
     montar();
     window.addEventListener('resize', montar);
     return () => {
       window.removeEventListener('resize', montar);
-      anim?.cancel();
+      window.clearTimeout(espera);
+      for (const a of animacoes) a.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `base` deriva de `retrato`
   }, [retrato, semMovimento]);
@@ -486,11 +559,7 @@ export function AberturaAnimada() {
     >
       <style>{estilos}</style>
       <PaletaCtx.Provider value={COR}>
-        <div
-          ref={cameraRef}
-          className="absolute inset-0"
-          style={{ transformOrigin: '0 0', willChange: 'transform' }}
-        >
+        <div ref={cameraRef} className="absolute inset-0" style={{ transformOrigin: '0 0' }}>
           <svg
             ref={svgRef}
             viewBox={baseTexto}
@@ -1022,6 +1091,49 @@ export function AberturaAnimada() {
             </g>
           </svg>
         </div>
+        {/* A TELA GRANDE: cópia da tela do celular com o logo, colada sobre ela
+            em 8,6 s e crescendo até cobrir tudo (ver o efeito da câmera). */}
+        {!semMovimento && (
+          <div
+            ref={telaGrandeRef}
+            aria-hidden
+            className="pointer-events-none absolute left-0 top-0 overflow-hidden"
+            style={{
+              width: 46,
+              height: 98,
+              borderRadius: 7,
+              transformOrigin: '0 0',
+              opacity: 0,
+              background: `linear-gradient(${COR.telaAcesaTopo}, ${COR.telaAcesaBase})`,
+            }}
+          >
+            <svg width="46" height="98" viewBox="-23 -49 46 98" fill="none">
+              <g
+                transform="translate(-14 -24) scale(1.1667)"
+                stroke={COR.logo}
+                strokeWidth="1.8"
+                strokeLinecap="round"
+              >
+                <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
+                <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
+                <circle cx="12" cy="12" r="2" />
+                <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
+                <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1" />
+              </g>
+              <text
+                x="0"
+                y="22"
+                textAnchor="middle"
+                fontSize="7.5"
+                fontWeight="700"
+                fill={COR.logo}
+                letterSpacing="0.3"
+              >
+                radinho
+              </text>
+            </svg>
+          </div>
+        )}
       </PaletaCtx.Provider>
     </div>,
     document.body,
