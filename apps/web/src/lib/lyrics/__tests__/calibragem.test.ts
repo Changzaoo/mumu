@@ -184,8 +184,16 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
       calibrada: true,
       alinhada: true,
       confianca: 0.9,
+      // Confiança 0,9 ≥ ALINHAMENTO_SELADO: carimbada — nunca mais volta ao retrabalho.
+      selada: true,
     });
-    expect(resultado).toEqual({ ...reancorada, calibrada: true, alinhada: true, confianca: 0.9 });
+    expect(resultado).toEqual({
+      ...reancorada,
+      calibrada: true,
+      alinhada: true,
+      confianca: 0.9,
+      selada: true,
+    });
   });
 
   it('alinhamento fraco: vai à prova da voz; sem como ouvir, fica como estava', async () => {
@@ -235,7 +243,11 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     cachedLyrics.mockReturnValue(comLetra);
     buscarTempo.mockResolvedValue({ tipo: 'pronto', words });
     const resultado = await pedirCalibracao(faixa());
-    expect(resultado).toMatchObject({ alinhada: true, verificadaPelaVoz: 'confirmada' });
+    expect(resultado).toMatchObject({
+      alinhada: true,
+      verificadaPelaVoz: 'confirmada',
+      selada: true,
+    });
     expect(recusarLetra).not.toHaveBeenCalled();
   });
 

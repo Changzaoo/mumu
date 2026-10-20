@@ -29,6 +29,12 @@ export interface Lyrics {
   source: string | null;
   /** Já reancorada no áudio do cofre (ver lib/lyrics/recalibrar) — não refaz. */
   calibrada?: boolean;
+  /**
+   * CARIMBADA: o áudio confirmou que é esta letra e o relógio é este
+   * (alinhamento com confiança alta, ou a voz confirmou). Nunca mais volta ao
+   * retrabalho — nem por metadado corrigido. Ver calibragem.ts.
+   */
+  selada?: boolean;
 }
 
 interface CachedLyricsEntry {
@@ -333,11 +339,14 @@ export function cachedLyrics(trackId: string): Lyrics | null {
 export function cachedLyricsFor(track: TrackDto): Lyrics | null {
   const guardada = readCache()[track.id];
   if (!guardada || typeof guardada !== 'object') return null;
+  const letra = letraDaEntrada(guardada);
+  // Letra carimbada vale pelo ÁUDIO, não pelo título: metadado corrigido não a derruba.
+  if (letra?.selada) return letra;
   if ('lyrics' in guardada) {
     const entrada = guardada as CachedLyricsEntry;
     if (entrada.fingerprint && entrada.fingerprint !== trackFingerprint(track)) return null;
   }
-  return letraDaEntrada(guardada);
+  return letra;
 }
 
 /**

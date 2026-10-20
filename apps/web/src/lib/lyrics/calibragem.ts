@@ -28,6 +28,7 @@ import {
 import { garantirDetalhe } from '@/lib/local/detalheDaFaixa';
 import { dicaDeIdioma } from '@/lib/lyrics/syncFromAudio';
 import {
+  ALINHAMENTO_SELADO,
   ALINHAMENTO_SUSPEITO,
   aplicarAlinhamento,
   buscarAlinhamento,
@@ -172,7 +173,7 @@ async function usarLetraConfirmada(
   if ('pronta' in r) return r.pronta;
   // A voz JÁ confirmou esta letra: alinhamento fraco aqui é o autotune, não
   // a música errada. Fica como veio.
-  const pronta: LetraAlinhada = { ...r.suspeita, verificadaPelaVoz: 'confirmada' };
+  const pronta: LetraAlinhada = { ...r.suspeita, verificadaPelaVoz: 'confirmada', selada: true };
   writeLyrics(trackId, pronta);
   return pronta;
 }
@@ -280,6 +281,9 @@ async function alinharAteChegar(
         calibrada: true,
         alinhada: true,
         confianca,
+        // O CARIMBO: confiança alta = o texto casou com o áudio palavra a
+        // palavra. Esta letra não volta ao retrabalho (ver Lyrics.selada).
+        ...(nova && confianca >= ALINHAMENTO_SELADO ? { selada: true } : {}),
       };
       // ALINHAMENTO FRACO NÃO É PROVA. O alinhador encaixa qualquer texto no
       // áudio; quando poucas linhas ficam confiáveis (`nova === null`) ou a
@@ -328,7 +332,14 @@ async function verificarPelaVoz(
   const url = urlDoTempo(remota, idiomaPara(letra), track.artists[0]?.name);
   // Sem como ouvir o áudio, vale o que o alinhamento deu — como sempre foi.
   const manter = (verificadaPelaVoz?: 'confirmada' | 'inconclusiva'): LetraAlinhada => {
-    const pronta: LetraAlinhada = verificadaPelaVoz ? { ...suspeita, verificadaPelaVoz } : suspeita;
+    // A voz confirmou: é esta letra, carimbada (dupla checagem: alinhamento + voz).
+    const pronta: LetraAlinhada = verificadaPelaVoz
+      ? {
+          ...suspeita,
+          verificadaPelaVoz,
+          ...(verificadaPelaVoz === 'confirmada' ? { selada: true } : {}),
+        }
+      : suspeita;
     writeLyrics(trackId, pronta);
     return pronta;
   };
@@ -352,6 +363,7 @@ async function verificarPelaVoz(
           alinhada: true,
           confianca: suspeita.confianca,
           verificadaPelaVoz: 'confirmada',
+          selada: true,
         };
         writeLyrics(trackId, pronta);
         return pronta;

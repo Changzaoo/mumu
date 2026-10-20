@@ -214,6 +214,15 @@ const LINHA_CONFIAVEL = 0.3;
  */
 export const ALINHAMENTO_SUSPEITO = 0.42;
 
+/**
+ * O CARIMBO: acima desta confiança média o alinhamento é prova por si só
+ * (é a mediana medida nos 673 alinhamentos do cofre: metade das faixas passa
+ * daqui, e nessa faixa o texto casa com o áudio palavra a palavra). Letra
+ * carimbada (`selada`) nunca mais entra em retrabalho — nem quando o
+ * fingerprint da faixa muda, porque a prova veio do áudio, não do título.
+ */
+export const ALINHAMENTO_SELADO = 0.55;
+
 /** Confiança média do alinhamento inteiro (0–1), sobre as linhas enviadas. */
 export function confiancaDoAlinhamento(indices: number[], alinhadas: LinhaAlinhada[]): number {
   if (indices.length === 0 || alinhadas.length !== indices.length) return 0;
