@@ -533,6 +533,73 @@ export async function aiTranscribe(
  * semelhança em silêncio. Devolve null quando a IA não está disponível — o
  * chamador degrada para a recomendação heurística.
  */
+// ── O JEV NOSSO (apps/importer/jev): decisões tipadas, locais e de graça ─────
+
+export type JevQuestion =
+  | { type: 'choice'; instructions?: string; criteria: Record<string, unknown> }
+  | { type: 'score'; instructions?: string; criteria: unknown[] }
+  | { type: 'noul'; instructions?: string; criteria?: { true?: unknown; false?: unknown } };
+
+export type JevAnswer =
+  | {
+      type: 'choice';
+      choice: string;
+      confidence: number;
+      probabilities: Record<string, number>;
+      evidence?: number;
+    }
+  | {
+      type: 'score';
+      score: number;
+      confidence: number;
+      legend: Record<string, string>;
+      probabilities: Record<string, number>;
+      evidence?: number;
+    }
+  | { type: 'noul'; noul: number; evidence?: number };
+
+export interface JevResponse {
+  model: string;
+  answers: Record<string, JevAnswer>;
+}
+
+/** Faz perguntas tipadas sobre um estado. Null quando o motor não responde. */
+export async function jevDecidir(
+  state: string,
+  questions: Record<string, JevQuestion>,
+): Promise<JevResponse | null> {
+  try {
+    const res = await fetch(`${helperUrl()}/jev/decidir`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ state, questions }),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as JevResponse;
+    return data && data.answers && typeof data.answers === 'object' ? data : null;
+  } catch {
+    return null;
+  }
+}
+
+/** Um rótulo confirmado vira exemplo na memória do motor. Nunca lança. */
+export async function jevAprender(
+  question: string,
+  state: string,
+  label: string,
+): Promise<boolean> {
+  try {
+    const res = await fetch(`${helperUrl()}/jev/aprender`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...(await baseHeaders()) },
+      body: JSON.stringify({ question, state, label }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
+}
+
 export async function aiEmbed(
   input: string[],
   inputType: 'passage' | 'query' = 'passage',

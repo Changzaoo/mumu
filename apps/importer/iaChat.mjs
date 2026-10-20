@@ -17,7 +17,12 @@
  * `CLAUDE_MODELO_VERIFY=haiku`); tarefa desconhecida usa `CLAUDE_MODELO_PADRAO`.
  *
  * ── PROVEDOR ────────────────────────────────────────────────────────────────
- *   IA_PROVEDOR=claude (padrão) | nvidia
+ *   IA_PROVEDOR=nvidia (padrão) | claude
+ *   Decisão do dono (20/10/2026): o Claude CLI NÃO é usado. Ele dependia do
+ *   login da conta nesta máquina e passou semanas deslogado em silêncio
+ *   (1327 "claude falhou" no log) — toda a limpeza de título caía na NVIDIA
+ *   de qualquer jeito. Agora a NVIDIA é o caminho; o Claude só entra se
+ *   alguém ligar IA_PROVEDOR=claude de propósito.
  *   Com `claude`, qualquer falha do CLI (ausente, deslogado, limite, timeout,
  *   saída inválida) cai para a NVIDIA SE `NVIDIA_API_KEY` existir; o log diz
  *   quem atendeu. `IA_FALLBACK_NVIDIA=0` desliga a queda.
@@ -88,7 +93,9 @@ export function messagesParaPrompt(messages) {
   const prompt =
     resto.length === 1
       ? resto[0].content
-      : resto.map((m) => `${m.role === 'assistant' ? 'Assistente' : 'Usuário'}:\n${m.content}`).join('\n\n');
+      : resto
+          .map((m) => `${m.role === 'assistant' ? 'Assistente' : 'Usuário'}:\n${m.content}`)
+          .join('\n\n');
   return { sistema, prompt };
 }
 
@@ -101,8 +108,8 @@ export function messagesParaPrompt(messages) {
  * }} deps
  */
 export function criarIaChat({ claude, nvidia = null, env = process.env, log = () => {} }) {
-  const provedorConfigurado = (env.IA_PROVEDOR ?? 'claude').trim().toLowerCase();
-  const usarClaude = provedorConfigurado !== 'nvidia';
+  const provedorConfigurado = (env.IA_PROVEDOR ?? 'nvidia').trim().toLowerCase();
+  const usarClaude = provedorConfigurado === 'claude';
   const quedaPermitida = (env.IA_FALLBACK_NVIDIA ?? '1') !== '0';
   const tamanhoCache = 500;
   const validadeCacheMs = 24 * 60 * 60_000;
@@ -110,7 +117,12 @@ export function criarIaChat({ claude, nvidia = null, env = process.env, log = ()
   const cache = new Map();
 
   function chaveDe(modelo, messages) {
-    return crypto.createHash('sha1').update(modelo).update('\0').update(JSON.stringify(messages)).digest('hex');
+    return crypto
+      .createHash('sha1')
+      .update(modelo)
+      .update('\0')
+      .update(JSON.stringify(messages))
+      .digest('hex');
   }
 
   /** Há algum provedor que possa atender? (para o 503 do endpoint) */

@@ -14,6 +14,7 @@
  *  - offline ou deslogado: dorme e tenta na próxima oportunidade.
  */
 import { aiClassifyGenre } from '@/lib/ai/ai';
+import { aprenderGenero, CONFIANCA_PARA_ACEITAR, decidirGenero } from '@/lib/ai/jev';
 import { iaIndisponivel } from '@/lib/local/importerHelper';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { modoLeve } from '@/lib/perf/dispositivo';
@@ -271,6 +272,7 @@ async function run(): Promise<void> {
       const herdado = herdarDoArtista(voto);
       if (herdado) {
         localLibrary.setTrackGenre(t.id, herdado);
+        aprenderGenero(t.title, artist, herdado);
         const minima = porId.get(t.id);
         if (minima) {
           minima.genre = herdado;
@@ -286,7 +288,15 @@ async function run(): Promise<void> {
         continue; // não gastou consulta nenhuma
       }
 
-      const resposta = await aiClassifyGenre(t.title, artist).catch(() => null);
+      // O JEV NOSSO DECIDE ANTES DO LLM: ~50 ms, sem rede externa, com a
+      // probabilidade de cada gênero. Acima do corte calibrado a resposta
+      // vale; abaixo, a faixa vai ao juiz caro (NVIDIA), e o veredito dele
+      // volta como exemplo para o motor acertar sozinho da próxima vez.
+      const decisao = await decidirGenero(t.title, artist).catch(() => null);
+      const resposta =
+        decisao && decisao.confidence >= CONFIANCA_PARA_ACEITAR
+          ? decisao.genre
+          : await aiClassifyGenre(t.title, artist).catch(() => null);
       classifiedThisSession += 1;
       // A resposta ainda passa pelo crivo do artista: se contradiz uma maioria
       // FORTE, é recusada e a faixa fica sem categoria (buraco visível vale mais
@@ -294,6 +304,9 @@ async function run(): Promise<void> {
       const genre = aceitarSugestao(resposta, voto);
       if (genre) {
         localLibrary.setTrackGenre(t.id, genre);
+        if (!decisao || decisao.genre !== genre || decisao.confidence < CONFIANCA_PARA_ACEITAR) {
+          aprenderGenero(t.title, artist, genre);
+        }
         const minima = porId.get(t.id);
         if (minima) {
           minima.genre = genre;

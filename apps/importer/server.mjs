@@ -52,6 +52,13 @@ import {
 } from './riva.mjs';
 import { criarClaudeCli } from './claudeCli.mjs';
 import { criarIaChat } from './iaChat.mjs';
+import { decidir as jevDecidir } from './jev/motor.mjs';
+import { criarMemoria as criarMemoriaJev } from './jev/memoria.mjs';
+import {
+  embed as jevEmbed,
+  aquecer as aquecerJev,
+  pronto as jevPronto,
+} from './jev/embeddings.mjs';
 import { criarTempoDasPalavras } from './tempoDasPalavras.mjs';
 import { buscarOutraFonteDeLetra, permitirRequisicaoDeLetra } from './outrasFontesDeLetra.mjs';
 import { criarVocabulario } from './vocabulario.mjs';
@@ -994,6 +1001,16 @@ const iaChat = criarIaChat({
   nvidia: NVIDIA_API_KEY ? nvidiaChat : null,
   log: (...a) => log(...a),
 });
+// ── O JEV NOSSO: decisões tipadas com probabilidade, sem rede ────────────────
+// Ver jev/motor.mjs. Embeddings locais (CPU), memória de exemplos rotulados em
+// JEV_DIR (semeada com os gêneros curados do acervo — jev/semear.mjs). O app
+// pergunta por aqui ANTES de gastar o LLM: 24 gêneros, 2 noul e 1 score
+// cabem numa chamada de ~50 ms.
+const JEV_DIR = process.env.JEV_DIR || 'D:/Aurial/jev';
+const jevMemoria = criarMemoriaJev({ dir: JEV_DIR, embed: jevEmbed, log: (...a) => log(...a) });
+const JEV_MAX_PERGUNTAS = 32;
+const JEV_MAX_ESTADO = 4000;
+
 /** Teto do áudio aceito para transcrição (uma música cabe folgada em 40 MB). */
 const MAX_TRANSCRIBE_BYTES = Number(process.env.MAX_TRANSCRIBE_MB ?? 40) * 1024 * 1024;
 
@@ -3611,6 +3628,96 @@ async function main() {
         return;
       }
 
+      // ── /jev/decidir: o mesmo contrato do Jev (state + questions → answers) ──
+      if (req.method === 'POST' && pathname === '/jev/decidir') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          const questions =
+            body.questions && typeof body.questions === 'object' ? body.questions : {};
+          if (
+            Object.keys(questions).length === 0 ||
+            Object.keys(questions).length > JEV_MAX_PERGUNTAS
+          ) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: `questions: de 1 a ${JEV_MAX_PERGUNTAS} perguntas.` }));
+            return;
+          }
+          const state =
+            typeof body.state === 'string' ? body.state.slice(0, JEV_MAX_ESTADO) : body.state;
+          if (!state) {
+            res.writeHead(400, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'state obrigatório.' }));
+            return;
+          }
+          const inicio = Date.now();
+          // `memory: false` desliga a memória (zero-shot puro) — para medir e comparar.
+          const r = await jevDecidir(
+            { state, questions },
+            { embed: jevEmbed, memoria: body.memory === false ? null : jevMemoria },
+          );
+          res.writeHead(200, {
+            'Content-Type': 'application/json',
+            'X-Jev-Ms': String(Date.now() - inicio),
+          });
+          res.end(JSON.stringify(r));
+        } catch (err) {
+          const msg = err instanceof Error ? err.message : String(err);
+          // Pedido mal formado é 400; modelo sem rede no primeiro download é 503.
+          const ruim = /questions|pergunta|state/.test(msg);
+          log('jev decidir:', msg);
+          res.writeHead(ruim ? 400 : 503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: ruim ? msg : 'Motor de decisão indisponível.' }));
+        }
+        return;
+      }
+
+      // ── /jev/aprender: um rótulo confirmado vira exemplo para os próximos ──
+      if (req.method === 'POST' && pathname === '/jev/aprender') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        try {
+          const body = JSON.parse((await readBody(req)) || '{}');
+          const itens = Array.isArray(body.examples) ? body.examples : [body];
+          let novos = 0;
+          for (const it of itens.slice(0, 200)) {
+            const pergunta = typeof it.question === 'string' ? it.question.trim() : '';
+            const estado =
+              typeof it.state === 'string' ? it.state.trim().slice(0, JEV_MAX_ESTADO) : '';
+            const rotulo = typeof it.label === 'string' ? it.label.trim() : '';
+            if (!pergunta || !estado || !rotulo) continue;
+            if (await jevMemoria.aprender(pergunta, estado, rotulo)) novos += 1;
+          }
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ learned: novos }));
+        } catch (err) {
+          log('jev aprender:', err instanceof Error ? err.message : err);
+          res.writeHead(503, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Motor de decisão indisponível.' }));
+        }
+        return;
+      }
+
+      if (req.method === 'GET' && pathname === '/jev/estado') {
+        const tamanho = await jevMemoria.tamanho('genero').catch(() => 0);
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(
+          JSON.stringify({
+            model: 'jev-nosso-1',
+            ready: jevPronto(),
+            examples: { genero: tamanho },
+          }),
+        );
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/ai/chat') {
         if (!(await authorize(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
@@ -3944,6 +4051,8 @@ async function main() {
 
   server.listen(PORT, HOST, () => {
     log(`listening on http://${HOST}:${PORT}`);
+    // O motor de decisão sobe em segundo plano: o primeiro pedido não espera 30 s.
+    aquecerJev((...a) => log(...a));
     log(`allowed origins: ${ALLOW_ORIGINS.join(', ')}`);
     log('⚠️  Personal use only — import only content you are authorized to download.');
   });
