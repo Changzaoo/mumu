@@ -362,35 +362,63 @@ export function AberturaAnimada() {
     : [0, 0, 1000, 560];
   const baseTexto = base.join(' ');
 
-  // A câmera anda no relógio das animações CSS da própria cena (o primeiro
-  // `Animation` dela): as peças e o enquadramento nunca se desencontram, nem
-  // quando o celular engasga.
+  const cameraRef = useRef<HTMLDivElement>(null);
+
+  // A CÂMERA RODA NA PLACA DE VÍDEO. Mexer no `viewBox` a cada quadro (ou num
+  // `transform` dentro do SVG) é trabalho da linha principal — a mesma que
+  // monta o app por baixo. No Moto G34 ela fica entupida durante a abertura e
+  // o zoom virava "bugação": quadros pulados, peças tremendo. Aqui o caminho
+  // inteiro da câmera é calculado UMA vez (um quadro-chave a cada 40 ms, com o
+  // sinal seguido de perto) e entregue ao navegador como animação de
+  // `transform` num <div> — o compositor toca sozinho, sem depender do resto.
   useEffect(() => {
     const svg = svgRef.current;
-    if (!svg || semMovimento) return;
-    const inicio = performance.now();
-    let raf = 0;
-    const quadro = (): void => {
-      // O relógio é o INÍCIO da animação contra o relógio do documento — não o
-      // `currentTime` dela: a primeira animação da cena dura 0,6 s e, acabada,
-      // o `currentTime` para no fim (a câmera ficava presa no quadro inicial).
-      // Pausada (inspeção quadro a quadro), vale o `currentTime`.
-      const anim = svg.getAnimations?.({ subtree: true })[0];
-      const agora = document.timeline?.currentTime;
-      const ms =
-        anim && anim.startTime !== null && typeof agora === 'number'
-          ? agora - Number(anim.startTime)
-          : anim && typeof anim.currentTime === 'number'
-            ? anim.currentTime
-            : performance.now() - inicio;
-      svg.setAttribute(
-        'viewBox',
-        enquadramento(ms, base, svg.querySelector<SVGPathElement>('#trilha')),
-      );
-      if (ms < DURACAO_DA_CENA_MS + 200) raf = requestAnimationFrame(quadro);
+    const camera = cameraRef.current;
+    if (!svg || !camera || semMovimento || typeof camera.animate !== 'function') return;
+    const trilha = svg.querySelector<SVGPathElement>('#trilha');
+    let anim: Animation | null = null;
+    const montar = (): void => {
+      const ctm = svg.getScreenCTM();
+      const caixa = camera.getBoundingClientRect();
+      if (!ctm || caixa.width === 0) return;
+      // px por unidade e onde cai a origem (0,0) do desenho, relativo ao <div>.
+      const k = ctm.a;
+      const ex = ctm.e - caixa.left;
+      const ey = ctm.f - caixa.top;
+      const [bx, by, bw] = base;
+      const quadros: Keyframe[] = [];
+      for (let ms = 0; ms <= DURACAO_DA_CENA_MS; ms += 40) {
+        const [qx, qy, qw] = enquadramento(ms, base, trilha).split(' ').map(Number) as [
+          number,
+          number,
+          number,
+        ];
+        const esc = bw / qw;
+        const dx = ex + k * bx - esc * ex - k * esc * qx;
+        const dy = ey + k * by - esc * ey - k * esc * qy;
+        quadros.push({
+          offset: ms / DURACAO_DA_CENA_MS,
+          transform: `translate(${dx.toFixed(2)}px, ${dy.toFixed(2)}px) scale(${esc.toFixed(4)})`,
+        });
+      }
+      const ja = anim?.currentTime;
+      anim?.cancel();
+      anim = camera.animate(quadros, {
+        duration: DURACAO_DA_CENA_MS,
+        easing: 'linear',
+        fill: 'forwards',
+      });
+      // Mesmo relógio das peças da cena: começa junto com elas.
+      const primeira = svg.getAnimations?.({ subtree: true })[0];
+      if (typeof ja === 'number') anim.currentTime = ja;
+      else if (primeira && primeira.startTime !== null) anim.startTime = primeira.startTime;
     };
-    raf = requestAnimationFrame(quadro);
-    return () => cancelAnimationFrame(raf);
+    montar();
+    window.addEventListener('resize', montar);
+    return () => {
+      window.removeEventListener('resize', montar);
+      anim?.cancel();
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `base` deriva de `retrato`
   }, [retrato, semMovimento]);
 
@@ -458,536 +486,542 @@ export function AberturaAnimada() {
     >
       <style>{estilos}</style>
       <PaletaCtx.Provider value={COR}>
-        <svg
-          ref={svgRef}
-          viewBox={baseTexto}
-          className={classe}
-          width="100%"
-          height="100%"
-          preserveAspectRatio={retrato ? 'xMidYMid meet' : 'xMidYMid slice'}
-          fill="none"
+        <div
+          ref={cameraRef}
+          className="absolute inset-0"
+          style={{ transformOrigin: '0 0', willChange: 'transform' }}
         >
-          <defs>
-            <linearGradient id="ab-caixa" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={COR.madeiraClara} />
-              <stop offset="1" stopColor={COR.madeira} />
-            </linearGradient>
-            <linearGradient id="ab-cromo" x1="0" y1="0" x2="1" y2="1">
-              <stop offset="0" stopColor={COR.cromoClaro} />
-              <stop offset="0.5" stopColor={COR.cromo} />
-              <stop offset="1" stopColor={COR.cromoEscuro} />
-            </linearGradient>
-            <linearGradient id="ab-vidro" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={COR.vidro} />
-              <stop offset="1" stopColor={COR.vidroEscuro} />
-            </linearGradient>
-            <radialGradient id="ab-brilho" cx="50%" cy="50%" r="50%">
-              <stop offset="0" stopColor={COR.brilho} stopOpacity="0.45" />
-              <stop offset="1" stopColor={COR.brilho} stopOpacity="0" />
-            </radialGradient>
-            <linearGradient id="ab-tela-acesa" x1="0" y1="0" x2="0" y2="1">
-              <stop offset="0" stopColor={COR.telaAcesaTopo} />
-              <stop offset="1" stopColor={COR.telaAcesaBase} />
-            </linearGradient>
-            <clipPath id="ab-dial-clip">
-              <rect x="344" y="296" width="96" height="46" rx="8" />
-            </clipPath>
-          </defs>
+          <svg
+            ref={svgRef}
+            viewBox={baseTexto}
+            className={classe}
+            width="100%"
+            height="100%"
+            preserveAspectRatio={retrato ? 'xMidYMid meet' : 'xMidYMid slice'}
+            fill="none"
+          >
+            <defs>
+              <linearGradient id="ab-caixa" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor={COR.madeiraClara} />
+                <stop offset="1" stopColor={COR.madeira} />
+              </linearGradient>
+              <linearGradient id="ab-cromo" x1="0" y1="0" x2="1" y2="1">
+                <stop offset="0" stopColor={COR.cromoClaro} />
+                <stop offset="0.5" stopColor={COR.cromo} />
+                <stop offset="1" stopColor={COR.cromoEscuro} />
+              </linearGradient>
+              <linearGradient id="ab-vidro" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor={COR.vidro} />
+                <stop offset="1" stopColor={COR.vidroEscuro} />
+              </linearGradient>
+              <radialGradient id="ab-brilho" cx="50%" cy="50%" r="50%">
+                <stop offset="0" stopColor={COR.brilho} stopOpacity="0.45" />
+                <stop offset="1" stopColor={COR.brilho} stopOpacity="0" />
+              </radialGradient>
+              <linearGradient id="ab-tela-acesa" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0" stopColor={COR.telaAcesaTopo} />
+                <stop offset="1" stopColor={COR.telaAcesaBase} />
+              </linearGradient>
+              <clipPath id="ab-dial-clip">
+                <rect x="344" y="296" width="96" height="46" rx="8" />
+              </clipPath>
+            </defs>
 
-          <g className="cena">
-            {/* chão e sombras */}
-            <rect
-              className="peca r0"
-              x="0"
-              y="470"
-              width="1000"
-              height="90"
-              fill="currentColor"
-              fillOpacity="0.05"
-            />
-            <ellipse
-              className="peca r0"
-              cx="290"
-              cy="472"
-              rx="190"
-              ry="8"
-              fill="currentColor"
-              fillOpacity="0.14"
-            />
-            <ellipse
-              className="peca p0"
-              cx="776"
-              cy="472"
-              rx="90"
-              ry="7"
-              fill="currentColor"
-              fillOpacity="0.14"
-            />
+            <g className="cena">
+              {/* chão e sombras */}
+              <rect
+                className="peca r0"
+                x="0"
+                y="470"
+                width="1000"
+                height="90"
+                fill="currentColor"
+                fillOpacity="0.05"
+              />
+              <ellipse
+                className="peca r0"
+                cx="290"
+                cy="472"
+                rx="190"
+                ry="8"
+                fill="currentColor"
+                fillOpacity="0.14"
+              />
+              <ellipse
+                className="peca p0"
+                cx="776"
+                cy="472"
+                rx="90"
+                ry="7"
+                fill="currentColor"
+                fillOpacity="0.14"
+              />
 
-            {/* ── 1. O RÁDIO DE MESA (anos 50) ─────────────────────────── */}
-            <g className="radio">
-              {/* pés */}
-              <rect
-                className="peca r1"
-                x="150"
-                y="456"
-                width="36"
-                height="14"
-                rx="6"
-                fill={COR.madeiraEscura}
-              />
-              <rect
-                className="peca r1"
-                x="394"
-                y="456"
-                width="36"
-                height="14"
-                rx="6"
-                fill={COR.madeiraEscura}
-              />
-              {/* caixa de baquelite com brilho no topo */}
-              <rect
-                className="peca r1"
-                x="120"
-                y="250"
-                width="340"
-                height="212"
-                rx="30"
-                fill="url(#ab-caixa)"
-              />
-              <rect
-                className="peca r2"
-                x="134"
-                y="258"
-                width="312"
-                height="18"
-                rx="9"
-                fill={COR.frente}
-                fillOpacity="0.12"
-              />
-              <rect
-                className="peca r2"
-                x="120"
-                y="420"
-                width="340"
-                height="42"
-                rx="18"
-                fill={COR.fundoDoRadio}
-                fillOpacity="0.16"
-              />
-              {/* grade cromada com lâminas */}
-              <rect
-                className="peca r2"
-                x="140"
-                y="286"
-                width="190"
-                height="124"
-                rx="14"
-                fill={COR.madeiraEscura}
-              />
-              <rect
-                className="peca r2"
-                x="146"
-                y="292"
-                width="178"
-                height="112"
-                rx="11"
-                fill="url(#ab-cromo)"
-                fillOpacity="0.35"
-              />
-              <Laminas x={154} y={300} w={162} n={10} passo={10.5} />
-              {/* vidro do dial com escala e ponteiro */}
-              <rect
-                className="peca r3"
-                x="344"
-                y="296"
-                width="96"
-                height="46"
-                rx="8"
-                fill={COR.madeiraEscura}
-              />
-              <rect
-                className="peca r3"
-                x="348"
-                y="300"
-                width="88"
-                height="38"
-                rx="6"
-                fill="url(#ab-vidro)"
-              />
-              <g className="peca r4">
-                <Escala x={356} y={304} w={72} />
-                <g clipPath="url(#ab-dial-clip)">
-                  <rect
-                    className="ponteiro"
-                    x="391"
-                    y="298"
-                    width="2.4"
-                    height="42"
-                    fill={COR.ponteiro}
-                  />
-                </g>
+              {/* ── 1. O RÁDIO DE MESA (anos 50) ─────────────────────────── */}
+              <g className="radio">
+                {/* pés */}
                 <rect
+                  className="peca r1"
+                  x="150"
+                  y="456"
+                  width="36"
+                  height="14"
+                  rx="6"
+                  fill={COR.madeiraEscura}
+                />
+                <rect
+                  className="peca r1"
+                  x="394"
+                  y="456"
+                  width="36"
+                  height="14"
+                  rx="6"
+                  fill={COR.madeiraEscura}
+                />
+                {/* caixa de baquelite com brilho no topo */}
+                <rect
+                  className="peca r1"
+                  x="120"
+                  y="250"
+                  width="340"
+                  height="212"
+                  rx="30"
+                  fill="url(#ab-caixa)"
+                />
+                <rect
+                  className="peca r2"
+                  x="134"
+                  y="258"
+                  width="312"
+                  height="18"
+                  rx="9"
+                  fill={COR.frente}
+                  fillOpacity="0.12"
+                />
+                <rect
+                  className="peca r2"
+                  x="120"
+                  y="420"
+                  width="340"
+                  height="42"
+                  rx="18"
+                  fill={COR.fundoDoRadio}
+                  fillOpacity="0.16"
+                />
+                {/* grade cromada com lâminas */}
+                <rect
+                  className="peca r2"
+                  x="140"
+                  y="286"
+                  width="190"
+                  height="124"
+                  rx="14"
+                  fill={COR.madeiraEscura}
+                />
+                <rect
+                  className="peca r2"
+                  x="146"
+                  y="292"
+                  width="178"
+                  height="112"
+                  rx="11"
+                  fill="url(#ab-cromo)"
+                  fillOpacity="0.35"
+                />
+                <Laminas x={154} y={300} w={162} n={10} passo={10.5} />
+                {/* vidro do dial com escala e ponteiro */}
+                <rect
+                  className="peca r3"
+                  x="344"
+                  y="296"
+                  width="96"
+                  height="46"
+                  rx="8"
+                  fill={COR.madeiraEscura}
+                />
+                <rect
+                  className="peca r3"
                   x="348"
                   y="300"
                   width="88"
-                  height="12"
+                  height="38"
                   rx="6"
-                  fill={COR.frente}
-                  fillOpacity="0.18"
+                  fill="url(#ab-vidro)"
                 />
+                <g className="peca r4">
+                  <Escala x={356} y={304} w={72} />
+                  <g clipPath="url(#ab-dial-clip)">
+                    <rect
+                      className="ponteiro"
+                      x="391"
+                      y="298"
+                      width="2.4"
+                      height="42"
+                      fill={COR.ponteiro}
+                    />
+                  </g>
+                  <rect
+                    x="348"
+                    y="300"
+                    width="88"
+                    height="12"
+                    rx="6"
+                    fill={COR.frente}
+                    fillOpacity="0.18"
+                  />
+                </g>
+                {/* botões */}
+                <g className="peca r5">
+                  <circle cx="372" cy="384" r="19" fill={COR.madeiraEscura} />
+                  <circle cx="372" cy="384" r="15" fill="url(#ab-cromo)" />
+                  <circle cx="372" cy="384" r="8" fill={COR.cromoEscuro} />
+                  <rect x="371" y="368" width="2.4" height="8" rx="1.2" fill={COR.madeiraEscura} />
+                </g>
+                <g className="peca r5" style={{ animationDelay: '1.95s' }}>
+                  <circle cx="418" cy="384" r="19" fill={COR.madeiraEscura} />
+                  <circle cx="418" cy="384" r="15" fill="url(#ab-cromo)" />
+                  <circle cx="418" cy="384" r="8" fill={COR.cromoEscuro} />
+                  <rect x="417" y="368" width="2.4" height="8" rx="1.2" fill={COR.madeiraEscura} />
+                </g>
+                {/* placa com o nome */}
+                <g className="peca r6">
+                  <rect x="356" y="350" width="72" height="14" rx="4" fill={COR.cromo} />
+                  <text
+                    x="392"
+                    y="360.5"
+                    fontSize="8"
+                    fontWeight="800"
+                    letterSpacing="2.2"
+                    textAnchor="middle"
+                    fill={COR.madeiraEscura}
+                  >
+                    RADINHO
+                  </text>
+                </g>
+                {/* antena telescópica: três gomos que SE ESTENDEM, base no canto da caixa */}
+                <g className="antena" transform="translate(432 266) rotate(-122)">
+                  <rect
+                    className="gomo g1"
+                    x="-4"
+                    y="-2"
+                    width="8"
+                    height="58"
+                    rx="4"
+                    fill={COR.cromoEscuro}
+                  />
+                  <rect
+                    className="gomo g2"
+                    x="-3"
+                    y="50"
+                    width="6"
+                    height="56"
+                    rx="3"
+                    fill={COR.cromo}
+                  />
+                  <rect
+                    className="gomo g3"
+                    x="-2"
+                    y="100"
+                    width="4"
+                    height="50"
+                    rx="2"
+                    fill={COR.cromoClaro}
+                  />
+                  <circle className="gomo g3" cx="0" cy="152" r="5" fill={COR.cromo} />
+                </g>
               </g>
-              {/* botões */}
-              <g className="peca r5">
-                <circle cx="372" cy="384" r="19" fill={COR.madeiraEscura} />
-                <circle cx="372" cy="384" r="15" fill="url(#ab-cromo)" />
-                <circle cx="372" cy="384" r="8" fill={COR.cromoEscuro} />
-                <rect x="371" y="368" width="2.4" height="8" rx="1.2" fill={COR.madeiraEscura} />
-              </g>
-              <g className="peca r5" style={{ animationDelay: '1.95s' }}>
-                <circle cx="418" cy="384" r="19" fill={COR.madeiraEscura} />
-                <circle cx="418" cy="384" r="15" fill="url(#ab-cromo)" />
-                <circle cx="418" cy="384" r="8" fill={COR.cromoEscuro} />
-                <rect x="417" y="368" width="2.4" height="8" rx="1.2" fill={COR.madeiraEscura} />
-              </g>
-              {/* placa com o nome */}
-              <g className="peca r6">
-                <rect x="356" y="350" width="72" height="14" rx="4" fill={COR.cromo} />
-                <text
-                  x="392"
-                  y="360.5"
-                  fontSize="8"
-                  fontWeight="800"
-                  letterSpacing="2.2"
-                  textAnchor="middle"
-                  fill={COR.madeiraEscura}
-                >
-                  RADINHO
-                </text>
-              </g>
-              {/* antena telescópica: três gomos que SE ESTENDEM, base no canto da caixa */}
-              <g className="antena" transform="translate(432 266) rotate(-122)">
-                <rect
-                  className="gomo g1"
-                  x="-4"
-                  y="-2"
-                  width="8"
-                  height="58"
-                  rx="4"
-                  fill={COR.cromoEscuro}
-                />
-                <rect
-                  className="gomo g2"
-                  x="-3"
-                  y="50"
-                  width="6"
-                  height="56"
-                  rx="3"
-                  fill={COR.cromo}
-                />
-                <rect
-                  className="gomo g3"
-                  x="-2"
-                  y="100"
-                  width="4"
-                  height="50"
-                  rx="2"
-                  fill={COR.cromoClaro}
-                />
-                <circle className="gomo g3" cx="0" cy="152" r="5" fill={COR.cromo} />
-              </g>
-            </g>
 
-            {/* ── 2. A PESSOA (ilustração chapada, estilo Nubank) ─────────── */}
-            <g className="pessoa">
-              {/* sapatos e pernas */}
-              <ellipse className="peca p1" cx="748" cy="466" rx="24" ry="8" fill={COR.sapato} />
-              <ellipse className="peca p1" cx="806" cy="466" rx="24" ry="8" fill={COR.sapato} />
-              <path className="peca p1" d="M734 340 h40 v120 h-40 z" fill={COR.calca} />
-              <path className="peca p1" d="M782 340 h40 v120 h-40 z" fill={COR.calca} />
-              <rect
-                className="peca p1"
-                x="734"
-                y="330"
-                width="88"
-                height="34"
-                rx="10"
-                fill={COR.calca}
-              />
-              {/* tronco (camisa) */}
-              <path
-                className="peca p2"
-                d="M722 350 V250 Q722 200 778 200 Q834 200 834 250 V350 Q778 362 722 350 Z"
-                fill={COR.camisa}
-              />
-              <path
-                className="peca p2"
-                d="M722 350 V300 Q778 318 834 300 V350 Q778 362 722 350 Z"
-                fill={COR.camisaSombra}
-              />
-              {/* pescoço */}
-              <rect
-                className="peca p3"
-                x="764"
-                y="178"
-                width="28"
-                height="36"
-                rx="12"
-                fill={COR.peleSombra}
-              />
-              {/* braço direito (da pessoa): ombro → cotovelo → mão com o celular */}
-              <path
-                className="peca p3"
-                d="M730 226 Q690 250 700 306"
-                stroke={COR.camisa}
-                strokeWidth="26"
-                strokeLinecap="round"
-              />
-              <path
-                className="peca p3"
-                d="M700 306 Q708 340 734 328"
-                stroke={COR.pele}
-                strokeWidth="22"
-                strokeLinecap="round"
-              />
-              {/* braço esquerdo relaxado */}
-              <path
-                className="peca p3"
-                d="M826 226 Q860 262 850 316"
-                stroke={COR.camisa}
-                strokeWidth="26"
-                strokeLinecap="round"
-              />
-              <path
-                className="peca p3"
-                d="M850 316 Q846 352 840 372"
-                stroke={COR.pele}
-                strokeWidth="22"
-                strokeLinecap="round"
-              />
-              <ellipse className="peca p3" cx="839" cy="380" rx="12" ry="14" fill={COR.pele} />
-              {/* cabeça, orelha, cabelo com coque e franja */}
-              <circle className="peca p4" cx="778" cy="138" r="46" fill={COR.pele} />
-              <circle className="peca p4" cx="823" cy="142" r="8" fill={COR.peleSombra} />
-              <path
-                className="peca p5"
-                d="M730 136 Q730 84 778 84 Q826 84 826 136 Q812 112 778 112 Q744 112 730 136 Z"
-                fill={COR.cabelo}
-              />
-              <path
-                className="peca p5"
-                d="M730 136 q-6 20 6 36 q-2 -22 8 -40 z"
-                fill={COR.cabelo}
-              />
-              <circle className="peca p5" cx="810" cy="82" r="20" fill={COR.cabelo} />
-
-              {/* ── O CELULAR na mão (detalhado) ── */}
-              <g className="celular" transform="translate(726 262) rotate(-10)">
+              {/* ── 2. A PESSOA (ilustração chapada, estilo Nubank) ─────────── */}
+              <g className="pessoa">
+                {/* sapatos e pernas */}
+                <ellipse className="peca p1" cx="748" cy="466" rx="24" ry="8" fill={COR.sapato} />
+                <ellipse className="peca p1" cx="806" cy="466" rx="24" ry="8" fill={COR.sapato} />
+                <path className="peca p1" d="M734 340 h40 v120 h-40 z" fill={COR.calca} />
+                <path className="peca p1" d="M782 340 h40 v120 h-40 z" fill={COR.calca} />
                 <rect
-                  className="peca p6"
-                  x="0"
-                  y="0"
-                  width="60"
-                  height="118"
+                  className="peca p1"
+                  x="734"
+                  y="330"
+                  width="88"
+                  height="34"
+                  rx="10"
+                  fill={COR.calca}
+                />
+                {/* tronco (camisa) */}
+                <path
+                  className="peca p2"
+                  d="M722 350 V250 Q722 200 778 200 Q834 200 834 250 V350 Q778 362 722 350 Z"
+                  fill={COR.camisa}
+                />
+                <path
+                  className="peca p2"
+                  d="M722 350 V300 Q778 318 834 300 V350 Q778 362 722 350 Z"
+                  fill={COR.camisaSombra}
+                />
+                {/* pescoço */}
+                <rect
+                  className="peca p3"
+                  x="764"
+                  y="178"
+                  width="28"
+                  height="36"
                   rx="12"
-                  fill={COR.celularBorda}
+                  fill={COR.peleSombra}
                 />
-                <rect
-                  className="peca p6"
-                  x="3"
-                  y="3"
-                  width="54"
-                  height="112"
-                  rx="10"
-                  fill={COR.celular}
+                {/* braço direito (da pessoa): ombro → cotovelo → mão com o celular */}
+                <path
+                  className="peca p3"
+                  d="M730 226 Q690 250 700 306"
+                  stroke={COR.camisa}
+                  strokeWidth="26"
+                  strokeLinecap="round"
                 />
-                <rect
-                  className="peca p6"
-                  x="-2"
-                  y="30"
-                  width="3"
-                  height="10"
-                  rx="1.5"
-                  fill={COR.celularBorda}
+                <path
+                  className="peca p3"
+                  d="M700 306 Q708 340 734 328"
+                  stroke={COR.pele}
+                  strokeWidth="22"
+                  strokeLinecap="round"
                 />
-                <rect
-                  className="peca p6"
-                  x="-2"
-                  y="46"
-                  width="3"
-                  height="14"
-                  rx="1.5"
-                  fill={COR.celularBorda}
+                {/* braço esquerdo relaxado */}
+                <path
+                  className="peca p3"
+                  d="M826 226 Q860 262 850 316"
+                  stroke={COR.camisa}
+                  strokeWidth="26"
+                  strokeLinecap="round"
                 />
-                <rect
-                  className="peca p6"
-                  x="59"
-                  y="36"
-                  width="3"
-                  height="20"
-                  rx="1.5"
-                  fill={COR.celularBorda}
+                <path
+                  className="peca p3"
+                  d="M850 316 Q846 352 840 372"
+                  stroke={COR.pele}
+                  strokeWidth="22"
+                  strokeLinecap="round"
                 />
-                <rect
-                  className="peca p6"
-                  x="7"
-                  y="10"
-                  width="46"
-                  height="98"
-                  rx="7"
-                  fill={COR.tela}
+                <ellipse className="peca p3" cx="839" cy="380" rx="12" ry="14" fill={COR.pele} />
+                {/* cabeça, orelha, cabelo com coque e franja */}
+                <circle className="peca p4" cx="778" cy="138" r="46" fill={COR.pele} />
+                <circle className="peca p4" cx="823" cy="142" r="8" fill={COR.peleSombra} />
+                <path
+                  className="peca p5"
+                  d="M730 136 Q730 84 778 84 Q826 84 826 136 Q812 112 778 112 Q744 112 730 136 Z"
+                  fill={COR.cabelo}
                 />
-                <rect
-                  className="tela"
-                  x="7"
-                  y="10"
-                  width="46"
-                  height="98"
-                  rx="7"
-                  fill="url(#ab-tela-acesa)"
+                <path
+                  className="peca p5"
+                  d="M730 136 q-6 20 6 36 q-2 -22 8 -40 z"
+                  fill={COR.cabelo}
                 />
-                <rect
-                  className="peca p6"
-                  x="21"
-                  y="13"
-                  width="18"
-                  height="4"
-                  rx="2"
-                  fill={COR.celularBorda}
-                />
-                <circle className="peca p6" cx="43" cy="15" r="1.6" fill={COR.celularBorda} />
-                <rect
-                  className="peca p6"
-                  x="22"
-                  y="103"
-                  width="16"
-                  height="2"
-                  rx="1"
-                  fill={COR.celularBorda}
-                />
-                {/* a mão: palma atrás da borda e três dedos juntos sobre ela — nenhum
+                <circle className="peca p5" cx="810" cy="82" r="20" fill={COR.cabelo} />
+
+                {/* ── O CELULAR na mão (detalhado) ── */}
+                <g className="celular" transform="translate(726 262) rotate(-10)">
+                  <rect
+                    className="peca p6"
+                    x="0"
+                    y="0"
+                    width="60"
+                    height="118"
+                    rx="12"
+                    fill={COR.celularBorda}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="3"
+                    y="3"
+                    width="54"
+                    height="112"
+                    rx="10"
+                    fill={COR.celular}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="-2"
+                    y="30"
+                    width="3"
+                    height="10"
+                    rx="1.5"
+                    fill={COR.celularBorda}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="-2"
+                    y="46"
+                    width="3"
+                    height="14"
+                    rx="1.5"
+                    fill={COR.celularBorda}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="59"
+                    y="36"
+                    width="3"
+                    height="20"
+                    rx="1.5"
+                    fill={COR.celularBorda}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="7"
+                    y="10"
+                    width="46"
+                    height="98"
+                    rx="7"
+                    fill={COR.tela}
+                  />
+                  <rect
+                    className="tela"
+                    x="7"
+                    y="10"
+                    width="46"
+                    height="98"
+                    rx="7"
+                    fill="url(#ab-tela-acesa)"
+                  />
+                  <rect
+                    className="peca p6"
+                    x="21"
+                    y="13"
+                    width="18"
+                    height="4"
+                    rx="2"
+                    fill={COR.celularBorda}
+                  />
+                  <circle className="peca p6" cx="43" cy="15" r="1.6" fill={COR.celularBorda} />
+                  <rect
+                    className="peca p6"
+                    x="22"
+                    y="103"
+                    width="16"
+                    height="2"
+                    rx="1"
+                    fill={COR.celularBorda}
+                  />
+                  {/* a mão: palma atrás da borda e três dedos juntos sobre ela — nenhum
                     dedo solto fora da mão */}
-                <rect
-                  className="peca p6"
-                  x="-15"
-                  y="46"
-                  width="20"
-                  height="40"
-                  rx="10"
-                  fill={COR.pele}
-                />
-                <rect
-                  className="peca p6"
-                  x="-7"
-                  y="49"
-                  width="14"
-                  height="11"
-                  rx="5.5"
-                  fill={COR.pele}
-                  stroke={COR.peleSombra}
-                  strokeWidth="1"
-                />
-                <rect
-                  className="peca p6"
-                  x="-7"
-                  y="60"
-                  width="14"
-                  height="11"
-                  rx="5.5"
-                  fill={COR.pele}
-                  stroke={COR.peleSombra}
-                  strokeWidth="1"
-                />
-                <rect
-                  className="peca p6"
-                  x="-7"
-                  y="71"
-                  width="14"
-                  height="11"
-                  rx="5.5"
-                  fill={COR.pele}
-                  stroke={COR.peleSombra}
-                  strokeWidth="1"
-                />
-                <circle className="brilho" cx="30" cy="59" r="74" fill="url(#ab-brilho)" />
-                {/* o nosso logo, na tela */}
-                {/* a posição fica num grupo próprio: o CSS do `.logo` anima `transform`,
+                  <rect
+                    className="peca p6"
+                    x="-15"
+                    y="46"
+                    width="20"
+                    height="40"
+                    rx="10"
+                    fill={COR.pele}
+                  />
+                  <rect
+                    className="peca p6"
+                    x="-7"
+                    y="49"
+                    width="14"
+                    height="11"
+                    rx="5.5"
+                    fill={COR.pele}
+                    stroke={COR.peleSombra}
+                    strokeWidth="1"
+                  />
+                  <rect
+                    className="peca p6"
+                    x="-7"
+                    y="60"
+                    width="14"
+                    height="11"
+                    rx="5.5"
+                    fill={COR.pele}
+                    stroke={COR.peleSombra}
+                    strokeWidth="1"
+                  />
+                  <rect
+                    className="peca p6"
+                    x="-7"
+                    y="71"
+                    width="14"
+                    height="11"
+                    rx="5.5"
+                    fill={COR.pele}
+                    stroke={COR.peleSombra}
+                    strokeWidth="1"
+                  />
+                  <circle className="brilho" cx="30" cy="59" r="74" fill="url(#ab-brilho)" />
+                  {/* o nosso logo, na tela */}
+                  {/* a posição fica num grupo próprio: o CSS do `.logo` anima `transform`,
                   e isso substituiria um `transform` escrito no mesmo elemento. */}
-                <g transform="translate(30 59)">
-                  <g className="logo">
-                    <g
-                      transform="translate(-14 -24) scale(1.1667)"
-                      stroke={COR.logo}
-                      strokeWidth="1.8"
-                      strokeLinecap="round"
-                    >
-                      <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
-                      <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
-                      <circle cx="12" cy="12" r="2" />
-                      <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
-                      <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1" />
+                  <g transform="translate(30 59)">
+                    <g className="logo">
+                      <g
+                        transform="translate(-14 -24) scale(1.1667)"
+                        stroke={COR.logo}
+                        strokeWidth="1.8"
+                        strokeLinecap="round"
+                      >
+                        <path d="M4.9 19.1C1 15.2 1 8.8 4.9 4.9" />
+                        <path d="M7.8 16.2c-2.3-2.3-2.3-6.1 0-8.5" />
+                        <circle cx="12" cy="12" r="2" />
+                        <path d="M16.2 7.8c2.3 2.3 2.3 6.1 0 8.5" />
+                        <path d="M19.1 4.9C23 8.8 23 15.2 19.1 19.1" />
+                      </g>
+                      <text
+                        x="0"
+                        y="22"
+                        textAnchor="middle"
+                        fontSize="7.5"
+                        fontWeight="700"
+                        fill={COR.logo}
+                        letterSpacing="0.3"
+                      >
+                        radinho
+                      </text>
                     </g>
-                    <text
-                      x="0"
-                      y="22"
-                      textAnchor="middle"
-                      fontSize="7.5"
-                      fontWeight="700"
-                      fill={COR.logo}
-                      letterSpacing="0.3"
-                    >
-                      radinho
-                    </text>
+                  </g>
+                  <g className="notas">
+                    <Nota classe="n1" dupla />
+                    <Nota classe="n2" dupla={false} />
+                    <Nota classe="n3" dupla />
+                    <Nota classe="n4" dupla={false} />
                   </g>
                 </g>
-                <g className="notas">
-                  <Nota classe="n1" dupla />
-                  <Nota classe="n2" dupla={false} />
-                  <Nota classe="n3" dupla />
-                  <Nota classe="n4" dupla={false} />
-                </g>
+              </g>
+
+              {/* ── 3. O SINAL (sem arcos na antena: pedido do Vinicius, 20/10) ── */}
+              <path
+                id="trilha"
+                className="trilha"
+                pathLength={1}
+                d="M561 185 C 640 40, 700 80, 722 180 S 742 262, 752 272"
+                stroke={COR.sinal}
+                strokeWidth="2.5"
+                strokeDasharray="1"
+                strokeLinecap="round"
+              />
+              <g className="sinal" fill={COR.sinal}>
+                <circle r="18" className="halo">
+                  <animateMotion
+                    dur="2s"
+                    begin="3.9s"
+                    fill="freeze"
+                    calcMode="spline"
+                    keySplines="0.4 0 0.6 1"
+                    keyTimes="0;1"
+                  >
+                    <mpath href="#trilha" />
+                  </animateMotion>
+                </circle>
+                <circle r="7">
+                  <animateMotion
+                    dur="2s"
+                    begin="3.9s"
+                    fill="freeze"
+                    calcMode="spline"
+                    keySplines="0.4 0 0.6 1"
+                    keyTimes="0;1"
+                  >
+                    <mpath href="#trilha" />
+                  </animateMotion>
+                </circle>
               </g>
             </g>
-
-            {/* ── 3. O SINAL (sem arcos na antena: pedido do Vinicius, 20/10) ── */}
-            <path
-              id="trilha"
-              className="trilha"
-              pathLength={1}
-              d="M561 185 C 640 40, 700 80, 722 180 S 742 262, 752 272"
-              stroke={COR.sinal}
-              strokeWidth="2.5"
-              strokeDasharray="1"
-              strokeLinecap="round"
-            />
-            <g className="sinal" fill={COR.sinal}>
-              <circle r="18" className="halo">
-                <animateMotion
-                  dur="2s"
-                  begin="3.9s"
-                  fill="freeze"
-                  calcMode="spline"
-                  keySplines="0.4 0 0.6 1"
-                  keyTimes="0;1"
-                >
-                  <mpath href="#trilha" />
-                </animateMotion>
-              </circle>
-              <circle r="7">
-                <animateMotion
-                  dur="2s"
-                  begin="3.9s"
-                  fill="freeze"
-                  calcMode="spline"
-                  keySplines="0.4 0 0.6 1"
-                  keyTimes="0;1"
-                >
-                  <mpath href="#trilha" />
-                </animateMotion>
-              </circle>
-            </g>
-          </g>
-        </svg>
+          </svg>
+        </div>
       </PaletaCtx.Provider>
     </div>,
     document.body,
