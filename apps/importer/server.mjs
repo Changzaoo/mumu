@@ -459,6 +459,32 @@ let resolucoesAtivas = 0;
 
 /** Teto de tempo de UMA extração: yt-dlp pendurado não pode ocupar vaga eterna. */
 const RESOLUCAO_TIMEOUT_MS = Number(process.env.RESOLUCAO_TIMEOUT_MS ?? 45_000);
+/**
+ * Quanto o `/stream` espera a via rápida antes de ligar a via lenta. Uma
+ * resolução boa leva 7–10 s (medido em 27/10/2026); além disso é o YouTube
+ * emperrando, e o ouvinte já esperou demais. A via lenta leva ~12 s até o
+ * som: com o teto, o pior caso cai de ~57 s para ~24 s.
+ */
+const ESPERA_VIA_RAPIDA_MS = Number(process.env.ESPERA_VIA_RAPIDA_MS ?? 12_000);
+/** Quantas origens um `/aquecer` resolve (em série). */
+const AQUECER_MAX = Number(process.env.AQUECER_MAX ?? 8);
+
+/** `promessa` ou, passado `ms`, `null` — a promessa segue correndo ao fundo. */
+export function comTetoDeEspera(promessa, ms) {
+  return new Promise((resolve) => {
+    const relogio = setTimeout(() => resolve(null), ms);
+    promessa.then(
+      (v) => {
+        clearTimeout(relogio);
+        resolve(v);
+      },
+      () => {
+        clearTimeout(relogio);
+        resolve(null);
+      },
+    );
+  });
+}
 
 function guardarUrlDireta(sourceUrl, direta) {
   urlsDiretas.delete(sourceUrl); // reposiciona no fim (a ordem do Map é LRU aqui)
@@ -506,19 +532,84 @@ async function resolverUrlDireta(sourceUrl) {
   resolucoesAtivas += 1;
   const tarefa = (async () => {
     const binario = await resolveYtdlp();
-    // `-g` só RESOLVE: imprime a URL e sai, sem baixar um byte de áudio.
-    const args = [
-      '-f',
-      'bestaudio/best',
-      '--no-playlist',
-      '--no-warnings',
-      ...cookieArgs(),
-      ...extractorArgs(),
-      '-g',
-      '--',
-      linkParaYtdlp(sourceUrl),
-    ];
-    const direta = await new Promise((resolve) => {
+    // UM CLIENTE SÓ, E A URL CONFERIDA ANTES DE VALER. Medido nesta máquina em
+    // 27/10/2026 (yt-dlp 2026.07.04, mesmos cookies do importador): resolver
+    // leva 5–10 s com qualquer cliente, mas a URL que sai de `default`,
+    // `web_embedded`, `android_vr` e `tv_embedded` responde 403 a qualquer
+    // pedido maior que 1 byte — esses clientes exigem PO token, e o provedor
+    // bgutil configurado (127.0.0.1:4416) não está no ar. Era o "url direta
+    // recusou os bytes" do log, que mandava o ouvinte para a via lenta depois
+    // de já ter esperado a resolução. A URL de `android` entrega o arquivo
+    // inteiro (14 MB em 0,5 s) sem PO token. Então: `android` primeiro, 1 MB de
+    // prova antes de guardar (1 byte passa mesmo quando o resto é 403), e a
+    // lista do download (`web_embedded,default`) só de reserva.
+    for (const clientes of clientesParaResolver()) {
+      const direta = await resolverComCliente(binario, sourceUrl, clientes);
+      if (!direta) continue;
+      if (!(await urlDiretaServe(direta))) {
+        log(`url direta de ${clientes} recusou a prova de 1 byte:`, sourceUrl);
+        continue;
+      }
+      guardarUrlDireta(sourceUrl, direta);
+      return direta;
+    }
+    return null;
+  })()
+    .catch(() => null)
+    .finally(() => {
+      resolucoesAtivas -= 1;
+      resolucoesEmCurso.delete(sourceUrl);
+    });
+
+  resolucoesEmCurso.set(sourceUrl, tarefa);
+  return tarefa;
+}
+
+/**
+ * A URL direta entrega bytes? Um pedido de 1 MB, com teto curto. É a prova
+ * que falta entre "o yt-dlp imprimiu uma URL" e "o ouvinte vai ouvir" — e tem
+ * de ser 1 MB: a CDN responde 206 a `bytes=0-0` e 403 ao resto quando falta o
+ * PO token (medido em 27/10/2026).
+ */
+const PROVA_BYTES = 1_048_576;
+function urlDiretaServe(direta) {
+  return new Promise((resolve) => {
+    if (!ehUrlDiretaSegura(direta)) return resolve(false);
+    const req = https.get(direta, { headers: { Range: `bytes=0-${PROVA_BYTES - 1}` } }, (res) => {
+      const st = res.statusCode ?? 0;
+      res.resume();
+      resolve((st >= 200 && st < 300) || (st >= 300 && st < 400));
+      req.destroy();
+    });
+    req.on('error', () => resolve(false));
+    req.setTimeout(5_000, () => req.destroy(new Error('tempo esgotado')));
+  });
+}
+
+/** Os clientes a tentar, em ordem: o rápido e, de reserva, a lista do download. */
+function clientesParaResolver() {
+  const rapido = (process.env.YTDLP_RESOLVE_CLIENT ?? 'android').trim();
+  const completo = (process.env.YTDLP_PLAYER_CLIENT ?? 'web_embedded,default').trim();
+  return rapido && rapido !== completo ? [rapido, completo] : [completo];
+}
+
+/** Uma tentativa de `yt-dlp -g` com o cliente dado; null se não resolver. */
+function resolverComCliente(binario, sourceUrl, clientes) {
+  // `-g` só RESOLVE: imprime a URL e sai, sem baixar um byte de áudio.
+  const args = [
+    '-f',
+    'bestaudio/best',
+    '--no-playlist',
+    '--no-warnings',
+    ...cookieArgs(),
+    ...ARGS_DE_SEGURANCA,
+    ...(clientes ? ['--extractor-args', `youtube:player_client=${clientes}`] : []),
+    '-g',
+    '--',
+    linkParaYtdlp(sourceUrl),
+  ];
+  const inicio = Date.now();
+  return new Promise((resolve) => {
       const p = spawn(binario, args, { windowsHide: true });
       let saida = '';
       let terminou = false;
@@ -556,23 +647,16 @@ async function resolverUrlDireta(sourceUrl) {
         // `-f bestaudio` a primeira é a que interessa.
         const primeira = saida.trim().split(/\r?\n/)[0]?.trim() ?? '';
         const resolveu = code === 0 && /^https?:\/\//.test(primeira);
+        const segundos = ((Date.now() - inicio) / 1000).toFixed(1);
         if (!resolveu) {
-          log(`resolução falhou (código ${code}):`, erro.trim().split('\n').pop() ?? 'sem detalhe');
-        }
+          log(
+            `resolução falhou (${clientes}, código ${code}, ${segundos}s):`,
+            erro.trim().split('\n').pop() ?? 'sem detalhe',
+          );
+        } else log(`resolvida (${clientes}) em ${segundos}s:`, sourceUrl);
         encerrar(resolveu ? primeira : null);
       });
-    });
-    if (direta) guardarUrlDireta(sourceUrl, direta);
-    return direta;
-  })()
-    .catch(() => null)
-    .finally(() => {
-      resolucoesAtivas -= 1;
-      resolucoesEmCurso.delete(sourceUrl);
-    });
-
-  resolucoesEmCurso.set(sourceUrl, tarefa);
-  return tarefa;
+  });
 }
 
 /**
@@ -3362,10 +3446,12 @@ async function main() {
         }
         // Teto: uma playlist inteira mandada de uma vez viraria uma rajada de
         // extrações — exatamente o que `MAX_RESOLUCOES` existe para evitar.
+        // Oito, não cinco: é o que uma busca ou a prateleira "Em alta" mostra
+        // de uma vez, e o laço abaixo é em série — a rajada continua sendo de um.
         const alvos = urls
           .filter((u) => typeof u === 'string' && hostSupported(u))
           .filter((u) => !urlDiretaEmCache(u))
-          .slice(0, 5);
+          .slice(0, AQUECER_MAX);
         res.writeHead(202, { 'Content-Type': 'application/json' });
         res.end(JSON.stringify({ aquecendo: alvos.length }));
         // Em SÉRIE, não em paralelo: o teto de simultaneidade recusaria as
@@ -3463,7 +3549,13 @@ async function main() {
           // `resolverUrlDireta`. Os bytes vêm por `abrirUrlDireta` e não pelo
           // `-i <url>` do ffmpeg, que segfalta no servidor.
           let tocou = false;
-          const direta = await resolverUrlDireta(url);
+          // ESPERA COM TETO. A resolução pode levar até RESOLUCAO_TIMEOUT_MS
+          // (45 s) e só então a via lenta começava: medido em produção em
+          // 27/10/2026, "See You Again" levou 32 s até o primeiro byte — e o
+          // player desiste aos 60 s. Passado o teto, a via lenta assume JÁ; a
+          // resolução continua ao fundo e serve a próxima reprodução (e todo
+          // `/aquecer`), que é o lugar dela.
+          const direta = await comTetoDeEspera(resolverUrlDireta(url), ESPERA_VIA_RAPIDA_MS);
           if (direta && !t.cancelada) {
             const bytes = await abrirUrlDireta(direta).catch((e) => {
               log('url direta recusou os bytes:', e instanceof Error ? e.message : e);
