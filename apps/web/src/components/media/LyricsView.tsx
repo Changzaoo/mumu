@@ -29,6 +29,7 @@ import {
 import { cn, formatDuration } from '@/lib/utils';
 import { palavrasEmLinhas } from '@/lib/lyrics/recalibrar';
 import { normalizarLetra } from '@/lib/lyrics/grafia';
+import { semCabecalhos } from '@/lib/lyrics/cabecalhos';
 import { usePlayerStore } from '@/stores/playerStore';
 
 /**
@@ -147,7 +148,10 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
   // (letra publicada, cache ou transcrição, tudo passa por aqui), mas o texto
   // guardado e o que vai para o alinhamento ficam originais — o alinhamento casa
   // por conteúdo com o que o importador ouviu. Mesmas linhas, tempos e palavras.
-  const lyrics = useMemo(() => normalizarLetra(letraEscolhida), [letraEscolhida]);
+  // SÓ A LETRA: o cabeçalho do provedor ("[Intro: Tz da Coronel]") já sai
+  // antes de gravar (lib/lyrics/lyrics), mas a letra guardada no aparelho
+  // antes desta regra ainda o tem — a tela o tira de qualquer letra.
+  const lyrics = useMemo(() => normalizarLetra(semCabecalhos(letraEscolhida)), [letraEscolhida]);
 
   const terminouBusca = !isLoading;
   // O CAMINHO ANTIGO FOI DESLIGADO: transcrever pelo aparelho (reconhecimento

@@ -11,6 +11,7 @@ import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { fetchOutraFonteDeLetra } from '@/lib/local/importerHelper';
 import { lerPalavrasMarcadas } from './karaoke';
+import { semCabecalhos } from './cabecalhos';
 
 export interface LyricLine {
   timeMs: number;
@@ -220,18 +221,29 @@ export function toLyrics(row: LrclibRow | null | undefined, semTempo = false): L
       .map((l) => l.replace(/\[[^\]]*\]|<\d{1,2}:\d{2}(?:[.:]\d{1,3})?>/g, '').trim())
       .filter(Boolean);
     return texto.length > 0
-      ? { synced: false, lines: texto.map((text) => ({ timeMs: 0, text })), source: null }
+      ? soALetra({ synced: false, lines: texto.map((text) => ({ timeMs: 0, text })), source: null })
       : null;
   }
   if (!semTempo && typeof row.syncedLyrics === 'string' && row.syncedLyrics.trim()) {
     const lines = parseLrc(row.syncedLyrics);
-    if (lines.length > 0) return { synced: true, lines, source: null };
+    if (lines.length > 0) return soALetra({ synced: true, lines, source: null });
   }
   if (typeof row.plainLyrics === 'string' && row.plainLyrics.trim()) {
     const lines = row.plainLyrics.split(/\r?\n/).map((text) => ({ timeMs: 0, text: text.trim() }));
-    return { synced: false, lines, source: null };
+    return soALetra({ synced: false, lines, source: null });
   }
   return null;
+}
+
+/**
+ * SÓ A LETRA: `[Letra de "Mundo Fashion" ft. Matuê]`, `[Intro: Tz da Coronel]`,
+ * `[Refrão]`… são metadado do provedor, não verso (ver lib/lyrics/cabecalhos).
+ * Saem aqui, antes de a letra ir para o cache, para a tela e para o alinhamento.
+ * Letra que só tinha cabeçalho não é letra.
+ */
+function soALetra(letra: Lyrics): Lyrics | null {
+  const limpa = semCabecalhos(letra);
+  return limpa.lines.some((l) => l.text.trim()) ? limpa : null;
 }
 
 function trackFingerprint(track: TrackDto): string {
@@ -637,14 +649,14 @@ async function outrasFontesDeLetra(track: TrackDto): Promise<Lyrics | null> {
   if (!achado) return null;
   if (achado.synced && achado.lrc) {
     const lines = parseLrc(achado.lrc);
-    return lines.length > 0 ? { synced: true, lines, source: null } : null;
+    return lines.length > 0 ? soALetra({ synced: true, lines, source: null }) : null;
   }
   if (!achado.synced && achado.plain) {
     const lines = achado.plain
       .split(/\r?\n/)
       .map((text) => ({ timeMs: 0, text: text.trim() }))
       .filter((l) => l.text);
-    return lines.length > 0 ? { synced: false, lines, source: null } : null;
+    return lines.length > 0 ? soALetra({ synced: false, lines, source: null }) : null;
   }
   return null;
 }

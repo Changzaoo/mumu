@@ -18,6 +18,7 @@
  */
 import type { Lyrics, LyricLine } from '@/lib/lyrics/lyrics';
 import { alignLyrics, type AsrWord } from '@/lib/lyrics/align';
+import { ehCabecalho } from '@/lib/lyrics/cabecalhos';
 
 /** Âncora que destoa das vizinhas por mais que isto é casamento errado. */
 const OUTLIER_MS = 2_500;
@@ -177,10 +178,8 @@ export interface LinhaAlinhada {
   words: PalavraAlinhada[];
 }
 
-/** Linha que NÃO é cantada: cabeçalho de seção ("[Refrão: Mano Brown]"). */
-function ehCabecalho(texto: string): boolean {
-  return /^\s*\[[^\]]*\]\s*$/.test(texto);
-}
+// Linha que NÃO é cantada: cabeçalho de seção ("[Refrão: Mano Brown]") — a
+// mesma regra que tira essas linhas da tela (lib/lyrics/cabecalhos).
 
 /** Quais linhas da letra vão para o alinhamento (índices, na ordem). */
 export function linhasParaAlinhar(letra: Lyrics): number[] {

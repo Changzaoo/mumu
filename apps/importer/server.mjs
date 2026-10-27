@@ -43,6 +43,7 @@ import path from 'node:path';
 import https from 'node:https';
 import { fileURLToPath } from 'node:url';
 import {
+  estadoDaTranscricao,
   pickEngine,
   timestampsAreDegenerate,
   toWav16k,
@@ -1614,6 +1615,99 @@ const tempoDasPalavras = criarTempoDasPalavras({
   vocabulario,
 });
 
+// ── ÁUDIO PARA O RELÓGIO DA LETRA quando o cofre não o tem ──────────────────
+// 27/10/2026: o cofre deste PC virou antessala — a faixa sobe para o GitHub e
+// sai daqui. Mas alinhar a letra (e transcrever) precisa dos BYTES, e sem eles
+// `/blob/:id/alinhar` respondia 403 (a meta sumiu junto) para o acervo inteiro:
+// nenhuma faixa nova ganhava relógio. Quem não está no cofre é buscado na
+// borda (o mesmo `/blob/<id>?k=` que o app toca), com o token que o app
+// mandou — quem confere o token é a borda, não nós. A cópia fica em
+// TEMPO_DIR/audio (teto AUDIO_RELOGIO_GB, as mais antigas saem) para o job da
+// fila ler e para a próxima letra da mesma faixa não baixar de novo.
+const AUDIO_BORDA = (process.env.AUDIO_BORDA ?? 'https://musicas.radinho.online').replace(
+  /\/+$/,
+  '',
+);
+const AUDIO_RELOGIO_DIR = path.join(TEMPO_DIR, 'audio');
+const AUDIO_RELOGIO_MAX = Number(process.env.AUDIO_RELOGIO_GB ?? 3) * 1024 ** 3;
+/** id|k → promessa do download em curso (pedidos simultâneos esperam o mesmo). */
+const baixandoAudio = new Map();
+
+async function podarAudioDoRelogio() {
+  try {
+    const nomes = (await readdir(AUDIO_RELOGIO_DIR)).filter((n) => n.endsWith('.bin'));
+    const arquivos = [];
+    for (const n of nomes) {
+      const caminho = path.join(AUDIO_RELOGIO_DIR, n);
+      const st = await stat(caminho).catch(() => null);
+      if (st) arquivos.push({ caminho, size: st.size, em: st.mtimeMs });
+    }
+    let total = arquivos.reduce((soma, a) => soma + a.size, 0);
+    arquivos.sort((a, b) => a.em - b.em);
+    for (const a of arquivos) {
+      if (total <= AUDIO_RELOGIO_MAX) break;
+      await rm(a.caminho, { force: true }).catch(() => undefined);
+      total -= a.size;
+    }
+  } catch {
+    /* pasta ainda não existe */
+  }
+}
+
+/**
+ * Onde está o áudio desta faixa para o relógio da letra.
+ * @returns {Promise<{ arquivo: string } | { erro: 403 | 503 }>}
+ */
+async function audioDoRelogio(id, k) {
+  let meta = null;
+  try {
+    meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
+  } catch {
+    meta = null;
+  }
+  // No cofre: como sempre foi — o token da meta manda.
+  if (meta) {
+    if (!k || k !== meta.token) return { erro: 403 };
+    if (existsSync(blobPath(id))) return { arquivo: blobPath(id) };
+  }
+  if (!k || !AUDIO_BORDA) return { erro: 403 };
+  const destino = path.join(AUDIO_RELOGIO_DIR, `${encodeURIComponent(id)}.bin`);
+  if (existsSync(destino)) return { arquivo: destino };
+  const chave = `${id}|${k}`;
+  const emCurso = baixandoAudio.get(chave);
+  if (emCurso) return emCurso;
+  const promessa = (async () => {
+    const inicio = Date.now();
+    const res = await fetch(
+      `${AUDIO_BORDA}/blob/${encodeURIComponent(id)}?k=${encodeURIComponent(k)}`,
+      { headers: { 'User-Agent': 'radinho-importer' } },
+    );
+    if (res.status === 403) return { erro: 403 };
+    if (!res.ok) {
+      log(`áudio do relógio: borda respondeu ${res.status} para ${id}`);
+      return { erro: 503 };
+    }
+    const bytes = Buffer.from(await res.arrayBuffer());
+    if (bytes.length === 0) return { erro: 503 };
+    await mkdir(AUDIO_RELOGIO_DIR, { recursive: true });
+    const parcial = `${destino}.parcial`;
+    await writeFile(parcial, bytes);
+    await rename(parcial, destino);
+    log(
+      `áudio do relógio: ${id} veio da borda (${(bytes.length / 1024 / 1024).toFixed(1)}MB, ${Math.round((Date.now() - inicio) / 1000)}s)`,
+    );
+    void podarAudioDoRelogio();
+    return { arquivo: destino };
+  })()
+    .catch((e) => {
+      log('áudio do relógio: falha ao buscar na borda —', e instanceof Error ? e.message : e);
+      return { erro: 503 };
+    })
+    .finally(() => baixandoAudio.delete(chave));
+  baixandoAudio.set(chave, promessa);
+  return promessa;
+}
+
 /** Buffer a request body (binary-safe) up to `limit` bytes, else reject. */
 function readBinaryBody(req, limit) {
   return new Promise((resolve, reject) => {
@@ -2920,15 +3014,9 @@ async function main() {
       if (req.method === 'POST' && /^\/blob\/[^/]+\/alinhar$/.test(pathname)) {
         const id = decodeURIComponent(pathname.slice('/blob/'.length, -'/alinhar'.length));
         const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
-        let meta = null;
-        try {
-          meta = safeBlobId(id) ? JSON.parse(await readFile(blobMetaPath(id), 'utf8')) : null;
-        } catch {
-          meta = null;
-        }
-        if (!meta || params.get('k') !== meta.token) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+        if (!safeBlobId(id)) {
+          res.writeHead(400, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'id inválido.' }));
           return;
         }
         let linhas = null;
@@ -2948,13 +3036,21 @@ async function main() {
           res.end(JSON.stringify({ error: 'linhas inválidas.' }));
           return;
         }
-        if (!existsSync(blobPath(id))) {
+        // Cofre local, ou a cópia da borda (ver audioDoRelogio) — o token vai
+        // junto e é conferido por quem tem o áudio.
+        const audio = await audioDoRelogio(id, params.get('k'));
+        if ('erro' in audio) {
+          if (audio.erro === 403) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Acesso negado.' }));
+            return;
+          }
           res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '30' });
           res.end(JSON.stringify({ status: 'sem-audio' }));
           return;
         }
         const idioma = (params.get('lang') ?? 'pt').toLowerCase().startsWith('en') ? 'en' : 'pt';
-        const r = await tempoDasPalavras.pedirAlinhamento(id, blobPath(id), idioma, linhas);
+        const r = await tempoDasPalavras.pedirAlinhamento(id, audio.arquivo, idioma, linhas);
         if ('pronto' in r) {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
           res.end(JSON.stringify(r.pronto));
@@ -2981,18 +3077,13 @@ async function main() {
           res.end(JSON.stringify({ error: 'id inválido.' }));
           return;
         }
-        let meta = null;
-        try {
-          meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
-        } catch {
-          meta = null;
-        }
-        if (!meta || params.get('k') !== meta.token) {
-          res.writeHead(403, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Acesso negado.' }));
-          return;
-        }
-        if (!existsSync(blobPath(id))) {
+        const audio = await audioDoRelogio(id, params.get('k'));
+        if ('erro' in audio) {
+          if (audio.erro === 403) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Acesso negado.' }));
+            return;
+          }
           res.writeHead(503, { 'Content-Type': 'application/json', 'Retry-After': '30' });
           res.end(JSON.stringify({ status: 'sem-audio' }));
           return;
@@ -3002,7 +3093,7 @@ async function main() {
         // Artista da faixa (opcional): só empresta o vocabulário já aprendido
         // dele para a transcrição livre — ver vocabulario.mjs.
         const artista = (params.get('artista') || '').trim().slice(0, 200) || undefined;
-        const r = await tempoDasPalavras.pedir(id, blobPath(id), idioma, artista);
+        const r = await tempoDasPalavras.pedir(id, audio.arquivo, idioma, artista);
         if ('pronto' in r) {
           res.writeHead(200, {
             'Content-Type': 'application/json',
@@ -3785,17 +3876,27 @@ async function main() {
       // Recebe o áudio que o navegador JÁ tem no aparelho e devolve só as
       // palavras com seus instantes. O texto exibido continua vindo do LRCLIB;
       // daqui sai apenas o relógio.
+      // Diagnóstico: qual função da NVIDIA está respondendo e o que falhou por
+      // último (código gRPC incluso). Só para quem já pode transcrever.
+      if (req.method === 'GET' && pathname === '/ai/transcribe/estado') {
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
+        res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+        res.end(JSON.stringify(estadoDaTranscricao()));
+        return;
+      }
+
       if (req.method === 'POST' && pathname === '/ai/transcribe') {
         if (!(await authorize(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
         }
-        if (!transcribeConfigured()) {
-          res.writeHead(503, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ error: 'Transcrição não configurada no servidor.' }));
-          return;
-        }
+        // SEM CHAVE DA NVIDIA NÃO É MAIS 503: o whisper local (faster-whisper,
+        // large-v3-turbo) transcreve do mesmo jeito — só mais devagar.
         try {
           const audio = await readBodyBuffer(req, MAX_TRANSCRIBE_BYTES);
           if (!audio || audio.length === 0) {
@@ -3807,29 +3908,51 @@ async function main() {
             new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('language') ||
             undefined;
           const wav = await toWav16k(audio, FFMPEG_BIN);
-          // Inglês → TDT (tempo por PALAVRA). pt-BR/outros → whisper (tempo por
-          // LINHA). A escolha mora no riva.mjs; aqui só despachamos o resultado.
-          if (pickEngine(language) === 'segment') {
-            const segments = await transcribeSegments(wav, { language });
-            if (segments.length === 0) {
+          // 1) NVIDIA na nuvem (rápido). Inglês → TDT (tempo por PALAVRA).
+          //    pt-BR/outros → whisper-large-v3 (tempo por LINHA). Cada tipo tem
+          //    reservas no riva.mjs; aqui só despachamos o resultado.
+          if (transcribeConfigured()) {
+            try {
+              if (pickEngine(language) === 'segment') {
+                const segments = await transcribeSegments(wav, { language });
+                res.writeHead(200, { 'Content-Type': 'application/json', 'X-Motor': 'nvidia' });
+                res.end(JSON.stringify({ segments }));
+                return;
+              }
+              const words = await transcribeWords(wav, { language });
+              res.writeHead(200, { 'Content-Type': 'application/json', 'X-Motor': 'nvidia' });
+              res.end(JSON.stringify({ words }));
+              return;
+            } catch (err) {
+              log(
+                'transcribe: NVIDIA esgotou as reservas, indo para o whisper local —',
+                err instanceof Error ? err.message : err,
+              );
+            }
+          }
+          // 2) Whisper LOCAL — a rede de segurança: nenhuma faixa fica sem
+          //    transcrição porque a NVIDIA tirou uma função do ar.
+          const tmpWav = path.join(tmpdir(), `transcribe-${process.pid}-${Date.now()}.wav`);
+          await writeFile(tmpWav, wav);
+          try {
+            const lang = (language ?? '').toLowerCase();
+            const idioma = lang.startsWith('en') ? 'en' : lang.startsWith('pt') ? 'pt' : 'auto';
+            const r = await tempoDasPalavras.transcreverAgora(tmpWav, idioma);
+            const words = (r.words ?? [])
+              .filter((w) => w.prob === undefined || w.prob >= 0.35)
+              .map((w) => ({ text: w.text, startMs: w.startMs }));
+            // Sem tempo útil, sincronizar produziria um karaokê que não anda —
+            // melhor dizer que não deu e deixar a letra plana em paz.
+            if (words.length === 0 || timestampsAreDegenerate(words)) {
               res.writeHead(422, { 'Content-Type': 'application/json' });
-              res.end(JSON.stringify({ error: 'Sem texto utilizável para esta faixa.' }));
+              res.end(JSON.stringify({ error: 'Sem tempos utilizáveis para esta faixa.' }));
               return;
             }
-            res.writeHead(200, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ segments }));
-            return;
+            res.writeHead(200, { 'Content-Type': 'application/json', 'X-Motor': r.motor });
+            res.end(JSON.stringify({ words }));
+          } finally {
+            await unlink(tmpWav).catch(() => undefined);
           }
-          const words = await transcribeWords(wav, { language });
-          // Sem tempo útil, sincronizar produziria um karaokê que não anda —
-          // melhor dizer que não deu e deixar a letra plana em paz.
-          if (words.length === 0 || timestampsAreDegenerate(words)) {
-            res.writeHead(422, { 'Content-Type': 'application/json' });
-            res.end(JSON.stringify({ error: 'Sem tempos utilizáveis para esta faixa.' }));
-            return;
-          }
-          res.writeHead(200, { 'Content-Type': 'application/json' });
-          res.end(JSON.stringify({ words }));
         } catch (err) {
           log('transcribe error:', err instanceof Error ? err.message : err);
           res.writeHead(502, { 'Content-Type': 'application/json' });

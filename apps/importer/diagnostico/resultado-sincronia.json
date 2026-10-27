@@ -1,0 +1,258 @@
+{
+  "em": "2026-10-27T04:07:15",
+  "segundos": 150.0,
+  "faixas": [
+    {
+      "nome": "Mundo Fashion (Tz da Coronel ft. Matuê)",
+      "ataques": 326,
+      "separacaoS": 1,
+      "alinhamentos": {
+        "small-mix": {
+          "global": {
+            "desvioMs": -810,
+            "coincidencia": 0.64
+          },
+          "linhas": {
+            "n": 12,
+            "medianaMs": 15,
+            "p25Ms": -10,
+            "p75Ms": 80,
+            "mediaAbsMs": 75,
+            "dentroDe100ms": 0.83,
+            "dentroDe250ms": 0.92,
+            "antesDaVoz150ms": 0.08,
+            "semAtaquePerto": 0
+          },
+          "palavras": {
+            "n": 13,
+            "medianaMs": 20,
+            "p25Ms": -10,
+            "p75Ms": 80,
+            "mediaAbsMs": 81,
+            "dentroDe100ms": 0.77,
+            "dentroDe250ms": 0.92,
+            "antesDaVoz150ms": 0.08,
+            "semAtaquePerto": 1
+          }
+        },
+        "small-voz": {
+          "global": {
+            "desvioMs": -770,
+            "coincidencia": 0.56
+          },
+          "linhas": {
+            "n": 14,
+            "medianaMs": 40,
+            "p25Ms": -30,
+            "p75Ms": 150,
+            "mediaAbsMs": 98,
+            "dentroDe100ms": 0.57,
+            "dentroDe250ms": 0.93,
+            "antesDaVoz150ms": 0.0,
+            "semAtaquePerto": 0
+          },
+          "palavras": {
+            "n": 18,
+            "medianaMs": 50,
+            "p25Ms": -30,
+            "p75Ms": 150,
+            "mediaAbsMs": 107,
+            "dentroDe100ms": 0.56,
+            "dentroDe250ms": 0.94,
+            "antesDaVoz150ms": 0.0,
+            "semAtaquePerto": 0
+          }
+        }
+      }
+    },
+    {
+      "nome": "reza-do-milhao",
+      "ataques": 301,
+      "separacaoS": 1,
+      "alinhamentos": {
+        "small-mix(producao)": {
+          "global": {
+            "desvioMs": -430,
+            "coincidencia": 0.5
+          },
+          "linhas": {
+            "n": 18,
+            "medianaMs": -25,
+            "p25Ms": -90,
+            "p75Ms": 40,
+            "mediaAbsMs": 112,
+            "dentroDe100ms": 0.67,
+            "dentroDe250ms": 0.83,
+            "antesDaVoz150ms": 0.11,
+            "semAtaquePerto": 3
+          },
+          "palavras": {
+            "n": 18,
+            "medianaMs": -25,
+            "p25Ms": -90,
+            "p75Ms": 40,
+            "mediaAbsMs": 112,
+            "dentroDe100ms": 0.67,
+            "dentroDe250ms": 0.83,
+            "antesDaVoz150ms": 0.11,
+            "semAtaquePerto": 4
+          }
+        },
+        "small-voz": {
+          "global": {
+            "desvioMs": -10,
+            "coincidencia": 0.61
+          },
+          "linhas": {
+            "n": 24,
+            "medianaMs": 0,
+            "p25Ms": -60,
+            "p75Ms": 40,
+            "mediaAbsMs": 82,
+            "dentroDe100ms": 0.71,
+            "dentroDe250ms": 0.92,
+            "antesDaVoz150ms": 0.12,
+            "semAtaquePerto": 1
+          },
+          "palavras": {
+            "n": 27,
+            "medianaMs": 0,
+            "p25Ms": -60,
+            "p75Ms": 40,
+            "mediaAbsMs": 84,
+            "dentroDe100ms": 0.67,
+            "dentroDe250ms": 0.93,
+            "antesDaVoz150ms": 0.15,
+            "semAtaquePerto": 1
+          }
+        }
+      }
+    },
+    {
+      "nome": "quebra-mar",
+      "ataques": 198,
+      "separacaoS": 1,
+      "alinhamentos": {
+        "small-mix(producao)": {
+          "global": {
+            "desvioMs": -230,
+            "coincidencia": 0.5
+          },
+          "linhas": {
+            "n": 23,
+            "medianaMs": -40,
+            "p25Ms": -110,
+            "p75Ms": 70,
+            "mediaAbsMs": 107,
+            "dentroDe100ms": 0.57,
+            "dentroDe250ms": 0.96,
+            "antesDaVoz150ms": 0.17,
+            "semAtaquePerto": 2
+          },
+          "palavras": {
+            "n": 24,
+            "medianaMs": -40,
+            "p25Ms": -90,
+            "p75Ms": 70,
+            "mediaAbsMs": 105,
+            "dentroDe100ms": 0.58,
+            "dentroDe250ms": 0.96,
+            "antesDaVoz150ms": 0.17,
+            "semAtaquePerto": 2
+          }
+        },
+        "small-voz": {
+          "global": {
+            "desvioMs": 50,
+            "coincidencia": 0.68
+          },
+          "linhas": {
+            "n": 22,
+            "medianaMs": 40,
+            "p25Ms": -10,
+            "p75Ms": 70,
+            "mediaAbsMs": 72,
+            "dentroDe100ms": 0.77,
+            "dentroDe250ms": 1.0,
+            "antesDaVoz150ms": 0.09,
+            "semAtaquePerto": 1
+          },
+          "palavras": {
+            "n": 23,
+            "medianaMs": 40,
+            "p25Ms": -10,
+            "p75Ms": 80,
+            "mediaAbsMs": 73,
+            "dentroDe100ms": 0.78,
+            "dentroDe250ms": 1.0,
+            "antesDaVoz150ms": 0.09,
+            "semAtaquePerto": 2
+          }
+        }
+      }
+    },
+    {
+      "nome": "snoop-you",
+      "ataques": 308,
+      "separacaoS": 1,
+      "alinhamentos": {
+        "small-mix(producao)": {
+          "global": {
+            "desvioMs": 400,
+            "coincidencia": 0.58
+          },
+          "linhas": {
+            "n": 5,
+            "medianaMs": -50,
+            "p25Ms": -90,
+            "p75Ms": -40,
+            "mediaAbsMs": 56,
+            "dentroDe100ms": 1.0,
+            "dentroDe250ms": 1.0,
+            "antesDaVoz150ms": 0.0,
+            "semAtaquePerto": 2
+          },
+          "palavras": {
+            "n": 10,
+            "medianaMs": -70,
+            "p25Ms": -170,
+            "p75Ms": 0,
+            "mediaAbsMs": 97,
+            "dentroDe100ms": 0.7,
+            "dentroDe250ms": 0.9,
+            "antesDaVoz150ms": 0.3,
+            "semAtaquePerto": 2
+          }
+        },
+        "small-voz": {
+          "global": {
+            "desvioMs": -610,
+            "coincidencia": 0.48
+          },
+          "linhas": {
+            "n": 12,
+            "medianaMs": -5,
+            "p25Ms": -20,
+            "p75Ms": 120,
+            "mediaAbsMs": 90,
+            "dentroDe100ms": 0.58,
+            "dentroDe250ms": 0.92,
+            "antesDaVoz150ms": 0.08,
+            "semAtaquePerto": 0
+          },
+          "palavras": {
+            "n": 19,
+            "medianaMs": 30,
+            "p25Ms": -40,
+            "p75Ms": 110,
+            "mediaAbsMs": 100,
+            "dentroDe100ms": 0.53,
+            "dentroDe250ms": 0.95,
+            "antesDaVoz150ms": 0.16,
+            "semAtaquePerto": 2
+          }
+        }
+      }
+    }
+  ]
+}
