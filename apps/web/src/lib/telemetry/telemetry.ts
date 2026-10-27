@@ -616,6 +616,9 @@ function start(user: User | null): void {
   // falharem — diagnóstico nunca atrapalha o uso.
   instalarConsoleDoDiario();
   void import('./diarioSondas').then((m) => m.instalarSondasDoDiario()).catch(() => undefined);
+  // O MÉDICO lê o diário, trata (disjuntor do importador, pausa do LRCLIB) e
+  // dá alta: as linhas curadas ficam verdes no painel em vez de vermelhas.
+  void import('./medico').then((m) => m.instalarMedico()).catch(() => undefined);
   initVitals(); // idempotente — liga os observadores de Web Vitals uma vez
   // Registra ESTA entrada no app no log local (vira `recentSessions` no doc).
   writeSessionLog([...readSessionLog(), { startedAt: new Date().toISOString(), durationSec: 0 }]);

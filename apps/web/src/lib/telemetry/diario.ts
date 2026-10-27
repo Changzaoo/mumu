@@ -44,7 +44,9 @@ export type Canal =
   /** Chamadas de rede que falharam ou demoraram. */
   | 'rede'
   /** Erros de JavaScript e promessas rejeitadas sem dono. */
-  | 'erro';
+  | 'erro'
+  /** O médico (`medico.ts`): o que diagnosticou, tratou e curou. */
+  | 'medico'
 
 export interface Linha {
   /** Hora local HH:MM:SS. */
@@ -60,6 +62,12 @@ export interface Linha {
   oculta?: true;
   /** Quantas vezes seguidas a mesma linha se repetiu (ausente = 1). */
   n?: number;
+  /**
+   * CURADA: o médico confirmou depois que a causa passou (o importador voltou,
+   * o LRCLIB respondeu de novo). A linha fica — aconteceu —, mas sai da conta
+   * de sintomas em aberto e o painel a mostra em verde. Só vai quando `true`.
+   */
+  ok?: true;
 }
 
 /** Eventos que são SINTOMA: o painel os destaca e o resumo os conta. */
@@ -73,11 +81,15 @@ export const SINTOMAS: ReadonlySet<string> = new Set([
   'falhou',
   'mudo',
   'morte',
+  /** O médico tentou por dez minutos e o importador seguia fora. */
+  'desistiu',
 ]);
 
 export interface ResumoDoDiario {
-  /** Quantas linhas-sintoma há no diário (não só nas enviadas). */
+  /** Quantas linhas-sintoma EM ABERTO há no diário (não só nas enviadas). */
   sintomas: number;
+  /** Quantos sintomas o médico já curou (não entram em `sintomas`). */
+  curados?: number;
   /** Contagem por evento-sintoma ('erro': 3, 'silencio': 1…). */
   porSintoma: Record<string, number>;
   /** O último sintoma, para o painel dizer de cara. */
@@ -218,10 +230,15 @@ export function ouvirDiario(ouvinte: (linha: Linha) => void): () => void {
 export function resumoDoDiario(): ResumoDoDiario {
   const porSintoma: Record<string, number> = {};
   let sintomas = 0;
+  let curados = 0;
   let ultimoSintoma: ResumoDoDiario['ultimoSintoma'];
   for (const l of linhas) {
     if (!SINTOMAS.has(l.e)) continue;
     const vezes = l.n ?? 1;
+    if (l.ok) {
+      curados += vezes;
+      continue;
+    }
     sintomas += vezes;
     porSintoma[l.e] = (porSintoma[l.e] ?? 0) + vezes;
     ultimoSintoma = { em: l.em, e: l.e, ...(l.d ? { d: l.d } : {}) };
@@ -229,9 +246,33 @@ export function resumoDoDiario(): ResumoDoDiario {
   return {
     sintomas,
     porSintoma,
+    ...(curados > 0 ? { curados } : {}),
     ...(ultimoSintoma ? { ultimoSintoma } : {}),
     abertaHaS: Math.round(agoraMs() / 1000),
   };
+}
+
+/** O relógio do diário (ms desde o boot), para quem compara com `Linha.ms`. */
+export function relogioDoDiario(): number {
+  return agoraMs();
+}
+
+/**
+ * DÁ ALTA: marca como curadas as linhas que `filtro` aceitar (e ainda não
+ * estavam). Devolve quantas ocorrências foram curadas (uma linha ×8 vale 8).
+ * Quem chama é o médico, depois de CONFIRMAR que a causa passou — nunca por
+ * tempo decorrido.
+ */
+export function curar(filtro: (linha: Linha) => boolean): number {
+  let curadas = 0;
+  for (const l of linhas) {
+    if (l.ok) continue;
+    if (!filtro(l)) continue;
+    l.ok = true;
+    curadas += l.n ?? 1;
+  }
+  if (curadas > 0) gravar();
+  return curadas;
 }
 
 /** O que vai na telemetria: as últimas linhas e o resumo dos sintomas. */
@@ -267,10 +308,11 @@ export function instalarConsoleDoDiario(): void {
       lista.map((l) => ({
         hora: l.em,
         canal: l.c,
-        evento: SINTOMAS.has(l.e) ? `⚠ ${l.e}` : l.e,
+        evento: l.ok ? `✓ ${l.e}` : SINTOMAS.has(l.e) ? `⚠ ${l.e}` : l.e,
         detalhe: l.d ?? '',
         vezes: l.n ?? 1,
         oculta: l.oculta ? 'sim' : '',
+        curada: l.ok ? 'sim' : '',
       })),
     );
     return lista;

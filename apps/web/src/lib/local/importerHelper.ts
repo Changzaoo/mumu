@@ -17,6 +17,7 @@ import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { qualidadeEfetiva } from '@/lib/perf/adaptacao';
 import { IMPORTADOR } from '@/lib/dominios';
+import { circuitoAberto } from '@/lib/local/saudeDoImportador';
 
 /**
  * Erro de uma chamada ao helper que carrega o status HTTP da resposta. A fila
@@ -419,6 +420,8 @@ export async function aiChat(
   messages: AiMessage[],
   opts: { model?: string; maxTokens?: number; temperature?: number } = {},
 ): Promise<string | null> {
+  // O médico já sabe que o importador está fora: não é "não sei", é "agora não".
+  if (circuitoAberto()) return null;
   try {
     const res = await fetch(`${helperUrl()}/ai/chat`, {
       method: 'POST',
@@ -653,6 +656,7 @@ export async function buildStreamUrl(sourceUrl: string): Promise<string | null> 
 export async function aquecerFontes(sourceUrls: string[]): Promise<void> {
   const urls = Array.from(new Set(sourceUrls.filter(Boolean)));
   if (urls.length === 0) return;
+  if (circuitoAberto()) return; // importador fora (médico): aquecer agora só engorda a rajada
   const headers = await baseHeaders();
   if (!headers.Authorization) return; // sem login o ajudante recusa de qualquer forma
   await fetch(`${helperUrl()}/aquecer`, {
@@ -925,6 +929,7 @@ export interface NetworkSpeed {
  */
 export async function measureNetworkSpeed(): Promise<NetworkSpeed> {
   const result: NetworkSpeed = { downMbps: null, upMbps: null };
+  if (circuitoAberto()) return result; // importador fora (médico): medir agora é mais uma falha
   try {
     const headers = await baseHeaders();
     if (!headers.Authorization) return result;
@@ -984,6 +989,9 @@ export async function fetchOutraFonteDeLetra(
   artista: string | undefined,
   duracaoSeg: number,
 ): Promise<OutraFonteDeLetra | null> {
+  // Importador fora (médico): quem chama confere `circuitoAberto()` para não
+  // gravar "sem letra" por uma semana com base num pedido que nem saiu.
+  if (circuitoAberto()) return null;
   try {
     const params = new URLSearchParams({ titulo });
     if (artista) params.set('artista', artista);

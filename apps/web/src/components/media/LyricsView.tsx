@@ -117,6 +117,17 @@ export function LyricsView({ track, className, remoto }: LyricsViewProps) {
     staleTime: Infinity,
     retry: false,
   });
+  // O MÉDICO deu alta (importador voltou, LRCLIB respondeu de novo): a letra
+  // que ficou em branco por causa da queda é pedida de novo, sem a pessoa
+  // precisar fechar e abrir a tela.
+  useEffect(() => {
+    const aoCurar = (): void => {
+      if (achada) return;
+      void queryClient.invalidateQueries({ queryKey: ['lyrics', track.id] });
+    };
+    window.addEventListener('radinho:medico-curou', aoCurar);
+    return () => window.removeEventListener('radinho:medico-curou', aoCurar);
+  }, [achada, queryClient, track.id]);
   // A "Transcrição do áudio" do caminho antigo era texto inventado pelo
   // reconhecimento livre — não é letra, não aparece.
   const publicada = achada?.source === TRANSCRICAO_ANTIGA ? null : achada;

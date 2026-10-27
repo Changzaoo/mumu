@@ -10,6 +10,8 @@ import type { TrackDto } from '@radinho/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
 import { fetchOutraFonteDeLetra } from '@/lib/local/importerHelper';
+import { circuitoAberto } from '@/lib/local/saudeDoImportador';
+import { pedirAoLrclib } from './portaoDoLrclib';
 import { lerPalavrasMarcadas } from './karaoke';
 import { semCabecalhos } from './cabecalhos';
 
@@ -509,12 +511,20 @@ async function lrclibGet(
 
   const get = async (title: string, artist: string | undefined): Promise<Lyrics | null> => {
     if (!durationSec) return null;
+    // `/api/get` EXIGE `artist_name`: sem ele o LRCLIB responde 400 (medido em
+    // 27/10/2026), e cada 400 contava como "a fonte errou". O candidato sem
+    // artista continua valendo na busca solta, onde é aceito.
+    if (!artist) return null;
     const url = new URL('https://lrclib.net/api/get');
     url.searchParams.set('track_name', title);
-    if (artist) url.searchParams.set('artist_name', artist);
+    url.searchParams.set('artist_name', artist);
     if (track.album?.title) url.searchParams.set('album_name', track.album.title);
     url.searchParams.set('duration', String(durationSec));
-    const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
+    const res = await pedirAoLrclib(url.toString(), { headers: { Accept: 'application/json' } });
+    if (!res) {
+      estado.falhou = true; // LRCLIB em pausa (lotado): o pedido nem saiu
+      return null;
+    }
     if (!res.ok) {
       if (res.status !== 404) estado.falhou = true; // 404 = "não tenho", o resto = erro
       return null;
@@ -546,8 +556,8 @@ async function lrclibGet(
     const url = new URL('https://lrclib.net/api/search');
     url.searchParams.set('track_name', title);
     if (artist) url.searchParams.set('artist_name', artist);
-    const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } });
-    if (!res.ok) {
+    const res = await pedirAoLrclib(url.toString(), { headers: { Accept: 'application/json' } });
+    if (!res?.ok) {
       estado.falhou = true;
       return null;
     }
@@ -598,9 +608,9 @@ export async function letrasComOMesmoTitulo(track: TrackDto): Promise<LrclibRow[
     titulos.map(async (titulo) => {
       const url = new URL('https://lrclib.net/api/search');
       url.searchParams.set('track_name', titulo);
-      const res = await fetch(url.toString(), { headers: { Accept: 'application/json' } }).catch(
-        () => null,
-      );
+      const res = await pedirAoLrclib(url.toString(), {
+        headers: { Accept: 'application/json' },
+      }).catch(() => null);
       if (!res?.ok) return [];
       const rows = (await res.json().catch(() => [])) as unknown;
       return Array.isArray(rows) ? (rows as LrclibRow[]) : [];
@@ -750,7 +760,9 @@ async function buscarLetra(track: TrackDto): Promise<Lyrics | null> {
     // A fonte ERROU e não achou nada: não é "sem letra". Gravar a entrada
     // negativa aqui trancaria a faixa por uma semana por causa de um soluço de
     // rede — melhor perguntar de novo na próxima reprodução.
-    if (!lyrics && estado.falhou) return null;
+    // O mesmo vale com o importador dado como fora pelo médico: as outras
+    // fontes nem foram perguntadas.
+    if (!lyrics && (estado.falhou || circuitoAberto())) return null;
     julgarConteudo(track.id, track.title ?? '', lyrics);
     writeCache({
       ...readCache(),

@@ -735,6 +735,7 @@ const CANAIS: Array<{ value: Canal; label: string }> = [
   { value: 'download', label: 'Downloads' },
   { value: 'rede', label: 'Rede' },
   { value: 'erro', label: 'Erros' },
+  { value: 'medico', label: 'Médico' },
   { value: 'app', label: 'App' },
 ];
 
@@ -745,6 +746,7 @@ const COR_DO_CANAL: Record<Canal, string> = {
   download: 'bg-fg/8 text-fg-muted',
   rede: 'bg-fg/8 text-fg-muted',
   erro: 'bg-danger/15 text-danger',
+  medico: 'bg-success/15 text-success',
   app: 'bg-fg/6 text-fg-subtle',
 };
 
@@ -785,7 +787,8 @@ function RelatosDoOuvinte({ relatos }: { relatos: Relato[] }) {
             {aberto === r.id && (
               <ol className="mt-2 max-h-56 space-y-0.5 overflow-auto font-mono text-[11px] text-fg-muted">
                 {r.diario.map((l, i) => (
-                  <li key={i}>
+                  <li key={i} className={l.ok ? 'text-success' : undefined}>
+                    {l.ok ? '✓ ' : ''}
                     {l.em} [{l.c}] {l.e}
                     {l.d ? ` ${typeof l.d === 'string' ? l.d : JSON.stringify(l.d)}` : ''}
                   </li>
@@ -799,10 +802,16 @@ function RelatosDoOuvinte({ relatos }: { relatos: Relato[] }) {
   );
 }
 
-function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDoDiario } }) {
+export function DiarioDeBordo({
+  diario,
+}: {
+  diario: { linhas: Linha[]; resumo: ResumoDoDiario };
+}) {
   const [aberto, setAberto] = useState(false);
   const [canal, setCanal] = useState<Canal | 'tudo' | 'sintomas'>('tudo');
   const { linhas, resumo } = diario;
+  // Curados pelo médico: ficam verdes e fora da conta de sintomas em aberto.
+  const curados = resumo.curados ?? 0;
   const visiveis = [...linhas]
     .reverse()
     .filter((l) =>
@@ -819,23 +828,32 @@ function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDo
       <div
         className={cn(
           'flex flex-wrap items-center gap-x-2 gap-y-1 rounded-lg px-3 py-2 text-[12px]',
-          resumo.sintomas > 0 ? 'bg-danger/10 text-danger' : 'bg-fg/5 text-fg-muted',
+          resumo.sintomas > 0
+            ? 'bg-danger/10 text-danger'
+            : curados > 0
+              ? 'bg-success/10 text-success'
+              : 'bg-fg/5 text-fg-muted',
         )}
       >
         {resumo.sintomas > 0 ? (
           <>
             <AlertTriangle className="size-4 shrink-0" />
             <span>
-              {resumo.sintomas} sintoma(s): {sintomasTexto}
+              {resumo.sintomas} sintoma(s) em aberto: {sintomasTexto}
               {resumo.ultimoSintoma
                 ? ` — último: ${resumo.ultimoSintoma.e} às ${resumo.ultimoSintoma.em}${resumo.ultimoSintoma.d ? ` (${resumo.ultimoSintoma.d})` : ''}`
                 : ''}
+              {curados > 0 ? ` · ${curados} curado(s) pelo médico` : ''}
             </span>
           </>
         ) : (
           <>
             <CheckCircle2 className="size-4 shrink-0" />
-            <span>Nenhum sintoma nas últimas {linhas.length} linhas.</span>
+            <span>
+              {curados > 0
+                ? `Nenhum sintoma em aberto · ${curados} curado(s) pelo médico.`
+                : `Nenhum sintoma nas últimas ${linhas.length} linhas.`}
+            </span>
           </>
         )}
         <button
@@ -877,13 +895,16 @@ function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDo
           ) : (
             <ol className="max-h-80 space-y-0.5 overflow-y-auto text-[12px] text-fg-muted">
               {visiveis.map((l, i) => {
-                const sintoma = SINTOMAS.has(l.e);
+                // Curada pelo médico (ou a própria alta): VERDE. Sintoma em
+                // aberto: vermelho. O resto, neutro.
+                const curada = l.ok === true || (l.c === 'medico' && l.e === 'curou');
+                const sintoma = !curada && SINTOMAS.has(l.e);
                 return (
                   <li
                     key={`${l.ms}:${i}`}
                     className={cn(
                       'flex items-baseline gap-2 rounded px-1',
-                      sintoma && 'bg-danger/8',
+                      curada ? 'bg-success/8' : sintoma && 'bg-danger/8',
                     )}
                   >
                     <span className="w-16 shrink-0 font-mono text-[11px] tabular-nums text-fg-subtle">
@@ -898,7 +919,10 @@ function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDo
                       {l.c}
                     </span>
                     <span
-                      className={cn('shrink-0 font-medium', sintoma ? 'text-danger' : 'text-fg')}
+                      className={cn(
+                        'shrink-0 font-medium',
+                        curada ? 'text-success' : sintoma ? 'text-danger' : 'text-fg',
+                      )}
                     >
                       {l.e}
                     </span>
@@ -908,6 +932,14 @@ function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDo
                     {(l.n ?? 1) > 1 && (
                       <span className="shrink-0 rounded-full bg-fg/8 px-1.5 py-0.5 text-[10px] font-semibold text-fg">
                         ×{l.n}
+                      </span>
+                    )}
+                    {l.ok && (
+                      <span
+                        className="shrink-0 rounded-full bg-success/15 px-1.5 py-0.5 text-[10px] font-semibold text-success"
+                        title="O médico confirmou depois que a causa passou"
+                      >
+                        ✓ curada
                       </span>
                     )}
                     {l.oculta && (

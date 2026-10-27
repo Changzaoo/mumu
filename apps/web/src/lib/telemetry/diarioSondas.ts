@@ -184,8 +184,10 @@ export function rotuloDaUrl(entrada: unknown): string {
 // ── As sondas ─────────────────────────────────────────────────────────
 
 let instalado = false;
-/** Chamadas que não entram no diário: a própria telemetria (loop) e sondas. */
-const IGNORAR_NA_REDE = /\/telemetria\//;
+/** Chamadas que não entram no diário: a própria telemetria (loop) e a sonda
+ *  do médico em `/health` (ela falha de propósito enquanto o importador está
+ *  fora; registrá-la seria o médico alimentando a própria doença). */
+const IGNORAR_NA_REDE = /\/telemetria\/|\/health(?:$|\?)/;
 /** Acima disto, uma chamada bem-sucedida ainda ganha linha: 'lenta'. */
 const REDE_LENTA_MS = 8_000;
 
