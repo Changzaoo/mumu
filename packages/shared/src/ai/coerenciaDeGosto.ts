@@ -32,10 +32,13 @@
  *
  * E as duas exceções que valem mais que a tabela:
  *
- *   • FAMÍLIA-TOPO SENSÍVEL (devocional): só "mesma" e "vizinha" passam, e a
- *     candidata precisa ter conteúdo COMPROVADAMENTE limpo. É a mesma
- *     assimetria de `podemConviver`: ali, receber funk explícito num rádio de
- *     louvor é a perda da pessoa; aqui também.
+ *   • FAMÍLIA-TOPO SENSÍVEL (devocional): só "mesma" e "vizinha" passam, nada
+ *     explícito passa, e candidata de OUTRA família precisa ter conteúdo
+ *     COMPROVADAMENTE limpo. Da própria família, "não sei" ainda entra: um
+ *     louvor sem letra julgada não é risco, e barrá-lo esvaziaria a Home de
+ *     quem só ouve gospel (a biblioteca inteira dela ainda sem veredito). É a
+ *     mesma assimetria de `podemConviver`: ali, receber funk explícito num rádio
+ *     de louvor é a perda da pessoa; aqui também.
  *   • GÊNERO DESCONHECIDO na candidata: passa só quando a família-topo não é
  *     sensível. "Não sei o que é" não é "combina".
  *
@@ -165,9 +168,13 @@ export function podeRecomendar(
   const familia = familiaDoGenero(candidata.genero);
 
   if (familia === null) return !sensivel;
-  if (sensivel && candidata.conteudo !== 'limpo') return false;
+  const mesma = fortes.some((f) => f.familia === familia);
+  if (sensivel) {
+    if (candidata.conteudo === 'explicito') return false;
+    if (!mesma && candidata.conteudo !== 'limpo') return false;
+  }
 
-  if (fortes.some((f) => f.familia === familia)) return true;
+  if (mesma) return true;
   if (relacaoDeFamilias(topo.familia, familia) === 'oposta') return false;
   if (fortes.some((f) => relacaoDeFamilias(f.familia, familia) === 'vizinha')) return true;
   if (sensivel) return false;

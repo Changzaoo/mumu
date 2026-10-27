@@ -51,10 +51,10 @@ describe('familiasDoPerfil', () => {
 });
 
 describe('bibliotecaCoerente', () => {
-  it('quem só ouve gospel recebe só o gospel comprovadamente limpo', () => {
+  it('quem só ouve gospel recebe só gospel — nunca o explícito, e de outra família só o limpo', () => {
     const perfil = perfilDeGosto({ historico: plays(['g1', 'g1', 'g1']), curtidas: [], now: agora });
     const ids = bibliotecaCoerente(BIBLIOTECA, familiasDoPerfil(perfil), semIdade).map((e) => e.track.id);
-    expect(ids).toEqual(['g1']);
+    expect(ids).toEqual(['g1', 'g2']);
   });
 
   it('quem só ouve trap não recebe gospel, mas recebe trap e o sem gênero', () => {
@@ -72,7 +72,7 @@ describe('bibliotecaCoerente', () => {
   it('a semente do onboarding já fecha a fronteira no dia zero', () => {
     const perfil = perfilDeGosto({ historico: [], curtidas: [], sementesDeGenero: ['Gospel'], now: agora });
     const ids = bibliotecaCoerente(BIBLIOTECA, familiasDoPerfil(perfil), semIdade).map((e) => e.track.id);
-    expect(ids).toEqual(['g1']);
+    expect(ids).toEqual(['g1', 'g2']);
   });
 
   it('sem gosto, só a idade filtra', () => {

@@ -49,15 +49,16 @@ const perfil = (...partes: Array<[FamiliaDeGenero, number]>): FamiliaDoGosto[] =
   partes.map(([familia, fatia]) => ({ familia, fatia }));
 
 describe('teste de mesa: gospel, trap e sertanejo', () => {
-  it('quem só ouve gospel não recebe trap, funk, rap nem nada que não seja limpo', () => {
+  it('quem só ouve gospel não recebe trap, funk, rap nem nada explícito ou sem gênero', () => {
     const oferecido = filtrarPeloGosto(perfil(['devocional', 1]), ACERVO, ler);
     const generos = generosDe(oferecido);
     expect(generos.has('Trap')).toBe(false);
     expect(generos.has('Funk')).toBe(false);
     expect(generos.has('Hip-Hop/Rap')).toBe(false);
     expect(generos.has(null)).toBe(false);
-    // Só o louvor comprovadamente limpo: "não sei" não é "está limpo".
-    expect(oferecido.map((f) => f.titulo)).toEqual(['Louvor 1']);
+    // Só louvor: o da própria família entra mesmo sem letra julgada; de outra
+    // família, só o comprovadamente limpo (e não há família vizinha).
+    expect(oferecido.map((f) => f.titulo)).toEqual(['Louvor 1', 'Louvor 2']);
   });
 
   it('quem só ouve trap não recebe gospel nem clássica, mas recebe rap, funk e pop', () => {

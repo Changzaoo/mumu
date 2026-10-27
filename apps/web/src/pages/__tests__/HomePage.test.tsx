@@ -147,15 +147,17 @@ describe('HomePage (personal library)', () => {
       await renderHome();
 
       const gospel = await screen.findByText('Gospel');
-      const rock = screen.getByText('Rock');
+      // O rock, maior gênero do acervo, NÃO é oferecido a quem só ouve gospel:
+      // é família oposta na tabela de coerência (lib/reco/coerencia). Antes da
+      // coerência ele vinha depois do gospel; agora não vem.
+      expect(screen.queryByText('Rock')).not.toBeInTheDocument();
+      expect(screen.queryByText('Rock 0')).not.toBeInTheDocument();
+
+      // E as ramificações do gospel vêm logo depois do tronco.
+      const ramo = screen.getByText('Gospel para descobrir');
       // `compareDocumentPosition` responde a única pergunta que importa aqui:
       // quem vem ANTES na página. Contar prateleiras não responderia.
-      expect(gospel.compareDocumentPosition(rock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-
-      // E as ramificações do gospel ficam entre um e outro.
-      const ramo = screen.getByText('Gospel para descobrir');
       expect(gospel.compareDocumentPosition(ramo) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
-      expect(ramo.compareDocumentPosition(rock) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
     },
   );
 
