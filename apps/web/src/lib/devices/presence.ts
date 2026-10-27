@@ -30,7 +30,7 @@ import type { User } from 'firebase/auth';
 import type { TrackDto } from '@radinho/shared';
 import { db, subscribeAuth } from '@/lib/firebase';
 import { resumeAt, usePlayerStore } from '@/stores/playerStore';
-import { definirAlvoRemoto } from '@/lib/devices/alvoRemoto';
+import { definirAlvoRemoto, escolherAlvoRemoto } from '@/lib/devices/alvoRemoto';
 import { PRESETS_EM_ORDEM } from '@/lib/audio/eqPresets';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -46,6 +46,16 @@ const HEARTBEAT_MS = 25_000;
  * fingir presença por muito tempo.
  */
 const FRESH_MS = 180_000;
+/**
+ * "TOCANDO" SÓ VALE COM SINAL RECENTE. Quem toca publica a cada 25 s no
+ * máximo (pulso + progresso); um "tocando" com mais de 90 s de idade é de um
+ * app que morreu ou congelou em segundo plano com a presença no ar. Medido em
+ * 27/10: o moto g34 ficou seis minutos "tocando Backstage em 0:00" no
+ * Firestore, e o computador espelhou um aparelho mudo, mandou cliques e seeks
+ * para ele e só três minutos depois o deu por offline. O aparelho continua na
+ * lista (online até os 180 s), mas deixa de ser quem recebe o som.
+ */
+const TOCANDO_FRESCO_MS = 90_000;
 /**
  * Janela para OFERECER retomar o que tocava em outro aparelho. Some depois de um
  * tempo: retomar de onde parou faz sentido em horas, não em dias — reabrir o app
@@ -447,13 +457,24 @@ function emitRemote(next: RemotePlayback | null): void {
   if (changed) for (const listener of remoteListeners) listener(remoteState);
 }
 
+/**
+ * Aparelhos que NÃO RESPONDERAM a um pedido de tocar (id → hora da marca, em
+ * tempo do servidor). Um app morto em segundo plano fica "online, tocando" na
+ * presença por até três minutos; sem esta lista, cada clique seguinte iria
+ * para o mesmo buraco. A marca cai sozinha quando o aparelho publica de novo.
+ */
+const semResposta = new Map<string, number>();
+
 function emitDevices(next: DeviceInfo[]): void {
-  deviceState = next;
+  // A posse chega por outro documento, em outro momento: a lista é refeita com
+  // o dono atual, senão o alvo do clique olharia para uma posse já trocada.
+  deviceState = next.map((d) =>
+    d.isActive === (activeDeviceId === d.id) ? d : { ...d, isActive: activeDeviceId === d.id },
+  );
+  next = deviceState;
   // O player lê daqui, sem importar este módulo, para saber se um clique numa
   // música deve tocar aqui ou ser mandado para o aparelho que está com o som.
-  const me = getDeviceId();
-  const tocandoFora = next.find((d) => d.id !== me && d.online && d.isPlaying && d.track);
-  definirAlvoRemoto(tocandoFora ? { id: tocandoFora.id, name: tocandoFora.name } : null);
+  definirAlvoRemoto(escolherAlvoRemoto(next, getDeviceId(), semResposta));
   for (const listener of deviceListeners) listener(deviceState);
 }
 
@@ -690,6 +711,53 @@ export async function sendCommand(
   await addDoc(collection(db, 'users', currentUser.uid, 'commands'), payload).catch(
     () => undefined,
   );
+}
+
+/** Quanto tempo esperar o outro aparelho acusar o pedido antes de tocar aqui. */
+const CONFIRMACAO_MS = 7_000;
+
+/**
+ * MANDA A FAIXA PARA OUTRO APARELHO E ESPERA ELE ACUSAR.
+ *
+ * O pedido viaja pelo Firestore e o outro lado, ao aplicar, publica a presença
+ * na hora (`publish(true)` em `tocarFaixaPedida`). Então "respondeu" é ver a
+ * presença dele mudar depois do envio: a faixa pedida aparecer lá, ou qualquer
+ * sinal de vida mais novo que o pedido (se está vivo, vai aplicar).
+ *
+ * Sem resposta em 7 s, resolve `false` e marca o aparelho como surdo: quem
+ * chamou toca aqui mesmo e avisa. ANTES, o clique num aparelho morto não
+ * fazia NADA — nem aqui, nem lá — e a pessoa clicava de novo, e de novo.
+ */
+export async function enviarFaixaParaAparelho(
+  alvoId: string,
+  carga: CargaDeComando,
+  limiteMs = CONFIRMACAO_MS,
+): Promise<boolean> {
+  const enviadoEm = agoraNoServidor();
+  await sendCommand(alvoId, 'playTrack', undefined, carga);
+  return new Promise<boolean>((resolve) => {
+    let encerrado = false;
+    const acusou = (devices: DeviceInfo[]): boolean => {
+      const d = devices.find((x) => x.id === alvoId);
+      return Boolean(d && (d.trackId === carga.trackId || d.seenAt > enviadoEm));
+    };
+    const terminar = (ok: boolean): void => {
+      if (encerrado) return;
+      encerrado = true;
+      clearTimeout(timer);
+      parar();
+      if (!ok) {
+        semResposta.set(alvoId, enviadoEm);
+        emitDevices(deviceState); // o alvo some na hora; o próximo clique toca aqui
+      }
+      resolve(ok);
+    };
+    const timer = setTimeout(() => terminar(false), limiteMs);
+    const parar = subscribeDevices((devices) => {
+      if (acusou(devices)) terminar(true);
+    });
+    if (acusou(deviceState)) terminar(true);
+  });
 }
 
 /**
@@ -973,6 +1041,10 @@ function start(user: User): void {
             }
           }
           const online = agoraNoServidor() - seenAt < FRESH_MS;
+          const tocandoFresco = agoraNoServidor() - seenAt < TOCANDO_FRESCO_MS;
+          // Publicou de novo depois de ser dado como surdo: está vivo, volta a contar.
+          const marca = semResposta.get(d.id);
+          if (marca !== undefined && seenAt > marca) semResposta.delete(d.id);
           // Entrada morta há mais de um mês (navegador limpo, aparelho trocado):
           // sai da conta, uma vez por sessão.
           if (!podado && d.id !== me && agoraNoServidor() - seenAt > PODA_MS) {
@@ -987,7 +1059,7 @@ function start(user: User): void {
             id: d.id,
             name: p.name,
             isSelf: d.id === me,
-            isPlaying: Boolean(p.isPlaying),
+            isPlaying: Boolean(p.isPlaying) && (d.id === me || tocandoFresco),
             isActive: activeDeviceId === d.id,
             online,
             track: p.track ?? null,
@@ -997,7 +1069,7 @@ function start(user: User): void {
             duration: typeof p.duration === 'number' ? p.duration : 0,
             seenAt,
           });
-          if (d.id !== me && online && p.isPlaying && p.track) {
+          if (d.id !== me && online && tocandoFresco && p.isPlaying && p.track) {
             found ??= {
               deviceId: d.id,
               deviceName: p.name,

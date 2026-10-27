@@ -62,8 +62,11 @@ vi.mock('@/lib/api', () => ({
 
 vi.mock('@/lib/audio/mediaSession', () => ({ initMediaSession: vi.fn() }));
 
-const sendCommand = vi.fn(() => Promise.resolve());
-vi.mock('@/lib/devices/presence', () => ({ sendCommand }));
+/** O envio com confirmação: `true` = o outro aparelho acusou; `false` = surdo. */
+const enviarFaixaParaAparelho = vi.fn((): Promise<boolean> => Promise.resolve(true));
+vi.mock('@/lib/devices/presence', () => ({ enviarFaixaParaAparelho }));
+const toast = vi.fn();
+vi.mock('sonner', () => ({ toast }));
 
 import { initPlayerEngine, usePlayerStore } from '@/stores/playerStore';
 import { definirAlvoRemoto } from '@/lib/devices/alvoRemoto';
@@ -79,7 +82,9 @@ const assentar = (): Promise<void> => new Promise((r) => setTimeout(r, 0));
 beforeEach(() => {
   usePlayerStore.setState(inicial, true);
   definirAlvoRemoto(null);
-  sendCommand.mockClear();
+  enviarFaixaParaAparelho.mockClear();
+  enviarFaixaParaAparelho.mockImplementation(() => Promise.resolve(true));
+  toast.mockClear();
 });
 
 describe('com outro aparelho tocando', () => {
@@ -92,10 +97,8 @@ describe('com outro aparelho tocando', () => {
     await assentar();
 
     expect(usePlayerStore.getState().currentTrack).toBeNull();
-    expect(sendCommand).toHaveBeenCalledWith(
+    expect(enviarFaixaParaAparelho).toHaveBeenCalledWith(
       'celular',
-      'playTrack',
-      undefined,
       expect.objectContaining({ trackId: 'a' }),
     );
   });
@@ -105,11 +108,40 @@ describe('com outro aparelho tocando', () => {
     await assentar();
 
     expect(usePlayerStore.getState().currentTrack).toBeNull();
-    expect(sendCommand).toHaveBeenCalledWith('celular', 'playTrack', undefined, {
+    expect(enviarFaixaParaAparelho).toHaveBeenCalledWith('celular', {
       trackId: 'c',
       queue: ['a', 'b', 'c'],
       index: 2,
     });
+  });
+
+  it('se o outro aparelho não responde, toca AQUI e avisa', async () => {
+    enviarFaixaParaAparelho.mockImplementation(() => Promise.resolve(false));
+
+    usePlayerStore.getState().playQueue(faixas as never, 1);
+    await assentar();
+
+    expect(enviarFaixaParaAparelho).toHaveBeenCalledTimes(1);
+    expect(usePlayerStore.getState().currentTrack?.id).toBe('b');
+    expect(usePlayerStore.getState().queue.map((t) => t.id)).toEqual(['a', 'b', 'c']);
+    expect(toast).toHaveBeenCalledWith(expect.stringContaining('moto g não respondeu'));
+  });
+
+  it('a falta de resposta de um pedido velho não atropela o pedido novo', async () => {
+    let resolverPrimeiro: (ok: boolean) => void = () => undefined;
+    enviarFaixaParaAparelho.mockImplementationOnce(
+      () => new Promise<boolean>((r) => (resolverPrimeiro = r)),
+    );
+    usePlayerStore.getState().playTrack(faixas[0] as never);
+    await assentar();
+    usePlayerStore.getState().playTrack(faixas[2] as never); // o pedido novo (acusado)
+    await assentar();
+
+    resolverPrimeiro(false); // o velho expira depois
+    await assentar();
+
+    expect(usePlayerStore.getState().currentTrack).toBeNull();
+    expect(toast).not.toHaveBeenCalled();
   });
 
   it('mas se ESTE aparelho está tocando, o clique é dele', async () => {
@@ -118,7 +150,7 @@ describe('com outro aparelho tocando', () => {
     usePlayerStore.getState().playTrack(faixas[0] as never);
     await assentar();
 
-    expect(sendCommand).not.toHaveBeenCalled();
+    expect(enviarFaixaParaAparelho).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().currentTrack?.id).toBe('a');
   });
 });
@@ -128,7 +160,7 @@ describe('sem ninguém tocando fora', () => {
     usePlayerStore.getState().playTrack(faixas[1] as never);
     await assentar();
 
-    expect(sendCommand).not.toHaveBeenCalled();
+    expect(enviarFaixaParaAparelho).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().currentTrack?.id).toBe('b');
   });
 });
@@ -148,7 +180,7 @@ describe('o fim da faixa', () => {
     for (const handler of engineHandlers.get('ended') ?? []) handler({ track: faixas[0] });
     await assentar();
 
-    expect(sendCommand).not.toHaveBeenCalled();
+    expect(enviarFaixaParaAparelho).not.toHaveBeenCalled();
     expect(usePlayerStore.getState().currentTrack?.id).toBe('b');
   });
 });

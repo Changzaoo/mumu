@@ -470,22 +470,49 @@ function anotarPuloDaAtual(): void {
   }
 }
 
-function mandarParaQuemToca(get: () => PlayerState, tracks: TrackDto[], index: number): boolean {
-  if (avancoAutomatico) return false;
+/** Verdadeiro enquanto um pedido volta para cá por falta de resposta do outro. */
+let tocandoAquiPorFalta = false;
+/** Conta os pedidos mandados para fora; só o mais recente pode voltar para cá. */
+let pedidoRemoto = 0;
+
+function mandarParaQuemToca(
+  get: () => PlayerState,
+  tracks: TrackDto[],
+  index: number,
+  tocarAqui: () => void,
+): boolean {
+  if (avancoAutomatico || tocandoAquiPorFalta) return false;
   const alvo = alvoRemotoAtual();
   if (!alvo || get().isPlaying) return false;
   const faixa = tracks[index];
   if (!faixa) return false;
+  const pedido = ++pedidoRemoto;
   // O envio é assíncrono (Firestore) e o import é tardio de propósito: a
   // presença importa este módulo, e trazê-la aqui em cima fecharia o ciclo.
   void import('@/lib/devices/presence')
-    .then(({ sendCommand }) =>
-      sendCommand(alvo.id, 'playTrack', undefined, {
+    .then(({ enviarFaixaParaAparelho }) =>
+      enviarFaixaParaAparelho(alvo.id, {
         trackId: faixa.id,
         queue: tracks.map((t) => t.id),
         index,
       }),
     )
+    .then((respondeu) => {
+      // SEM RESPOSTA, O CLIQUE NÃO PODE VIRAR NADA. O app do outro aparelho
+      // morreu ou congelou com a presença no ar; a pessoa clicou e ficou
+      // olhando. Toca aqui e diz por quê — a menos que ela já tenha pedido
+      // outra coisa (pedido mais novo) ou este aparelho já esteja tocando.
+      if (respondeu || pedido !== pedidoRemoto || get().isPlaying) return;
+      tocandoAquiPorFalta = true;
+      try {
+        tocarAqui();
+      } finally {
+        tocandoAquiPorFalta = false;
+      }
+      void import('sonner')
+        .then(({ toast }) => toast(`${alvo.name} não respondeu — tocando aqui.`))
+        .catch(() => undefined);
+    })
     .catch(() => undefined);
   return true;
 }
@@ -2262,7 +2289,7 @@ export const usePlayerStore = create<PlayerState>()(
             avisarBloqueio();
             return;
           }
-          if (mandarParaQuemToca(get, [track], 0)) return;
+          if (mandarParaQuemToca(get, [track], 0, () => get().playTrack(track, context))) return;
           const ctx = context ?? { source: 'queue' };
           set({ queue: [track], originalQueue: [track], context: ctx });
           loadIndex(0, true);
@@ -2319,7 +2346,12 @@ export const usePlayerStore = create<PlayerState>()(
             inicio = depois ? tracks.indexOf(depois) : 0;
           }
           const index = clamp(inicio, 0, tracks.length - 1);
-          if (mandarParaQuemToca(get, tracks, index)) return;
+          if (
+            mandarParaQuemToca(get, tracks, index, () =>
+              get().playQueue(todas, startIndex, context),
+            )
+          )
+            return;
           const { shuffle } = get();
           const queue = shuffle ? shuffleKeepingFirst(tracks, index) : [...tracks];
           set({
@@ -2333,7 +2365,7 @@ export const usePlayerStore = create<PlayerState>()(
         playAt: (index) => {
           const fila = get().queue;
           if (index < 0 || index >= fila.length) return;
-          if (mandarParaQuemToca(get, fila, index)) return;
+          if (mandarParaQuemToca(get, fila, index, () => get().playAt(index))) return;
           // Clicar em outra faixa da fila com esta tocando também é pular.
           if (index !== get().queueIndex) anotarPuloDaAtual();
           loadIndex(index, true);
