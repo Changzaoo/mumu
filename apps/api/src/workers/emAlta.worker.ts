@@ -28,7 +28,9 @@ import {
   entradasDoDeezer,
   entradasDoYoutube,
   fundirParadas,
+  generoDoFunkDaApple,
   idsDoRssDaApple,
+  PARADA_FUNK_APPLE,
   PARADAS_APPLE,
   PARADAS_DEEZER,
   PLAYLISTS_YOUTUBE,
@@ -117,7 +119,14 @@ async function lerApple(): Promise<LeituraDeFonte> {
           if (typeof r?.trackId === 'number') lookup.set(String(r.trackId), r);
         }
       }
-      saida.entradas.push(...entradasDaApple(parada.genero, rss, lookup));
+      saida.entradas.push(
+        ...entradasDaApple(
+          parada.genero,
+          rss,
+          lookup,
+          parada.id === PARADA_FUNK_APPLE ? generoDoFunkDaApple : undefined,
+        ),
+      );
     } catch (err) {
       saida.falhas[`apple:${parada.id}`] = String(err);
     }
@@ -197,7 +206,14 @@ export async function lerParadasUmaVez(agora = new Date()): Promise<ResultadoDaB
   const porFonte = Object.fromEntries(leituras.map((l) => [l.fonte, l.entradas.length]));
   const entradas = leituras.flatMap((l) => l.entradas);
   if (entradas.length === 0) {
-    return { gravou: false, motivo: 'nenhuma fonte respondeu', porFonte, falhas, generos: 0, faixas: 0 };
+    return {
+      gravou: false,
+      motivo: 'nenhuma fonte respondeu',
+      porFonte,
+      falhas,
+      generos: 0,
+      faixas: 0,
+    };
   }
   const acervo = await lerAcervo();
   const generos = fundirParadas(entradas, acervo, {

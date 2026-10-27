@@ -130,6 +130,18 @@ export function generoDoRapFunk(artista: string, titulo: string): Genre {
   return CREDITO_DE_FUNK.test(`${artista} ${titulo}`) ? 'Funk' : 'Hip-Hop/Rap';
 }
 
+/**
+ * A parada 1139 "Funk" da Apple, na loja brasileira, é funk do Brasil no topo
+ * (MC GP, MC Iguinho, DJ Boy) com funk/soul americano no meio (James Brown,
+ * Rick James, Cause & Effect). O mesmo crédito decide: MC/DJ é Funk; o resto
+ * é o funk americano, que aqui mora em R&B/Soul (como a "Soul & Funk" do Deezer).
+ */
+export const PARADA_FUNK_APPLE = 1139;
+
+export function generoDoFunkDaApple(artista: string, titulo: string): Genre {
+  return CREDITO_DE_FUNK.test(`${artista} ${titulo}`) ? 'Funk' : 'R&B/Soul';
+}
+
 interface DeezerFaixa {
   title?: string;
   title_short?: string;
@@ -238,6 +250,8 @@ export function entradasDaApple(
   genero: Genre,
   rss: unknown,
   lookup: ReadonlyMap<string, AppleLookup>,
+  /** Parada que mistura dois gêneros nossos: o crédito de cada faixa decide. */
+  decidir?: (artista: string, titulo: string) => Genre,
 ): EntradaDeParada[] {
   const feed = (rss as { feed?: { entry?: unknown } } | null)?.feed;
   const bruto = feed?.entry;
@@ -262,7 +276,7 @@ export function entradasDaApple(
     const origem = detalhe?.trackViewUrl ?? e?.id?.label ?? null;
     saida.push({
       fonte: 'apple',
-      genero,
+      genero: decidir ? decidir(artista, titulo) : genero,
       posicao: i + 1,
       titulo,
       artista,

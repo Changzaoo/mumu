@@ -10,6 +10,7 @@ import {
   entradasDoDeezer,
   entradasDoYoutube,
   fundirParadas,
+  generoDoFunkDaApple,
   generoDoRapFunk,
   idsDoRssDaApple,
   type EntradaDeParada,
@@ -33,9 +34,30 @@ describe('ler as fontes', () => {
   it('Deezer: selo da gravadora vira explícito/limpo/não sei; MC na parada de rap/funk vira Funk', () => {
     const json = {
       data: [
-        { title: 'A', artist: { name: 'MC Ryan SP' }, explicit_content_lyrics: 1, duration: 150, position: 1, link: 'https://www.deezer.com/track/1', album: { cover_medium: 'c1' } },
-        { title: 'B', artist: { name: 'Matuê' }, explicit_content_lyrics: 0, duration: 200, position: 2, link: 'https://www.deezer.com/track/2' },
-        { title: 'C', artist: { name: 'Teto' }, explicit_content_lyrics: 6, explicit_lyrics: false, position: 3 },
+        {
+          title: 'A',
+          artist: { name: 'MC Ryan SP' },
+          explicit_content_lyrics: 1,
+          duration: 150,
+          position: 1,
+          link: 'https://www.deezer.com/track/1',
+          album: { cover_medium: 'c1' },
+        },
+        {
+          title: 'B',
+          artist: { name: 'Matuê' },
+          explicit_content_lyrics: 0,
+          duration: 200,
+          position: 2,
+          link: 'https://www.deezer.com/track/2',
+        },
+        {
+          title: 'C',
+          artist: { name: 'Teto' },
+          explicit_content_lyrics: 6,
+          explicit_lyrics: false,
+          position: 3,
+        },
         { title: '', artist: { name: 'Vazio' } },
       ],
     };
@@ -49,28 +71,76 @@ describe('ler as fontes', () => {
     expect(generoDoRapFunk('Djonga', 'Leão')).toBe('Hip-Hop/Rap');
   });
 
+  it('parada 1139 "Funk" da Apple: MC/DJ é Funk, o funk americano vai para R&B/Soul', () => {
+    // Top 8 real de 27/10/2026 depois de trocar 1123 por 1139.
+    expect(generoDoFunkDaApple('Mc GP, Mc Paiva ZS', 'Menina Viajante')).toBe('Funk');
+    expect(generoDoFunkDaApple('DJ BOY & MC Joãozinho VT', 'Pior Versão')).toBe('Funk');
+    expect(generoDoFunkDaApple('MC Iguinho da Capital', 'Moto de Vilão')).toBe('Funk');
+    expect(generoDoFunkDaApple('James Brown', 'Sex Machine')).toBe('R&B/Soul');
+    expect(generoDoFunkDaApple('Rick James', 'Spend The Night With Me')).toBe('R&B/Soul');
+    expect(generoDoFunkDaApple('Cause & Effect', 'What Do You See')).toBe('R&B/Soul');
+    expect(generoDoFunkDaApple('Benetti House Bar', 'Our Pleasure')).toBe('R&B/Soul');
+  });
+
   it('Apple: a ordem vem do RSS, o selo e a duração do lookup', () => {
     const rss = {
       feed: {
         entry: [
-          { 'im:name': { label: 'Housewife' }, 'im:artist': { label: 'Tate McRae' }, 'im:image': [{ label: 'x/55x55bb.png' }, { label: 'x/170x170bb.png' }], id: { label: 'https://music.apple.com/br/album/h/1?i=10', attributes: { 'im:id': '10' } } },
-          { 'im:name': { label: 'Sem lookup' }, 'im:artist': { label: 'Alguém' }, id: { attributes: { 'im:id': '11' } } },
+          {
+            'im:name': { label: 'Housewife' },
+            'im:artist': { label: 'Tate McRae' },
+            'im:image': [{ label: 'x/55x55bb.png' }, { label: 'x/170x170bb.png' }],
+            id: {
+              label: 'https://music.apple.com/br/album/h/1?i=10',
+              attributes: { 'im:id': '10' },
+            },
+          },
+          {
+            'im:name': { label: 'Sem lookup' },
+            'im:artist': { label: 'Alguém' },
+            id: { attributes: { 'im:id': '11' } },
+          },
         ],
       },
     };
     expect(idsDoRssDaApple(rss)).toEqual(['10', '11']);
     const lookup = new Map([
-      ['10', { trackId: 10, trackName: 'Housewife', artistName: 'Tate McRae', trackExplicitness: 'explicit', trackTimeMillis: 208_810, artworkUrl100: 'y/100x100bb.jpg', trackViewUrl: 'https://music.apple.com/br/album/h/1?i=10' }],
+      [
+        '10',
+        {
+          trackId: 10,
+          trackName: 'Housewife',
+          artistName: 'Tate McRae',
+          trackExplicitness: 'explicit',
+          trackTimeMillis: 208_810,
+          artworkUrl100: 'y/100x100bb.jpg',
+          trackViewUrl: 'https://music.apple.com/br/album/h/1?i=10',
+        },
+      ],
     ]);
     const lidas = entradasDaApple('Pop', rss, lookup);
-    expect(lidas[0]).toMatchObject({ posicao: 1, explicito: true, duracaoMs: 208_810, capa: 'y/600x600bb.jpg', origem: 'https://music.apple.com/br/album/h/1?i=10' });
+    expect(lidas[0]).toMatchObject({
+      posicao: 1,
+      explicito: true,
+      duracaoMs: 208_810,
+      capa: 'y/600x600bb.jpg',
+      origem: 'https://music.apple.com/br/album/h/1?i=10',
+    });
     expect(lidas[1]).toMatchObject({ posicao: 2, explicito: null, duracaoMs: null, origem: null });
   });
 
   it('YouTube: o nome do vídeo vira artista e título; versão mexida fica de fora', () => {
     const lidas = entradasDoYoutube([
-      { url: 'https://www.youtube.com/watch?v=abcdefghijk', title: 'Matuê - Mantém (Clipe Oficial)', duracaoSeg: 200 },
-      { url: 'https://www.youtube.com/watch?v=lmnopqrstuv', title: 'Matuê - Mantém (speed up)', duracaoSeg: 190 },
+      {
+        url: 'https://www.youtube.com/watch?v=abcdefghijk',
+        title: 'Matuê - Mantém (Clipe Oficial)',
+        duracaoSeg: 200,
+      },
+      {
+        url: 'https://www.youtube.com/watch?v=lmnopqrstuv',
+        title: 'Matuê - Mantém (speed up)',
+        duracaoSeg: 190,
+      },
     ]);
     expect(lidas).toHaveLength(1);
     expect(lidas[0]).toMatchObject({
@@ -88,9 +158,23 @@ describe('fundir', () => {
   it('a mesma música em duas fontes é UMA, com nota maior e as duas origens', () => {
     const generos = fundirParadas(
       [
-        entrada({ fonte: 'youtube', genero: null, posicao: 3, titulo: 'Pós', origem: 'https://www.youtube.com/watch?v=abcdefghijk', capa: 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg' }),
+        entrada({
+          fonte: 'youtube',
+          genero: null,
+          posicao: 3,
+          titulo: 'Pós',
+          origem: 'https://www.youtube.com/watch?v=abcdefghijk',
+          capa: 'https://i.ytimg.com/vi/abcdefghijk/hqdefault.jpg',
+        }),
         entrada({ fonte: 'deezer', posicao: 1, capa: 'https://cdn-images.dzcdn.net/disco.jpg' }),
-        entrada({ fonte: 'apple', posicao: 1, titulo: 'Outra', artista: 'Alguém', genero: 'Pop', origem: null }),
+        entrada({
+          fonte: 'apple',
+          posicao: 1,
+          titulo: 'Outra',
+          artista: 'Alguém',
+          genero: 'Pop',
+          origem: null,
+        }),
       ],
       [],
     );
@@ -110,7 +194,14 @@ describe('fundir', () => {
 
   it('o veredito do acervo vence o selo; o título com palavrão condena; fontes limpas absolvem', () => {
     const acervo: FaixaDoAcervo[] = [
-      { id: 'local:1', titulo: 'Pós (Ao Vivo)', artista: 'Felipe e Rodrigo', genero: 'Sertanejo', veredicto: 'explicito', tocavel: true },
+      {
+        id: 'local:1',
+        titulo: 'Pós (Ao Vivo)',
+        artista: 'Felipe e Rodrigo',
+        genero: 'Sertanejo',
+        veredicto: 'explicito',
+        tocavel: true,
+      },
     ];
     const generos = fundirParadas(
       [
@@ -132,11 +223,33 @@ describe('fundir', () => {
 
   it('sem voto de parada, o gênero vem do artista no acervo; faixa do acervo que não toca não é "do acervo"', () => {
     const acervo: FaixaDoAcervo[] = [
-      { id: 'local:a', titulo: 'Outra do Matuê', artista: 'Matuê', genero: 'Trap', veredicto: null, tocavel: true },
-      { id: 'local:b', titulo: 'Mantém', artista: 'Matuê', genero: 'Trap', veredicto: 'limpo', tocavel: false },
+      {
+        id: 'local:a',
+        titulo: 'Outra do Matuê',
+        artista: 'Matuê',
+        genero: 'Trap',
+        veredicto: null,
+        tocavel: true,
+      },
+      {
+        id: 'local:b',
+        titulo: 'Mantém',
+        artista: 'Matuê',
+        genero: 'Trap',
+        veredicto: 'limpo',
+        tocavel: false,
+      },
     ];
     const generos = fundirParadas(
-      [entrada({ fonte: 'youtube', genero: null, titulo: 'Mantém', artista: 'Matuê', explicito: null })],
+      [
+        entrada({
+          fonte: 'youtube',
+          genero: null,
+          titulo: 'Mantém',
+          artista: 'Matuê',
+          explicito: null,
+        }),
+      ],
       acervo,
     );
     const f = generos[0]!.faixas[0]!;
@@ -156,6 +269,8 @@ describe('fundir', () => {
   });
 
   it('a chave ignora acento, caixa e parênteses', () => {
-    expect(chaveDaMusica('Felipe e Rodrigo', 'Pós (Ao Vivo)')).toBe(chaveDaMusica('FELIPE E RODRIGO', 'pos'));
+    expect(chaveDaMusica('Felipe e Rodrigo', 'Pós (Ao Vivo)')).toBe(
+      chaveDaMusica('FELIPE E RODRIGO', 'pos'),
+    );
   });
 });
