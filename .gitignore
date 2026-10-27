@@ -13,9 +13,12 @@ coverage/
 
 # Environment
 .env
+.env.*
 .env.local
 .env.*.local
 !.env.example
+# Claude Code: pode conter config de deploy da API
+.claude/launch.json
 
 # Prisma
 apps/api/prisma/*.db
