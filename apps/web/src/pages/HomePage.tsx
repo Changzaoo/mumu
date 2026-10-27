@@ -15,6 +15,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { CartaoDeFaixa } from '@/components/media/CartaoDeFaixa';
+import { AvisoDoMundo } from '@/components/media/AvisoDoMundo';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { PrateleiraEmAlta } from '@/components/media/PrateleiraEmAlta';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
@@ -725,6 +726,10 @@ export default function HomePage() {
       <div className="relative">
         <QuickAccess artists={meusArtistas} />
       </div>
+
+      {/* Quem segue um artista fica sabendo de show, transmissão, prêmio e
+          lançamento aqui (ver components/media/AvisoDoMundo). Some sem novidade. */}
+      <AvisoDoMundo />
 
       {/* O que está no topo das paradas agora, por gênero — do servidor, já
           fundido; aqui só a idade e o gosto desta pessoa decidem o que fica
