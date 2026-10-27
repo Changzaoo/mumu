@@ -1,0 +1,34 @@
+# Importador do radinho no servidor vnmax (systemd de USUÁRIO, não de sistema).
+# Instalar: cp infra/systemd/radinho-importer.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now radinho-importer
+# Env: /home/v/aurial/importer.env (ver infra/systemd/importer.env.vnmax.example) e
+#      /home/v/aurial/segredos.env (IMPORT_SERVICE_TOKEN, NVIDIA_API_KEY; fora do git).
+# Deps: `npm install --omit=dev` em apps/importer (não há pnpm no servidor) e, para o
+#      relógio da letra, `python3 -m pip install --user --break-system-packages
+#      faster-whisper stable-ts --extra-index-url https://download.pytorch.org/whl/cpu`.
+# O deploy-api.sh reinicia esta unidade quando apps/importer muda (IMPORTER_HEALTH_URL :8787).
+[Unit]
+Description=Importador do radinho (yt-dlp, letras, relogio, jev) - checkout /opt/aurial
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/aurial/apps/importer
+ExecStart=/usr/bin/node --env-file=/home/v/aurial/importer.env --env-file=/home/v/aurial/segredos.env /opt/aurial/apps/importer/server.mjs
+Environment=NODE_OPTIONS=--max-old-space-size=512
+Restart=always
+RestartSec=5
+# Celeron N4020 (2 núcleos, 3,4 GB) dividido com o Bitcoin VNMAX: o VNMAX ganha a disputa.
+Nice=10
+CPUWeight=50
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+# Inclui os filhos (yt-dlp, ffmpeg, palavras.py com whisper small ≈ 700 MB).
+MemoryHigh=1100M
+MemoryMax=1400M
+StandardOutput=append:/home/v/aurial/importer.log
+StandardError=append:/home/v/aurial/importer.log
+
+[Install]
+WantedBy=default.target

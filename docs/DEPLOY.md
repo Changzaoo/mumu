@@ -265,3 +265,24 @@ Processos: `aurial-api` (`dist/main.js`) e `aurial-worker` (`dist/workers/index.
 | Porta 80/443/4000 já em uso                      | `sudo ss -ltnp                                                                                                                                                              | grep -E ':80 | :443 | :4000'` — pare o serviço conflitante (apache/nginx nativo) |
 | Upload grande falha em ~1 min                    | `proxy_read_timeout`/`client_max_body_size` no `nginx.conf` (512m padrão) — aumente se enviar arquivos maiores                                                              |
 | Disco cheio                                      | `docker system prune -f` (o deploy já faz prune de imagens), confira `/opt/aurial/backups` e o volume `media-cache`                                                         |
+
+## 13. Importador no servidor (vnmax, 27/10/2026)
+
+O servidor atual é o notebook **vnmax** (Tailscale `100.103.150.56`; `192.168.0.100` morreu),
+dividido com o Bitcoin VNMAX: Celeron N4020, 2 núcleos, 3,4 GB. O importador roda lá como
+**systemd de usuário** `radinho-importer` na porta **8787**, a partir do checkout `/opt/aurial`
+(o `deploy-api.sh` o reinicia quando `apps/importer` muda).
+
+| O quê                                 | Onde                                                                                                                                                                      |
+| ------------------------------------- | ------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Unidade                               | `infra/systemd/radinho-importer.service` → `~/.config/systemd/user/`                                                                                                      |
+| Env                                   | `/home/v/aurial/importer.env` (modelo em `infra/systemd/importer.env.vnmax.example`) + `segredos.env` (fora do git)                                                       |
+| yt-dlp                                | `/home/v/aurial/yt-dlp.sh` (`infra/scripts/yt-dlp-vnmax.sh`): injeta `--js-runtimes node` e guarda o stderr                                                               |
+| Dados                                 | `/home/v/aurial/{cofre,tempos,jev,work,cookies.txt}` — o cofre é só antessala (2 GB); o acervo mora no GitHub                                                             |
+| Deps                                  | `npm install --omit=dev` em `apps/importer`; `pip install --user --break-system-packages faster-whisper stable-ts --extra-index-url https://download.pytorch.org/whl/cpu` |
+| Quem atende `importer.radinho.online` | `~/.cloudflared/aurial-importer.yml` (`service: http://localhost:8787`); `IMPORTER_URL=http://100.103.150.56:8787` em `/opt/aurial/.env`                                  |
+
+Armadilha: o importador chama o yt-dlp com `--ignore-config`, então o `~/.config/yt-dlp/config`
+do servidor (que liga `--js-runtimes node`) não vale; sem o invólucro o YouTube resolve o formato
+e responde **403 nos bytes**. Diagnóstico: `tail ~/aurial/ytdlp-stderr.log`.
+Saúde: `curl http://127.0.0.1:8787/health` deve devolver o commit do `main`.
