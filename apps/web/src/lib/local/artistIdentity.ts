@@ -24,40 +24,7 @@
  * que não fundir: junta duas pessoas e não há como o usuário desfazer.
  */
 
-/** Minúsculas, sem acento, só letra/número — a mesma base do resto da lib. */
-function normalizar(value: string): string {
-  return value
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}+/gu, '')
-    .normalize('NFC')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-/** Como a pessoa é ANUNCIADA, na frente do nome. */
-const PAPEIS = new Set([
-  'dj',
-  'djs',
-  'mc',
-  'mcs',
-  'mr',
-  'mrs',
-  'ms',
-  'dr',
-  'sr',
-  'sra',
-  'the',
-  'o',
-  'a',
-  'os',
-  'as',
-  'banda',
-  'grupo',
-]);
-
-/** Carimbo de canal/lançamento no fim — nunca faz parte do nome. */
-const CARIMBOS = new Set(['oficial', 'official', 'vevo', 'topic', 'music', 'musica', 'brasil']);
+import { chaveDeIdentidadeDoArtista } from '@radinho/shared';
 
 /**
  * A identidade de um nome de artista. Duas grafias com a MESMA chave são a
@@ -80,39 +47,9 @@ export function artistIdentityKey(name: string): string {
  */
 const chavePorNome = new Map<string, string>();
 
+/** A regra vive no shared (a API grava fichas pela mesma chave). */
 function calcularChave(name: string): string {
-  const base = normalizar(name);
-  if (!base) return '';
-  const inteiro = base.replace(/ /g, '');
-
-  // "D.J. Kennedi" chega aqui como "d j kennedi": a pontuação virou espaço e o
-  // papel virou duas letras soltas. Iniciais vizinhas voltam a ser uma palavra
-  // antes da poda, senão "d" e "j" não são reconhecidos como papel nenhum.
-  const partes = base.split(' ').reduce<string[]>((acc, parte) => {
-    const anterior = acc[acc.length - 1];
-    if (parte.length === 1 && anterior !== undefined && anterior.length <= 2) {
-      acc[acc.length - 1] = anterior + parte;
-      return acc;
-    }
-    acc.push(parte);
-    return acc;
-  }, []);
-  while (partes.length > 1 && PAPEIS.has(partes[0] as string)) partes.shift();
-  while (partes.length > 1 && CARIMBOS.has(partes[partes.length - 1] as string)) partes.pop();
-
-  let curto = partes.join('');
-  // O papel também vem colado ("djkennedi", exportado assim por alguns sites).
-  // Aqui a poda exige uma cauda de CINCO letras, não quatro: sem o espaço não
-  // há como distinguir o papel do começo de um nome, e nomes curtos que
-  // começam por acaso com "dj"/"mc" — Djavan, Djonga, Mcfly — ficam de fora
-  // por isso. Errar aqui juntaria duas pessoas sem volta.
-  if (partes.length === 1) {
-    const colado = /^(dj|djs|mc|mcs|mr|mrs|dr|sr|sra)(.{5,})$/.exec(curto);
-    if (colado) curto = colado[2] as string;
-  }
-  // Nome curto demais depois da poda volta a valer inteiro: o risco de juntar
-  // duas pessoas diferentes é maior que o de deixar duas fichas de uma só.
-  return curto.length >= 4 ? curto : inteiro;
+  return chaveDeIdentidadeDoArtista(name);
 }
 
 /**

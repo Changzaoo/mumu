@@ -10,6 +10,7 @@ import { Disc3, Flame, MicVocal, Play, Share2 } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { SobreOArtista } from '@/components/media/SobreOArtista';
+import { AgendaDoArtista } from '@/components/media/AgendaDoArtista';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { VirtualList } from '@/components/media/VirtualList';
@@ -18,6 +19,7 @@ import { useTrackLikes } from '@/features/library/api';
 import { useArtistBio } from '@/lib/artistBio';
 import { useArtistImage } from '@/lib/artistImage';
 import { useArtistTopTracks } from '@/lib/artistTop';
+import { podeVerAgendaDe } from '@/lib/mundo/mundo';
 import { dominantLabel } from '@/lib/catalog/label';
 import * as localLibrary from '@/lib/local/localLibrary';
 import { usePlayerStore } from '@/stores/playerStore';
@@ -187,6 +189,11 @@ export default function ArtistLocalPage() {
           </p>
         )}
       </section>
+
+      {/* Agenda e notícias — shows, transmissões, prêmios e lançamentos que o
+          servidor mantém em cache (lib/mundo). Menor de idade só vê a agenda de
+          quem pode ouvir, e nunca o YouTube embutido. */}
+      <AgendaDoArtista artista={artist} ligado={podeVerAgendaDe(artist)} />
 
       {/* Sobre o artista — foto grande + bio conferida (lib/artistBio.ts). Sem
           bio com identidade provada, o card não aparece: vazio é melhor que a

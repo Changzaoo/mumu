@@ -738,3 +738,81 @@ model WorkerState {
   value     Json
   updatedAt DateTime @updatedAt
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// O MUNDO DA MÚSICA — agenda, prêmios e lançamentos por artista do acervo.
+//
+// Por NOME, não por `Artist.id`: o acervo vive em `CatalogTrack` (JSON) e a
+// tabela `Artist` está vazia em produção. A chave é a mesma identidade que o
+// app usa para agrupar grafias e para "seguir" (`UserCollectionItem`, coleção
+// `artistas`) — ver `chaveDeIdentidadeDoArtista` no shared.
+// ─────────────────────────────────────────────────────────────────────────────
+
+model FichaDoArtista {
+  /// `chaveDeIdentidadeDoArtista(nome)`.
+  chave        String    @id
+  /// A grafia mais vista no acervo.
+  nome         String
+  /// MusicBrainz artist id — a âncora para todas as outras fontes.
+  mbid         String?
+  wikidataId   String?
+  /// Canal oficial no YouTube (id `UC…`), vindo das relações do MusicBrainz.
+  youtubeCanal String?
+  /// Links oficiais (site, Bandsintown, Songkick, Discogs, Instagram…).
+  links        Json?
+  /// Quantos seguem + quantas faixas no acervo: decide quem é atualizado antes.
+  prioridade   Int       @default(0)
+  /// Última leitura da agenda; nulo = nunca. Erro da última leitura ao lado.
+  agendaEm     DateTime?
+  agendaErro   String?
+  /// Chamadas externas gastas com este artista (visibilidade do orçamento).
+  chamadas     Int       @default(0)
+  createdAt    DateTime  @default(now())
+  updatedAt    DateTime  @updatedAt
+
+  eventos EventoDoArtista[]
+
+  @@index([agendaEm])
+  @@index([prioridade])
+}
+
+enum TipoDeEvento {
+  SHOW
+  FESTIVAL
+  TRANSMISSAO
+  PREMIO
+  LANCAMENTO
+}
+
+model EventoDoArtista {
+  /// `<fonte>:<id na fonte>` — reimportar a mesma fonte substitui, não duplica.
+  id           String       @id
+  chave        String
+  tipo         TipoDeEvento
+  titulo       String
+  descricao    String?
+  /// Quando acontece (ou aconteceu). Nulo quando a fonte só tem o ano.
+  quando       DateTime?
+  /// Local por extenso ("Allianz Parque · São Paulo, SP").
+  local        String?
+  cidade       String?
+  pais         String?
+  /// Faixa de preço como a fonte informa ("R$ 120 – R$ 480"); nulo = não diz.
+  preco        String?
+  linkIngresso String?
+  /// Página de origem (evento no Bandsintown, verbete, vídeo…).
+  link         String?
+  /// Vídeo do YouTube para transmitir dentro do app (embed oficial).
+  youtubeId    String?
+  /// O vídeo PERMITE embed (conferido no oEmbed). Sem isto, só o link.
+  embed        Boolean      @default(false)
+  fonte        String
+  dados        Json?
+  criadoEm     DateTime     @default(now())
+  atualizadoEm DateTime     @updatedAt
+
+  ficha FichaDoArtista @relation(fields: [chave], references: [chave], onDelete: Cascade)
+
+  @@index([chave, quando])
+  @@index([tipo, quando])
+}

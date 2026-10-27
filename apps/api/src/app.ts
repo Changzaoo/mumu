@@ -34,6 +34,7 @@ import { collectionsRoutes } from './modules/collections/index.js';
 import { telemetryRoutes } from './modules/telemetry/index.js';
 import { emAltaRoutes } from './modules/emAlta/index.js';
 import { categoriesRoutes } from './modules/categories/index.js';
+import { mundoRoutes } from './modules/mundo/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -120,6 +121,9 @@ export function createApp(): Express {
   api.use('/telemetria', telemetryRoutes);
   // NOVA: categorias organizada pela curadoria AI
   api.use('/categorias', categoriesRoutes);
+  // O MUNDO DA MÚSICA: agenda, prêmios, lançamentos e transmissões por artista,
+  // lidos do cache que o worker `mundo` mantém. Leitura aberta.
+  api.use('/mundo', mundoRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());

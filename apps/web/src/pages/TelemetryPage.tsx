@@ -737,6 +737,7 @@ const CANAIS: Array<{ value: Canal; label: string }> = [
   { value: 'erro', label: 'Erros' },
   { value: 'medico', label: 'Médico' },
   { value: 'app', label: 'App' },
+  { value: 'mundo', label: 'Mundo' },
 ];
 
 const COR_DO_CANAL: Record<Canal, string> = {
@@ -748,6 +749,7 @@ const COR_DO_CANAL: Record<Canal, string> = {
   erro: 'bg-danger/15 text-danger',
   medico: 'bg-success/15 text-success',
   app: 'bg-fg/6 text-fg-subtle',
+  mundo: 'bg-accent/10 text-accent',
 };
 
 /** O que a pessoa relatou pelo botão "Reportar problema" do player. */

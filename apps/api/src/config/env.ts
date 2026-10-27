@@ -237,6 +237,34 @@ const envSchema = z
     /** Teto por dia — o YouTube recua quando vê rajada. */
     PESQUISADOR_MAX_POR_DIA: z.coerce.number().int().min(1).default(60),
 
+    /**
+     * O MUNDO DA MÚSICA (worker `mundo`): agenda, prêmios, lançamentos e
+     * transmissões por artista do acervo, de fontes públicas, em cache no
+     * Postgres. Nunca busca em tempo real na página. Chaves opcionais: sem a
+     * do Bandsintown/Ticketmaster/YouTube a fonte correspondente fica muda e o
+     * log diz. MusicBrainz, Wikidata e o oEmbed do YouTube não pedem chave.
+     */
+    MUNDO_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('true')
+      .transform((v) => v === 'true'),
+    /** De quantos em quantos minutos o worker bate. */
+    MUNDO_BATIDA_MIN: z.coerce.number().int().min(2).default(10),
+    /** Artistas atualizados por batida. */
+    MUNDO_ARTISTAS_POR_BATIDA: z.coerce.number().int().min(1).max(50).default(6),
+    /** Teto de chamadas externas por dia (todas as fontes somadas). */
+    MUNDO_MAX_CHAMADAS_DIA: z.coerce.number().int().min(10).default(1500),
+    /** Um artista é relido depois deste tanto de horas. */
+    MUNDO_REFRESH_HORAS: z.coerce.number().int().min(1).default(24),
+    /** Identificação na MusicBrainz (exigida por eles: app + contato). */
+    MUNDO_USER_AGENT: z.string().default('radinho.online/1.0 ( perdibitcoin@gmail.com )'),
+    BANDSINTOWN_APP_ID: optionalString,
+    TICKETMASTER_API_KEY: optionalString,
+    YOUTUBE_API_KEY: optionalString,
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {
