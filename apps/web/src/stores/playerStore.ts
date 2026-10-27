@@ -2055,18 +2055,25 @@ export const usePlayerStore = create<PlayerState>()(
             .then((m) => m.queueLyricsSync(track, { agora: true }))
             .catch(() => undefined);
         });
-        // A LETRA JÁ VEM BUSCADA quando a pessoa abrir a tela: a desta faixa e
-        // a da próxima. É uma consulta leve ao LRCLIB e o resultado fica em cache.
-        depoisDoSom(track.id, () => {
+        // A LETRA É PEDIDA JUNTO COM O ÁUDIO, não depois do som. "A música tem
+        // que começar e a letra já tem que estar lá" (27/10/2026): esperando o
+        // som para só então ir ao LRCLIB, a letra que precisava de rede chegava
+        // DEPOIS de a música começar; pedida aqui, ela corre em paralelo com a
+        // resolução da fonte e a carga do áudio (que levam mais que a consulta)
+        // e está no cache quando a tela abre. Letra já em cache não custa nada
+        // (`prefetchLyrics` devolve na hora). O custo na thread é um `import()`
+        // + um `fetch`: nada que dispute com o `play()`. A da PRÓXIMA vai
+        // junto, como o `/aquecer` faz com o áudio das seguintes — é "entrar na
+        // fila" que a põe a caminho, não "começar a tocar".
+        if (typeof navigator === 'undefined' || navigator.onLine) {
           void import('@/lib/lyrics/lyrics')
             .then((m) => {
-              if (typeof navigator !== 'undefined' && !navigator.onLine) return;
               m.prefetchLyrics(track);
               const proxima = get().queue[index + 1];
-              if (proxima) setTimeout(() => m.prefetchLyrics(proxima), 8_000);
+              if (proxima) m.prefetchLyrics(proxima);
             })
             .catch(() => undefined);
-        });
+        }
         // A CALIBRAÇÃO PRECISA ESTAR PRONTA QUANDO A LETRA FOR ABERTA, não
         // começar naquele instante — o caminho pt-BR (faster-whisper) leva
         // ~50s por música de 4 min, e quem abrisse a tela via a letra

@@ -673,7 +673,25 @@ async function outrasFontesDeLetra(track: TrackDto): Promise<Lyrics | null> {
  * derrubam um texto puro que o LRCLIB já tinha — texto puro por texto puro, o
  * mais verificado fica.
  */
-export async function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
+/**
+ * UMA BUSCA POR FAIXA DE CADA VEZ. A pré-busca do player (ao entrar na fila) e
+ * a consulta da tela da letra pedem a mesma faixa no mesmo segundo; sem isto
+ * eram duas idas ao LRCLIB e a tela esperava a dela em vez de aproveitar a que
+ * já estava a caminho. Quem chega enquanto a busca está em voo recebe a mesma
+ * promessa. A chave leva o fingerprint: metadado corrigido no meio é outra busca.
+ */
+const emVoo = new Map<string, Promise<Lyrics | null>>();
+
+export function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
+  const chave = `${track.id}|${trackFingerprint(track)}`;
+  const viva = emVoo.get(chave);
+  if (viva) return viva;
+  const busca = buscarLetra(track).finally(() => emVoo.delete(chave));
+  emVoo.set(chave, busca);
+  return busca;
+}
+
+async function buscarLetra(track: TrackDto): Promise<Lyrics | null> {
   const fingerprint = trackFingerprint(track);
   const guardada = readCache()[track.id];
   // Entrada que não é objeto (cache sujo) conta como ausente — `in` lançaria.

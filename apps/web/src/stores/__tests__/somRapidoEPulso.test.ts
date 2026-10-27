@@ -332,23 +332,26 @@ describe('sem pré-carga, a resolução corre em paralelo', () => {
 });
 
 describe('o que não é som espera o som', () => {
-  it('letra, calibração, guardião e transcrição só rodam depois do primeiro som', async () => {
+  it('calibração, guardião e transcrição só rodam depois do primeiro som; a LETRA vai junto com o áudio', async () => {
     usePlayerStore.getState().playQueue([catalogo('d1'), catalogo('d2')], 0);
     await assentar();
     await vi.advanceTimersByTimeAsync(1_000);
     await assentar();
-    // Antes do som: nada disso disputou a thread com o play().
+    // Antes do som: nada disso disputou a thread com o play()…
     expect(mocks.queueLyricsSync).not.toHaveBeenCalled();
-    expect(mocks.prefetchLyrics).not.toHaveBeenCalled();
     expect(mocks.aquecerCalibracao).not.toHaveBeenCalled();
     expect(mocks.informarContexto).not.toHaveBeenCalled();
+    // …menos a letra: "a música tem que começar e a letra já tem que estar lá".
+    // Pedida junto com o áudio — a desta faixa e a da próxima da fila.
+    expect(mocks.prefetchLyrics).toHaveBeenCalledTimes(2);
+    expect(mocks.prefetchLyrics.mock.calls.map((c) => (c[0] as TrackDto).id)).toEqual(['d1', 'd2']);
 
     timeupdate(1);
     await vi.advanceTimersByTimeAsync(200); // ociosidade
     await assentar();
     await vi.advanceTimersByTimeAsync(200);
     expect(mocks.queueLyricsSync).toHaveBeenCalledTimes(1);
-    expect(mocks.prefetchLyrics).toHaveBeenCalledTimes(1);
+    expect(mocks.prefetchLyrics).toHaveBeenCalledTimes(2); // o som não pede de novo
     expect(mocks.aquecerCalibracao).toHaveBeenCalledTimes(1);
     expect(mocks.informarContexto).toHaveBeenCalledTimes(1);
   });
