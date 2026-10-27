@@ -1,0 +1,32 @@
+# API do radinho no vnmax SEM Docker (docs/vnmax-equilibrio.md, passo 4).
+# Instalar: cp infra/systemd/radinho-api.service infra/systemd/radinho-worker.service ~/.config/systemd/user/
+#           systemctl --user daemon-reload && systemctl --user enable --now radinho-api radinho-worker
+# Pasta: /home/v/radinho-api (publicada por infra/scripts/publicar-api-vnmax.sh, com prisma CLI).
+# Env: /home/v/radinho-api.env = o /opt/aurial/.env com DATABASE_URL/REDIS_URL nativos
+#      (localhost), PORT=4000, YTDLP_PATH=/home/v/.local/bin/yt-dlp, FFMPEG_PATH=/usr/bin/ffmpeg.
+# Só ativar depois do Postgres e do Redis nativos (passo 3) e com o contêiner aurial-api parado
+# (a porta 4000 é uma só; o túnel aurial-api aponta para ela).
+[Unit]
+Description=radinho API (node dist/main.js) - /home/v/radinho-api
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/v/radinho-api
+EnvironmentFile=/home/v/radinho-api.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=512
+ExecStart=/usr/bin/node dist/main.js
+Restart=always
+RestartSec=5
+Nice=5
+CPUWeight=100
+MemoryHigh=600M
+MemoryMax=768M
+OOMScoreAdjust=-100
+StandardOutput=append:/home/v/radinho-api.log
+StandardError=append:/home/v/radinho-api.log
+
+[Install]
+WantedBy=default.target

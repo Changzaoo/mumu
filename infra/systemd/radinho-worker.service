@@ -1,0 +1,29 @@
+# Worker do radinho (BullMQ: ffmpeg, curadoria, em alta, mundo, créditos) no vnmax SEM Docker.
+# Ver radinho-api.service para instalação, pasta e env. O worker é o que mais pesa (ffmpeg +
+# NVIDIA): fica abaixo da API na disputa e é o primeiro a cair se faltar memória.
+[Unit]
+Description=radinho worker (node dist/workers/index.js) - /home/v/radinho-api
+After=network-online.target radinho-api.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+WorkingDirectory=/home/v/radinho-api
+EnvironmentFile=/home/v/radinho-api.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=640
+ExecStart=/usr/bin/node dist/workers/index.js
+Restart=always
+RestartSec=10
+Nice=10
+CPUWeight=50
+IOSchedulingClass=best-effort
+IOSchedulingPriority=7
+MemoryHigh=768M
+MemoryMax=1G
+OOMScoreAdjust=300
+StandardOutput=append:/home/v/radinho-worker.log
+StandardError=append:/home/v/radinho-worker.log
+
+[Install]
+WantedBy=default.target
