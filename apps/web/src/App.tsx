@@ -11,6 +11,7 @@ import { initSettings, useSettingsStore, type ReducedMotionSetting } from '@/sto
 import { marcarBoot, medirEtapa } from '@/lib/telemetry/bootPerf';
 import { router } from '@/app/router';
 import { instalarVigiaDoMenu } from '@/lib/telemetry/menuTravado';
+import { instalarDetectorDeRaiva } from '@/lib/telemetry/toqueDaRaiva';
 import { ligarCacheDePaginas } from '@/lib/perf/cacheDePaginas';
 
 const queryClient = new QueryClient({
@@ -61,6 +62,8 @@ export default function App() {
     initPlayerEngine();
     // Toque no menu que não troca a tela: anota o flagrante e destrava.
     instalarVigiaDoMenu(router);
+    // O mesmo botão três vezes sem nada mudar: flagrante no diário (`raiva-*`).
+    instalarDetectorDeRaiva();
     // No app de Android: serviço de reprodução enquanto toca — é o que impede o
     // sistema de matar o app com a tela desligada (ver lib/android/tocadorNativo).
     void import('@/lib/android/tocadorNativo').then((m) => m.iniciarTocadorNativo());
