@@ -17,6 +17,7 @@ import { MediaCard } from '@/components/media/MediaCard';
 import { CartaoDeFaixa } from '@/components/media/CartaoDeFaixa';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
+import { PrateleiraEmAlta } from '@/components/media/PrateleiraEmAlta';
 import * as localHistory from '@/lib/local/localHistory';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -726,6 +727,10 @@ export default function HomePage() {
       </div>
 
       {/* ── O GÊNERO QUE ELA MAIS OUVE, E OS RAMOS DELE ──────────────────
+      {/* O que está no topo das paradas agora, por gênero — do servidor, já
+          fundido; aqui só a idade e o gosto desta pessoa decidem o que fica
+          (ver components/media/PrateleiraEmAlta). */}
+      <PrateleiraEmAlta />
           Primeiro bloco da página de propósito: é a resposta à pergunta que a
           pessoa tem ao abrir o app ("o que eu ouço?"), e não à que o app tem
           ("o que eu acabei de receber?"). O que vinha aqui antes era

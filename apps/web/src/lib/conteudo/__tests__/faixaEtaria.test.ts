@@ -15,6 +15,7 @@ import {
   podeOuvir,
   podeTrocarPara,
   registrarLetra,
+  registrarVereditos,
 } from '@/lib/conteudo/faixaEtaria';
 import { useSettingsStore } from '@/stores/settingsStore';
 
@@ -100,5 +101,34 @@ describe('ehExplicita — o selo "E"', () => {
   it('a letra julgada no aparelho acende o selo na hora', () => {
     registrarLetra('l', 'Música', 'olha essa porra toda');
     expect(ehExplicita(faixa('l'))).toBe(true);
+  });
+});
+
+describe('registrarVereditos (faixas de fora do acervo, como as do "em alta")', () => {
+  it('o veredito do servidor vale para quem tem restrição; desconhecido apaga', () => {
+    useSettingsStore.setState({ dataNascimento: '2016-01' }); // criança
+    registrarVereditos([
+      ['em-alta:a', 'limpo'],
+      ['em-alta:b', 'explicito'],
+      ['em-alta:c', 'desconhecido'],
+    ]);
+    expect(podeOuvir(faixa('em-alta:a'))).toBe(true);
+    expect(podeOuvir(faixa('em-alta:b'))).toBe(false);
+    expect(podeOuvir(faixa('em-alta:c'))).toBe(false);
+    useSettingsStore.setState({ dataNascimento: '2010-01' }); // adolescente
+    expect(podeOuvir(faixa('em-alta:b'))).toBe(false);
+    expect(podeOuvir(faixa('em-alta:c'))).toBe(true);
+    registrarVereditos([['em-alta:b', 'desconhecido']]);
+    expect(podeOuvir(faixa('em-alta:b'))).toBe(true);
+  });
+
+  it('a letra julgada aqui e a entrada da biblioteca valem mais que o registro', () => {
+    useSettingsStore.setState({ dataNascimento: '2016-01' });
+    registrarVereditos([['x', 'limpo']]);
+    biblioteca.set('x', { conteudoVeredicto: 'explicito' });
+    expect(podeOuvir(faixa('x'))).toBe(false);
+    registrarVereditos([['y', 'explicito']]);
+    registrarLetra('y', 'Música', 'Deus é bom o tempo todo, o tempo todo Deus é bom');
+    expect(podeOuvir(faixa('y'))).toBe(true);
   });
 });

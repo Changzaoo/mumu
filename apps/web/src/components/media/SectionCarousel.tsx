@@ -1,4 +1,12 @@
-import { Children, useCallback, useEffect, useRef, useState, type ComponentProps } from 'react';
+import {
+  Children,
+  useCallback,
+  useEffect,
+  useRef,
+  useState,
+  type ComponentProps,
+  type ReactNode,
+} from 'react';
 import { Link } from 'react-router';
 import { ChevronLeft, ChevronRight } from 'lucide-react';
 import { cn } from '@/lib/utils';
@@ -41,6 +49,8 @@ export interface SectionCarouselProps extends ComponentProps<'section'> {
   inicial?: number;
   /** Dá a volta ao chegar no fim (padrão). Só vale quando há fila para dar. */
   loop?: boolean;
+  /** Uma linha entre o título e os cartões (abas de gênero, por exemplo). */
+  acessorio?: ReactNode;
 }
 
 /**
@@ -53,6 +63,7 @@ export function SectionCarousel({
   href,
   inicial,
   loop = true,
+  acessorio,
   className,
   children,
   ...props
@@ -297,6 +308,7 @@ export function SectionCarousel({
           </Link>
         )}
       </header>
+      {acessorio && <div className="mb-3 px-3">{acessorio}</div>}
 
       <div
         ref={scrollerRef}

@@ -55,6 +55,13 @@ export function permitidoPara(faixa: FaixaEtaria, veredicto: VeredictoDeConteudo
 
 // ── vereditos que o aparelho tirou da letra ────────────────────────────
 const daLetra = new Map<string, VeredictoDeConteudo>();
+/**
+ * Vereditos que o SERVIDOR já tinha de faixas que NÃO estão na biblioteca
+ * deste aparelho — a parada "em alta" traz música de fora do acervo com o
+ * veredito das fontes (selo da gravadora, título). Entra em `veredictoDe`
+ * depois da letra julgada aqui e da entrada da biblioteca, antes do título.
+ */
+const doServidor = new Map<string, VeredictoDeConteudo>();
 const ouvintes = new Set<() => void>();
 let versao = 0;
 
@@ -91,6 +98,26 @@ export function registrarLetra(trackId: string, titulo: string, letra: string): 
   avisar();
 }
 
+/**
+ * Vereditos do servidor para faixas de fora da biblioteca, em lote (um aviso
+ * só: cada aviso redesenha todo cartão que pergunta). `desconhecido` apaga o
+ * que havia — "não sei" nunca é guardado como se fosse resposta.
+ */
+export function registrarVereditos(
+  vereditos: ReadonlyArray<readonly [trackId: string, veredicto: VeredictoDeConteudo]>,
+): void {
+  let mudou = false;
+  for (const [id, veredicto] of vereditos) {
+    if (veredicto === 'desconhecido') {
+      if (doServidor.delete(id)) mudou = true;
+    } else if (doServidor.get(id) !== veredicto) {
+      doServidor.set(id, veredicto);
+      mudou = true;
+    }
+  }
+  if (mudou) avisar();
+}
+
 function veredictoDaBiblioteca(id: string): VeredictoDeConteudo | undefined {
   try {
     const entrada = localLibrary.entryFor?.(id) as {
@@ -107,8 +134,10 @@ export function veredictoDe(track: Pick<TrackDto, 'id' | 'title'>): VeredictoDeC
   if (local) return local;
   // Consultar a biblioteca nunca pode derrubar quem pergunta (o player, uma
   // lista): sem resposta, o veredito é "desconhecido" e a regra da idade decide.
-  const doServidor = veredictoDaBiblioteca(track.id);
-  if (doServidor) return doServidor;
+  const daBiblioteca = veredictoDaBiblioteca(track.id);
+  if (daBiblioteca) return daBiblioteca;
+  const registrado = doServidor.get(track.id);
+  if (registrado) return registrado;
   return tituloEhExplicito(track.title ?? '') ? 'explicito' : 'desconhecido';
 }
 
