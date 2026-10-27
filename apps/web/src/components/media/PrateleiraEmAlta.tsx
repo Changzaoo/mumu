@@ -11,7 +11,7 @@
  * (`lib/local/importQueue`) — nunca por um caminho novo. Sem conta não dá
  * para trazer nada; a pessoa é avisada em vez de ver um botão que não faz nada.
  */
-import { useMemo, useState, useSyncExternalStore } from 'react';
+import { useEffect, useMemo, useState, useSyncExternalStore } from 'react';
 import type { TrackDto } from '@radinho/shared';
 import { CartaoDeFaixa } from '@/components/media/CartaoDeFaixa';
 import { SectionCarousel } from '@/components/media/SectionCarousel';
@@ -28,6 +28,7 @@ import {
 import * as artistasSeguidos from '@/lib/local/artistasSeguidos';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import {
+  aquecerFontes,
   buscarNoYoutube,
   faixaDoYoutube,
   videoIdDoYoutube,
@@ -45,6 +46,37 @@ import { pushNotification } from '@/stores/notificationsStore';
 import { usePlayerStore } from '@/stores/playerStore';
 
 const CARTOES_INICIAIS = 10;
+
+/**
+ * Quanto o toque espera pelo importador antes de desistir. Relato de
+ * 27/10/2026 (16:20): com o importador fora do ar, "Trazendo…" ficava para
+ * sempre — a busca não tinha tempo limite e o botão nunca voltava.
+ */
+const TEMPO_LIMITE_MS = 8_000;
+
+/** `AbortSignal.timeout` ainda falta em navegador antigo: cai no timer. */
+function sinalComTempoLimite(ms: number): AbortSignal {
+  if (typeof AbortSignal.timeout === 'function') return AbortSignal.timeout(ms);
+  const c = new AbortController();
+  setTimeout(() => c.abort(), ms);
+  return c.signal;
+}
+
+function comTempoLimite<T>(promessa: Promise<T>, ms: number): Promise<T> {
+  return new Promise<T>((resolver, rejeitar) => {
+    const timer = setTimeout(() => rejeitar(new Error('tempo limite')), ms);
+    promessa.then(
+      (v) => {
+        clearTimeout(timer);
+        resolver(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        rejeitar(e instanceof Error ? e : new Error(String(e)));
+      },
+    );
+  });
+}
 
 /** O resultado da busca que é ESTA música: mesmo nome, duração parecida. */
 function escolherVideo(
@@ -81,7 +113,8 @@ export function PrateleiraEmAlta() {
       for (const t of g.tracks) {
         generoDaFaixa.set(t.id, g.genre);
         const a = t.artists?.[0]?.name;
-        if (a && !generoDoArtista.has(chaveDeTexto(a))) generoDoArtista.set(chaveDeTexto(a), g.genre);
+        if (a && !generoDoArtista.has(chaveDeTexto(a)))
+          generoDoArtista.set(chaveDeTexto(a), g.genre);
       }
     }
     const semente = gostoInicial.snapshot();
@@ -116,6 +149,21 @@ export function PrateleiraEmAlta() {
   const [escolhido, setEscolhido] = useState<string | null>(null);
   const [trazendo, setTrazendo] = useState<string | null>(null);
   const ativa = prateleiras.find((p) => p.genero === escolhido) ?? prateleiras[0];
+
+  // AQUECE o que está à vista: o importador já extrai a URL direta das faixas
+  // de fora do acervo (as que têm link do YouTube), para o toque tocar em
+  // segundos em vez de esperar a extração na hora. Só com conta (sem crachá o
+  // ajudante recusa) e só o que a prateleira mostra de início.
+  const urlsParaAquecer = (ativa?.faixas ?? [])
+    .slice(0, CARTOES_INICIAIS)
+    .filter((t) => ehDeForaDoAcervo(t) && t.sourceUrl && videoIdDoYoutube(t.sourceUrl))
+    .map((t) => t.sourceUrl as string)
+    .join('|');
+  useEffect(() => {
+    if (!logado || !urlsParaAquecer) return;
+    void aquecerFontes(urlsParaAquecer.split('|'));
+  }, [logado, urlsParaAquecer]);
+
   if (!data || !ativa) return null;
 
   const tocar = async (track: TrackDto, index: number): Promise<void> => {
@@ -151,10 +199,21 @@ export function PrateleiraEmAlta() {
           capa: track.coverUrl,
         };
       } else {
-        const busca = await buscarNoYoutube(`${artista} ${track.title}`);
+        const busca = await buscarNoYoutube(
+          `${artista} ${track.title}`,
+          sinalComTempoLimite(TEMPO_LIMITE_MS),
+        );
+        if (!busca.ok && busca.motivo !== 'login') {
+          pushNotification({
+            type: 'error',
+            title: 'O importador não respondeu',
+            body: 'Tente de novo em instantes.',
+          });
+          return;
+        }
         video = busca.ok ? escolherVideo(busca.resultados, track) : null;
       }
-      const faixa = video ? await faixaDoYoutube(video) : null;
+      const faixa = video ? await comTempoLimite(faixaDoYoutube(video), TEMPO_LIMITE_MS) : null;
       if (!faixa || !video) {
         pushNotification({
           type: 'error',
@@ -163,9 +222,19 @@ export function PrateleiraEmAlta() {
         });
         return;
       }
-      playTrack({ ...faixa, genre: track.genre ?? faixa.genre, coverUrl: track.coverUrl ?? faixa.coverUrl }, contexto);
+      playTrack(
+        { ...faixa, genre: track.genre ?? faixa.genre, coverUrl: track.coverUrl ?? faixa.coverUrl },
+        contexto,
+      );
       // O mesmo caminho de qualquer link colado: a fila de import normal.
       importQueue.enqueue([{ url: video.url, title: `${artista} - ${track.title}` }]);
+    } catch {
+      // Tempo limite ou crachá indisponível: o botão volta e a pessoa sabe.
+      pushNotification({
+        type: 'error',
+        title: 'O importador não respondeu',
+        body: 'Tente de novo em instantes.',
+      });
     } finally {
       setTrazendo(null);
     }
