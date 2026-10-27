@@ -66,6 +66,85 @@ const WHISPER_FUNCTION_ID =
 const WHISPER_LANGUAGE = process.env.WHISPER_LANGUAGE ?? 'multi';
 
 /**
+ * RESERVAS NA NVIDIA — quando a função principal cai (NVCF tira função do ar,
+ * troca o id, devolve UNAVAILABLE/NOT_FOUND/PERMISSION_DENIED), a transcrição
+ * não pode simplesmente morrer: tenta a próxima função hospedada que fala a
+ * mesma língua. A ordem é de qualidade; a que responder fica memorizada (ver
+ * `funcaoQueFunciona`) para as próximas faixas não pagarem as tentativas.
+ * Ids conferidos em build.nvidia.com (out/2026). Sobrescrevíveis por env, em
+ * CSV `id:idioma`.
+ */
+function listaDeFuncoes(env, padrao) {
+  const bruto = (process.env[env] ?? '').trim();
+  if (!bruto) return padrao;
+  return bruto
+    .split(',')
+    .map((par) => par.trim())
+    .filter(Boolean)
+    .map((par) => {
+      const [id, idioma] = par.split(':');
+      return { modelo: id, id, idioma: idioma || null };
+    });
+}
+/** Tempo POR PALAVRA (inglês). */
+export const FUNCOES_PALAVRA = listaDeFuncoes('RIVA_FUNCOES_PALAVRA', [
+  { modelo: 'parakeet-tdt-0.6b-v2', id: RIVA_FUNCTION_ID, idioma: null },
+  { modelo: 'parakeet-ctc-1.1b-asr', id: '1598d209-5e27-4d3c-8079-4751568b1081', idioma: 'en-US' },
+  { modelo: 'parakeet-ctc-0.6b-asr', id: 'd8dd4e9b-fbf5-4fb0-9dba-8cf436c8d965', idioma: 'en-US' },
+]);
+/** Tempo POR SEGMENTO (pt-BR e qualquer outro idioma). */
+export const FUNCOES_SEGMENTO = listaDeFuncoes('RIVA_FUNCOES_SEGMENTO', [
+  { modelo: 'whisper-large-v3', id: WHISPER_FUNCTION_ID, idioma: null },
+  // 25 idiomas, pt-BR incluso. Não devolve `audio_processed` em toda versão:
+  // o tempo do segmento então sai das palavras (ver transcribeSegments).
+  { modelo: 'parakeet-1.1b-rnnt-multilingual', id: '71203149-d3b7-4460-8231-1be2543a1fca', idioma: 'pt-BR' },
+]);
+
+/**
+ * Códigos gRPC que dizem "esta FUNÇÃO não serve agora" — vale tentar outra.
+ * Os demais (chave inválida = UNAUTHENTICATED, áudio ruim = INVALID_ARGUMENT
+ * de forma geral) também passam para a próxima: o custo é uma chamada a mais,
+ * e a alternativa era a faixa ficar sem letra.
+ */
+const memoria = new Map(); // tipo → índice da função que respondeu por último
+
+/** Exportado para testes: reordena a lista pondo a que funcionou na frente. */
+export function ordemDeTentativa(lista, preferido) {
+  if (preferido == null || preferido <= 0 || preferido >= lista.length) return lista;
+  return [lista[preferido], ...lista.filter((_, i) => i !== preferido)];
+}
+
+/** Erro com o código gRPC preservado (o log precisa dele para diagnóstico). */
+export class RivaError extends Error {
+  constructor(message, code, modelo) {
+    super(message);
+    this.code = code;
+    this.modelo = modelo;
+  }
+}
+
+/** Histórico curto das últimas tentativas — exposto em /ai/transcribe/estado. */
+const historico = [];
+function registrar(entrada) {
+  historico.push({ em: new Date().toISOString(), ...entrada });
+  while (historico.length > 30) historico.shift();
+}
+export function estadoDaTranscricao() {
+  return {
+    configurada: transcribeConfigured(),
+    palavra: FUNCOES_PALAVRA.map((f) => f.modelo),
+    segmento: FUNCOES_SEGMENTO.map((f) => f.modelo),
+    funcionando: Object.fromEntries(
+      [...memoria.entries()].map(([tipo, i]) => [
+        tipo,
+        (tipo === 'palavra' ? FUNCOES_PALAVRA : FUNCOES_SEGMENTO)[i]?.modelo ?? null,
+      ]),
+    ),
+    historico: [...historico],
+  };
+}
+
+/**
  * Escolhe o motor pelo idioma pedido. Inglês → TDT (tempo por palavra, o
  * melhor karaokê). Qualquer outra coisa (pt, es, 'multi', ausente) → whisper
  * (tempo por linha). Decidir aqui, e não no navegador, mantém o cliente burro.
@@ -164,54 +243,127 @@ export function toWav16k(inputBuffer, ffmpegBin) {
   });
 }
 
-/**
- * Transcreve um WAV e devolve [{ text, startMs }] — só as palavras, que é tudo
- * que o alinhamento precisa. Lança em falha; o chamador decide o que dizer.
- */
-export async function transcribeWords(wavBuffer, { language } = {}) {
+/** Uma chamada Recognize (unária) a UMA função NVCF. Lança RivaError. */
+async function recognize(funcao, config, wavBuffer) {
   const apiKey = (process.env.NVIDIA_API_KEY ?? '').trim();
-  if (!apiKey) throw new Error('NVIDIA_API_KEY ausente.');
+  if (!apiKey) throw new RivaError('NVIDIA_API_KEY ausente.', 'SEM_CHAVE', funcao.modelo);
 
   const { grpc, client } = await getClient();
   const metadata = new grpc.Metadata();
-  metadata.add('function-id', RIVA_FUNCTION_ID);
+  metadata.add('function-id', funcao.id);
   metadata.add('authorization', `Bearer ${apiKey}`);
-
   // Recognize é UNÁRIO: mandamos o áudio inteiro e recebemos a resposta final
   // de uma vez. O deadline substitui o timer manual do fluxo em streaming.
   const deadline = new Date(Date.now() + TRANSCRIBE_TIMEOUT_MS);
-  const request = {
-    config: {
-      // encoding/sample_rate omitidos de propósito: o Riva lê o cabeçalho WAV.
-      language_code: language ?? RIVA_LANGUAGE,
-      max_alternatives: 1,
-      enable_automatic_punctuation: true,
-      enable_word_time_offsets: true, // o motivo de tudo isto existir
-      audio_channel_count: 1,
-    },
-    audio: wavBuffer,
-  };
-
-  const response = await new Promise((resolve, reject) => {
-    client.Recognize(request, metadata, { deadline }, (err, resp) => {
+  return new Promise((resolve, reject) => {
+    client.Recognize({ config, audio: wavBuffer }, metadata, { deadline }, (err, resp) => {
       if (err) {
-        reject(new Error(`Riva: ${err.details ?? err.message ?? 'falha'} (${err.code})`));
+        reject(
+          new RivaError(
+            `Riva ${funcao.modelo}: ${err.details ?? err.message ?? 'falha'} (${err.code})`,
+            err.code,
+            funcao.modelo,
+          ),
+        );
         return;
       }
       resolve(resp);
     });
   });
+}
 
-  const words = [];
-  for (const result of response?.results ?? []) {
-    const alternative = result.alternatives?.[0];
-    for (const w of alternative?.words ?? []) {
-      const text = typeof w?.word === 'string' ? w.word : '';
-      if (!text) continue;
-      words.push({ text, startMs: Number(w.start_time) || 0 });
+/**
+ * Percorre a lista de funções até uma devolver algo UTILIZÁVEL (`extrair`
+ * devolve null quando a resposta veio vazia/sem tempo). A primeira que serve
+ * vira a preferida do processo. Lança o último erro se nenhuma serviu.
+ */
+async function comReservas(tipo, lista, montarConfig, extrair, wavBuffer) {
+  const ordem = ordemDeTentativa(
+    lista.map((f, i) => ({ ...f, i })),
+    memoria.get(tipo),
+  );
+  let ultimo = null;
+  for (const funcao of ordem) {
+    const inicio = Date.now();
+    try {
+      const resp = await recognize(funcao, montarConfig(funcao), wavBuffer);
+      const util = extrair(resp);
+      if (util && util.length > 0) {
+        memoria.set(tipo, funcao.i);
+        registrar({ tipo, modelo: funcao.modelo, ok: true, itens: util.length, ms: Date.now() - inicio });
+        return util;
+      }
+      ultimo = new RivaError(`Riva ${funcao.modelo}: resposta sem texto/tempo utilizável`, 'VAZIO', funcao.modelo);
+    } catch (err) {
+      ultimo = err;
+      // Sem chave não adianta tentar outra função.
+      if (err instanceof RivaError && err.code === 'SEM_CHAVE') throw err;
     }
+    registrar({ tipo, modelo: funcao.modelo, ok: false, codigo: ultimo.code, erro: ultimo.message, ms: Date.now() - inicio });
+    console.warn('[radinho-importer] transcrição NVIDIA falhou —', ultimo.message, '→ tentando a próxima');
   }
-  return words;
+  throw ultimo ?? new RivaError('Nenhuma função de transcrição configurada.', 'SEM_FUNCAO', null);
+}
+
+/**
+ * Transcreve um WAV e devolve [{ text, startMs }] — só as palavras, que é tudo
+ * que o alinhamento precisa. Lança em falha; o chamador decide o que dizer.
+ */
+export async function transcribeWords(wavBuffer, { language } = {}) {
+  return comReservas(
+    'palavra',
+    FUNCOES_PALAVRA,
+    (funcao) => ({
+      // encoding/sample_rate omitidos de propósito: o Riva lê o cabeçalho WAV.
+      language_code: funcao.idioma ?? language ?? RIVA_LANGUAGE,
+      max_alternatives: 1,
+      enable_automatic_punctuation: true,
+      enable_word_time_offsets: true, // o motivo de tudo isto existir
+      audio_channel_count: 1,
+    }),
+    (response) => {
+      const words = [];
+      for (const result of response?.results ?? []) {
+        const alternative = result.alternatives?.[0];
+        for (const w of alternative?.words ?? []) {
+          const text = typeof w?.word === 'string' ? w.word : '';
+          if (!text) continue;
+          words.push({ text, startMs: Number(w.start_time) || 0 });
+        }
+      }
+      // Tempos todos iguais = o modelo não deu offset de verdade: reserva.
+      return words.length > 0 && !timestampsAreDegenerate(words) ? words : null;
+    },
+    wavBuffer,
+  );
+}
+
+/** Exportado para testes: resposta do Riva → segmentos `{ text, startMs, endMs }`. */
+export function segmentosDaResposta(response) {
+  const segments = [];
+  let prevEndMs = 0;
+  for (const result of response?.results ?? []) {
+    const alt = result.alternatives?.[0];
+    const text = (alt?.transcript ?? '').trim();
+    // `audio_processed` vem em SEGUNDOS (fim acumulado do segmento). Função que
+    // não o preenche (parakeet multilíngue) ainda manda tempo por palavra: o
+    // fim do segmento é a última palavra.
+    let endMs = Math.round((Number(result.audio_processed) || 0) * 1000);
+    const palavras = alt?.words ?? [];
+    if (endMs <= prevEndMs && palavras.length > 0) {
+      endMs = Math.max(...palavras.map((w) => Number(w.end_time) || Number(w.start_time) || 0));
+    }
+    const primeira = palavras.length > 0 ? Number(palavras[0].start_time) : NaN;
+    const startMs = Number.isFinite(primeira) && primeira >= prevEndMs ? primeira : prevEndMs;
+    if (endMs > prevEndMs) prevEndMs = endMs;
+    // Segmento sem letra/dígito (ex.: "🎶" de trecho instrumental) não vira
+    // linha, mas ainda AVANÇA o relógio para o próximo começar no lugar certo.
+    if (!/[\p{L}\p{N}]/u.test(text)) continue;
+    segments.push({ text, startMs, endMs: Math.max(endMs, startMs) });
+  }
+  // Sem relógio nenhum (todos terminando em 0) o segmento não serve de tempo.
+  if (segments.length > 1 && segments.every((s) => s.endMs === 0)) return [];
+  return segments;
 }
 
 /**
@@ -220,53 +372,29 @@ export async function transcribeWords(wavBuffer, { language } = {}) {
  * O whisper hospedado fatia em janelas de ~30 s e devolve um `result` por
  * janela; `audio_processed` é o fim acumulado dela (em segundos). O começo de um
  * segmento é o fim do anterior. Sem tempo por palavra — o texto de cada janela
- * é distribuído em linhas do lado do web. Lança em falha.
+ * é distribuído em linhas do lado do web. Lança em falha (depois de esgotar as
+ * reservas da NVIDIA).
  */
 export async function transcribeSegments(wavBuffer, { language } = {}) {
-  const apiKey = (process.env.NVIDIA_API_KEY ?? '').trim();
-  if (!apiKey) throw new Error('NVIDIA_API_KEY ausente.');
-
-  const { grpc, client } = await getClient();
-  const metadata = new grpc.Metadata();
-  metadata.add('function-id', WHISPER_FUNCTION_ID);
-  // O whisper RECUSA código vazio (erro). 'multi' o deixa detectar sozinho.
-  metadata.add('authorization', `Bearer ${apiKey}`);
-
-  const deadline = new Date(Date.now() + TRANSCRIBE_TIMEOUT_MS);
-  const request = {
-    config: {
-      language_code: language && language !== 'multi' ? language : WHISPER_LANGUAGE,
+  const pedido = language && language !== 'multi' ? language : null;
+  return comReservas(
+    'segmento',
+    FUNCOES_SEGMENTO,
+    (funcao) => ({
+      // O whisper RECUSA código vazio (erro). 'multi' o deixa detectar sozinho.
+      // Reserva com idioma fixo (parakeet multilíngue = pt-BR) usa o dela,
+      // a não ser que o pedido seja explícito.
+      language_code: funcao.idioma ? (pedido && pedido.includes('-') ? pedido : funcao.idioma) : (pedido ?? WHISPER_LANGUAGE),
       max_alternatives: 1,
       enable_automatic_punctuation: true,
+      // Pedir offsets não custa nada ao whisper e salva a reserva sem
+      // `audio_processed`.
+      enable_word_time_offsets: Boolean(funcao.idioma),
       audio_channel_count: 1,
-    },
-    audio: wavBuffer,
-  };
-
-  const response = await new Promise((resolve, reject) => {
-    client.Recognize(request, metadata, { deadline }, (err, resp) => {
-      if (err) {
-        reject(new Error(`Riva: ${err.details ?? err.message ?? 'falha'} (${err.code})`));
-        return;
-      }
-      resolve(resp);
-    });
-  });
-
-  const segments = [];
-  let prevEndMs = 0;
-  for (const result of response?.results ?? []) {
-    const text = (result.alternatives?.[0]?.transcript ?? '').trim();
-    // `audio_processed` vem em SEGUNDOS (fim acumulado do segmento).
-    const endMs = Math.round((Number(result.audio_processed) || 0) * 1000);
-    const startMs = prevEndMs;
-    if (endMs > prevEndMs) prevEndMs = endMs;
-    // Segmento sem letra/dígito (ex.: "🎶" de trecho instrumental) não vira
-    // linha, mas ainda AVANÇA o relógio para o próximo começar no lugar certo.
-    if (!/[\p{L}\p{N}]/u.test(text)) continue;
-    segments.push({ text, startMs, endMs: Math.max(endMs, startMs) });
-  }
-  return segments;
+    }),
+    segmentosDaResposta,
+    wavBuffer,
+  );
 }
 
 /**

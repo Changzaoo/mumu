@@ -35,12 +35,29 @@ import { fileURLToPath } from 'node:url';
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 const PYTHON = process.env.PYTHON_PATH || (process.platform === 'win32' ? 'python' : 'python3');
+/** ALINHAMENTO: o texto já é conhecido, o `small` acha o tempo bem e rápido. */
 const MODELO = process.env.WHISPER_MODELO || 'small';
-const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 15 * 60_000);
+/**
+ * TRANSCRIÇÃO LIVRE: aqui o modelo precisa OUVIR a letra, e o `small` não dá
+ * conta de canto em pt-BR — devolvia palavra com confiança baixa demais e o
+ * app (transcricaoConfiavel: ≥70% das palavras com prob ≥ 0,6) descartava
+ * tudo: "não transcreve". O palavras.py já foi escrito esperando o
+ * `large-v3-turbo` (e desce sozinho para large-v3/medium/small se ele não
+ * existir na instalação); quem passava `small` era este arquivo.
+ */
+const MODELO_TRANSCRICAO = process.env.WHISPER_MODELO_TRANSCRICAO || 'large-v3-turbo';
+// 25 min: o large-v3-turbo numa CPU de 4 núcleos leva alguns minutos por música.
+const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 25 * 60_000);
 /** Fila curta: o que interessa é a faixa tocando agora, não um acúmulo. */
 const FILA_MAX = 20;
 /** Versão do formato em disco — mudou o modelo/saída, muda a chave. */
 const VERSAO = 'v2';
+/**
+ * Versão do cache da TRANSCRIÇÃO: leva o modelo junto. Trocar o modelo tem de
+ * refazer o que o modelo fraco não conseguiu — inclusive as faixas que ficaram
+ * marcadas como falha (a marca é por chave).
+ */
+const VERSAO_TRANSCRICAO = `v3-${MODELO_TRANSCRICAO}`;
 /**
  * NINGUÉM PERGUNTOU POR ISTO EM 3 MINUTOS = a pessoa pulou a faixa ou fechou
  * o app. O cliente reancora (`pedirPorChave`) a cada poll enquanto ainda
@@ -152,7 +169,12 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
 
   async function transcrever({ arquivo, idioma, artista }) {
     if (idioma === 'en' && rivaPalavras) {
-      const words = await rivaPalavras(arquivo).catch(() => null);
+      // Falha da NVIDIA não pode sumir calada: sem este log, "não transcreve"
+      // não tinha rastro nenhum. Cai para o whisper local de qualquer jeito.
+      const words = await rivaPalavras(arquivo).catch((e) => {
+        log('riva falhou, caindo para o whisper local:', e instanceof Error ? e.message : e);
+        return null;
+      });
       if (words && words.length > 0) return { words, motor: 'riva', language: 'en' };
     }
     const lingua = idioma === 'en' ? 'en' : idioma === 'auto' ? '' : 'pt';
@@ -162,8 +184,14 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
     // onde o modelo pode errar o que ouviu; o ALINHAMENTO já recebe o texto
     // certo e não precisa de dica nenhuma.
     const prompt = artista ? await vocabulario?.promptPara(artista).catch(() => '') : '';
-    const r = await python(['transcrever', arquivo, lingua, MODELO, prompt || '']);
-    return { words: r.words, motor: `whisper-${MODELO}`, language: r.language ?? idioma };
+    const r = await python(['transcrever', arquivo, lingua, MODELO_TRANSCRICAO, prompt || '']);
+    // `r.modelo` é o que RODOU de verdade (palavras.py desce de modelo se o
+    // pedido não existir) — o rótulo não pode prometer o turbo se rodou o small.
+    return {
+      words: r.words,
+      motor: `whisper-${r.modelo ?? MODELO_TRANSCRICAO}`,
+      language: r.language ?? idioma,
+    };
   }
 
   async function alinhar({ arquivo, idioma, linhas }) {
@@ -251,7 +279,7 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
    * já sai mais certa.
    */
   function pedir(id, arquivo, idioma, artista) {
-    const chave = `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO}`;
+    const chave = `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO_TRANSCRICAO}`;
     return pedirPorChave(chave, { tipo: 'transcrever', id, arquivo, idioma, artista });
   }
 
@@ -262,5 +290,13 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
     return pedirPorChave(chave, { tipo: 'alinhar', id, arquivo, idioma, linhas });
   }
 
-  return { pedir, pedirAlinhamento };
+  /**
+   * Transcrição DIRETA (fora da fila), para o /ai/transcribe quando a NVIDIA
+   * não responde. Mesmo motor e mesma qualidade da fila.
+   */
+  function transcreverAgora(arquivo, idioma) {
+    return transcrever({ arquivo, idioma: idioma ?? 'auto' });
+  }
+
+  return { pedir, pedirAlinhamento, transcreverAgora };
 }
