@@ -1039,6 +1039,14 @@ const BLOB_DIR_EXTERNAL = Boolean(process.env.BLOB_DIR);
 // viraria 503 e toda reprodução cairia para streaming ao vivo. Aceitar só o
 // antigo travaria o nome velho para sempre. Os dois convivem.
 const BLOB_MARKERS = [path.join(BLOB_DIR, '.radinho-blobs'), path.join(BLOB_DIR, '.aurial-blobs')];
+// 27/10/2026: o cofre deste PC foi APOSENTADO como fonte de áudio — o app toca
+// dos repositórios privados do GitHub, pela borda (musicas.radinho.online) — e
+// virou só a antessala do script infra/scripts/musicas-para-o-git.mjs, numa
+// pasta do disco interno: não há mountpoint para cair, e exigir o marcador só
+// deixava o importador gritando "INDISPONÍVEL" e recusando todo upload.
+// COFRE_EXIGE_MARCADOR=0 desliga a exigência. O padrão continua exigindo, pela
+// instância do servidor, cujo cofre mora num cartão que já desmontou sozinho.
+const COFRE_EXIGE_MARCADOR = (process.env.COFRE_EXIGE_MARCADOR ?? '1') !== '0';
 // Teto do cofre (LRU): ao passar, os blobs MAIS ANTIGOS saem primeiro. São
 // cópias para streaming entre aparelhos — o original continua no aparelho do
 // dono e a faixa segue tocável via streaming ao vivo da fonte.
@@ -1215,7 +1223,7 @@ function faixaPedida(cabecalho, total) {
 }
 
 async function blobStoreReady() {
-  if (!BLOB_DIR_EXTERNAL) return true;
+  if (!BLOB_DIR_EXTERNAL || !COFRE_EXIGE_MARCADOR) return true;
   for (const marcador of BLOB_MARKERS) {
     try {
       await stat(marcador);
@@ -2228,8 +2236,13 @@ async function main() {
   });
   // Diretório local padrão pode ser criado; o EXTERNO nunca (mkdir num
   // mountpoint desmontado criaria a pasta no disco raiz).
-  if (!BLOB_DIR_EXTERNAL) await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
-  else log(`blob store externo: ${BLOB_DIR} (${(await blobStoreReady()) ? 'ok' : 'INDISPONÍVEL'})`);
+  if (!BLOB_DIR_EXTERNAL || !COFRE_EXIGE_MARCADOR) {
+    await mkdir(BLOB_DIR, { recursive: true }).catch(() => undefined);
+  }
+  if (BLOB_DIR_EXTERNAL) {
+    const estado = (await blobStoreReady()) ? 'ok' : 'INDISPONÍVEL';
+    log(`blob store externo: ${BLOB_DIR} (${estado}${COFRE_EXIGE_MARCADOR ? '' : ', sem exigir marcador'})`);
+  }
   void sweepStaleTmp();
   void sweepBlobStore();
   setInterval(() => void sweepStaleTmp(), 3600_000).unref();
@@ -2324,6 +2337,7 @@ async function main() {
           JSON.stringify({
             pronto,
             dirExterno: BLOB_DIR_EXTERNAL,
+            exigeMarcador: COFRE_EXIGE_MARCADOR,
             marcadores: BLOB_MARKERS,
             tetoBytes: MAX_BLOB_BYTES,
             folgaMinimaBytes: MIN_LIVRE_BYTES,
