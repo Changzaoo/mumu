@@ -163,8 +163,7 @@ export function entradasDoDeezer(
           : r.explicit_lyrics === true
             ? true
             : null;
-    const genero =
-      paradaId === PARADA_RAP_FUNK ? generoDoRapFunk(artista, titulo) : generoDaParada;
+    const genero = paradaId === PARADA_RAP_FUNK ? generoDoRapFunk(artista, titulo) : generoDaParada;
     saida.push({
       fonte: 'deezer',
       genero,
@@ -174,7 +173,8 @@ export function entradasDoDeezer(
       capa: r.album?.cover_big ?? r.album?.cover_medium ?? null,
       duracaoMs: typeof r.duration === 'number' && r.duration > 0 ? r.duration * 1000 : null,
       explicito,
-      origem: typeof r.link === 'string' && /^https:\/\/www\.deezer\.com\//.test(r.link) ? r.link : null,
+      origem:
+        typeof r.link === 'string' && /^https:\/\/www\.deezer\.com\//.test(r.link) ? r.link : null,
     });
   }
   return saida;
@@ -194,8 +194,12 @@ export const PARADAS_APPLE: ReadonlyArray<{ id: number; genero: Genre }> = [
   { id: 12, genero: 'Latina' },
   { id: 6, genero: 'Country' },
   { id: 1332, genero: 'Sertanejo' },
-  { id: 1122, genero: 'MPB' },
-  { id: 1123, genero: 'Funk' },
+  // 1122 "Brazilian" é salada (sertanejo, MPB, axé, baile funk, rock): rotular
+  // tudo como MPB poluía a prateleira. MPB vem do Deezer 78. E 1123 é
+  // "Regional Mexicano" (Javier Solís, Antonio Aguilar) — foi parar na aba
+  // Funk em 27/10/2026. O funk do Brasil, na loja brasileira, é o 1139 "Funk"
+  // (MC Jacaré, MC Marcinho & DJ Marlboro, MC Poze), conferido no RSS.
+  { id: 1139, genero: 'Funk' },
   { id: 22, genero: 'Gospel' }, // "Música religiosa"
   { id: 24, genero: 'Reggae' },
   { id: 11, genero: 'Jazz' },
@@ -227,9 +231,7 @@ export function idsDoRssDaApple(rss: unknown): string[] {
   const feed = (rss as { feed?: { entry?: unknown } } | null)?.feed;
   const bruto = feed?.entry;
   const entradas = (Array.isArray(bruto) ? bruto : bruto ? [bruto] : []) as AppleRssEntrada[];
-  return entradas
-    .map((e) => e?.id?.attributes?.['im:id'] ?? '')
-    .filter((id) => /^\d+$/.test(id));
+  return entradas.map((e) => e?.id?.attributes?.['im:id'] ?? '').filter((id) => /^\d+$/.test(id));
 }
 
 export function entradasDaApple(
@@ -255,7 +257,8 @@ export function entradasDaApple(
         ? capaRss.replace(/\/\d+x\d+bb\./, '/600x600bb.')
         : null;
     const selo = detalhe?.trackExplicitness;
-    const explicito = selo === 'explicit' ? true : selo === 'notExplicit' || selo === 'cleaned' ? false : null;
+    const explicito =
+      selo === 'explicit' ? true : selo === 'notExplicit' || selo === 'cleaned' ? false : null;
     const origem = detalhe?.trackViewUrl ?? e?.id?.label ?? null;
     saida.push({
       fonte: 'apple',
@@ -418,7 +421,8 @@ export function fundirParadas(
     if (e.genero) m.votos.set(e.genero, (m.votos.get(e.genero) ?? 0) + 1);
     m.selos.push(e.explicito);
     // A capa do Deezer/Apple é a do disco; a do YouTube é o quadro do vídeo.
-    if (!m.capa || (e.fonte !== 'youtube' && m.capa.includes('ytimg.com'))) m.capa = e.capa ?? m.capa;
+    if (!m.capa || (e.fonte !== 'youtube' && m.capa.includes('ytimg.com')))
+      m.capa = e.capa ?? m.capa;
     if (!m.duracaoMs && e.duracaoMs) m.duracaoMs = e.duracaoMs;
     if (e.origem && !m.origens[e.fonte]) m.origens[e.fonte] = e.origem;
   }
@@ -435,7 +439,9 @@ export function fundirParadas(
     }
     const conteudo: VeredictoDeConteudo =
       noAcervoDesta?.veredicto ??
-      (classificarTexto(m.titulo).veredicto === 'explicito' ? 'explicito' : conteudoDasFontes(m.selos));
+      (classificarTexto(m.titulo).veredicto === 'explicito'
+        ? 'explicito'
+        : conteudoDasFontes(m.selos));
     faixas.push({
       chave: m.chave,
       titulo: m.titulo,
