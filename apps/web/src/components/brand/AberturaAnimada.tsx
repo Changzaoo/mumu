@@ -33,9 +33,28 @@ import { createPortal } from 'react-dom';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { useSemMovimento } from '@/hooks/useSemMovimento';
+import { anotar } from '@/lib/telemetry/diario';
+// Uma vez por sessão: recarga no meio do uso não repete a cena (ver o módulo).
+import { aberturaJaVista, marcarAberturaVista } from './aberturaVista';
 
-/** Duração da cena inteira (ms) — o mínimo que a abertura fica na tela. */
+/**
+ * Duração da cena inteira, em ms DE CENA — o mínimo que a abertura fica na
+ * tela. A coreografia foi desenhada em 9,5 s; o relógio real anda mais rápido
+ * (ver `RITMO`), e é por isso que todo tempo que vai para o navegador passa
+ * por `real()` ou `s()`.
+ */
 export const DURACAO_DA_CENA_MS = 9_500;
+/**
+ * O RITMO. Pedido do dono (27/10/2026): "a abertura está muito demorada". A
+ * cena inteira roda `RITMO` vezes mais rápido do que foi desenhada — 9,5 s
+ * viram ~5,3 s — sem mexer na coreografia: cada tempo de cena (delays do CSS,
+ * quadros da câmera, timers) vira tempo real dividindo por este fator.
+ */
+export const RITMO = 1.8;
+/** Tempo de cena (ms) → tempo real (ms). */
+const real = (ms: number): number => ms / RITMO;
+/** Tempo de cena (s) → tempo real para o CSS ("0.306s"). */
+const s = (seg: number): string => `${(seg / RITMO).toFixed(3)}s`;
 /** Teto de espera pelo app (ms): depois disto a abertura sai de qualquer jeito. */
 const TETO_DE_ESPERA_MS = 20_000;
 /** Saída: o tempo do fade (ms). */
@@ -275,7 +294,7 @@ function Laminas({
         <rect
           key={i}
           className={`peca r3 lamina`}
-          style={{ animationDelay: `${0.9 + i * 0.06}s` }}
+          style={{ animationDelay: s(0.9 + i * 0.06) }}
           x={x}
           y={y + i * passo}
           width={w}
@@ -360,7 +379,9 @@ export function AberturaAnimada() {
   const [cenaAcabou, setCenaAcabou] = useState(false);
   const [teto, setTeto] = useState(false);
   const [saindo, setSaindo] = useState(false);
-  const [fechada, setFechada] = useState(false);
+  // Já vista nesta sessão (recarga no meio do uso): nasce fechada, sem cena.
+  const [fechada, setFechada] = useState(aberturaJaVista);
+  const [pulada, setPulada] = useState(false);
   const svgRef = useRef<SVGSVGElement>(null);
   const base: readonly [number, number, number, number] = retrato
     ? [100, 0, 780, 560]
@@ -385,7 +406,7 @@ export function AberturaAnimada() {
     const svg = svgRef.current;
     const camera = cameraRef.current;
     const telaGrande = telaGrandeRef.current;
-    if (!svg || !camera || semMovimento || typeof camera.animate !== 'function') return;
+    if (fechada || !svg || !camera || semMovimento || typeof camera.animate !== 'function') return;
     const trilha = svg.querySelector<SVGPathElement>('#trilha');
     const telaRect = svg.querySelector<SVGGraphicsElement>('rect.tela');
     const animacoes: Animation[] = [];
@@ -394,10 +415,11 @@ export function AberturaAnimada() {
     const decorrido = (): number => {
       const a = svg.getAnimations?.({ subtree: true })[0];
       const agora = document.timeline?.currentTime;
+      // Em ms DE CENA: o relógio real anda RITMO vezes mais devagar que a cena.
       if (a && a.startTime !== null && typeof agora === 'number') {
-        return agora - Number(a.startTime);
+        return (agora - Number(a.startTime)) * RITMO;
       }
-      return a && typeof a.currentTime === 'number' ? a.currentTime : 0;
+      return a && typeof a.currentTime === 'number' ? a.currentTime * RITMO : 0;
     };
     const montar = (): void => {
       for (const a of animacoes.splice(0)) a.cancel();
@@ -464,25 +486,25 @@ export function AberturaAnimada() {
       const iniciar = (): void => {
         const ja = Math.max(0, decorrido() - INICIO);
         const a = camera.animate(quadros, {
-          duration: DURACAO_DA_CENA_MS - INICIO,
+          duration: real(DURACAO_DA_CENA_MS - INICIO),
           easing: 'linear',
           fill: 'forwards',
         });
-        a.currentTime = ja;
+        a.currentTime = real(ja);
         animacoes.push(a);
         if (telaGrande && quadrosDaTela) {
           const t = telaGrande.animate(quadrosDaTela, {
-            duration: TELA_GRANDE_MS[1] - TELA_GRANDE_MS[0],
-            delay: TELA_GRANDE_MS[0] - INICIO,
+            duration: real(TELA_GRANDE_MS[1] - TELA_GRANDE_MS[0]),
+            delay: real(TELA_GRANDE_MS[0] - INICIO),
             easing: 'cubic-bezier(.55,0,.8,.2)',
             fill: 'forwards',
           });
-          t.currentTime = ja;
+          t.currentTime = real(ja);
           animacoes.push(t);
         }
       };
       const falta = INICIO - decorrido();
-      if (falta > 0) espera = window.setTimeout(iniciar, falta);
+      if (falta > 0) espera = window.setTimeout(iniciar, real(falta));
       else iniciar();
     };
     montar();
@@ -493,10 +515,10 @@ export function AberturaAnimada() {
       for (const a of animacoes) a.cancel();
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps -- `base` deriva de `retrato`
-  }, [retrato, semMovimento]);
+  }, [retrato, semMovimento, fechada]);
 
   useEffect(() => {
-    const a = setTimeout(() => setCenaAcabou(true), semMovimento ? 0 : DURACAO_DA_CENA_MS);
+    const a = setTimeout(() => setCenaAcabou(true), semMovimento ? 0 : real(DURACAO_DA_CENA_MS));
     const b = setTimeout(() => setTeto(true), TETO_DE_ESPERA_MS);
     return () => {
       clearTimeout(a);
@@ -505,12 +527,45 @@ export function AberturaAnimada() {
   }, [semMovimento]);
 
   const podeSair = cenaAcabou && (pronto || teto);
+  // Só `podeSair` nas dependências: com `saindo` junto, o próprio setSaindo
+  // rodava a limpeza e cancelava o timer do fade — a abertura ficava montada
+  // para sempre, invisível (opacity 0), em vez de sair do DOM.
   useEffect(() => {
-    if (!podeSair || saindo) return;
+    if (!podeSair) return;
     setSaindo(true);
     const t = setTimeout(() => setFechada(true), SAIDA_MS);
     return () => clearTimeout(t);
-  }, [podeSair, saindo]);
+  }, [podeSair]);
+
+  // Registra a decisão no diário de bordo e marca a sessão: a próxima recarga
+  // não repete a cena. (Roda uma vez, na montagem.)
+  useEffect(() => {
+    if (fechada) {
+      anotar('app', 'abertura', 'dispensada: já vista nesta sessão');
+      return;
+    }
+    marcarAberturaVista();
+    anotar('app', 'abertura', 'mostrada');
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- só na montagem
+  }, []);
+
+  // PULAR. A cena acaba na hora; a abertura sai assim que o app estiver pronto
+  // por baixo (ou no teto). O botão e a tecla Esc fazem a mesma coisa.
+  const pular = (): void => {
+    if (pulada || saindo || fechada) return;
+    setPulada(true);
+    setCenaAcabou(true);
+    anotar('app', 'abertura', 'pulada');
+  };
+  useEffect(() => {
+    if (fechada) return;
+    const aoTeclar = (e: KeyboardEvent): void => {
+      if (e.key === 'Escape') pular();
+    };
+    window.addEventListener('keydown', aoTeclar);
+    return () => window.removeEventListener('keydown', aoTeclar);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- `pular` lê o estado atual
+  }, [fechada, pulada, saindo]);
 
   // ENQUANTO A ABERTURA COBRE A TELA, O APP NÃO PINTA. Ele continua montando,
   // buscando dados e carregando imagens por baixo (`visibility` não para nada
@@ -746,7 +801,7 @@ export function AberturaAnimada() {
                   <circle cx="372" cy="384" r="8" fill={COR.cromoEscuro} />
                   <rect x="371" y="368" width="2.4" height="8" rx="1.2" fill={COR.madeiraEscura} />
                 </g>
-                <g className="peca r5" style={{ animationDelay: '1.95s' }}>
+                <g className="peca r5" style={{ animationDelay: s(1.95) }}>
                   <circle cx="418" cy="384" r="19" fill={COR.madeiraEscura} />
                   <circle cx="418" cy="384" r="15" fill="url(#ab-cromo)" />
                   <circle cx="418" cy="384" r="8" fill={COR.cromoEscuro} />
@@ -1135,13 +1190,30 @@ export function AberturaAnimada() {
           </div>
         )}
       </PaletaCtx.Provider>
+      {!saindo && !pulada && (
+        <button
+          type="button"
+          onClick={pular}
+          data-testid="abertura-pular"
+          className="absolute right-5 z-10 rounded-full px-4 py-2 text-sm font-medium text-fg"
+          style={{
+            bottom: 'max(1.25rem, env(safe-area-inset-bottom, 0px))',
+            border: '1px solid currentColor',
+            background: 'transparent',
+            opacity: 0.75,
+          }}
+        >
+          Pular
+        </button>
+      )}
     </div>,
     document.body,
   );
 }
 
 /**
- * Os tempos da cena, em segundos (9,5 s no total):
+ * Os tempos da cena, em segundos DE CENA (9,5 s no total; o tempo real é
+ * o de cena dividido por `RITMO`, via `s()` e `real()`):
  *   0,0–2,6  o rádio se monta (pés, caixa, grade, lâminas, dial, botões, placa)
  *   2,6–3,4  a antena se estende, gomo a gomo
  *   2,2–3,6  a pessoa se monta (pernas, tronco, braços, cabeça, cabelo, celular)
@@ -1156,28 +1228,28 @@ export function AberturaAnimada() {
  * pessoa (778, 300); centro da tela do celular ≈ (748, 316).
  */
 const estilos = `
-.abertura .peca { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; animation: ab-pop 0.55s cubic-bezier(.2,.9,.3,1.3) forwards }
-.abertura .r0 { animation-delay: 0.05s } .abertura .r1 { animation-delay: 0.2s }
-.abertura .r2 { animation-delay: 0.55s } .abertura .r3 { animation-delay: 0.9s }
-.abertura .r4 { animation-delay: 1.45s } .abertura .r5 { animation-delay: 1.8s }
-.abertura .r6 { animation-delay: 2.15s }
+.abertura .peca { opacity: 0; transform-box: fill-box; transform-origin: 50% 100%; animation: ab-pop ${s(0.55)} cubic-bezier(.2,.9,.3,1.3) forwards }
+.abertura .r0 { animation-delay: ${s(0.05)} } .abertura .r1 { animation-delay: ${s(0.2)} }
+.abertura .r2 { animation-delay: ${s(0.55)} } .abertura .r3 { animation-delay: ${s(0.9)} }
+.abertura .r4 { animation-delay: ${s(1.45)} } .abertura .r5 { animation-delay: ${s(1.8)} }
+.abertura .r6 { animation-delay: ${s(2.15)} }
 .abertura .lamina { transform-origin: 0% 50% }
-.abertura .gomo { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(0); opacity: 0; animation-name: ab-estender, ab-aparecer; animation-duration: 0.45s, 0.05s; animation-fill-mode: forwards, forwards; animation-timing-function: cubic-bezier(.3,.8,.3,1), linear }
-.abertura .g1 { animation-delay: 2.5s } .abertura .g2 { animation-delay: 2.8s } .abertura .g3 { animation-delay: 3.1s }
-.abertura .p0 { animation-delay: 2.2s } .abertura .p1 { animation-delay: 2.3s } .abertura .p2 { animation-delay: 2.55s }
-.abertura .p3 { animation-delay: 2.8s } .abertura .p4 { animation-delay: 3.05s } .abertura .p5 { animation-delay: 3.25s }
-.abertura .p6 { animation-delay: 3.45s }
-.abertura .ponteiro { transform-box: fill-box; transform-origin: 50% 50%; animation: ab-ponteiro 1.3s ease-in-out 2.2s 2 alternate }
-.abertura .radio { animation: ab-sumir-de-vez 0.8s ease-in 5s forwards }
-.abertura .trilha { stroke-dashoffset: 1; opacity: 0; animation: ab-tracar 2s cubic-bezier(.4,0,.6,1) 3.9s forwards, ab-meia 0.05s linear 3.9s forwards, ab-sumir-de-vez 0.6s ease 6.4s forwards }
-.abertura .sinal { opacity: 0; animation: ab-aparecer 0.2s linear 3.9s forwards, ab-sumir-de-vez 0.5s ease 6.1s forwards }
-.abertura .halo { opacity: 0.35; animation: ab-halo 0.9s ease-out 3.9s 2 }
-.abertura .tela { opacity: 0; animation: ab-acender 0.6s ease-out 6.3s forwards }
-.abertura .brilho { opacity: 0; animation: ab-aparecer 0.8s ease-out 6.4s forwards }
-.abertura .nota { opacity: 0; transform: translate(30px, 70px); animation: ab-nota 1.7s ease-out forwards }
-.abertura .n1 { animation-delay: 6.6s } .abertura .n2 { animation-delay: 6.9s }
-.abertura .n3 { animation-delay: 7.2s } .abertura .n4 { animation-delay: 7.5s }
-.abertura .logo { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: ab-logo 0.8s cubic-bezier(.2,.8,.2,1) 7.8s forwards }
+.abertura .gomo { transform-box: fill-box; transform-origin: 50% 0%; transform: scaleY(0); opacity: 0; animation-name: ab-estender, ab-aparecer; animation-duration: ${s(0.45)}, ${s(0.05)}; animation-fill-mode: forwards, forwards; animation-timing-function: cubic-bezier(.3,.8,.3,1), linear }
+.abertura .g1 { animation-delay: ${s(2.5)} } .abertura .g2 { animation-delay: ${s(2.8)} } .abertura .g3 { animation-delay: ${s(3.1)} }
+.abertura .p0 { animation-delay: ${s(2.2)} } .abertura .p1 { animation-delay: ${s(2.3)} } .abertura .p2 { animation-delay: ${s(2.55)} }
+.abertura .p3 { animation-delay: ${s(2.8)} } .abertura .p4 { animation-delay: ${s(3.05)} } .abertura .p5 { animation-delay: ${s(3.25)} }
+.abertura .p6 { animation-delay: ${s(3.45)} }
+.abertura .ponteiro { transform-box: fill-box; transform-origin: 50% 50%; animation: ab-ponteiro ${s(1.3)} ease-in-out ${s(2.2)} 2 alternate }
+.abertura .radio { animation: ab-sumir-de-vez ${s(0.8)} ease-in ${s(5)} forwards }
+.abertura .trilha { stroke-dashoffset: 1; opacity: 0; animation: ab-tracar ${s(2)} cubic-bezier(.4,0,.6,1) ${s(3.9)} forwards, ab-meia ${s(0.05)} linear ${s(3.9)} forwards, ab-sumir-de-vez ${s(0.6)} ease ${s(6.4)} forwards }
+.abertura .sinal { opacity: 0; animation: ab-aparecer ${s(0.2)} linear ${s(3.9)} forwards, ab-sumir-de-vez ${s(0.5)} ease ${s(6.1)} forwards }
+.abertura .halo { opacity: 0.35; animation: ab-halo ${s(0.9)} ease-out ${s(3.9)} 2 }
+.abertura .tela { opacity: 0; animation: ab-acender ${s(0.6)} ease-out ${s(6.3)} forwards }
+.abertura .brilho { opacity: 0; animation: ab-aparecer ${s(0.8)} ease-out ${s(6.4)} forwards }
+.abertura .nota { opacity: 0; transform: translate(30px, 70px); animation: ab-nota ${s(1.7)} ease-out forwards }
+.abertura .n1 { animation-delay: ${s(6.6)} } .abertura .n2 { animation-delay: ${s(6.9)} }
+.abertura .n3 { animation-delay: ${s(7.2)} } .abertura .n4 { animation-delay: ${s(7.5)} }
+.abertura .logo { opacity: 0; transform-box: fill-box; transform-origin: 50% 50%; animation: ab-logo ${s(0.8)} cubic-bezier(.2,.8,.2,1) ${s(7.8)} forwards }
 
 @keyframes ab-pop { from { opacity: 0; transform: scale(0.7) translateY(14px) } to { opacity: 1; transform: none } }
 @keyframes ab-estender { to { transform: scaleY(1) } }

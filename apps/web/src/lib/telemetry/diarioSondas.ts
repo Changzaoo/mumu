@@ -197,11 +197,27 @@ function seguro(nome: string, instalar: () => void): void {
   }
 }
 
+/**
+ * Como a página nasceu: 'navigate' (abriu), 'reload' (recarregou — a versão
+ * nova, o puxar para recarregar), 'back_forward'. É o que separa "o app
+ * reiniciou sozinho" de "a pessoa abriu o app" quando alguém relata reinício.
+ */
+function tipoDaNavegacao(): string | undefined {
+  try {
+    const nav = performance.getEntriesByType?.('navigation')[0] as
+      PerformanceNavigationTiming | undefined;
+    return nav?.type;
+  } catch {
+    return undefined;
+  }
+}
+
 function sondaDoApp(): void {
   const conexao = (navigator as Navigator & { connection?: { effectiveType?: string } }).connection;
   anotar('app', 'boot', {
     build: import.meta.env.MODE,
     rota: location.pathname,
+    tipo: tipoDaNavegacao(),
     online: navigator.onLine,
     rede: conexao?.effectiveType,
     instalado: window.matchMedia?.('(display-mode: standalone)').matches || undefined,

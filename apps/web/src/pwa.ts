@@ -16,7 +16,11 @@
  */
 import { registerSW } from 'virtual:pwa-register';
 import { recarregarPreservandoMusica } from '@/lib/recarregar';
+import { anotar } from '@/lib/telemetry/diario';
 import { usePlayerStore } from '@/stores/playerStore';
+
+/** Quanto tempo sem toque, tecla ou rolagem antes de recarregar para a versão nova. */
+const SOSSEGO_MS = 6_000;
 
 /**
  * O cache de capas antigo (`aurial-images`) guardava respostas opacas — 404,
@@ -38,11 +42,39 @@ export function initPwaUpdater(): void {
     // recarregar ali seria um refresh à toa logo na abertura.
     const tinhaControle = Boolean(navigator.serviceWorker.controller);
     let recarregando = false;
+    // NUNCA NO MEIO DE UM GESTO. "O app fica reiniciando do nada" (dono,
+    // 27/10/2026): cada versão publicada recarregava a página na hora, ainda
+    // que a pessoa estivesse digitando na busca ou rolando a lista — e a
+    // abertura inteira tocava de novo. Agora a recarga espera `SOSSEGO_MS`
+    // sem toque, tecla nem rolagem; a abertura não repete (AberturaAnimada
+    // guarda a sessão) e a música e a tela voltam como estavam: a troca de
+    // versão vira um piscar.
+    let ultimoGesto = 0;
+    for (const tipo of ['pointerdown', 'keydown', 'touchstart', 'wheel'] as const) {
+      window.addEventListener(
+        tipo,
+        () => {
+          ultimoGesto = Date.now();
+        },
+        { capture: true, passive: true },
+      );
+    }
+    const quandoSossegar = (fazer: () => void): void => {
+      const falta = ultimoGesto + SOSSEGO_MS - Date.now();
+      if (falta <= 0) {
+        fazer();
+        return;
+      }
+      window.setTimeout(() => quandoSossegar(fazer), falta);
+    };
     const recarregar = (): void => {
       if (recarregando) return;
       recarregando = true;
-      // A música volta de onde estava, e a tela como estava (lib/recarregar).
-      recarregarPreservandoMusica();
+      quandoSossegar(() => {
+        anotar('app', 'atualizar', 'versão nova: recarregando');
+        // A música volta de onde estava, e a tela como estava (lib/recarregar).
+        recarregarPreservandoMusica();
+      });
     };
     navigator.serviceWorker.addEventListener('controllerchange', () => {
       if (recarregando || !tinhaControle) return;

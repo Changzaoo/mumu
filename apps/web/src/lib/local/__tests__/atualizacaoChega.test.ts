@@ -17,9 +17,11 @@
  *  - primeira visita (nenhum worker anterior) → NÃO recarrega (seria refresh à
  *    toa na abertura);
  *  - tocando → grava a retomada antes de recarregar;
- *  - recarrega UMA vez só, mesmo se o evento repetir.
+ *  - recarrega UMA vez só, mesmo se o evento repetir;
+ *  - no meio de um gesto (toque, tecla, rolagem) → espera sossegar antes de
+ *    recarregar ("o app fica reiniciando do nada", 27/10/2026).
  */
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 const { updateSW, prepararRetomadaTocando, estadoPlayer, swListeners, reload, controller } =
   vi.hoisted(() => ({
@@ -39,6 +41,7 @@ vi.mock('@/stores/playerStore', () => ({
   usePlayerStore: { getState: () => estadoPlayer },
   prepararRetomadaTocando,
 }));
+vi.mock('@/lib/telemetry/diario', () => ({ anotar: vi.fn() }));
 
 /** Dispara o controllerchange como o navegador faz quando o worker novo assume. */
 function workerNovoAssume(): void {
@@ -108,5 +111,26 @@ describe('a versão nova chega ao aparelho', () => {
     workerNovoAssume();
     workerNovoAssume();
     expect(reload).toHaveBeenCalledTimes(1);
+  });
+
+  describe('no meio de um gesto', () => {
+    beforeEach(() => vi.useFakeTimers());
+    afterEach(() => vi.useRealTimers());
+
+    it('espera a pessoa sossegar antes de recarregar', async () => {
+      const { initPwaUpdater } = await import('@/pwa');
+      initPwaUpdater();
+      window.dispatchEvent(new Event('pointerdown'));
+      workerNovoAssume();
+      expect(reload).not.toHaveBeenCalled();
+      // Continua mexendo: continua esperando.
+      vi.advanceTimersByTime(4_000);
+      window.dispatchEvent(new Event('keydown'));
+      vi.advanceTimersByTime(4_000);
+      expect(reload).not.toHaveBeenCalled();
+      // Sossegou: recarrega.
+      vi.advanceTimersByTime(2_100);
+      expect(reload).toHaveBeenCalledTimes(1);
+    });
   });
 });
