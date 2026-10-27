@@ -2005,6 +2005,23 @@ const limiteDeImport = criarLimiteDeImport({
   maxPorJanela: Math.max(1, Number(process.env.IMPORT_MAX_POR_HORA ?? 600)),
 });
 
+/**
+ * IP CONFIÁVEL de quem pediu, para chavear o limite de taxa de rota sem login.
+ *
+ * O `x-forwarded-for` NÃO serve: atrás do Cloudflare Tunnel o cliente ainda
+ * manda esse cabeçalho, e tomar o primeiro item (`split(',')[0]`) pega
+ * justamente o valor que o cliente escolheu — trocar a cada pedido zera a chave
+ * e fura o teto por hora. O Cloudflare põe o IP real do cliente em
+ * `cf-connecting-ip` e SOBRESCREVE qualquer valor que o cliente tente mandar
+ * nele; por isso ele é a fonte confiável. Sem Cloudflare (uso local/LAN,
+ * acesso direto), cai no socket. O `x-forwarded-for` nunca entra na chave.
+ */
+function ipConfiavel(req) {
+  const cf = req.headers['cf-connecting-ip'];
+  if (typeof cf === 'string' && cf.trim()) return cf.trim();
+  return req.socket?.remoteAddress || '?';
+}
+
 /** Quem está pedindo: a conta (do token já verificado) ou o IP; null = serviço. */
 function quemPede(req) {
   const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
@@ -2018,10 +2035,7 @@ function quemPede(req) {
   } catch {
     /* token que não é JWT: vai pelo IP */
   }
-  const ip = String(req.headers['x-forwarded-for'] ?? '')
-    .split(',')[0]
-    .trim();
-  return `ip:${ip || req.socket.remoteAddress || '?'}`;
+  return `ip:${ipConfiavel(req)}`;
 }
 
 /** Responde 429 e devolve false quando a conta estourou o limite. */
@@ -2300,13 +2314,12 @@ async function musicbrainzCredits(title, artist) {
   return { label, catalogNumber, composer, coverUrl };
 }
 
-/** IP de quem pediu — Cloudflare Tunnel repassa o cliente real em
- *  `X-Forwarded-For`; sem ele, cai no socket direto (uso local/LAN). Usado só
- *  para o limite de taxa de `/letra/outras-fontes` (rota sem login). */
+/** IP de quem pediu, para o limite de taxa de `/letra/outras-fontes` (rota sem
+ *  login). Usa o `cf-connecting-ip` do Cloudflare (que o cliente não forja);
+ *  sem ele, o socket direto. Ver `ipConfiavel`. */
 function ipDoPedido(req) {
-  const fwd = req.headers['x-forwarded-for'];
-  if (typeof fwd === 'string' && fwd.trim()) return fwd.split(',')[0].trim();
-  return req.socket?.remoteAddress || 'desconhecido';
+  const ip = ipConfiavel(req);
+  return ip === '?' ? 'desconhecido' : ip;
 }
 
 async function main() {
@@ -3656,10 +3669,7 @@ async function main() {
           /* token que não é JWT (token de serviço/compartilhado) — vai pelo IP */
         }
         if (!quem) {
-          const encaminhado = String(req.headers['x-forwarded-for'] ?? '')
-            .split(',')[0]
-            .trim();
-          quem = `ip:${encaminhado || req.socket.remoteAddress || '?'}`;
+          quem = `ip:${ipConfiavel(req)}`;
         }
         try {
           let corpo;
