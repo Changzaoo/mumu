@@ -53,6 +53,8 @@ const CARTOES_INICIAIS = 10;
  * sempre — a busca não tinha tempo limite e o botão nunca voltava.
  */
 const TEMPO_LIMITE_MS = 8_000;
+/** Quantas origens o `/aquecer` do importador aceita por pedido. */
+const AQUECER_ATE = 8;
 
 /** `AbortSignal.timeout` ainda falta em navegador antigo: cai no timer. */
 function sinalComTempoLimite(ms: number): AbortSignal {
@@ -157,6 +159,7 @@ export function PrateleiraEmAlta() {
   const urlsParaAquecer = (ativa?.faixas ?? [])
     .slice(0, CARTOES_INICIAIS)
     .filter((t) => ehDeForaDoAcervo(t) && t.sourceUrl && videoIdDoYoutube(t.sourceUrl))
+    .slice(0, AQUECER_ATE)
     .map((t) => t.sourceUrl as string)
     .join('|');
   useEffect(() => {
