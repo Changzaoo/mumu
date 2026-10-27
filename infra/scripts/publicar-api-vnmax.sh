@@ -41,9 +41,14 @@ echo "dist: $(ls apps/api/dist | wc -l) entradas"
 
 passo "3/5 pasta autossuficiente (pnpm deploy)"
 SAIDA="$EXPORT/_deploy"
-pnpm --filter @radinho/api deploy --legacy "$SAIDA" >/dev/null
-# O prisma generate roda no servidor (engine do Linux); aqui só conferimos o CLI.
+# node-linker=hoisted: node_modules com diretórios de verdade. Com o linker padrão
+# o pnpm cria junções no Windows e o tar as deixa para trás (faltou @prisma/client
+# no servidor na primeira tentativa, 27/10/2026).
+pnpm --filter @radinho/api deploy --legacy --config.node-linker=hoisted "$SAIDA" >/dev/null
+# O prisma generate roda no servidor (engine do Linux); aqui só conferimos o CLI e o cliente.
 [[ -x "$SAIDA/node_modules/.bin/prisma" ]] || { echo "prisma CLI ausente na pasta" >&2; exit 1; }
+[[ -d "$SAIDA/node_modules/@prisma/client" ]] || { echo "@prisma/client ausente na pasta (links?)" >&2; exit 1; }
+find "$SAIDA/node_modules" -maxdepth 1 -type l | grep -q . && { echo "node_modules ainda tem links; o tar os perderia" >&2; exit 1; }
 echo "$SHA" > "$SAIDA/VERSAO"
 du -sh "$SAIDA" | cut -f1
 
@@ -56,7 +61,9 @@ ssh -o BatchMode=yes "$HOST_SSH" bash -s -- "$DESTINO" "$SHA" "${ESTAGIAR:-0}" <
 set -euo pipefail
 DESTINO="$1"; SHA="$2"; ESTAGIAR="$3"
 cd "${DESTINO}.novo"
-nice -n 10 ./node_modules/.bin/prisma generate >/dev/null 2>&1 && echo "prisma generate ok"
+if ! saida="$(nice -n 10 ./node_modules/.bin/prisma generate 2>&1)"; then echo "$saida" | tail -5 >&2; exit 1; fi
+echo "prisma generate ok"
+node -e 'import("@prisma/client").then(() => console.log("@prisma/client carrega"))'
 if [[ "$ESTAGIAR" == "1" ]]; then
   echo "estagiado em ${DESTINO}.novo (${SHA}); nada ativado."
   exit 0
