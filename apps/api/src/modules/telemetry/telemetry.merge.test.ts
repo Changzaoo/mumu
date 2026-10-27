@@ -44,6 +44,23 @@ describe('fusão da telemetria', () => {
     expect(saida.pageSeconds).toEqual({ inicio: 12 });
   });
 
+  it('envio deslogado (identidade nula) NÃO apaga e-mail, nome e uid já gravados', () => {
+    // O caso real: iPhone com o app instalado abriu sem login e mandou null.
+    const saida = fundir(
+      { email: 'dono@gmail.com', displayName: 'Dono', uid: 'abc', libraryCount: 4828 },
+      { email: null, displayName: null, uid: null, libraryCount: 4830 },
+    );
+    expect(saida.email).toBe('dono@gmail.com');
+    expect(saida.displayName).toBe('Dono');
+    expect(saida.uid).toBe('abc');
+    expect(saida.libraryCount).toBe(4830);
+  });
+
+  it('identidade nova ainda substitui a antiga; null em campo vazio continua null', () => {
+    expect(fundir({ email: 'a@x.com' }, { email: 'b@x.com' }).email).toBe('b@x.com');
+    expect(fundir({}, { email: null }).email).toBeNull();
+  });
+
   it('não confunde um número solto com incremento', () => {
     // `{ __inc }` é a marca; um número cru é estado e deve substituir.
     expect(fundir({ sessions: 9 }, { sessions: 1 }).sessions).toBe(1);

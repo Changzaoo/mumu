@@ -50,6 +50,7 @@ import { Badge } from '@/components/ui/badge';
 import { Skeleton } from '@/components/ui/skeleton';
 import { getIdToken } from '@/lib/firebase';
 import { API_BASE_URL } from '@/lib/apiBase';
+import { chaveDaConta, identidadeDoGrupo } from '@/lib/telemetry/contaDoAparelho';
 import { computeInsights } from '@/lib/telemetry/insights';
 import { SINTOMAS, type Canal, type Linha, type ResumoDoDiario } from '@/lib/telemetry/diario';
 import { TIPOS_DE_RELATO, type Relato } from '@/lib/telemetry/relatos';
@@ -632,15 +633,19 @@ function somarMapa(
  *
  * A telemetria é gravada por `deviceId` — então quem usa o app no celular e no
  * computador virava DUAS linhas da mesma pessoa. Aqui as linhas de uma conta
- * (mesmo e-mail) viram UMA: os números somam (tempo, plays, histogramas,
- * páginas, cliques) e a lista de aparelhos vai junto, para o painel mostrar
- * "3 aparelhos · 1 ativo" e, no detalhe, quais são. Anônimo não agrupa — cada
- * aparelho sem conta é uma pessoa que a gente não tem como saber se é a mesma.
+ * viram UMA: os números somam (tempo, plays, histogramas, páginas, cliques) e
+ * a lista de aparelhos vai junto, para o painel mostrar "3 aparelhos · 1 ativo"
+ * e, no detalhe, quais são. Anônimo não agrupa — cada aparelho sem conta é uma
+ * pessoa que a gente não tem como saber se é a mesma.
+ *
+ * A conta é o `userId` que o servidor vinculou ao aparelho (ver
+ * lib/telemetry/contaDoAparelho): agrupar pelo e-mail do documento deixava de
+ * fora o aparelho que abriu deslogado e gravou `email: null`.
  */
 function agruparPorConta(docs: TelemetryDoc[]): TelemetryDoc[] {
   const grupos = new Map<string, TelemetryDoc[]>();
   for (const t of docs) {
-    const chave = t.email ? `e:${t.email.toLowerCase()}` : `u:${t.uid}`;
+    const chave = chaveDaConta(t);
     const lista = grupos.get(chave);
     if (lista) lista.push(t);
     else grupos.set(chave, [t]);
@@ -659,6 +664,7 @@ function agruparPorConta(docs: TelemetryDoc[]): TelemetryDoc[] {
     const base = ord[0]!; // representante = aparelho visto por último
     contas.push({
       ...base,
+      ...identidadeDoGrupo(grupo, base),
       totalSeconds: grupo.reduce((s, t) => s + (t.totalSeconds ?? 0), 0),
       totalPlays: grupo.reduce((s, t) => s + (t.totalPlays ?? 0), 0),
       totalClicks: grupo.reduce((s, t) => s + (t.totalClicks ?? 0), 0),

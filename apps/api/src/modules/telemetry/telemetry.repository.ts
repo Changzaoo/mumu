@@ -42,6 +42,17 @@ export const MAX_PROFUNDIDADE = 16;
 const CHAVES_PROIBIDAS = new Set(['__proto__', 'constructor', 'prototype']);
 
 /**
+ * IDENTIDADE DO DONO: um envio deslogado não apaga o que a sessão logada gravou.
+ *
+ * O cliente manda `email`, `displayName` e `uid` a cada pedaço, com `null`
+ * quando ninguém está logado. O iPhone com o app instalado abria sem login e
+ * cada envio zerava a identidade do aparelho — que continuava vinculado à
+ * conta pelo `userId` da linha, mas aparecia no painel como "Usuário" sem
+ * e-mail. Um valor novo ainda substitui o antigo; só o `null` não apaga.
+ */
+const CHAVES_DE_IDENTIDADE = new Set(['email', 'displayName', 'uid']);
+
+/**
  * O pedaço que chegou é raso o bastante para ser processado com segurança?
  *
  * Iterativo DE PROPÓSITO: uma checagem recursiva de profundidade estouraria a
@@ -117,6 +128,7 @@ function fundir(
   for (const [chave, valor] of Object.entries(pedaco)) {
     // Ver `CHAVES_PROIBIDAS`: aceitar e não gravar é pior que recusar.
     if (CHAVES_PROIBIDAS.has(chave)) continue;
+    if (valor === null && CHAVES_DE_IDENTIDADE.has(chave) && saida[chave] != null) continue;
     if (ehIncremento(valor)) {
       const atual = saida[chave];
       saida[chave] = (typeof atual === 'number' ? atual : 0) + valor.__inc;
