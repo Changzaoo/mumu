@@ -18,7 +18,7 @@ import { startImportacoesWorker } from './importacoes.worker.js';
 import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
 import { startEmAltaWorker } from './emAlta.worker.js';
 import { startDuracoesWorker } from './duracoes.worker.js';
-import { startMundoWorker } from './mundo.worker.js';
+import { startCreditosWorker } from './creditos.worker.js';
 
 const connection = createBullConnection();
 
@@ -73,20 +73,18 @@ const stopImportacoes = startImportacoesWorker();
 // conteudoDaFaixa.worker.
 const stopConteudo = startConteudoDaFaixaWorker();
 
-// Um terço do acervo nasceu com `durationMs: 0` e mostrava "0:00" na lista.
 // "Em alta" por gênero: lê as paradas públicas (Deezer, Apple, YouTube) de
 // tempos em tempos e grava um retrato que a Home lê. Ver emAlta.worker.
 const stopEmAlta = startEmAltaWorker();
 
+// Um terço do acervo nasceu com `durationMs: 0` e mostrava "0:00" na lista.
 // Este agente lê a duração no cabeçalho da cópia do cofre (sem baixar a música)
 // e a leva ao acervo e às bibliotecas. Ver duracoes.worker.
 const stopDuracoes = startDuracoesWorker();
 
-// O MUNDO DA MÚSICA: agenda de shows, prêmios, lançamentos e transmissões por
-// artista do acervo, de fontes públicas, em cache no Postgres. A página do
-// artista e a Home leem daqui — nunca de uma fonte em tempo real. Ver
-// mundo.worker.
-const stopMundo = startMundoWorker();
+// CRÉDITOS PROFUNDOS: produtor, compositor, gravadora, editora e empresário
+// por faixa e por artista (MusicBrainz, Discogs, acervo). Ver creditos.worker.
+const stopCreditos = startCreditosWorker();
 
 logger.info(
   {
@@ -113,15 +111,15 @@ async function shutdown(signal: string): Promise<void> {
   stopAcervoFiel();
   stopVarredura();
   stopPesquisador();
+  stopEmAlta();
   stopImportacoes();
   stopConteudo();
   stopDuracoes();
-  stopMundo();
+  stopCreditos();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));
   await closeQueues().catch(() => undefined);
-  stopEmAlta();
   await connection.quit().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);
   await redis.quit().catch(() => undefined);

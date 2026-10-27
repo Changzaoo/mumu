@@ -15,10 +15,9 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { LocalArtistCard } from '@/components/media/LocalArtistCard';
 import { MediaCard } from '@/components/media/MediaCard';
 import { CartaoDeFaixa } from '@/components/media/CartaoDeFaixa';
-import { AvisoDoMundo } from '@/components/media/AvisoDoMundo';
 import { PageSkeleton } from '@/components/media/PageSkeleton';
-import { SectionCarousel } from '@/components/media/SectionCarousel';
 import { PrateleiraEmAlta } from '@/components/media/PrateleiraEmAlta';
+import { SectionCarousel } from '@/components/media/SectionCarousel';
 import * as localHistory from '@/lib/local/localHistory';
 import * as gostoInicial from '@/lib/local/gostoInicial';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -31,11 +30,11 @@ import {
   seededShuffle,
 } from '@/lib/reco/recommend';
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
+import { bibliotecaCoerente, familiasDoPerfil } from '@/lib/reco/coerencia';
 import { generosDoGosto } from '@/lib/reco/generosDoGosto';
 import { chaveDeTexto, perfilDeGosto } from '@/lib/reco/perfilDeGosto';
 import { lerPulos } from '@/lib/reco/pulos';
 import * as artistasSeguidos from '@/lib/local/artistasSeguidos';
-import { bibliotecaCoerente, familiasDoPerfil } from '@/lib/reco/coerencia';
 import { ramificacoesDoGenero } from '@/lib/reco/ramificacoes';
 import { prateleiraDaSemente } from '@/lib/reco/semente';
 import { artistasDoUsuario } from '@/lib/reco/artistasDoUsuario';
@@ -204,8 +203,6 @@ function* passosDaHome(
   const liked = localLikes.list();
   const todosOsGrupos = localLibrary.genreGroups();
   yield;
-  const artistasDoAcervo = localLibrary.artists();
-  const albums = localLibrary.albumGroups();
 
   // ── O GOSTO VEM ANTES DE QUALQUER PRATELEIRA ──────────────────────────
   // É ele que decide o que pode ser OFERECIDO (lib/reco/coerencia, com a
@@ -241,6 +238,8 @@ function* passosDaHome(
     .filter((g) => g.tracks.length > 0);
   yield;
   // Álbuns e artistas são a BIBLIOTECA, não recomendação: ficam inteiros.
+  const artistasDoAcervo = localLibrary.artists();
+  const albums = localLibrary.albumGroups();
   yield;
 
   // Artistas DELA para a grade de atalhos — não os maiores do acervo
@@ -517,8 +516,6 @@ function montarTardia(foto: FotoDaHome) {
   const { entries, history } = foto.insumos;
   const liked = localLikes.list();
   const letras = new Map(lyricsCacheEntries());
-  return {
-    deFoto: foto,
   const now = new Date();
   // Só o que passou na coerência (foto.insumos.entries): o motor não lê a
   // biblioteca inteira por conta própria.
@@ -527,6 +524,8 @@ function montarTardia(foto: FotoDaHome) {
     .albumGroups()
     .map((a) => ({ ...a, tracks: a.tracks.filter((t) => permitida.has(t.id)) }))
     .filter((a) => a.tracks.length > 0);
+  return {
+    deFoto: foto,
     recos: buildRecommendations({ entries, history, liked, now }),
     albumRecos: buildAlbumRecommendations({ entries, albums, history, liked, now }),
     prateleirasDeAgentes: construirPrateleirasDeAgentes(
@@ -727,15 +726,12 @@ export default function HomePage() {
         <QuickAccess artists={meusArtistas} />
       </div>
 
-      {/* Quem segue um artista fica sabendo de show, transmissão, prêmio e
-          lançamento aqui (ver components/media/AvisoDoMundo). Some sem novidade. */}
-      <AvisoDoMundo />
-
-      {/* ── O GÊNERO QUE ELA MAIS OUVE, E OS RAMOS DELE ──────────────────
       {/* O que está no topo das paradas agora, por gênero — do servidor, já
           fundido; aqui só a idade e o gosto desta pessoa decidem o que fica
           (ver components/media/PrateleiraEmAlta). */}
       <PrateleiraEmAlta />
+
+      {/* ── O GÊNERO QUE ELA MAIS OUVE, E OS RAMOS DELE ──────────────────
           Primeiro bloco da página de propósito: é a resposta à pergunta que a
           pessoa tem ao abrir o app ("o que eu ouço?"), e não à que o app tem
           ("o que eu acabei de receber?"). O que vinha aqui antes era

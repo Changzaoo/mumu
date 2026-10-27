@@ -27,4 +27,3 @@ export * from './utils/importacao.js';
 export * from './utils/duracaoDoMp3.js';
 export * from './utils/robos.js';
 export * from './ai/creditosDeArtista.js';
-export * from './utils/identidadeDoArtista.js';
