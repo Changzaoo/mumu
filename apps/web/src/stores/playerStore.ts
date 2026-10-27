@@ -2131,6 +2131,20 @@ export const usePlayerStore = create<PlayerState>()(
           return;
         }
 
+        // PULOU, PAROU. Daqui para baixo a fonte da faixa pedida é resolvida
+        // com `await` (cofre local, `GET /catalogo/:id`, extração na origem) —
+        // até 20 s — e o motor seguia TOCANDO A ANTERIOR esse tempo todo, com
+        // a tela já dizendo o nome da nova em 0:00. Era o "pula pra outra, mas
+        // fica tocando a que tava antes; não avança" (27/10/2026): com a cópia
+        // podada ou o importador fora do ar, cada pulo virava 20 s da música
+        // errada. Quem pulou quer a anterior CALADA já; a nova chega quando
+        // chegar (ou a fila anda, se ela estiver morta). Os atalhos acima não
+        // passam por aqui: neles o `load` é síncrono e o próprio motor troca.
+        // Mesma faixa (retentativa, repetir-uma) não é pulo e não se cala.
+        if (audioEngine.currentTrack && audioEngine.currentTrack.id !== track.id) {
+          audioEngine.pause();
+        }
+
         // Wait for the local caches to hydrate before touching any network URL —
         // on a fresh boot (especially OFFLINE) the object-URL maps may still be
         // rebuilding, and a downloaded track must NEVER go to the server.
