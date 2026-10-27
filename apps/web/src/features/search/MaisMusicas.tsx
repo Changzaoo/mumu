@@ -102,11 +102,13 @@ export function MaisMusicas({
     return saida;
   }, [busca.data, jaNaTela]);
 
-  // Adianta a extração das primeiras: é o que faz o play responder em menos de
-  // um segundo em vez de 10-17 s (ver `aquecerFontes`).
+  // Adianta a extração do que está à vista: é o que faz o play responder em
+  // menos de um segundo em vez de 10-17 s (ver `aquecerFontes`). Eram só as
+  // duas primeiras; quem clicava na terceira pagava a extração inteira. O
+  // importador resolve em série, uma de cada vez — não vira rajada.
   useEffect(() => {
     const fontes = faixas
-      .slice(0, 2)
+      .slice(0, 6)
       .filter((f) => f.id.startsWith('youtube:'))
       .map((f) => f.sourceUrl ?? '');
     if (fontes.length > 0) void aquecerFontes(fontes);

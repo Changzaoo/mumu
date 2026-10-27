@@ -50,6 +50,7 @@ import { aparar, definirEmUso as definirAlcasEmUso } from '@/lib/perf/alcasDeBlo
 import { garantirDetalhe, informarFila } from '@/lib/local/detalheDaFaixa';
 import * as faixasQueFalharam from '@/lib/local/faixasQueFalharam';
 import { buildStreamUrl, importerHostLabel } from '@/lib/local/importerHelper';
+import { anotar } from '@/lib/telemetry/diario';
 import { candidatosDaCopia, marcarBordaFora, viaCdn } from '@/lib/audio/cdn';
 import { migrarDominio } from '@/lib/dominios';
 import { antecedenciaDoPreload } from '@/lib/perf/adaptacao';
@@ -1023,6 +1024,40 @@ async function veredictoDasFontes(urls: string[]): Promise<Veredito> {
   if (status.some((st) => st >= 200 && st < 300)) return 'viva';
   if (status.every((st) => st === 404 || st === 403)) return 'morta';
   return 'semProva';
+}
+
+/**
+ * O IMPORTADOR NÃO RESPONDEU — dito em 8 s, não em 60.
+ *
+ * "Músicas pesquisadas do YouTube e as do Em alta demoram demais para aparecer
+ * e não tocam" (27/10/2026): o importador ficou fora do ar das 14:49 às 16:11
+ * e toda faixa `youtube:` ficava em "buscando a música na fonte original" até
+ * o watchdog de 60 s. O `/stream` só pode responder depois de o yt-dlp
+ * resolver o vídeo (7–10 s medidos), então o primeiro byte não serve de prova
+ * em 8 s — mas o `/health` responde em 0,2 s quando o importador está de pé.
+ * É ele que se pergunta, em paralelo com a carga: sem resposta em 8 s (ou
+ * bloqueado pela borda), a faixa para com o aviso certo e o disjuntor abre
+ * (as chamadas secundárias deixam de insistir; o médico cuida da volta).
+ * Se o som já saiu antes da resposta, nada muda.
+ */
+export const IMPORTADOR_MUDO_MSG = 'O importador não respondeu — tente de novo em instantes.';
+
+function vigiarImportador(trackId: string, geracao: number): void {
+  void (async () => {
+    const [{ sondarImportador }, saude] = await Promise.all([
+      import('@/lib/telemetry/medico'),
+      import('@/lib/local/saudeDoImportador'),
+    ]);
+    const diag = await sondarImportador(); // teto de 8 s dentro da sonda
+    if (diag === 'ok') return;
+    if (geracao !== geracaoDeCarga) return; // a pessoa já pediu outra coisa
+    const s = usePlayerStore.getState();
+    if (s.currentTrack?.id !== trackId || audioEngine.getPosition() > 0) return;
+    saude.abrirCircuito();
+    clearLoadWatchdog();
+    anotar('erro', 'importador-mudo', `${diag} · ${s.currentTrack.title.slice(0, 40)}`);
+    pararComErro(IMPORTADOR_MUDO_MSG);
+  })().catch(() => undefined);
 }
 
 /**
@@ -2248,6 +2283,9 @@ export const usePlayerStore = create<PlayerState>()(
             reconciliarIntencao(geracao);
             armLoadWatchdog(track.id, initialWatchdogMs(track.id));
             sondarFonteEmParalelo(track, index);
+            // Extração ao vivo depende do importador: se ele não responder em
+            // 8 s, a pessoa fica sabendo — não espera o watchdog de 60 s.
+            if (ehExtracaoAoVivo(track.streamUrl)) vigiarImportador(track.id, geracao);
             return;
           }
 
