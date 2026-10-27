@@ -27,7 +27,7 @@ import {
 } from 'lucide-react';
 import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import type { WaveformDto } from '@radinho/shared';
-import { fetchCredits } from '@/lib/credits/credits';
+import { CreditosDaFaixa } from '@/components/media/CreditosDaFaixa';
 import { LikeButton } from '@/components/media/LikeButton';
 import { useEhExplicita } from '@/lib/conteudo/faixaEtaria';
 import { LyricsView } from '@/components/media/LyricsView';
@@ -225,13 +225,6 @@ export function NowPlaying() {
   const isDesktopQueue = useMediaQuery('(min-width: 1024px)');
   const dominant = useDominantColor(capaUrl);
   const glow = faixaLocal?.dominantColor ?? dominant ?? 'hsl(var(--accent))';
-  const { data: credits } = useQuery({
-    queryKey: ['credits', faixaLocal?.id],
-    enabled: open && Boolean(faixaLocal),
-    staleTime: Infinity,
-    retry: false,
-    queryFn: () => fetchCredits(faixaLocal as NonNullable<typeof faixaLocal>),
-  });
 
   const sourceLabels: Record<string, string> = {
     album: 'do álbum',
@@ -486,28 +479,11 @@ export function NowPlaying() {
                     )}
                   </p>
                 </TrocaDeFaixa>
-                {faixaLocal && (credits || faixaLocal.composer) && !lyricsOpen && (
-                  <div className="mt-2 space-y-0.5 text-[11px] leading-relaxed text-fg-subtle">
-                    {(() => {
-                      const primary = faixaLocal.artists[0]?.name;
-                      const extra = (credits?.performers ?? []).filter((p) => p !== primary);
-                      return extra.length > 0 ? <p>Com {extra.join(', ')}</p> : null;
-                    })()}
-                    {/* O MusicBrainz é a fonte melhor, mas cobre pouco: quando ele
-                        não tem, mostramos o compositor que veio na tag do arquivo
-                        (TCOM) ou do catálogo — melhor que esconder o crédito. */}
-                    {credits && credits.composers.length > 0 ? (
-                      <p>Composição: {credits.composers.join(', ')}</p>
-                    ) : faixaLocal.composer ? (
-                      <p>Composição: {faixaLocal.composer}</p>
-                    ) : null}
-                    {credits && credits.lyricists.length > 0 && (
-                      <p>Letra: {credits.lyricists.join(', ')}</p>
-                    )}
-                    {credits && credits.producers.length > 0 && (
-                      <p>Produção: {credits.producers.join(', ')}</p>
-                    )}
-                  </div>
+                {/* Créditos profundos (lib/mundo/creditos): do servidor, com
+                    link em cada nome; enquanto o worker não chega na faixa, a
+                    busca antiga no navegador e a tag do arquivo quebram o galho. */}
+                {faixaLocal && !lyricsOpen && (
+                  <CreditosDaFaixa track={faixaLocal} ligado={open} className="mt-2" />
                 )}
               </div>
 

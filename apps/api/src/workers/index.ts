@@ -19,6 +19,7 @@ import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
 import { startEmAltaWorker } from './emAlta.worker.js';
 import { startDuracoesWorker } from './duracoes.worker.js';
 import { startMundoWorker } from './mundo.worker.js';
+import { startCreditosWorker } from './creditos.worker.js';
 
 const connection = createBullConnection();
 
@@ -87,6 +88,9 @@ const stopDuracoes = startDuracoesWorker();
 // artista e a Home leem daqui — nunca de uma fonte em tempo real. Ver
 // mundo.worker.
 const stopMundo = startMundoWorker();
+// CRÉDITOS PROFUNDOS: produtor, compositor, gravadora, editora e empresário
+// por faixa e por artista (MusicBrainz, Discogs, acervo). Ver creditos.worker.
+const stopCreditos = startCreditosWorker();
 
 logger.info(
   {
@@ -118,6 +122,7 @@ async function shutdown(signal: string): Promise<void> {
   stopConteudo();
   stopDuracoes();
   stopMundo();
+  stopCreditos();
 
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));

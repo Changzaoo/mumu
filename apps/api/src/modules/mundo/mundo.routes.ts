@@ -5,6 +5,8 @@ import { ok } from '../../core/http/respond.js';
 import { NotFoundError } from '../../core/errors/index.js';
 import { validate } from '../../middlewares/validate.js';
 import { agendaDoArtista, avisosPara } from './mundo.repository.js';
+import { creditosDaFaixa, fichaTecnicaDoArtista, pessoaCreditada } from './creditos.repository.js';
+import { papelDeCreditoSchema } from './creditos.schemas.js';
 
 /**
  * Montado em /mundo. LEITURA ABERTA, como o acervo: a agenda de um artista é
@@ -47,5 +49,49 @@ mundoRoutes.get(
   asyncHandler(async (req, res) => {
     const { artistas } = req.valid.query as z.infer<typeof avisosSchema>;
     ok(res, await avisosPara(artistas));
+  }),
+);
+
+// ── Créditos profundos (worker `creditos`) ───────────────────────────────────
+
+const idSchema = z.object({ id: z.string().trim().min(1).max(200) });
+const chaveSchema = z.object({ chave: z.string().trim().min(1).max(120) });
+const papelQuerySchema = z.object({ papel: papelDeCreditoSchema.optional() });
+
+/** A ficha de uma faixa: produtor, compositor, gravadora, editora… */
+mundoRoutes.get(
+  '/faixa/:id/creditos',
+  validate({ params: idSchema }),
+  asyncHandler(async (req, res) => {
+    const { id } = req.valid.params as z.infer<typeof idSchema>;
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    ok(res, await creditosDaFaixa(id));
+  }),
+);
+
+/** A ficha técnica do artista: contrato/editora/empresário e colaboradores. */
+mundoRoutes.get(
+  '/artista/:nome/creditos',
+  validate({ params: nomeSchema }),
+  asyncHandler(async (req, res) => {
+    const { nome } = req.valid.params as z.infer<typeof nomeSchema>;
+    const ficha = await fichaTecnicaDoArtista(nome);
+    if (!ficha) throw new NotFoundError('Artista');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    ok(res, ficha);
+  }),
+);
+
+/** Uma pessoa creditada: o que ela produziu/compôs no acervo. */
+mundoRoutes.get(
+  '/pessoa/:chave',
+  validate({ params: chaveSchema, query: papelQuerySchema }),
+  asyncHandler(async (req, res) => {
+    const { chave } = req.valid.params as z.infer<typeof chaveSchema>;
+    const { papel } = req.valid.query as z.infer<typeof papelQuerySchema>;
+    const pessoa = await pessoaCreditada(chave, papel);
+    if (!pessoa) throw new NotFoundError('Pessoa');
+    res.setHeader('Cache-Control', 'public, max-age=300');
+    ok(res, pessoa);
   }),
 );

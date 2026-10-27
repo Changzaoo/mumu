@@ -767,10 +767,16 @@ model FichaDoArtista {
   agendaErro   String?
   /// Chamadas externas gastas com este artista (visibilidade do orçamento).
   chamadas     Int       @default(0)
+  /// Créditos do artista (contrato, editora, empresário): última leitura e
+  /// quando reler. Ver workers/creditos.worker.ts.
+  creditosEm        DateTime?
+  creditosProximaEm DateTime?
+  creditosErro      String?
   createdAt    DateTime  @default(now())
   updatedAt    DateTime  @updatedAt
 
-  eventos EventoDoArtista[]
+  eventos  EventoDoArtista[]
+  creditos CreditoDoArtista[]
 
   @@index([agendaEm])
   @@index([prioridade])
@@ -815,4 +821,88 @@ model EventoDoArtista {
 
   @@index([chave, quando])
   @@index([tipo, quando])
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// CRÉDITOS PROFUNDOS — quem produziu, compôs, mixou, lançou e empresaria.
+//
+// Por faixa (`CreditoDaFaixa`, chave = id da `CatalogTrack`) e por artista
+// (`CreditoDoArtista`, chave = identidade do nome). Os NOMES creditados também
+// viram chave de identidade (`chave` / `chaveDoNome`): é o que permite "quem
+// mais ele produziu no acervo" e o link para a ficha quando a pessoa é artista
+// do acervo — sem criar artista duplicado. Ver workers/creditos.worker.ts.
+// ─────────────────────────────────────────────────────────────────────────────
+
+enum PapelDeCredito {
+  PRODUTOR
+  COMPOSITOR
+  LETRISTA
+  ARRANJADOR
+  MIXAGEM
+  MASTERIZACAO
+  ENGENHEIRO
+  INTERPRETE
+  GRAVADORA
+  SELO
+  PRODUTORA
+  EDITORA
+  EMPRESARIO
+}
+
+model FichaDaFaixa {
+  /// Id da faixa no acervo (`CatalogTrack.id`); sem FK porque o acervo é
+  /// republicado pelos aparelhos — o worker apaga fichas órfãs.
+  trackId          String    @id
+  mbRecordingId    String?
+  mbWorkId         String?
+  mbReleaseId      String?
+  discogsReleaseId Int?
+  lidoEm           DateTime?
+  /// Quando reler: identificada em meses, desconhecida em um mês, fonte fora
+  /// do ar em uma hora.
+  proximaEm        DateTime?
+  erro             String?
+  versao           Int       @default(0)
+  chamadas         Int       @default(0)
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
+
+  creditos CreditoDaFaixa[]
+
+  @@index([proximaEm])
+}
+
+model CreditoDaFaixa {
+  /// `<trackId>|<papel>|<chave>`.
+  id       String         @id
+  trackId  String
+  papel    PapelDeCredito
+  nome     String
+  /// `chaveDeIdentidadeDoArtista(nome)` — navegação e fusão com o acervo.
+  chave    String
+  fonte    String
+  dados    Json?
+  criadoEm DateTime       @default(now())
+
+  ficha FichaDaFaixa @relation(fields: [trackId], references: [trackId], onDelete: Cascade)
+
+  @@index([trackId])
+  @@index([chave, papel])
+}
+
+model CreditoDoArtista {
+  /// `<chave do artista>|<papel>|<chave do nome>`.
+  id          String         @id
+  chave       String
+  papel       PapelDeCredito
+  nome        String
+  chaveDoNome String
+  fonte       String
+  dados       Json?
+  criadoEm    DateTime       @default(now())
+
+  ficha FichaDoArtista @relation(fields: [chave], references: [chave], onDelete: Cascade)
+
+  @@index([chave])
+  @@index([chaveDoNome, papel])
 }

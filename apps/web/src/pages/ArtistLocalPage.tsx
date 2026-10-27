@@ -11,6 +11,7 @@ import { EmptyState } from '@/components/media/EmptyState';
 import { MediaCard } from '@/components/media/MediaCard';
 import { SobreOArtista } from '@/components/media/SobreOArtista';
 import { AgendaDoArtista } from '@/components/media/AgendaDoArtista';
+import { FichaTecnica } from '@/components/media/FichaTecnica';
 import { openShare } from '@/components/media/ShareDialog';
 import { TrackList, TrackRow } from '@/components/media/TrackRow';
 import { VirtualList } from '@/components/media/VirtualList';
@@ -194,6 +195,10 @@ export default function ArtistLocalPage() {
           servidor mantém em cache (lib/mundo). Menor de idade só vê a agenda de
           quem pode ouvir, e nunca o YouTube embutido. */}
       <AgendaDoArtista artista={artist} ligado={podeVerAgendaDe(artist)} />
+
+      {/* Ficha técnica — gravadora, editora, empresário e quem trabalha com o
+          artista (produtores, compositores), dos créditos que o servidor leu. */}
+      <FichaTecnica artista={artist} />
 
       {/* Sobre o artista — foto grande + bio conferida (lib/artistBio.ts). Sem
           bio com identidade provada, o card não aparece: vazio é melhor que a

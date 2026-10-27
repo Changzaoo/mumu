@@ -41,6 +41,7 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/artista-yt', 'ArtistaYoutubePage'],
   ['/artista', 'ArtistLocalPage'],
   ['/gravadora', 'LabelLocalPage'],
+  ['/pessoa', 'PessoaPage'],
   ['/gravadoras', 'LabelsPage'],
   ['/genero', 'GenreLocalPage'],
   ['/disco', 'AlbumLocalPage'],
@@ -259,6 +260,7 @@ export const router = createBrowserRouter([
           { path: '/artista/:name', element: page('ArtistLocalPage', 'detail') },
           { path: '/artista-yt/:canal', element: page('ArtistaYoutubePage', 'detail') },
           { path: '/gravadora/:name', element: page('LabelLocalPage', 'detail') },
+          { path: '/pessoa/:chave', element: page('PessoaPage', 'detail') },
           { path: '/genero/:name', element: page('GenreLocalPage', 'detail') },
           { path: '/mix/:key', element: page('MixPage', 'detail') },
           // Public share landing (link sent by a user) — works signed-out.

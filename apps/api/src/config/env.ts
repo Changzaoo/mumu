@@ -265,6 +265,25 @@ const envSchema = z
     TICKETMASTER_API_KEY: optionalString,
     YOUTUBE_API_KEY: optionalString,
 
+    /**
+     * CRÉDITOS PROFUNDOS (worker `creditos`): produtor, compositor, letrista,
+     * gravadora/selo, editora, empresário por faixa e por artista, do
+     * MusicBrainz, do Discogs (token opcional) e do que o importador trouxe.
+     */
+    CREDITOS_ENABLED: z
+      .preprocess(
+        (v) => (typeof v === 'string' ? v.trim().toLowerCase() : v),
+        z.enum(['true', 'false']),
+      )
+      .default('true')
+      .transform((v) => v === 'true'),
+    CREDITOS_BATIDA_MIN: z.coerce.number().int().min(2).default(10),
+    CREDITOS_FAIXAS_POR_BATIDA: z.coerce.number().int().min(1).max(100).default(8),
+    CREDITOS_ARTISTAS_POR_BATIDA: z.coerce.number().int().min(0).max(50).default(3),
+    CREDITOS_MAX_CHAMADAS_DIA: z.coerce.number().int().min(10).default(1500),
+    /** Token pessoal do Discogs (60 req/min). Sem ele a fonte fica muda. */
+    DISCOGS_TOKEN: optionalString,
+
     LOG_LEVEL: z.enum(['fatal', 'error', 'warn', 'info', 'debug', 'trace']).default('info'),
   })
   .superRefine((cfg, ctx) => {
