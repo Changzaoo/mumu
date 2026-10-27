@@ -10,6 +10,7 @@
  * dura para tocar (todo áudio sai dela), então a listagem vir daqui não cria
  * nenhum ponto de falha novo.
  */
+import { separarArtistasDaFaixa } from '@radinho/shared';
 import { prisma } from '../../infra/db/prisma.js';
 
 /** A entrada como o cliente a conhece — trafega inteira, sem tradução. */
@@ -172,8 +173,33 @@ function sem(obj: Obj, campos: readonly string[]): Obj {
   return copia;
 }
 
+/**
+ * DOIS ARTISTAS NUNCA SÃO UM.
+ *
+ * "Tz da Coronel, Matuê" chegou ao acervo como UM nome (o importador junta a
+ * lista do YouTube Music com ", " e o app antigo não separava vírgula). Daí
+ * nasceu um artista falso com uma música, e nem Tz nem Matuê tinham a faixa na
+ * própria página. A regra de separar é a do shared (`separarCreditos`); aqui
+ * ela roda na GRAVAÇÃO (o que entra já entra certo) e na LISTAGEM (o que já
+ * estava gravado sai certo, mesmo antes da correção do banco).
+ */
+function comArtistasSeparados(track: Obj): Obj {
+  const artistas = track.artists;
+  if (!Array.isArray(artistas) || artistas.length === 0) return track;
+  const validos = artistas.filter(
+    (a): a is Obj & { name: string } =>
+      !!a && typeof a === 'object' && typeof (a as Obj).name === 'string',
+  );
+  if (validos.length !== artistas.length) return track;
+  const separados = separarArtistasDaFaixa(validos);
+  return separados === validos ? track : { ...track, artists: separados };
+}
+
 function enxugarFaixa(track: Obj): Obj {
-  let saida = sem(track, [...CAMPOS_MORTOS_DA_FAIXA, ...CAMPOS_SOB_DEMANDA_DA_FAIXA]);
+  let saida = sem(comArtistasSeparados(track), [
+    ...CAMPOS_MORTOS_DA_FAIXA,
+    ...CAMPOS_SOB_DEMANDA_DA_FAIXA,
+  ]);
 
   const album = saida.album;
   if (album && typeof album === 'object') {
@@ -261,7 +287,12 @@ export function comCamposDoServidor(
   // gravá-los criaria uma cópia do estado que envelhece sozinha e passa a
   // mentir — o primeiro quando o cofre podar, o segundo quando o léxico mudar e
   // a faixa for reclassificada.
-  const limpa = sem(recebida as Obj, ['tocavel', 'conteudoVeredicto']) as CatalogEntry;
+  let limpa = sem(recebida as Obj, ['tocavel', 'conteudoVeredicto']) as CatalogEntry;
+  const faixaRecebida = (limpa as Obj).track;
+  if (faixaRecebida && typeof faixaRecebida === 'object') {
+    const separada = comArtistasSeparados(faixaRecebida as Obj);
+    if (separada !== faixaRecebida) limpa = { ...limpa, track: separada } as CatalogEntry;
+  }
   if (!anterior) return limpa;
   let saida = limpa;
   for (const campo of [...CAMPOS_DO_SERVIDOR, ...CAMPOS_SOB_DEMANDA_DA_ENTRADA]) {

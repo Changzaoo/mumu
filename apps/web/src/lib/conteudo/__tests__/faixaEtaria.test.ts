@@ -9,6 +9,7 @@ vi.mock('@/lib/local/localLibrary', () => ({
 }));
 
 import {
+  ehExplicita,
   faixaEtariaDe,
   permitidoPara,
   podeOuvir,
@@ -79,5 +80,25 @@ describe('podeOuvir', () => {
     useSettingsStore.setState({ dataNascimento: '1990-05' });
     biblioteca.set('b', { conteudoVeredicto: 'explicito' });
     expect(podeOuvir(faixa('b'))).toBe(true);
+  });
+});
+
+describe('ehExplicita — o selo "E"', () => {
+  it('vem do veredito do servidor na entrada da biblioteca, não de track.explicit', () => {
+    // A listagem do acervo remove `track.explicit`; o que chega é `conteudoVeredicto`.
+    biblioteca.set('b', { conteudoVeredicto: 'explicito' });
+    biblioteca.set('a', { conteudoVeredicto: 'limpo' });
+    expect(ehExplicita({ ...faixa('b'), explicit: false })).toBe(true);
+    expect(ehExplicita({ ...faixa('a'), explicit: false })).toBe(false);
+    expect(ehExplicita(faixa('sem-veredito'))).toBe(false);
+  });
+
+  it('track.explicit true continua valendo (fonte que afirma)', () => {
+    expect(ehExplicita({ ...faixa('apple'), explicit: true })).toBe(true);
+  });
+
+  it('a letra julgada no aparelho acende o selo na hora', () => {
+    registrarLetra('l', 'Música', 'olha essa porra toda');
+    expect(ehExplicita(faixa('l'))).toBe(true);
   });
 });

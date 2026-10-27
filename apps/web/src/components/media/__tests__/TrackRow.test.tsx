@@ -34,6 +34,7 @@ vi.mock('@/lib/api', () => ({
 
 import { TrackRow } from '@/components/media/TrackRow';
 import { makeTrack } from '@/test/factories';
+import { useSettingsStore } from '@/stores/settingsStore';
 
 function renderRow(ui: ReactElement) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -79,6 +80,23 @@ describe('TrackRow', () => {
 
     await user.click(screen.getByRole('button', { name: 'Track t2b' }));
     expect(onPlay).toHaveBeenCalledTimes(1);
+  });
+
+  it('mostra o selo "E" quando a faixa é explícita e esconde quando não é', () => {
+    renderRow(<TrackRow track={makeTrack('e1', { explicit: true })} index={0} />);
+    expect(screen.getByLabelText('Conteúdo explícito')).toHaveTextContent('E');
+  });
+
+  it('título com palavrão acende o selo mesmo sem veredito gravado', () => {
+    // Adulto: senão a faixa explícita nem aparece na lista (regra da idade).
+    useSettingsStore.setState({ dataNascimento: '1990-01' });
+    renderRow(<TrackRow track={makeTrack('e2', { title: 'Foda-se o mundo' })} index={0} />);
+    expect(screen.getByLabelText('Conteúdo explícito')).toBeInTheDocument();
+  });
+
+  it('faixa limpa não tem selo', () => {
+    renderRow(<TrackRow track={makeTrack('e3')} index={0} />);
+    expect(screen.queryByLabelText('Conteúdo explícito')).not.toBeInTheDocument();
   });
 
   it('marks the active row with accent styling and exposes the row label', () => {

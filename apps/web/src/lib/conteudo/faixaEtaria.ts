@@ -151,6 +151,30 @@ export function usePodeOuvir(track: Pick<TrackDto, 'id' | 'title'> | null | unde
 }
 
 /**
+ * O SELO "E" DA FAIXA, para a lista e o player.
+ *
+ * `track.explicit` sozinho não serve: a listagem do acervo o remove (é peso
+ * morto para 5 mil faixas) e ele chegava sempre `false` — por isso o selo nunca
+ * aparecia, mesmo com 900 faixas julgadas explícitas no servidor. O veredito
+ * de verdade vem de `veredictoDe` (letra julgada aqui, veredito do servidor na
+ * entrada da biblioteca, título). `track.explicit` continua valendo quando vem
+ * `true` de uma fonte que afirma (catálogo da Apple, por exemplo).
+ */
+export function ehExplicita(
+  track: Pick<TrackDto, 'id' | 'title'> & { explicit?: boolean | null },
+): boolean {
+  return track.explicit === true || veredictoDe(track) === 'explicito';
+}
+
+/** Para componentes: re-renderiza quando um veredito chega (letra baixada). */
+export function useEhExplicita(
+  track: (Pick<TrackDto, 'id' | 'title'> & { explicit?: boolean | null }) | null | undefined,
+): boolean {
+  useSyncExternalStore(assinar, versaoDoFiltro, versaoDoFiltro);
+  return track ? ehExplicita(track) : false;
+}
+
+/**
  * No boot: julga as letras que já estão guardadas no aparelho (centenas), em
  * pedaços, fora do caminho da primeira tela. Só vale para quem tem restrição.
  */

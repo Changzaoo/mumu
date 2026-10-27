@@ -1,5 +1,5 @@
 import { IconeDoPlay } from '@/components/media/IconeDoPlay';
-import { usePodeOuvir } from '@/lib/conteudo/faixaEtaria';
+import { useEhExplicita, usePodeOuvir } from '@/lib/conteudo/faixaEtaria';
 import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import {
   ContextMenu,
@@ -297,6 +297,9 @@ export function TrackRow({
   // FAIXA QUE ESTA PESSOA NÃO PODE OUVIR (idade × conteúdo) NEM APARECE —
   // ver lib/conteudo/faixaEtaria.ts.
   const permitida = usePodeOuvir(track);
+  // O selo "E" vem do veredito de conteúdo, não de `track.explicit` (que a
+  // listagem do acervo remove) — ver `useEhExplicita`.
+  const explicita = useEhExplicita(track);
   const toggle = usePlayerStore((s) => s.toggle);
 
   const handlePlay = (): void => {
@@ -416,9 +419,10 @@ export function TrackRow({
                 )}
               >
                 {track.title}
-                {track.explicit && (
+                {explicita && (
                   <span
                     aria-label="Conteúdo explícito"
+                    title="Conteúdo explícito"
                     className="ml-1.5 inline-grid size-4 -translate-y-px place-items-center rounded-[4px] bg-fg/10 align-middle text-[9px] font-bold text-fg-muted"
                   >
                     E

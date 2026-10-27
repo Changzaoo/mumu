@@ -29,6 +29,7 @@ import { abrirAdicionarAPlaylist } from '@/components/media/AdicionarAPlaylist';
 import type { WaveformDto } from '@radinho/shared';
 import { fetchCredits } from '@/lib/credits/credits';
 import { LikeButton } from '@/components/media/LikeButton';
+import { useEhExplicita } from '@/lib/conteudo/faixaEtaria';
 import { LyricsView } from '@/components/media/LyricsView';
 import { ReportarProblema } from '@/components/media/ReportarProblema';
 import { ClipeView } from '@/components/media/ClipeView';
@@ -166,6 +167,8 @@ export function NowPlaying() {
   // Com o remoto no comando, a faixa daqui não deve pintar nada: capa, letra,
   // créditos e fila são dela, não da que está tocando.
   const faixaLocal = remoto ? null : track;
+  // Selo "E" como na lista: pelo veredito de conteúdo, não por `track.explicit`.
+  const explicita = useEhExplicita(faixaLocal);
   // A faixa do OUTRO aparelho, achada pelo id na biblioteca daqui — é o que
   // deixa ver a letra do que toca lá.
   const [faixaRemota, setFaixaRemota] = useState<TrackDto | null>(null);
@@ -447,6 +450,15 @@ export function NowPlaying() {
                   <div className="flex items-center justify-center gap-2">
                     <h1 className="line-clamp-2 min-w-0 text-2xl font-bold tracking-tight text-fg">
                       {titulo}
+                      {explicita && (
+                        <span
+                          aria-label="Conteúdo explícito"
+                          title="Conteúdo explícito"
+                          className="ml-2 inline-grid size-5 -translate-y-0.5 place-items-center rounded-[4px] bg-fg/10 align-middle text-[11px] font-bold text-fg-muted"
+                        >
+                          E
+                        </span>
+                      )}
                     </h1>
                     {/* Curtir age sobre a faixa DAQUI; do remoto só temos título e
                       artista em texto, não a faixa do catálogo. */}

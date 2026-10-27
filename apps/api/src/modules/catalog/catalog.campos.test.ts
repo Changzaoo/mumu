@@ -290,3 +290,52 @@ describe('veredito de conteúdo na listagem', () => {
     expect(em(paraGravar, 'conteudo', 'veredicto')).toBe('explicito');
   });
 });
+
+describe('dois artistas nunca são um', () => {
+  const juntos = () => ({
+    track: {
+      id: 'local:mf',
+      title: 'Mundo Fashion',
+      artists: [{ id: 'local-artist:local:mf:0', name: 'Tz da Coronel, Matuê', slug: '' }],
+    },
+    remoteUrl: 'https://cofre/mf',
+  });
+
+  it('a GRAVAÇÃO separa o crédito junto em dois artistas', () => {
+    const gravar = comCamposDoServidor(juntos(), null);
+    const artistas = em(gravar, 'track').artists as Array<{ name: string }>;
+    expect(artistas.map((a) => a.name)).toEqual(['Tz da Coronel', 'Matuê']);
+  });
+
+  it('a LISTAGEM separa o que já estava gravado junto', () => {
+    const saida = semCamposDoServidor(juntos());
+    const artistas = em(saida, 'track').artists as Array<{ name: string }>;
+    expect(artistas.map((a) => a.name)).toEqual(['Tz da Coronel', 'Matuê']);
+  });
+
+  it('grupo com separador no nome fica inteiro, e sem mudança a faixa é a MESMA', () => {
+    const grupo = {
+      track: { id: 'local:ewf', title: 'September', artists: [{ name: 'Earth, Wind & Fire' }] },
+      remoteUrl: 'x',
+    };
+    const saida = semCamposDoServidor(grupo);
+    expect(em(saida, 'track').artists).toBe(grupo.track.artists);
+    expect(em(saida, 'track', 'artists', 0).name).toBe('Earth, Wind & Fire');
+  });
+
+  it('"e" entre dois nomes não separa sem prova (dupla sertaneja)', () => {
+    const dupla = comCamposDoServidor(
+      {
+        track: { id: 'local:cx', title: 'Evidências', artists: [{ name: 'Chitãozinho e Xororó' }] },
+      },
+      null,
+    );
+    expect(em(dupla, 'track', 'artists', 0).name).toBe('Chitãozinho e Xororó');
+    const funk = comCamposDoServidor(
+      { track: { id: 'local:fk', title: 'x', artists: [{ name: 'MC Kevin e MC Ryan SP' }] } },
+      null,
+    );
+    const nomes = (em(funk, 'track').artists as Array<{ name: string }>).map((a) => a.name);
+    expect(nomes).toEqual(['MC Kevin', 'MC Ryan SP']);
+  });
+});

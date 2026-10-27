@@ -33,6 +33,7 @@ import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
 import { pushNotification } from '@/stores/notificationsStore';
 import { safeCoverUrl, sanitizeText, validateAudioFile } from '@/lib/local/validateAudio';
 import { creditIsAmbiguous, splitArtistNames } from '@/lib/local/artists';
+import { separarArtistasDaFaixa } from '@radinho/shared';
 import { artistIdentityKey, melhorGrafia } from '@/lib/local/artistIdentity';
 import { aiSplitArtists, aiVerifyArtist } from '@/lib/ai/ai';
 // O TIME DE METADADOS (5 agentes — ver metaTeam.ts). Aqui vive o AUDITOR;
@@ -626,8 +627,9 @@ async function carregarRegistro(): Promise<void> {
 function sanearRegistro(entradas: unknown): LibraryEntry[] {
   if (!Array.isArray(entradas)) return [];
   const saida: LibraryEntry[] = [];
+  const conhecido = conhecidoNoLote(entradas);
   for (const bruta of entradas) {
-    const e = sanearEntradaDoAcervo(bruta);
+    const e = sanearEntradaDoAcervo(bruta, conhecido);
     if (e) saida.push(e);
   }
   return saida;
@@ -1096,7 +1098,9 @@ function localTrackDto(
   const safeTitle = sanitizeText(title) || 'Faixa';
   // A credit can name several artists ("A feat. B", "A & B"). Split it so the
   // track is attributed to EACH artist — never merged into one.
-  const rawNames = Array.isArray(artist) ? artist : splitArtistNames(artist);
+  const rawNames = Array.isArray(artist)
+    ? artist
+    : splitArtistNames(artist, { conhecido: conhecidoNaBiblioteca });
   // A DUPLICATA MORRE NA PORTA. Se a biblioteca já conhece esta pessoa por
   // outra grafia ("DJ Kennedi" quando chega "Kennedi"), a faixa nova entra com
   // a grafia que já está lá. Sem isso, a ficha continuaria uma só (a chave de
@@ -1363,7 +1367,10 @@ function temComoTocar(e: LibraryEntry, mortas: Map<string, string>): boolean {
  * Aqui é a porta: entrada sem identidade ou sem título fica de fora; artistas
  * viram sempre uma lista de nomes de verdade; álbum sem título vira nulo.
  */
-export function sanearEntradaDoAcervo(bruta: unknown): LibraryEntry | null {
+export function sanearEntradaDoAcervo(
+  bruta: unknown,
+  conhecido?: (nome: string) => boolean,
+): LibraryEntry | null {
   if (!bruta || typeof bruta !== 'object') return null;
   const e = bruta as LibraryEntry;
   const t = e.track as Partial<TrackDto> | undefined;
@@ -1371,13 +1378,20 @@ export function sanearEntradaDoAcervo(bruta: unknown): LibraryEntry | null {
   if (typeof t.id !== 'string' || !t.id || typeof t.title !== 'string' || !t.title.trim()) {
     return null;
   }
-  const artists = (Array.isArray(t.artists) ? t.artists : []).filter(
+  const validos = (Array.isArray(t.artists) ? t.artists : []).filter(
     (a): a is TrackDto['artists'][number] =>
       !!a && typeof a === 'object' && typeof a.name === 'string' && a.name.trim() !== '',
   );
+  // DOIS ARTISTAS NUNCA SÃO UM. "Tz da Coronel, Matuê" gravado como um nome só
+  // (acervo antigo, aparelho antigo) vira dois créditos aqui, na porta — assim a
+  // ficha de cada um tem a música, e o nome composto não vira página nem url.
+  const artists = separarArtistasDaFaixa(validos, { conhecido });
   const album =
     t.album && typeof t.album === 'object' && typeof t.album.title === 'string' ? t.album : null;
-  const mudou = artists.length !== (t.artists?.length ?? -1) || album !== (t.album ?? null);
+  const mudou =
+    artists !== validos ||
+    artists.length !== (t.artists?.length ?? -1) ||
+    album !== (t.album ?? null);
   return mudou ? { ...e, track: { ...(t as TrackDto), artists, album } } : e;
 }
 
@@ -1412,8 +1426,9 @@ export function aplicarCatalogo(todasAsEntradas: LibraryEntry[]): void {
   const mortas = new Map<string, string>();
   for (const e of read()) if (e.remoteMorta) mortas.set(e.track.id, e.remoteMorta);
   const saneadas: LibraryEntry[] = [];
+  const conhecido = conhecidoNoLote(todasAsEntradas);
   for (const bruta of todasAsEntradas) {
-    const e = sanearEntradaDoAcervo(bruta);
+    const e = sanearEntradaDoAcervo(bruta, conhecido);
     if (e) saneadas.push(e);
   }
   const entradas = saneadas.filter((e) => temComoTocar(e, mortas));
@@ -2480,6 +2495,39 @@ function grafiaConhecida(name: string): string {
   if (conhecida) return conhecida;
   grafiasPorIdentidade.set(chave, name);
   return name;
+}
+
+/**
+ * Este nome já existe SOZINHO como artista nesta biblioteca? É a prova que
+ * libera separar "Kawe e Wiu" em dois (ver `separarCreditos` no shared): sem
+ * ela, "Chitãozinho e Xororó" seria partido ao meio.
+ */
+export function conhecidoNaBiblioteca(name: string): boolean {
+  const chave = artistIdentityKey(name);
+  if (!chave) return false;
+  if (!grafiasPorIdentidade) grafiaConhecida(name); // monta o mapa
+  return grafiasPorIdentidade?.has(chave) ?? false;
+}
+
+/**
+ * A prova de "artista conhecido" para um LOTE que chega (acervo, registro
+ * gravado): o nome aparece sozinho em alguma faixa do próprio lote. Não lê a
+ * biblioteca para não recursar durante a hidratação (`read()` → saneamento).
+ */
+function conhecidoNoLote(lote: readonly unknown[]): (nome: string) => boolean {
+  const chaves = new Set<string>();
+  for (const bruta of lote) {
+    const t = (bruta as { track?: { artists?: unknown } } | null)?.track;
+    if (!t || !Array.isArray(t.artists)) continue;
+    for (const a of t.artists) {
+      const nome = (a as { name?: unknown } | null)?.name;
+      if (typeof nome === 'string' && nome.trim()) chaves.add(artistIdentityKey(nome));
+    }
+  }
+  return (nome) => {
+    const k = artistIdentityKey(nome);
+    return Boolean(k) && chaves.has(k);
+  };
 }
 
 function computeArtists(vista: readonly LibraryEntry[]): LocalArtist[] {

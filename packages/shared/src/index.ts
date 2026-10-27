@@ -24,3 +24,4 @@ export * from './ai/tituloDeVideo.js';
 export * from './utils/importacao.js';
 export * from './utils/duracaoDoMp3.js';
 export * from './utils/robos.js';
+export * from './ai/creditosDeArtista.js';
