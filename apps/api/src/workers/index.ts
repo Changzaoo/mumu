@@ -16,6 +16,7 @@ import { startVarreduraNoturnaWorker } from './varreduraNoturna.worker.js';
 import { startPesquisadorWorker } from './pesquisador.worker.js';
 import { startImportacoesWorker } from './importacoes.worker.js';
 import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
+import { startEmAltaWorker } from './emAlta.worker.js';
 import { startDuracoesWorker } from './duracoes.worker.js';
 
 const connection = createBullConnection();
@@ -72,6 +73,10 @@ const stopImportacoes = startImportacoesWorker();
 const stopConteudo = startConteudoDaFaixaWorker();
 
 // Um terço do acervo nasceu com `durationMs: 0` e mostrava "0:00" na lista.
+// "Em alta" por gênero: lê as paradas públicas (Deezer, Apple, YouTube) de
+// tempos em tempos e grava um retrato que a Home lê. Ver emAlta.worker.
+const stopEmAlta = startEmAltaWorker();
+
 // Este agente lê a duração no cabeçalho da cópia do cofre (sem baixar a música)
 // e a leva ao acervo e às bibliotecas. Ver duracoes.worker.
 const stopDuracoes = startDuracoesWorker();
@@ -108,6 +113,7 @@ async function shutdown(signal: string): Promise<void> {
   // close() waits for in-flight jobs (important: never kill a transcode midway)
   await Promise.allSettled(workers.map((w) => w.close()));
   await closeQueues().catch(() => undefined);
+  stopEmAlta();
   await connection.quit().catch(() => undefined);
   await prisma.$disconnect().catch(() => undefined);
   await redis.quit().catch(() => undefined);

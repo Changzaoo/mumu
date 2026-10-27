@@ -32,6 +32,7 @@ import { undergroundRoutes } from './modules/underground/index.js';
 import { catalogRoutes } from './modules/catalog/index.js';
 import { collectionsRoutes } from './modules/collections/index.js';
 import { telemetryRoutes } from './modules/telemetry/index.js';
+import { emAltaRoutes } from './modules/emAlta/index.js';
 import { categoriesRoutes } from './modules/categories/index.js';
 
 export function createApp(): Express {
@@ -107,6 +108,8 @@ export function createApp(): Express {
   api.use('/admin', adminRoutes);
   api.use('/underground', undergroundRoutes);
   // O ACERVO — leitura aberta (visitante ouve prévia), escrita com conta.
+  // "Em alta" por gênero: o retrato que o worker de paradas grava (leitura aberta).
+  api.use('/em-alta', emAltaRoutes);
   // Saiu do Firestore porque a coleção inteira era lida a cada abertura do
   // app, por cada pessoa: o limite grátis é do projeto e estourou três vezes.
   api.use('/catalogo', catalogRoutes);
