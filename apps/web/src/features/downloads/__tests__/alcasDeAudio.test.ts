@@ -60,6 +60,11 @@ vi.mock('@/features/downloads/registry', () => ({
     registro.delete(id);
   },
   totalDownloadedBytes: () => 0,
+  registrarUso: () => undefined,
+  isAutomatico: () => false,
+  promoverParaManual: () => false,
+  ouvidasGuardadas: () => [],
+  bytesDasOuvidas: () => 0,
   clearDownloads: () => registro.clear(),
   subscribeDownloads: () => () => undefined,
 }));

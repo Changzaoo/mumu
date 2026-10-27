@@ -92,6 +92,7 @@ vi.mock('@/features/downloads/downloadManager', () => ({
   hasDownloadedAudio: vi.fn(() => false),
   ensureDownloadedAudioUrl: vi.fn(() => Promise.resolve(null)),
   rebaixarAoFalhar: vi.fn(),
+  guardarAoOuvir: vi.fn(),
 }));
 
 vi.mock('@/lib/local/importerHelper', () => ({

@@ -17,11 +17,21 @@ import { anotar } from '@/lib/telemetry/diario';
 import {
   cacheSupported,
   deleteAudio,
+  estimateStorage,
   lerAudio,
   putAudio,
   requestPersistentStorage,
 } from '@/lib/offline/audioCache';
-import { addDownload, isDownloaded, removeDownload } from '@/features/downloads/registry';
+import {
+  addDownload,
+  bytesDasOuvidas,
+  isAutomatico,
+  isDownloaded,
+  ouvidasGuardadas,
+  promoverParaManual,
+  registrarUso,
+  removeDownload,
+} from '@/features/downloads/registry';
 import { abrir, consultar, soltar } from '@/lib/perf/alcasDeBlob';
 
 export type DownloadStatus = 'idle' | 'downloading' | 'downloaded' | 'error';
@@ -150,8 +160,12 @@ export function hasDownloadedAudio(trackId: string): boolean {
  */
 export async function ensureDownloadedAudioUrl(trackId: string): Promise<string | null> {
   const aberta = consultar('audio', trackId); // consultar conta como uso
-  if (aberta) return aberta;
+  if (aberta) {
+    registrarUso(trackId);
+    return aberta;
+  }
   if (!isDownloaded(trackId) || !cacheSupported()) return null;
+  registrarUso(trackId); // tocar de novo tira a faixa da ponta do despejo (LRU)
 
   // FALHA DE LEITURA NÃO É DESPEJO. O IndexedDB tropeçou (conexão derrubada
   // pelo sistema, banco ocupado): os bytes continuam no aparelho. Podar o
@@ -252,6 +266,8 @@ async function fetchAudioBlob(
   headers: Record<string, string>,
   onProgress: (fraction: number | null) => void,
   pai: AbortSignal,
+  /** Corpo maior que isto é abortado: protege contra transmissão sem fim. */
+  tetoBytes = Number.POSITIVE_INFINITY,
 ): Promise<Blob> {
   // Um AbortController por tentativa: o timeout de uma não pode envenenar a
   // seguinte. O sinal do pai só carrega o "usuário apagou a faixa".
@@ -283,6 +299,10 @@ async function fetchAudioBlob(
       if (!value) continue;
       chunks.push(value);
       received += value.length;
+      if (received > tetoBytes) {
+        ac.abort();
+        throw new Error('O download passou do tamanho esperado para a faixa.');
+      }
       if (total > 0) onProgress(Math.min(0.99, received / total));
     }
     // Corpo vazio ou cortado limpo (proxy que fecha a conexão sem erro): sem
@@ -335,6 +355,15 @@ export function rebaixarAoFalhar(track: TrackDto): void {
 export async function downloadTrack(track: TrackDto): Promise<void> {
   const fonte = fonteDeArquivoUnico(track);
   if (!fonte || !cacheSupported()) return;
+  // Já está aqui porque foi OUVIDA: os bytes são os mesmos, só muda o dono. A
+  // faixa sai do orçamento das automáticas e vira um download de verdade, que
+  // nunca é despejado — sem gastar um byte de rede.
+  if (isAutomatico(track.id)) {
+    promoverParaManual(track.id);
+    emit();
+    anotar('download', 'promovida', track.title);
+    return;
+  }
   if (inFlight.has(track.id) || isDownloaded(track.id)) return;
 
   failed.delete(track.id);
@@ -484,6 +513,214 @@ function scheduleAutoRetry(track: TrackDto): void {
     void downloadTrack(track).catch(() => undefined); // já emite estado
   }, AUTO_RETRY_MS);
   autoRetryTimers.set(track.id, timer);
+}
+
+// ── GUARDADA AO OUVIR ─────────────────────────────────────────────
+//
+// O PEDIDO (27/10/2026): "uma vez que o usuário escutar a música, ela fica no
+// aparelho e toca imediatamente" na próxima vez.
+//
+// Até aqui a faixa só ficava no aparelho quando a pessoa mandava baixar; o
+// resto tocava por streaming TODA vez — e a segunda vez pagava a mesma espera
+// da primeira (resolver o endereço, pedir ao importador, esperar o primeiro
+// trecho). O player já sabe preferir a cópia local (`ensureDownloadedAudioUrl`
+// → `blob:`); o que faltava era alguém GUARDAR a cópia sem ninguém pedir.
+//
+// As regras:
+//
+//  1. SÓ DEPOIS DE OUVIR DE VERDADE. Quem chama é o player, quando a faixa
+//     passou de alguns segundos tocando (ou acabou). Pular uma faixa não é
+//     ouvi-la, e baixar o que foi pulado gastaria dados e disco à toa.
+//  2. NUNCA ATRAPALHA A MÚSICA DE AGORA. Uma guarda por vez, numa pista
+//     própria (não disputa as 3 vagas dos downloads manuais), e só com rede.
+//     No importador, o `/stream` da faixa que acabou de tocar já está na RAM
+//     (uma transmissão por faixa, replay para quem chega depois), então a
+//     segunda leitura custa pouco ao servidor.
+//  3. ORÇAMENTO PRÓPRIO COM DESPEJO LRU. As guardadas vivem sob um teto de
+//     bytes (`TETO_DAS_OUVIDAS_PADRAO`, cortado pela cota do navegador); quando
+//     não cabe, sai a MENOS usada recentemente. Só as automáticas entram nesse
+//     despejo: um download que a pessoa pediu nunca some sozinho.
+//  4. NÃO SEGURA ALÇA. A faixa já está tocando pelo stream; abrir um object URL
+//     agora só gastaria RAM (as alças são o que come a memória da aba, ver
+//     `alcasDeBlob`). A alça abre no próximo play, sob demanda.
+//  5. NÃO GUARDA O QUE NÃO É ARQUIVO. HLS (.m3u8), prévia de 30 s, rádio ao
+//     vivo (duração infinita) e arquivo que veio cortado ficam de fora — uma
+//     "guardada" que não toca é pior que não ter guardado.
+
+/** Teto de bytes das guardadas ao ouvir (antes do corte pela cota do navegador). */
+const TETO_DAS_OUVIDAS_PADRAO = 400_000_000;
+/** Fração da cota do navegador que as guardadas podem ocupar. */
+const FATIA_DA_COTA_DAS_OUVIDAS = 0.25;
+/** Nenhuma faixa acima disto é guardada sozinha (um show inteiro não é "a música"). */
+const MAIOR_FAIXA_GUARDAVEL_BYTES = 120_000_000;
+/** Taxa máxima plausível (kbps): o importador transcodifica a 320k no máximo. */
+const KBPS_MAXIMO = 320;
+/** Taxa mínima plausível (kbps) — abaixo disto, o arquivo veio cortado. */
+const KBPS_MINIMO = 48;
+
+let tetoDasOuvidas = TETO_DAS_OUVIDAS_PADRAO;
+
+/** Só para teste: muda o teto das guardadas ao ouvir. */
+export function definirTetoDasOuvidas(bytes: number): void {
+  tetoDasOuvidas = bytes;
+}
+
+/** Faixas já pedidas para guardar nesta sessão (com ou sem sucesso). */
+const guardaPedida = new Set<string>();
+/** A pista é serial: uma guarda por vez. */
+let pistaDeGuarda: Promise<unknown> = Promise.resolve();
+
+/**
+ * A fonte a guardar: a que ACABOU de tocar, quando é arquivo único.
+ *
+ * Diferente de `fonteDeArquivoUnico` (downloads manuais), aqui a `streamUrl`
+ * vem primeiro: é o MP3 que a pessoa ouviu e que o importador ainda tem em
+ * memória. O `downloadUrl` (original de upload, possivelmente enorme) é o
+ * segundo recurso, para as faixas da API cujo stream é HLS.
+ */
+function fonteParaGuardar(track: TrackDto): string | null {
+  if (track.previewOnly) return null;
+  const stream = track.streamUrl;
+  if (stream && !/\.m3u8(\?|$)/.test(stream) && !stream.startsWith('blob:')) return stream;
+  return track.downloadUrl ?? null;
+}
+
+/** Dá para guardar esta faixa sozinho? (sem olhar rede nem cota) */
+export function guardavelAoOuvir(track: TrackDto, duracaoS: number): boolean {
+  if (!cacheSupported()) return false;
+  if (!Number.isFinite(duracaoS) || duracaoS <= 0) return false; // rádio ao vivo
+  if (duracaoS * KBPS_MAXIMO * 125 > MAIOR_FAIXA_GUARDAVEL_BYTES) return false;
+  return fonteParaGuardar(track) !== null;
+}
+
+/** Quanto as guardadas podem ocupar AGORA, já cortado pela cota do navegador. */
+async function orcamentoDasOuvidas(): Promise<number> {
+  const estimativa = await estimateStorage().catch(() => null);
+  if (!estimativa || estimativa.quota <= 0) return tetoDasOuvidas;
+  return Math.min(tetoDasOuvidas, Math.floor(estimativa.quota * FATIA_DA_COTA_DAS_OUVIDAS));
+}
+
+/**
+ * Despeja guardadas automáticas, da menos usada para a mais, até `bytesNovos`
+ * caberem no orçamento (e pelo menos `minimo` faixas). Devolve quantas saíram.
+ */
+async function abrirEspacoParaOuvida(
+  bytesNovos: number,
+  orcamento: number,
+  minimo = 0,
+): Promise<number> {
+  let saiu = 0;
+  for (const entrada of ouvidasGuardadas()) {
+    if (saiu >= minimo && bytesDasOuvidas() + bytesNovos <= orcamento) break;
+    const id = entrada.track.id;
+    // Nunca a que está tocando/pré-carregada: a alça dela está aberta.
+    if (consultar('audio', id)) continue;
+    await deleteAudio(id).catch(() => undefined);
+    removeDownload(id);
+    saiu += 1;
+    anotar('download', 'despejada', `${entrada.track.title} · guardada ao ouvir`);
+  }
+  if (saiu > 0) emit();
+  return saiu;
+}
+
+/** O arquivo veio inteiro? Compara os bytes com a duração ouvida. */
+function pareceInteiro(blob: Blob, duracaoS: number): boolean {
+  if (!Number.isFinite(duracaoS) || duracaoS <= 0) return blob.size > 0;
+  return blob.size >= duracaoS * KBPS_MINIMO * 125;
+}
+
+/**
+ * Guarda no aparelho a faixa que a pessoa acabou de ouvir — melhor esforço, em
+ * segundo plano. Uma vez por faixa por sessão. Resolve `true` quando os bytes
+ * ficaram gravados e registrados.
+ */
+export function guardarAoOuvir(track: TrackDto, duracaoS: number): Promise<boolean> {
+  if (guardaPedida.has(track.id)) return Promise.resolve(false);
+  if (!guardavelAoOuvir(track, duracaoS)) return Promise.resolve(false);
+  if (isDownloaded(track.id) || inFlight.has(track.id)) return Promise.resolve(false);
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return Promise.resolve(false);
+  guardaPedida.add(track.id);
+  const fonte = fonteParaGuardar(track);
+  if (!fonte) return Promise.resolve(false);
+  const minha = pistaDeGuarda.then(
+    () => guardarAgora(track, fonte, duracaoS),
+    () => guardarAgora(track, fonte, duracaoS),
+  );
+  pistaDeGuarda = minha;
+  return minha.catch(() => false);
+}
+
+async function guardarAgora(track: TrackDto, fonte: string, duracaoS: number): Promise<boolean> {
+  // Alguém baixou (ou guardou) no meio da fila: nada a fazer.
+  if (isDownloaded(track.id) || inFlight.has(track.id)) return false;
+  if (typeof navigator !== 'undefined' && !navigator.onLine) return false;
+  void garantirPersistencia();
+
+  const headers: Record<string, string> = {};
+  if (isFirstPartyUrl(fonte)) {
+    const token = await getIdToken().catch(() => null);
+    if (token) headers.Authorization = `Bearer ${token}`;
+  }
+
+  const ac = new AbortController();
+  // Teto de bytes: uma transmissão sem fim (rádio que se disfarça de faixa)
+  // não pode encher o disco nem a RAM.
+  const tetoBytes = Math.min(
+    MAIOR_FAIXA_GUARDAVEL_BYTES,
+    Math.ceil(duracaoS * KBPS_MAXIMO * 125 * 1.5) + 1_000_000,
+  );
+  let blob: Blob;
+  try {
+    blob = await fetchAudioBlob(fonte, headers, () => undefined, ac.signal, tetoBytes);
+  } catch (err) {
+    anotar(
+      'download',
+      'guarda falhou',
+      `${track.title} · ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+  if (!pareceInteiro(blob, duracaoS)) {
+    anotar('download', 'guarda descartada', `${track.title} · veio cortada (${blob.size} B)`);
+    return false;
+  }
+  if (isDownloaded(track.id)) return false; // baixada manualmente enquanto isso
+
+  const orcamento = await orcamentoDasOuvidas();
+  if (blob.size > orcamento) return false; // não cabe nem sozinha
+  await abrirEspacoParaOuvida(blob.size, orcamento);
+
+  try {
+    await putAudio(track.id, blob);
+  } catch (err) {
+    if (!isQuotaError(err)) {
+      anotar('download', 'guarda falhou', `${track.title} · ${String(err)}`);
+      return false;
+    }
+    // A cota é do navegador, não nossa estimativa: solta as duas mais antigas e
+    // tenta UMA vez mais. Se ainda não couber, desiste em silêncio.
+    const saiu = await abrirEspacoParaOuvida(blob.size, 0, 2);
+    if (saiu === 0) return false;
+    try {
+      await putAudio(track.id, blob);
+    } catch {
+      return false;
+    }
+  }
+  addDownload(track, blob.size, { automatico: true });
+  emit();
+  anotar(
+    'download',
+    'guardada ao ouvir',
+    `${track.title} · ${Math.round(blob.size / 1024)} KB · ${ouvidasGuardadas().length} no aparelho`,
+  );
+  return true;
+}
+
+/** Só para teste: esquece quais faixas já foram pedidas nesta sessão. */
+export function esquecerGuardasPedidas(): void {
+  guardaPedida.clear();
 }
 
 export async function removeDownloadedTrack(trackId: string): Promise<void> {

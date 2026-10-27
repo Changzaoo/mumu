@@ -91,6 +91,7 @@ vi.mock('@/features/downloads/downloadManager', () => ({
   hasDownloadedAudio: vi.fn(() => false),
   ensureDownloadedAudioUrl: vi.fn(() => Promise.resolve(null)),
   rebaixarAoFalhar: vi.fn(),
+  guardarAoOuvir: vi.fn(),
 }));
 
 const buildStreamUrl = vi.fn<(url: string) => Promise<string | null>>(() => Promise.resolve(null));

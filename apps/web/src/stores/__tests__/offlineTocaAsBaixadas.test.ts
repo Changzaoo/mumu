@@ -118,6 +118,7 @@ vi.mock('@/features/downloads/downloadManager', () => ({
     return Promise.resolve(`blob:${id}`);
   }),
   rebaixarAoFalhar: vi.fn(),
+  guardarAoOuvir: vi.fn(),
 }));
 vi.mock('@/lib/local/detalheDaFaixa', () => ({
   garantirDetalhe: vi.fn(() =>

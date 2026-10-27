@@ -127,6 +127,7 @@ vi.mock('@/features/downloads/downloadManager', () => ({
   hasDownloadedAudio: vi.fn(() => false),
   ensureDownloadedAudioUrl: vi.fn(() => Promise.resolve(null)),
   rebaixarAoFalhar: vi.fn(),
+  guardarAoOuvir: vi.fn(),
 }));
 vi.mock('@/lib/local/detalheDaFaixa', () => ({
   garantirDetalhe: vi.fn((id: string) => {
@@ -159,7 +160,7 @@ vi.mock('@/lib/local/faixasQueFalharam', () => ({
 import { initPlayerEngine, usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { audioEngine } from '@/lib/audio/AudioEngine';
-import { ensureDownloadedAudioUrl } from '@/features/downloads/downloadManager';
+import { ensureDownloadedAudioUrl, guardarAoOuvir } from '@/features/downloads/downloadManager';
 import { ensureLocalAudioUrl } from '@/lib/local/localLibrary';
 import { garantirDetalhe } from '@/lib/local/detalheDaFaixa';
 import { makeTrack } from '@/test/factories';
@@ -505,5 +506,60 @@ describe('retomada gravada no máximo 1x por janela — e sempre quando importa'
     expect(gravado.track.id).toBe('l1');
     expect(gravado.progress).toBeGreaterThanOrEqual(10);
     spy.mockRestore();
+  });
+});
+
+// ── OUVIU, FICA NO APARELHO (pedido de 27/10/2026) ──────────────────
+//
+// A mecânica de guardar está em `downloadManager` (e nos testes dele). Aqui se
+// prende O QUANDO o player pede: depois de 30 s de som de verdade ou no fim
+// natural de uma música curta; uma vez por carga; nunca para rádio ao vivo.
+describe('ouviu, fica no aparelho', () => {
+  it('pede a guarda uma vez, só depois de 30 s de som', async () => {
+    usePlayerStore.getState().playQueue([catalogo('o1'), catalogo('o2')], 0);
+    await assentar();
+    timeupdate(1);
+    timeupdate(29);
+    expect(guardarAoOuvir).not.toHaveBeenCalled(); // pular não é ouvir
+
+    timeupdate(31);
+    expect(guardarAoOuvir).toHaveBeenCalledTimes(1);
+    const [faixa, duracao] = vi.mocked(guardarAoOuvir).mock.calls[0] as [TrackDto, number];
+    expect(faixa.id).toBe('o1');
+    expect(duracao).toBe(180); // a duração que o motor mediu
+
+    timeupdate(32);
+    timeupdate(60);
+    expect(guardarAoOuvir).toHaveBeenCalledTimes(1); // o pulso é a 5 Hz; o pedido é um
+  });
+
+  it('música curta que acaba antes dos 30 s também fica (pedido no fim natural)', async () => {
+    usePlayerStore.getState().playQueue([catalogo('c1'), catalogo('c2')], 0);
+    await assentar();
+    timeupdate(10);
+    expect(guardarAoOuvir).not.toHaveBeenCalled();
+
+    emitir('ended', { track: usePlayerStore.getState().currentTrack });
+    expect(guardarAoOuvir).toHaveBeenCalledTimes(1);
+    expect((vi.mocked(guardarAoOuvir).mock.calls[0]?.[0] as TrackDto).id).toBe('c1');
+  });
+
+  it('rádio ao vivo nunca é guardada', async () => {
+    usePlayerStore.getState().playQueue([catalogo('r1')], 0, { source: 'radio' });
+    await assentar();
+    timeupdate(31);
+    timeupdate(90);
+    expect(guardarAoOuvir).not.toHaveBeenCalled();
+  });
+
+  it('pausada não conta: o pedido sai quando volta a tocar e passa dos 30 s', async () => {
+    usePlayerStore.getState().playQueue([catalogo('p1'), catalogo('p2')], 0);
+    await assentar();
+    usePlayerStore.getState().pause();
+    timeupdate(31); // posição de um elemento parado não é escuta
+    expect(guardarAoOuvir).not.toHaveBeenCalled();
+    usePlayerStore.getState().play();
+    timeupdate(31);
+    expect(guardarAoOuvir).toHaveBeenCalledTimes(1);
   });
 });

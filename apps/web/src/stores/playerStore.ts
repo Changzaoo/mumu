@@ -27,6 +27,7 @@ import {
 import { useSettingsStore } from '@/stores/settingsStore';
 import {
   ensureDownloadedAudioUrl,
+  guardarAoOuvir,
   hasDownloadedAudio,
   hydrateDownloads,
   localAudioUrl,
@@ -837,6 +838,30 @@ function resetDeadRun(): void {
  */
 /** Faixa cujo "saiu som => reparada" já foi conferido (ver o 'timeupdate'). */
 let reparoConferidoDe: string | null = null;
+
+// ── OUVIU, FICA NO APARELHO ───────────────────────────────────────
+//
+// Pedido do Vinicius (27/10/2026): "uma vez que o usuário escutar a música, ela
+// fica no aparelho e toca imediatamente" na próxima vez. A regra do produto é
+// essa; a mecânica está em `guardarAoOuvir` (downloadManager). Aqui só se
+// decide O QUANDO: depois de `GUARDAR_APOS_S` segundos de som de verdade — ou
+// no fim natural, para a música curta —, e nunca para rádio ao vivo. Pular
+// uma faixa não é ouvi-la, e é por isso que o pedido não sai no 'loaded'.
+const GUARDAR_APOS_S = 30;
+/** Faixa cujo pedido de guarda já saiu nesta carga (o 'timeupdate' pulsa a 5 Hz). */
+let guardaPedidaPara: string | null = null;
+
+function pedirGuardaDaOuvida(state: PlayerState, posicao: number, fim = false): void {
+  const track = state.currentTrack;
+  if (!track || guardaPedidaPara === track.id) return;
+  if (!fim && posicao < GUARDAR_APOS_S) return;
+  if (state.context?.source === 'radio') return; // transmissão sem fim
+  guardaPedidaPara = track.id;
+  // A duração que o MOTOR mediu, não a do catálogo: é contra ela que a cópia
+  // guardada é conferida (arquivo cortado é descartado).
+  const duracao = audioEngine.getDuration() || state.duration;
+  void Promise.resolve(guardarAoOuvir(track, duracao)).catch(() => false);
+}
 
 function registrarNoMapa(track: TrackDto | null): void {
   if (!track) return;
@@ -2898,6 +2923,8 @@ export function initPlayerEngine(): void {
           /* diagnóstico nunca interrompe a reprodução */
         }
       }
+      // Ouviu o bastante: a faixa passa a morar no aparelho (ver `pedirGuardaDaOuvida`).
+      if (state.isPlaying) pedirGuardaDaOuvida(state, position);
     }
 
     // Visitantes ouvem 30s por faixa — depois disso, convite para registrar.
@@ -3422,6 +3449,8 @@ export function initPlayerEngine(): void {
     // NOVA — que ainda nem carregou — e a pessoa via uma música pulada.
     const atual = store.getState().currentTrack;
     if (track && atual && track.id !== atual.id) return;
+    // Música curta que acabou antes dos 30 s também foi ouvida inteira.
+    pedirGuardaDaOuvida(store.getState(), Number.POSITIVE_INFINITY, true);
     clearEndTimer();
     clearHandoffTimer();
     advanceFromTrackEnd('ended');
