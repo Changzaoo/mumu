@@ -78,6 +78,7 @@ services:
       - ../../.env # = /opt/aurial/.env
     environment:
       NODE_ENV: production
+      NODE_OPTIONS: --max-old-space-size=512
       PORT: '4000'
     ports:
       # Published so LAN clients can reach the API directly on :4000
@@ -107,11 +108,13 @@ services:
     # WORKDIR + STORAGE_LOCAL_PATH:
     # volumes:
     #   - api-storage:/app/apps/api/storage
+    # 27/10/2026: o vnmax (3,4 GB) divide a RAM com o Bitcoin VNMAX e o filminho;
+    # a API fica em ~350 MB de RSS, então 768 MB de teto (e heap de 512 MB) sobram.
     deploy:
       resources:
         limits:
           cpus: '1.5'
-          memory: 1g
+          memory: 768m
 
   worker:
     # Same image as `api` — BullMQ processors (FFmpeg transcode, waveform,
