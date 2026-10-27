@@ -79,9 +79,25 @@ fi
 export GIT_SHA
 
 step "2/7 Build images (worker reuses aurial-api image tag)"
-# Build only once: with classic builder, building api+worker in parallel can race
-# while exporting the same `aurial-api:latest` tag.
-compose build --pull api
+# Imagem pronta do registro (API_IMAGE no ambiente ou no .env): o vnmax
+# (Celeron, 3,4 GB) entrou em thrashing em 27/10/2026 construindo esta imagem;
+# desde então ela é construída no GitHub (.github/workflows/build-api-image.yml)
+# e aqui só se puxa a tag do commit. Sem API_IMAGE, o build local de antes.
+API_IMAGE="${API_IMAGE:-$(grep -E '^API_IMAGE=' .env 2>/dev/null | cut -d= -f2- | tr -d '"' || true)}"
+if [[ -n "${API_IMAGE}" && "${GIT_SHA}" != "unknown" ]]; then
+  echo "puxando ${API_IMAGE}:${GIT_SHA} (sem build neste servidor)"
+  if ! docker pull "${API_IMAGE}:${GIT_SHA}"; then
+    echo "error: ${API_IMAGE}:${GIT_SHA} nao existe (ou o pacote e privado)." >&2
+    echo "       Espere o workflow 'Build API image' deste commit terminar, ou" >&2
+    echo "       torne o pacote publico / faca 'docker login ghcr.io' aqui." >&2
+    exit 1
+  fi
+  docker tag "${API_IMAGE}:${GIT_SHA}" aurial-api:latest
+else
+  # Build only once: with classic builder, building api+worker in parallel can race
+  # while exporting the same `aurial-api:latest` tag.
+  compose build --pull api
+fi
 
 step "3/7 Run database migrations (prisma migrate deploy)"
 compose --profile tools run --rm migrate
