@@ -38,6 +38,12 @@ export interface Pulo {
   em: number;
   /** Quanto da faixa tinha tocado (0..1). */
   fracao: number;
+  /**
+   * De onde a faixa veio ("home:em-alta:Pop", "library:genre:Trap", "radio:")
+   * — ver `fonteDoContexto` em taxaDePulo. É o que permite medir a taxa de
+   * pulo DAS RECOMENDAÇÕES separada da do resto. Ausente nos pulos antigos.
+   */
+  fonte?: string;
 }
 
 const CHAVE = 'aurial:pulos';
@@ -125,6 +131,7 @@ export function registrarPulo(
   segundos: number,
   duracao: number,
   agora = Date.now(),
+  fonte?: string,
 ): void {
   if (!(segundos >= 1)) return;
   const fracao = duracao > 0 ? Math.min(1, segundos / duracao) : 0;
@@ -137,6 +144,7 @@ export function registrarPulo(
       artista: artistIdentityKey(track.artists[0]?.name ?? ''),
       em: agora,
       fracao,
+      ...(fonte ? { fonte } : {}),
     },
   ]);
 }

@@ -41,6 +41,7 @@
  */
 import type { TrackDto } from '@radinho/shared';
 import { familiaDoGenero, type FamiliaDeGenero } from '@radinho/shared';
+import { pesoDoPulo, type Pulo } from './pulos';
 
 /** Meia-vida do play: o de um mês atrás vale metade do de hoje. */
 const MEIA_VIDA_MS = 30 * 24 * 60 * 60 * 1000;
@@ -84,6 +85,28 @@ const MEIA_FORCA_SEMENTE = 10;
 /** Abaixo disto o gosto ainda não foi medido — vale a semente e o acervo. */
 export const PLAYS_PARA_CONFIAR = 5;
 
+/**
+ * Quanto vale SEGUIR um artista, em plays.
+ *
+ * Seguir é mais deliberado que curtir uma faixa: é dizer "quero mais disto"
+ * sobre um catálogo inteiro. Por isso vale um pouco mais que a curtida — e,
+ * como ela, é ato único: um hábito de ouvir passa na frente.
+ */
+export const PESO_SEGUIR = 4;
+
+/**
+ * O PULO NO PERFIL — de leve, e esquecendo.
+ *
+ * O pulo pesa na FILA (ver `pulos.ts`); aqui ele só tira um pouco do gênero
+ * da faixa pulada, para que pular dez trap seguidos faça o trap descer na
+ * lista de famílias que `podeRecomendar` lê. É metade de um play, decai com
+ * meia-vida de dez dias e nunca deixa um gênero negativo: pular diz "não
+ * agora", não "nunca mais".
+ */
+const FORCA_DO_PULO = 0.5;
+const MEIA_VIDA_PULO_MS = 10 * 24 * 60 * 60 * 1000;
+const VIDA_MAXIMA_PULO_MS = 60 * 24 * 60 * 60 * 1000;
+
 export interface PlayObservado {
   track: TrackDto;
   playedAt?: string;
@@ -99,6 +122,12 @@ export interface EntradasDoPerfil {
   /** O que a pessoa escolheu ao entrar (lib/local/gostoInicial). */
   sementesDeGenero?: readonly string[];
   sementesDeArtista?: readonly string[];
+  /** Pulos anotados no aparelho (lib/reco/pulos): tiram de leve do gênero. */
+  pulos?: readonly Pulo[];
+  /** Artistas que a pessoa segue (lib/local/artistasSeguidos), pelo nome. */
+  seguidos?: readonly string[];
+  /** Gênero que cada artista costuma ter (chave `chaveDeTexto`): dá gênero ao seguir. */
+  generoDoArtista?: ReadonlyMap<string, string>;
   now?: Date;
 }
 
@@ -225,6 +254,26 @@ export function perfilDeGosto(entradas: EntradasDoPerfil): PerfilDeGosto {
     if (!curtida?.id) continue;
     creditar(curtida, PESO_CURTIDA);
   }
+  for (const nome of entradas.seguidos ?? []) {
+    const chave = chaveDeTexto(nome ?? '');
+    if (!chave) continue;
+    somar(porArtista, chave, PESO_SEGUIR);
+    if (!nomeDoArtista.has(chave)) nomeDoArtista.set(chave, nome);
+    const genero = entradas.generoDoArtista?.get(chave);
+    if (genero) creditarGenero(genero, PESO_SEGUIR);
+  }
+  for (const pulo of entradas.pulos ?? []) {
+    const idade = agora - pulo.em;
+    if (!(idade >= 0) || idade > VIDA_MAXIMA_PULO_MS) continue;
+    const genero = generoDaFaixa.get(pulo.id);
+    if (!genero) continue;
+    const desconto =
+      FORCA_DO_PULO * pesoDoPulo(pulo.fracao) * Math.pow(0.5, idade / MEIA_VIDA_PULO_MS);
+    const chave = chaveDeTexto(genero);
+    porGenero.set(chave, Math.max(0, (porGenero.get(chave) ?? 0) - desconto));
+    const familia = familiaDoGenero(genero);
+    if (familia) porFamilia.set(familia, Math.max(0, (porFamilia.get(familia) ?? 0) - desconto));
+  }
 
   const massaDeSinal = [...porGenero.values()].reduce((a, b) => a + b, 0);
   // Retrato do comportamento ANTES da semente entrar. É a única forma honesta
@@ -286,7 +335,8 @@ export function perfilDeGosto(entradas: EntradasDoPerfil): PerfilDeGosto {
 }
 
 /**
- * SINAL_QUE_FALTA — o pulo. (Deixou de faltar: ver `lib/reco/pulos.ts`.)
+ * SINAL_QUE_FALTA — o pulo. (Deixou de faltar: ver `lib/reco/pulos.ts`; e desde
+ * 27/10/2026 ele também tira de leve do GÊNERO aqui — ver `FORCA_DO_PULO`.)
  *
  * O Spotify conta como FALHA a faixa pulada antes dos 30s, e é metade do que
  * ensina o modelo dele: sem o lado negativo, um gênero só pode subir. O player

@@ -18,6 +18,7 @@ import { clamp } from '@/lib/utils';
 import { alvoRemotoAtual } from '@/lib/devices/alvoRemoto';
 import type { EstadoDeCarga, FaseDeCarga } from '@/lib/audio/estadoDeCarga';
 import { perdoarPulos, registrarPulo } from '@/lib/reco/pulos';
+import { fonteDoContexto } from '@/lib/reco/taxaDePulo';
 import {
   anotarAvanco,
   avancoFalhou,
@@ -464,7 +465,7 @@ function anotarPuloDaAtual(): void {
   const s = usePlayerStore.getState();
   if (!s.currentTrack) return;
   try {
-    registrarPulo(s.currentTrack, s.progress, s.duration);
+    registrarPulo(s.currentTrack, s.progress, s.duration, Date.now(), fonteDoContexto(s.context));
   } catch {
     /* diagnóstico de gosto nunca atrapalha o pular */
   }

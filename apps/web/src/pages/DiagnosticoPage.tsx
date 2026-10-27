@@ -16,6 +16,9 @@ import { useCallback, useEffect, useState } from 'react';
 import { relatorioDeReproducao } from '@/lib/local/playbackDiagnosis';
 import { list as listarBiblioteca } from '@/lib/local/localLibrary';
 import { relatorioSyncTexto } from '@/lib/sync/syncStatus';
+import * as localHistory from '@/lib/local/localHistory';
+import { lerPulos } from '@/lib/reco/pulos';
+import { relatorioDeRecomendacao } from '@/lib/reco/taxaDePulo';
 
 export default function DiagnosticoPage(): React.ReactElement {
   const [relatorio, setRelatorio] = useState<string>('Verificando…');
@@ -48,7 +51,14 @@ export default function DiagnosticoPage(): React.ReactElement {
           anonima: usuario?.isAnonymous ?? false,
         },
       );
-      setRelatorio(`${sincronia}\n\n${'─'.repeat(48)}\n\n${await relatorioDeReproducao()}`);
+      // A medida da recomendação (taxa de pulo antes × depois da coerência de
+      // gênero) sai no mesmo relatório: lida do histórico e dos pulos deste
+      // aparelho, sem rede.
+      const recomendacao = relatorioDeRecomendacao(localHistory.listForCurrentUser(), lerPulos());
+      const linha = '─'.repeat(48);
+      setRelatorio(
+        `${sincronia}\n\n${linha}\n\n${await relatorioDeReproducao()}\n\n${linha}\n\n${recomendacao}`,
+      );
     } catch (err) {
       setRelatorio(`O diagnóstico falhou: ${(err as Error).message}`);
     } finally {

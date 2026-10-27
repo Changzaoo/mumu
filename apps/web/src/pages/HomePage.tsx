@@ -30,7 +30,10 @@ import {
 } from '@/lib/reco/recommend';
 import { capasDaPrateleira, construirPrateleirasDeAgentes } from '@/lib/reco/agents';
 import { generosDoGosto } from '@/lib/reco/generosDoGosto';
-import { perfilDeGosto } from '@/lib/reco/perfilDeGosto';
+import { chaveDeTexto, perfilDeGosto } from '@/lib/reco/perfilDeGosto';
+import { lerPulos } from '@/lib/reco/pulos';
+import * as artistasSeguidos from '@/lib/local/artistasSeguidos';
+import { bibliotecaCoerente, familiasDoPerfil } from '@/lib/reco/coerencia';
 import { ramificacoesDoGenero } from '@/lib/reco/ramificacoes';
 import { prateleiraDaSemente } from '@/lib/reco/semente';
 import { artistasDoUsuario } from '@/lib/reco/artistasDoUsuario';
@@ -197,11 +200,45 @@ function* passosDaHome(
   semente: ReturnType<typeof gostoInicial.snapshot>,
 ) {
   const liked = localLikes.list();
-  const faixas = entries.map((e) => e.track);
-  const genres = localLibrary.genreGroups();
+  const todosOsGrupos = localLibrary.genreGroups();
   yield;
   const artistasDoAcervo = localLibrary.artists();
   const albums = localLibrary.albumGroups();
+
+  // ── O GOSTO VEM ANTES DE QUALQUER PRATELEIRA ──────────────────────────
+  // É ele que decide o que pode ser OFERECIDO (lib/reco/coerencia, com a
+  // tabela de famílias do shared): quem ouve gospel não recebe trap em
+  // prateleira nenhuma — nem no tronco, nem nos ramos, nem no "Feito para
+  // você". O perfil lê histórico, curtidas, pulos e artistas seguidos; o
+  // filtro é duro e vale também para a idade (`podeOuvir`).
+  const generoDaFaixa = new Map<string, string>();
+  const generoDoArtista = new Map<string, string>();
+  for (const g of todosOsGrupos) {
+    for (const t of g.tracks) {
+      generoDaFaixa.set(t.id, g.genre);
+      const a = t.artists?.[0]?.name;
+      if (a && !generoDoArtista.has(chaveDeTexto(a))) generoDoArtista.set(chaveDeTexto(a), g.genre);
+    }
+  }
+  const perfil = perfilDeGosto({
+    historico: history,
+    curtidas: liked,
+    generoDaFaixa,
+    generoDoArtista,
+    sementesDeGenero: semente.generos,
+    sementesDeArtista: semente.artistas,
+    pulos: lerPulos(),
+    seguidos: artistasSeguidos.list().map((a) => a.nome),
+  });
+  yield;
+  const coerentes = bibliotecaCoerente(entries, familiasDoPerfil(perfil));
+  const permitida = new Set(coerentes.map((e) => e.track.id));
+  const faixas = coerentes.map((e) => e.track);
+  const genres = todosOsGrupos
+    .map((g) => ({ ...g, tracks: g.tracks.filter((t) => permitida.has(t.id)) }))
+    .filter((g) => g.tracks.length > 0);
+  yield;
+  // Álbuns e artistas são a BIBLIOTECA, não recomendação: ficam inteiros.
   yield;
 
   // Artistas DELA para a grade de atalhos — não os maiores do acervo
@@ -215,16 +252,6 @@ function* passosDaHome(
   const [generoTronco, ...outrosGeneros] = generosGosto;
 
   yield;
-  const generoDaFaixa = new Map<string, string>();
-  for (const g of genres) for (const t of g.tracks) generoDaFaixa.set(t.id, g.genre);
-  const perfil = perfilDeGosto({
-    historico: history,
-    curtidas: liked,
-    generoDaFaixa,
-    sementesDeGenero: semente.generos,
-    sementesDeArtista: semente.artistas,
-  });
-  yield;
   const ramos = generoTronco
     ? ramificacoesDoGenero({
         genero: generoTronco.genre,
@@ -235,7 +262,8 @@ function* passosDaHome(
     : [];
 
   return {
-    insumos: { entries, history },
+    // As prateleiras tardias recebem a biblioteca COERENTE — nunca a inteira.
+    insumos: { entries: coerentes, history },
     vazia: entries.length === 0,
     entriesCount: entries.length,
     artistasDoAcervo,
@@ -489,8 +517,16 @@ function montarTardia(foto: FotoDaHome) {
   const letras = new Map(lyricsCacheEntries());
   return {
     deFoto: foto,
-    recos: buildRecommendations(),
-    albumRecos: buildAlbumRecommendations(),
+  const now = new Date();
+  // Só o que passou na coerência (foto.insumos.entries): o motor não lê a
+  // biblioteca inteira por conta própria.
+  const permitida = new Set(entries.map((e) => e.track.id));
+  const albums = localLibrary
+    .albumGroups()
+    .map((a) => ({ ...a, tracks: a.tracks.filter((t) => permitida.has(t.id)) }))
+    .filter((a) => a.tracks.length > 0);
+    recos: buildRecommendations({ entries, history, liked, now }),
+    albumRecos: buildAlbumRecommendations({ entries, albums, history, liked, now }),
     prateleirasDeAgentes: construirPrateleirasDeAgentes(
       { entries, history, liked, now: new Date() },
       (trackId) => {
