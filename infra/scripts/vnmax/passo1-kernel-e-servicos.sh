@@ -17,7 +17,10 @@ update-grub
 grep -o "crashkernel=[^ ]*" /boot/grub/grub.cfg | head -1 || echo "crashkernel fora do grub.cfg"
 
 echo "== serviços de máquina virtual e apport (notebook físico)"
-apt-get purge -y open-vm-tools vgauth apport apport-core-dump-handler apport-symptoms 2>/dev/null || true
+# Um por vez: um nome inexistente (vgauth não existe no 26.04) aborta o apt inteiro.
+for p in open-vm-tools apport apport-core-dump-handler apport-symptoms; do
+  apt-get purge -y "$p" || echo "purge de $p falhou"
+done
 apt-get autoremove -y --purge
 systemctl disable --now apport 2>/dev/null || true
 

@@ -17,7 +17,8 @@ EOF
 systemctl restart zramswap.service
 systemctl enable zramswap.service >/dev/null
 
-cat > /etc/sysctl.d/90-vnmax-zram.conf <<'EOF'
+# 99-zz: o Ubuntu traz um 99-*.conf com swappiness=10 que venceria um 90-*.
+cat > /etc/sysctl.d/99-zz-vnmax-zram.conf <<'EOF'
 # zram é RAM: pode trocar cedo e barato. Páginas de cache ficam.
 vm.swappiness=100
 vm.page-cluster=0

@@ -61,6 +61,16 @@ ssh -o BatchMode=yes "$HOST_SSH" bash -s -- "$DESTINO" "$SHA" "${ESTAGIAR:-0}" <
 set -euo pipefail
 DESTINO="$1"; SHA="$2"; ESTAGIAR="$3"
 cd "${DESTINO}.novo"
+# sharp vem com o binário do Windows (a pasta nasce no PC); o worker precisa do linux-x64.
+if [[ -d node_modules/sharp ]] && ! ls node_modules/@img 2>/dev/null | grep -q linux-x64; then
+  # (num diretório à parte: o package.json da pasta tem "workspace:*", que o npm não lê)
+  v="$(node -p 'require("sharp/package.json").version')"
+  t="$(mktemp -d)"; ( cd "$t" && npm init -y >/dev/null && nice -n 10 npm install --no-audit --no-fund --os=linux --cpu=x64 --include=optional "sharp@${v}" >/dev/null 2>&1 ) \
+    && cp -r "$t"/node_modules/@img/sharp-linux-x64 "$t"/node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/ \
+    && echo "sharp ${v} linux-x64 ok" || { echo "sharp linux-x64 falhou" >&2; rm -rf "$t"; exit 1; }
+  rm -rf "$t"
+fi
+node -e 'require("sharp")' 2>/dev/null || { echo "sharp não carrega neste Linux" >&2; exit 1; }
 if ! saida="$(nice -n 10 ./node_modules/.bin/prisma generate 2>&1)"; then echo "$saida" | tail -5 >&2; exit 1; fi
 echo "prisma generate ok"
 node -e 'import("@prisma/client").then(() => console.log("@prisma/client carrega"))'
