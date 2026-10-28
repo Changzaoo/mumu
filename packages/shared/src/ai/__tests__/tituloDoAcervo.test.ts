@@ -173,4 +173,18 @@ describe('lerTituloDoAcervo — destroca não confunde música nem produtora', (
     expect(r?.artists).toEqual(expect.arrayContaining(['MC GP', 'MC MENO K']));
     expect(r?.artists.join(' ')).not.toMatch(/VIDEO/);
   });
+  it('participação depois do travessão sai do título', () => {
+    const r = lerTituloDoAcervo('Pipoco - Part. Melody', ['Ana Castela']);
+    expect(r).toEqual({ title: 'Pipoco', artists: ['Ana Castela', 'Melody'], label: null });
+  });
+  it('"featuring", "(with …)" e "participação especial" viram convidados', () => {
+    expect(lerTituloDoAcervo('Starboy featuring Daft Punk', ['The Weeknd'])?.title).toBe('Starboy');
+    expect(lerTituloDoAcervo('Starboy (with Daft Punk)', ['The Weeknd'])?.artists).toEqual([
+      'The Weeknd',
+      'Daft Punk',
+    ]);
+    expect(
+      lerTituloDoAcervo('Pipoco (Participação Especial Melody)', ['Ana Castela'])?.artists,
+    ).toEqual(['Ana Castela', 'Melody']);
+  });
 });

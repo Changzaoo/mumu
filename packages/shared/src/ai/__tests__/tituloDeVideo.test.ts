@@ -658,3 +658,42 @@ describe('limparNomeDeArtista', () => {
     ]);
   });
 });
+
+describe('lerTituloDeVideo — "Música - Artista" e participações', () => {
+  it('o canal decide qual lado é quem canta', () => {
+    const r = lerTituloDeVideo('Liberdade Provisória - Henrique e Juliano', 'Henrique & Juliano');
+    expect(r.title).toBe('Liberdade Provisória');
+    expect(r.artists.join(' ')).not.toContain('Liberdade');
+  });
+
+  it('lista de nomes depois do travessão é gente, não a música', () => {
+    const r = lerTituloDeVideo(
+      'Desenrola Bate Joga de Ladin - L7NNON, Biel do Furduncinho e Bianca',
+    );
+    expect(r.title).toBe('Desenrola Bate Joga de Ladin');
+    expect(r.artists).toEqual(['L7NNON', 'Biel do Furduncinho', 'Bianca']);
+  });
+
+  it('"Artista - Música" continua como era', () => {
+    expect(lerTituloDeVideo('Ferrugem - Pirata e Tesouro').title).toBe('Pirata e Tesouro');
+    expect(lerTituloDeVideo('The Beatles - Hello, Goodbye').title).toBe('Hello, Goodbye');
+    expect(lerTituloDeVideo('Gusttavo Lima - Bloqueado', 'Gusttavo Lima').title).toBe('Bloqueado');
+  });
+
+  it('participação depois do travessão é convidado, não a música', () => {
+    const r = lerTituloDeVideo('Pipoco - Part. Melody', 'Ana Castela');
+    expect(r.title).toBe('Pipoco');
+    expect(r.artists).toEqual(['Ana Castela', 'Melody']);
+  });
+
+  it('"participação especial", "featuring" e "(with …)" saem do título', () => {
+    expect(lerTituloDeVideo('Pipoco (Participação Especial Melody)', 'Ana Castela')).toMatchObject({
+      title: 'Pipoco',
+      artists: ['Ana Castela', 'Melody'],
+    });
+    expect(lerTituloDeVideo('Starboy featuring Daft Punk', 'The Weeknd').title).toBe('Starboy');
+    expect(lerTituloDeVideo('Starboy (with Daft Punk)', 'The Weeknd').title).toBe('Starboy');
+    // "with" solto é parte do nome da música.
+    expect(lerTituloDeVideo('Dancing with Myself', 'Billy Idol').title).toBe('Dancing with Myself');
+  });
+});

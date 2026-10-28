@@ -536,7 +536,34 @@ function trechoEntreAspas(texto: string): string | null {
  *
  * "Parte" não é "part.": a borda de palavra protege "Vida Loka - Parte II".
  */
-const CONVIDADOS = /\s*[-–—|([]?\s*\b(?:feat|ft|part|participacao|participação)\b\.?\s*:?\s+(.+)$/i;
+//
+// "Participação especial" leva o "especial" junto (senão vira o artista
+// "Especial Fulano"), "featuring" é o "feat." por extenso, e "with" só conta
+// DENTRO de parêntese — "Starboy (with Daft Punk)" —, porque solto ele é parte
+// do nome de muita música ("Dancing with Myself").
+const CONVIDADOS =
+  /\s*(?:[-–—|([]?\s*\b(?:featuring|feat|ft|part|participacao|participação)\b\.?(?:\s+especial\b)?|[([]\s*with\b)\s*:?\s+(.+)$/i;
+
+/** Pedaço que COMEÇA pelo convidado: "Pipoco - Part. Melody". */
+const ABRE_COM_CONVIDADO =
+  /^(?:featuring|feat|ft|part|participacao|participação)\b\.?(?:\s+especial\b)?\s*:?\s+\S/i;
+
+/**
+ * "Pipoco - Part. Melody": o convidado depois do separador é do pedaço
+ * ANTERIOR. Lido como mais um lado do "A - B", virava "a música" — ou empurrava
+ * a música inteira para o campo do artista.
+ */
+function grudarConvidados(partes: string[]): string[] {
+  const juntas: string[] = [];
+  for (const p of partes) {
+    if (juntas.length > 0 && ABRE_COM_CONVIDADO.test(p)) {
+      juntas[juntas.length - 1] = `${juntas[juntas.length - 1]} ${p}`;
+    } else {
+      juntas.push(p);
+    }
+  }
+  return juntas;
+}
 
 function extrairConvidados(titulo: string): { titulo: string; convidados: string[] } {
   const m = CONVIDADOS.exec(titulo);
@@ -599,6 +626,38 @@ function tirarDjNoFim(titulo: string): string {
   return limpar(antes);
 }
 
+/**
+ * O pedaço é uma LISTA DE NOMES de gente, e não o nome de uma música? Pede
+ * vírgula e três nomes ou mais, cada um curto e com letra: "Hello, Goodbye"
+ * (dois) e "7, 8, 9" (só número) continuam sendo música. Número DENTRO do nome
+ * vale — "L7NNON" é gente.
+ */
+function ehListaDeNomes(texto: string): boolean {
+  if (!texto.includes(',')) return false;
+  const nomes = separarNomes(texto);
+  return nomes.length >= 3 && nomes.every((n) => /\p{L}/u.test(n) && n.split(/\s+/).length <= 4);
+}
+
+/**
+ * Pergunta "o canal canta neste pedaço?" — ou `null` quando o canal não serve
+ * de testemunha (vazio, gravadora ou agregador). Compara pelos nomes, para
+ * "Henrique & Juliano" reconhecer "Henrique e Juliano".
+ */
+function cantaNoPedaco(canal?: string | null): ((pedaco: string) => boolean) | null {
+  const nome = limparNomeDeArtista(canal?.trim() ?? '');
+  if (!nome || ehGravadora(nome)) return null;
+  const doCanal = separarNomes(nome)
+    .map((n) => chave(n))
+    .filter(Boolean);
+  if (doCanal.length === 0) return null;
+  return (pedaco) => {
+    const k = chave(pedaco);
+    if (k === chave(nome)) return true;
+    const nomes = new Set(separarNomes(pedaco).map((n) => chave(n)));
+    return doCanal.every((n) => nomes.has(n));
+  };
+}
+
 /** Junta o resultado tirando os convidados de dentro do nome da música. */
 function montar(titulo: string, artistas: string[], label: string | null): PartesDoVideo {
   const { titulo: nome, convidados } = extrairConvidados(titulo);
@@ -650,6 +709,7 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
     // Oficial") era remontado dentro do título, virando "Ele Vem - OFICIAL".
     // O primeiro pedaço nunca sai: a banda LIVE se chama LIVE.
     .filter((p, i) => i === 0 || !SO_RUIDO.test(chave(p)));
+  partes.splice(0, partes.length, ...grudarConvidados(partes));
   if (partes.length >= 2) {
     // QUEM É LISTA DE MC/DJ É GENTE, de qualquer lado do travessão. Nos canais
     // de funk a música vem primeiro e os cantores depois ("COMEDINHA FICOU
@@ -671,6 +731,24 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
           .filter((n) => !ehGravadora(n)),
       );
       return montar(musica, artistas, label);
+    }
+    // "MÚSICA - ARTISTA": a ordem invertida também existe fora do funk, e lida
+    // como "Artista - Música" punha os nomes no lugar do título —
+    // "Liberdade Provisória - Henrique e Juliano" entrava com a música no campo
+    // do artista. Dois sinais decidem, e só quando há exatamente dois lados:
+    //  - o CANAL é quem canta e está do lado direito (e não do esquerdo);
+    //  - o lado direito é claramente uma lista de nomes ("Pipoco - Ana
+    //    Castela, Melody, DJ Chris") e o esquerdo não é.
+    if (partes.length === 2) {
+      const [a, b] = partes as [string, string];
+      const canta = cantaNoPedaco(canal);
+      const invertido = canta
+        ? canta(b) && !canta(a)
+        : ehListaDeNomes(tirarDjsEntreParenteses(b)) && !ehListaDeNomes(a);
+      if (invertido) {
+        const artistas = separarNomes(tirarDjsEntreParenteses(b)).filter((n) => !ehGravadora(n));
+        if (artistas.length > 0) return montar(a, artistas, label);
+      }
     }
     // "Brenninho VJ - Proibido Amar - DJ Boy e DJ Gu": os DJs que FECHAM o
     // título são crédito de produção, como o "(DJ Boy)" entre parênteses.
@@ -947,6 +1025,8 @@ export function lerTituloDoAcervo(
     .split(SEPARADOR)
     .map((p) => p.replace(/⁓/g, '-').trim())
     .filter(Boolean);
+  partes.splice(0, partes.length, ...grudarConvidados(partes));
+  if (partes.length === 1) texto = partes[0]!;
   if (partes.length >= 2) {
     const [esquerda, ...resto] = partes;
     const direita = resto.join(' - ');
