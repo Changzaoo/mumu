@@ -72,3 +72,41 @@ test('canal com id inválido não vira pedido ao YouTube', async () => {
   assert.deepEqual(await busca.musicasDoCanal('../../etc', 'u1'), { nome: '', musicas: [] });
   assert.equal(rodou, false);
 });
+
+test('sem vaga, a busca espera a vez em vez de ser recusada', async () => {
+  const soltar = [];
+  let chamadas = 0;
+  const busca = criarBuscaYoutube({
+    rodar: () => {
+      chamadas += 1;
+      return new Promise((resolve) => soltar.push(() => resolve(JSON.stringify({ entries: [] }))));
+    },
+  });
+  const ocupadas = ['a', 'b', 'c'].map((t) => busca.buscar(t, `u-${t}`));
+  const quarta = busca.buscar('d', 'u-d');
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(chamadas, 3); // a quarta está na fila, não recusada
+  soltar.shift()();
+  await new Promise((r) => setTimeout(r, 10));
+  assert.equal(chamadas, 4);
+  soltar.forEach((f) => f());
+  assert.deepEqual(await quarta, []);
+  await Promise.all(ocupadas);
+});
+
+test('vaga que não abre a tempo vira limite, e a fila anda depois', async () => {
+  const soltar = [];
+  const busca = criarBuscaYoutube({
+    esperaPorVagaMs: 20,
+    rodar: () =>
+      new Promise((resolve) => soltar.push(() => resolve(JSON.stringify({ entries: [] })))),
+  });
+  const ocupadas = ['a', 'b', 'c'].map((t) => busca.buscar(t, `u-${t}`));
+  await assert.rejects(busca.buscar('d', 'u-d'), (e) => e.esperarSeg === 3);
+  soltar.forEach((f) => f());
+  await Promise.all(ocupadas);
+  const depois = busca.buscar('e', 'u-e');
+  await new Promise((r) => setTimeout(r, 10));
+  soltar.at(-1)();
+  assert.deepEqual(await depois, []);
+});
