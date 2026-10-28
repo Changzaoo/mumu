@@ -34,6 +34,13 @@ const LIMITE_POR_JANELA = 20;
 const JANELA_MS = 60_000;
 /** yt-dlp simultâneos só desta rota — o resto do importador precisa de CPU. */
 const MAX_SIMULTANEAS = 3;
+/**
+ * Quanto uma busca ESPERA por uma vaga antes de desistir. Recusar na hora
+ * (era assim) fazia a busca de quem digitava voltar "Muitas buscas" só porque
+ * o "Em alta", a fila do artista e a busca de artistas da mesma tela ocupavam
+ * as três vagas por 1-3 s — e a tela guardava essa recusa como resposta.
+ */
+const ESPERA_POR_VAGA_MS = 15_000;
 const TIMEOUT_MS = 25_000;
 const TERMO_MAX = 120;
 
@@ -253,6 +260,7 @@ export function criarBuscaYoutube({
   rodarUrl,
   agora = () => Date.now(),
   quantos = 10,
+  esperaPorVagaMs = ESPERA_POR_VAGA_MS,
   // Com `rodar` injetado (testes) não sai pedido de rede para conferir capa.
   conferirCapa = rodar ? null : conferirCapaPadrao,
 } = {}) {
@@ -265,6 +273,36 @@ export function criarBuscaYoutube({
   /** chave do usuário → instantes das buscas que custaram yt-dlp */
   const historico = new Map();
   let rodando = 0;
+  /** Quem espera vaga, na ordem em que chegou. */
+  const fila = [];
+
+  /** Uma das MAX_SIMULTANEAS vagas, esperando até `esperaPorVagaMs` na fila. */
+  function pegarVaga() {
+    if (rodando < MAX_SIMULTANEAS) {
+      rodando += 1;
+      return Promise.resolve();
+    }
+    return new Promise((resolve, reject) => {
+      const vez = {
+        entrar: () => {
+          clearTimeout(relogio);
+          rodando += 1;
+          resolve();
+        },
+      };
+      const relogio = setTimeout(() => {
+        const i = fila.indexOf(vez);
+        if (i >= 0) fila.splice(i, 1);
+        reject(new LimiteDeBusca(3));
+      }, esperaPorVagaMs);
+      fila.push(vez);
+    });
+  }
+
+  function soltarVaga() {
+    rodando -= 1;
+    fila.shift()?.entrar();
+  }
 
   function consultarLimite(chave) {
     const t = agora();
@@ -295,20 +333,18 @@ export function criarBuscaYoutube({
     if (pendente) return pendente;
 
     consultarLimite(chaveUsuario);
-    if (rodando >= MAX_SIMULTANEAS) throw new LimiteDeBusca(3);
 
-    rodando += 1;
     const promessa = (async () => {
+      await pegarVaga();
       try {
         const resultados = await produzir();
         cache.set(chave, { em: agora(), resultados });
         if (cache.size > CACHE_MAX_TERMOS) cache.delete(cache.keys().next().value);
         return resultados;
       } finally {
-        rodando -= 1;
-        emCurso.delete(chave);
+        soltarVaga();
       }
-    })();
+    })().finally(() => emCurso.delete(chave));
     emCurso.set(chave, promessa);
     return promessa;
   }

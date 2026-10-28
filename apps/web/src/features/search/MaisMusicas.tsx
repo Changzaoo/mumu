@@ -40,9 +40,34 @@ interface ResultadoBusca {
   motivoFalha: 'limite' | 'falha' | null;
 }
 
+/**
+ * Uma recusa do importador (ocupado, limite, um tropeço do YouTube) costuma
+ * passar em segundos. Antes ela virava a resposta da busca: a pessoa via "nada"
+ * e, pelo cache de 10 min, continuava vendo nada mesmo buscando de novo.
+ */
+const ESPERA_PARA_TENTAR_DE_NOVO_MS = 1_500;
+
+function esperar(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    signal.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t);
+        resolve();
+      },
+      { once: true },
+    );
+  });
+}
+
 /** Busca por baixo e monta faixas prontas para tocar; nunca lança. */
 async function buscarFaixas(termo: string, signal: AbortSignal): Promise<ResultadoBusca> {
-  const busca = await buscarNoYoutube(termo, signal);
+  let busca = await buscarNoYoutube(termo, signal);
+  if (!busca.ok && busca.motivo !== 'login' && !signal.aborted) {
+    await esperar(ESPERA_PARA_TENTAR_DE_NOVO_MS, signal);
+    if (!signal.aborted) busca = await buscarNoYoutube(termo, signal);
+  }
   if (!busca.ok) {
     // 'login' já tem tela própria (ver `logado` abaixo) — só falha/limite
     // precisam ser sinalizados aqui como "a fonte caiu", não "vazio".
@@ -85,7 +110,8 @@ export function MaisMusicas({
     enabled: logado && assentado.length >= 2 && assentado === termo,
     // O servidor guarda 10 min; o cliente não precisa perguntar de novo antes.
     // (O link de stream carrega o crachá, que vale ~1 h — 10 min cabe folgado.)
-    staleTime: 10 * 60_000,
+    // Falha NÃO é resposta para guardar: buscar de novo tem de perguntar de novo.
+    staleTime: (q) => (q.state.data?.motivoFalha ? 0 : 10 * 60_000),
     retry: false,
     refetchOnWindowFocus: false,
   });
@@ -197,7 +223,19 @@ export function MaisMusicas({
     );
   }
 
-  if (faixas.length === 0) return semNadaNoAcervo ? vazio : null;
+  if (faixas.length === 0) {
+    if (semNadaNoAcervo) return vazio;
+    // Com o acervo na tela a falha sumia calada, e parecia que o YouTube não
+    // tinha nada: um aviso curto diz que faltou a outra metade da busca.
+    if (!motivoFalha) return null;
+    return (
+      <p role="status" className="text-sm text-fg-muted">
+        {motivoFalha === 'limite'
+          ? 'Mais músicas: muitas buscas em pouco tempo — tente de novo em instantes.'
+          : 'Mais músicas: a busca por baixo não respondeu agora — tente de novo em instantes.'}
+      </p>
+    );
+  }
 
   return (
     <section aria-label={titulo} className="min-w-0">

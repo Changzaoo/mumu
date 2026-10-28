@@ -142,7 +142,7 @@ describe('MaisMusicas', () => {
   it('fonte fora do ar: mensagem distinta de "nada encontrado"', async () => {
     estado.buscar.mockResolvedValue({ ok: false, motivo: 'falha' });
     montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo />);
-    expect(await screen.findByText('Busca fora do ar agora', {}, { timeout: 3000 })).toBeTruthy();
+    expect(await screen.findByText('Busca fora do ar agora', {}, { timeout: 4000 })).toBeTruthy();
     expect(screen.queryByText(/Nada encontrado/)).toBeNull();
   });
 
@@ -150,7 +150,24 @@ describe('MaisMusicas', () => {
     estado.buscar.mockResolvedValue({ ok: false, motivo: 'limite' });
     montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo />);
     expect(
-      await screen.findByText('Muitas buscas em pouco tempo', {}, { timeout: 3000 }),
+      await screen.findByText('Muitas buscas em pouco tempo', {}, { timeout: 4000 }),
     ).toBeTruthy();
+  });
+});
+
+describe('MaisMusicas — recusa passageira do importador', () => {
+  it('tenta de novo sozinha e mostra o que achou', async () => {
+    estado.buscar
+      .mockResolvedValueOnce({ ok: false, motivo: 'limite' })
+      .mockResolvedValue({ ok: true, resultados: RESULTADOS });
+    montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo />);
+    expect(await screen.findByText('Kenny G — Matuê', {}, { timeout: 4000 })).toBeTruthy();
+    expect(estado.buscar).toHaveBeenCalledTimes(2);
+  });
+
+  it('com o acervo na tela, a falha avisa em vez de sumir calada', async () => {
+    estado.buscar.mockResolvedValue({ ok: false, motivo: 'falha' });
+    montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo={false} />);
+    expect(await screen.findByRole('status', {}, { timeout: 4000 })).toBeTruthy();
   });
 });
