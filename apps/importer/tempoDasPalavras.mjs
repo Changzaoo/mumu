@@ -48,6 +48,14 @@ const MODELO = process.env.WHISPER_MODELO || 'small';
 const MODELO_TRANSCRICAO = process.env.WHISPER_MODELO_TRANSCRICAO || 'large-v3-turbo';
 // 25 min: o large-v3-turbo numa CPU de 4 núcleos leva alguns minutos por música.
 const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 25 * 60_000);
+/**
+ * TEMPO_LOCAL=0 desliga o whisper DESTA máquina (o servidor vnmax: 3,7 GB
+ * divididos com o VNMAX; o alinhamento sozinho pedia 864 MB e 1007 s por
+ * música, e derrubou o importador em 27/10). O que já está pronto em disco
+ * continua sendo servido; o resto responde "falhou" (422) e o app fica com a
+ * letra sem o relógio daqui.
+ */
+const LOCAL_LIGADO = process.env.TEMPO_LOCAL !== '0';
 /** Fila curta: o que interessa é a faixa tocando agora, não um acúmulo. */
 const FILA_MAX = 20;
 /** Versão do formato em disco — mudou o modelo/saída, muda a chave. */
@@ -177,6 +185,7 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
       });
       if (words && words.length > 0) return { words, motor: 'riva', language: 'en' };
     }
+    if (!LOCAL_LIGADO) throw new Error('whisper local desligado (TEMPO_LOCAL=0)');
     const lingua = idioma === 'en' ? 'en' : idioma === 'auto' ? '' : 'pt';
     // VOCABULÁRIO DO ARTISTA como `initial_prompt`: primar o whisper com as
     // gírias/palavras que a letra publicada já confirmou no passado para
@@ -251,6 +260,7 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
   async function pedirPorChave(chave, tarefa) {
     const pronto = await lerPronto(chave);
     if (pronto) return { pronto };
+    if (!LOCAL_LIGADO) return { status: 'falhou' };
     const quando = falhou.get(chave);
     if (quando && Date.now() - quando < 6 * 3600_000) return { status: 'falhou' };
     if (atual === chave) {
