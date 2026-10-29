@@ -64,6 +64,18 @@ export const telemetryRateLimit = createLimiter({
   message: 'Too many telemetry writes, slow down',
 });
 
+/**
+ * Convite de amigo - 20 req/min/IP. Escrita aberta (quem abre o link ainda nao
+ * tem conta) que cria uma linha por `deviceId`; curto para nao render contagem
+ * de amigos inventada.
+ */
+export const conviteRateLimit = createLimiter({
+  name: 'convite',
+  windowMs: 60 * 1000,
+  max: 20,
+  message: 'Too many invites, slow down',
+});
+
 /** Uploads — 10 req/hour/IP. */
 export const uploadRateLimit = createLimiter({
   name: 'upload',

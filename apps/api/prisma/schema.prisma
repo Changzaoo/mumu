@@ -60,6 +60,9 @@ model User {
   hostedSessions     ListenSession[]        @relation("SessionHost")
   sessionMemberships ListenSessionMember[]
   collectionItems    UserCollectionItem[]
+  jornada            Jornada?
+  afilhados          Indicacao[]            @relation("Padrinho")
+  indicadoPor        Indicacao[]            @relation("Indicado")
 
   @@index([handle])
   @@index([createdAt])
@@ -905,4 +908,37 @@ model CreditoDoArtista {
 
   @@index([chave])
   @@index([chaveDoNome, papel])
+}
+
+/// Liga semanal e sequência de quem usa o app. O XP da semana é enviado pelo
+/// aparelho (que calcula tudo); aqui só vive o que precisa ser comparado.
+model Jornada {
+  userId       String   @id
+  /// Semana ISO ('YYYY-Www') a que o xpSemana pertence.
+  semana       String
+  xpSemana     Int      @default(0)
+  /// 0..5: Bronze, Prata, Ouro, Safira, Rubi, Diamante.
+  liga         Int      @default(0)
+  sequencia    Int      @default(0)
+  recorde      Int      @default(0)
+  atualizadoEm DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([liga, semana, xpSemana])
+}
+
+/// Convite de amigo: o aparelho que abriu o link de um padrinho.
+model Indicacao {
+  deviceId   String   @id
+  padrinhoId String
+  /// Conta que entrou por esse aparelho, quando logou.
+  indicadoId String?
+  criadoEm   DateTime @default(now())
+
+  padrinho User  @relation("Padrinho", fields: [padrinhoId], references: [id], onDelete: Cascade)
+  indicado User? @relation("Indicado", fields: [indicadoId], references: [id], onDelete: SetNull)
+
+  @@index([padrinhoId])
+  @@index([indicadoId])
 }

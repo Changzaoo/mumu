@@ -22,11 +22,13 @@ import {
   IoSearch,
   IoSearchOutline,
   IoSettingsOutline,
-  IoShareSocialOutline,
   IoShieldCheckmarkOutline,
   IoTimeOutline,
+  IoTrophyOutline,
 } from 'react-icons/io5';
+import { CabecalhoDaConta } from '@/components/jornada/CabecalhoDaConta';
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { useAuthUser } from '@/hooks/useAuthUser';
 import { useIsAuthorized } from '@/lib/auth/roles';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
 import * as localLibrary from '@/lib/local/localLibrary';
@@ -80,12 +82,12 @@ const MENU: MenuGroup[] = [
       // playlists", lá em cima.)
       { to: '/history', label: 'Histórico', icon: IoTimeOutline },
       { to: '/dispositivo', label: 'Baixadas', icon: IoDownloadOutline },
-      { to: '/compartilhar', label: 'Compartilhar', icon: IoShareSocialOutline },
     ],
   },
   {
     heading: 'Conta',
     items: [
+      { to: '/jornada', label: 'Conquistas e liga', icon: IoTrophyOutline },
       { to: '/settings', label: 'Configurações', icon: IoSettingsOutline },
       { to: '/admin', label: 'Administração', icon: IoShieldCheckmarkOutline },
     ],
@@ -189,6 +191,8 @@ function MinhasPlaylists({ fechar }: { fechar: () => void }) {
 export function MobileNav() {
   const [open, setOpen] = useState(false);
   const authorized = useIsAuthorized();
+  const { user, profile } = useAuthUser();
+  const nome = profile?.displayName ?? user?.displayName ?? 'Você';
   // "Início" estando na Início: volta ao topo em vez de não fazer nada.
   const voltarAoTopo = useVoltarAoTopo();
   const menu = authorized
@@ -254,6 +258,14 @@ export function MobileNav() {
             <SheetTitle>Menu</SheetTitle>
           </SheetHeader>
           <div className="space-y-5 pb-2">
+            {/* A conta no topo: foto, nome e a jornada (pedido do dono). */}
+            <div className="rounded-2xl border border-border p-1">
+              <CabecalhoDaConta
+                nome={user ? nome : 'Sua jornada'}
+                foto={user ? (profile?.avatarUrl ?? user.photoURL ?? null) : null}
+                aoIr={() => setOpen(false)}
+              />
+            </div>
             <MinhasPlaylists fechar={() => setOpen(false)} />
             {menu.map((group) => (
               <div key={group.heading}>

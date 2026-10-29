@@ -9,7 +9,9 @@ import {
   Settings,
   Shield,
   Sun,
+  Trophy,
   User,
+  UserPlus,
 } from 'lucide-react';
 import { toast } from 'sonner';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
@@ -18,12 +20,13 @@ import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuLabel,
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from '@/components/ui/dropdown-menu';
 import { IconButton } from '@/components/ui/icon-button';
 import { NotificationBell } from '@/app/layout/NotificationBell';
+import { CabecalhoDaConta } from '@/components/jornada/CabecalhoDaConta';
+import { Foguinho } from '@/components/jornada/Foguinho';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useDebounce } from '@/hooks/useDebounce';
 import { useIsAuthorized } from '@/lib/auth/roles';
@@ -179,6 +182,8 @@ export function TopBar() {
       <div className="ml-auto flex items-center gap-1">
         {/* Sem atalho de "adicionar música/colar link": a busca já procura na
             internet o que não está no acervo. */}
+        {/* A sequência de dias sempre à vista (ver components/jornada). */}
+        <Foguinho />
         <NotificationBell />
         <IconButton
           aria-label={resolved === 'dark' ? 'Tema claro' : 'Tema escuro'}
@@ -209,8 +214,25 @@ export function TopBar() {
                 </Avatar>
               </button>
             </DropdownMenuTrigger>
-            <DropdownMenuContent align="end" className="min-w-52">
-              <DropdownMenuLabel className="text-fg">{displayName}</DropdownMenuLabel>
+            <DropdownMenuContent align="end" className="w-72">
+              {/* Foto, NOME em cima de tudo e a jornada logo abaixo. */}
+              <DropdownMenuItem asChild className="block p-0">
+                <CabecalhoDaConta
+                  nome={displayName}
+                  foto={profile?.avatarUrl ?? user.photoURL ?? null}
+                />
+              </DropdownMenuItem>
+              <DropdownMenuSeparator />
+              <DropdownMenuItem asChild>
+                <Link to="/jornada">
+                  <Trophy /> Conquistas e liga
+                </Link>
+              </DropdownMenuItem>
+              <DropdownMenuItem asChild>
+                <Link to="/jornada#amigos">
+                  <UserPlus /> Convidar amigos
+                </Link>
+              </DropdownMenuItem>
               <DropdownMenuSeparator />
               {profile && (
                 <DropdownMenuItem asChild>

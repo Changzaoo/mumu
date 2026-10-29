@@ -35,6 +35,7 @@ import { telemetryRoutes } from './modules/telemetry/index.js';
 import { emAltaRoutes } from './modules/emAlta/index.js';
 import { categoriesRoutes } from './modules/categories/index.js';
 import { mundoRoutes } from './modules/mundo/index.js';
+import { jornadaRoutes } from './modules/jornada/index.js';
 
 export function createApp(): Express {
   registerFeedProjection();
@@ -124,6 +125,7 @@ export function createApp(): Express {
   // O MUNDO DA MÚSICA: agenda, prêmios, lançamentos e transmissões por artista,
   // lidos do cache que o worker `mundo` mantém. Leitura aberta.
   api.use('/mundo', mundoRoutes);
+  api.use('/jornada', jornadaRoutes);
 
   app.use('/api/v1', api);
   app.use('/api/docs', createDocsRouter());

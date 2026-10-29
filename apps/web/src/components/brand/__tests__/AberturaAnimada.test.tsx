@@ -1,88 +1,113 @@
 /**
- * A ABERTURA: UMA VEZ POR SESSÃO, MAIS RÁPIDA, E COM "PULAR".
+ * A ABERTURA: UMA VEZ POR SESSÃO, NO HTML, E COM "PULAR".
  *
- * Pedidos do dono (27/10/2026): "a abertura está muito demorada", "o usuário
- * tem que poder pular", e "uma vez dentro do app, se ele precisar atualizar,
- * ela não deve aparecer de novo". As regras travadas aqui:
+ * Pedidos do dono (27/10 e 29/10/2026): a abertura não repete numa recarga no
+ * meio do uso, a pessoa pode pular, e ela não pode travar no celular fraco —
+ * por isso a cena mora no index.html e começa antes do app (aberturaCena.ts).
+ * O que se trava aqui:
  *
- *  - primeira abertura da sessão → a cena aparece e a sessão fica marcada;
- *  - recarga no meio do uso (sessão já marcada) → nada aparece;
- *  - a cena dura o tempo de cena dividido pelo RITMO, e sai no fade;
- *  - "Pular" (botão ou Esc) acaba a cena na hora e a abertura sai no fade.
- *
- * Sem movimento aqui = falso: é a cena de verdade, com os timers reais (falsos
- * do vitest). A câmera não roda no jsdom (`animate` não existe) — e não é dela
- * que estes testes tratam.
+ *  - o script do <head> marca a sessão e cobre o app (data-abrindo);
+ *  - sessão já marcada → a cena nem aparece;
+ *  - o componente tira a cena quando ela acaba E o app está pronto, no fade;
+ *  - "Pular" (botão ou Esc) acaba a cena na hora;
+ *  - a cena só anima transform e opacity (o que anda fora da linha principal).
  */
-import { act, fireEvent, render, screen } from '@testing-library/react';
+import { act, fireEvent, render } from '@testing-library/react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 vi.mock('@/hooks/useAuthUser', () => ({ useAuthUser: () => ({ loading: false, user: null }) }));
-vi.mock('@/hooks/useMediaQuery', () => ({ useMediaQuery: () => false }));
-vi.mock('@/hooks/useSemMovimento', () => ({ useSemMovimento: () => false }));
 const anotar = vi.fn();
 vi.mock('@/lib/telemetry/diario', () => ({ anotar: (...a: unknown[]) => anotar(...a) }));
 
-import { AberturaAnimada, DURACAO_DA_CENA_MS, RITMO } from '../AberturaAnimada';
-import { aberturaJaVista, marcarAberturaVista } from '../aberturaVista';
+import { AberturaAnimada, DURACAO_DA_CENA_MS, SAIDA_MS } from '../AberturaAnimada';
+import { CHAVE_VISTA, CSS_DA_CENA, htmlDaCena, scriptDoHead } from '../aberturaCena';
 
-const CENA_REAL_MS = DURACAO_DA_CENA_MS / RITMO;
-const FADE_MS = 700;
+const raiz = document.documentElement;
+
+/** O que o navegador faz com o index.html: roda o script do head e lê a cena. */
+function carregarPagina(): void {
+  new Function(scriptDoHead())();
+  document.body.insertAdjacentHTML('beforeend', htmlDaCena());
+}
+
+const cena = (): HTMLElement | null => document.getElementById('abertura');
 
 describe('a abertura', () => {
   beforeEach(() => {
     vi.useFakeTimers();
     window.sessionStorage.clear();
     anotar.mockClear();
+    for (const a of [
+      'data-abrindo',
+      'data-sem-abertura',
+      'data-abertura-pulada',
+      'data-abertura-parada',
+    ])
+      raiz.removeAttribute(a);
+    document.body.innerHTML = '';
   });
   afterEach(() => {
     vi.useRealTimers();
   });
 
-  it('aparece na primeira abertura da sessão e marca a sessão', () => {
+  it('primeira abertura da sessão: cobre o app e marca a sessão', () => {
+    carregarPagina();
     render(<AberturaAnimada />);
-    expect(screen.getByTestId('abertura')).toBeTruthy();
-    expect(screen.getByTestId('abertura-pular')).toBeTruthy();
-    expect(aberturaJaVista()).toBe(true);
+    expect(cena()).toBeTruthy();
+    expect(raiz.dataset.abrindo).toBe('1');
+    expect(window.sessionStorage.getItem(CHAVE_VISTA)).toBe('1');
     expect(anotar).toHaveBeenCalledWith('app', 'abertura', 'mostrada');
   });
 
   it('recarga no meio do uso (sessão já marcada) → não aparece', () => {
-    marcarAberturaVista();
+    window.sessionStorage.setItem(CHAVE_VISTA, '1');
+    carregarPagina();
+    expect(raiz.dataset.abrindo).toBeUndefined();
+    expect(raiz.hasAttribute('data-sem-abertura')).toBe(true);
     render(<AberturaAnimada />);
-    expect(screen.queryByTestId('abertura')).toBeNull();
-    expect(document.documentElement.dataset.abrindo).toBeUndefined();
+    expect(cena()).toBeNull();
     expect(anotar).toHaveBeenCalledWith('app', 'abertura', 'dispensada: já vista nesta sessão');
   });
 
-  it('a cena roda mais rápido que foi desenhada e sai no fade', () => {
-    expect(RITMO).toBeGreaterThan(1);
+  it('fica a cena inteira e sai no fade', () => {
+    carregarPagina();
     render(<AberturaAnimada />);
-    // Pouco antes do fim da cena (em tempo real): ainda cobrindo a tela.
-    act(() => vi.advanceTimersByTime(CENA_REAL_MS - 50));
-    expect(screen.getByTestId('abertura')).toBeTruthy();
-    expect(document.documentElement.dataset.abrindo).toBe('1');
-    // Fim da cena (o fade só começa depois que o React assenta o estado)…
-    act(() => vi.advanceTimersByTime(50));
-    // …e o fade: foi embora, e o app volta a pintar.
-    act(() => vi.advanceTimersByTime(FADE_MS + 20));
-    expect(screen.queryByTestId('abertura')).toBeNull();
-    expect(document.documentElement.dataset.abrindo).toBeUndefined();
+    act(() => vi.advanceTimersByTime(DURACAO_DA_CENA_MS - 50));
+    expect(cena()?.classList.contains('ab-saindo')).toBe(false);
+    expect(raiz.dataset.abrindo).toBe('1');
+    act(() => vi.advanceTimersByTime(60));
+    expect(cena()?.classList.contains('ab-saindo')).toBe(true);
+    expect(raiz.dataset.abrindo).toBeUndefined();
+    act(() => vi.advanceTimersByTime(SAIDA_MS + 20));
+    expect(cena()).toBeNull();
   });
 
   it('"Pular" acaba a cena na hora', () => {
+    carregarPagina();
     render(<AberturaAnimada />);
     act(() => vi.advanceTimersByTime(500));
-    fireEvent.click(screen.getByTestId('abertura-pular'));
+    fireEvent.click(cena()!.querySelector('.ab-pular')!);
     expect(anotar).toHaveBeenCalledWith('app', 'abertura', 'pulada');
-    act(() => vi.advanceTimersByTime(FADE_MS + 20));
-    expect(screen.queryByTestId('abertura')).toBeNull();
+    act(() => vi.advanceTimersByTime(SAIDA_MS + 20));
+    expect(cena()).toBeNull();
   });
 
   it('Esc também pula', () => {
+    carregarPagina();
     render(<AberturaAnimada />);
     fireEvent.keyDown(window, { key: 'Escape' });
-    act(() => vi.advanceTimersByTime(FADE_MS + 20));
-    expect(screen.queryByTestId('abertura')).toBeNull();
+    act(() => vi.advanceTimersByTime(SAIDA_MS + 20));
+    expect(cena()).toBeNull();
+  });
+
+  it('a cena só anima transform e opacity', () => {
+    const quadros = CSS_DA_CENA.match(/@keyframes[^{]+\{(?:[^{}]*\{[^}]*\})+\s*\}/g) ?? [];
+    expect(quadros.length).toBeGreaterThan(5);
+    for (const q of quadros) {
+      const props = [...q.replace(/^@keyframes[^{]+\{/, '').matchAll(/([a-z-]+)\s*:/g)].map(
+        (m) => m[1],
+      );
+      for (const p of props) expect(['transform', 'opacity'], q).toContain(p);
+    }
   });
 });

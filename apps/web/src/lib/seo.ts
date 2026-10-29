@@ -78,6 +78,7 @@ type Regra = (partes: string[]) => Omit<Seo, 'caminho'>;
  *  busca. O título continua importando — é o que aparece na aba. */
 const PRIVADAS: Record<string, string> = {
   library: 'Sua biblioteca',
+  jornada: 'Sua jornada',
   liked: 'Músicas curtidas',
   history: 'Tocadas recentemente',
   downloads: 'Downloads',
@@ -128,6 +129,13 @@ const ESTATICAS: Record<string, Omit<Seo, 'caminho'>> = {
 };
 
 const DINAMICAS: Record<string, Regra> = {
+  // O convite de um amigo: é o link que mais circula no WhatsApp.
+  c: () => ({
+    titulo: 'Te chamaram para o radinho',
+    descricao:
+      'Música de graça, sem anúncio e sem cadastro: funk, rap, pop, sertanejo, MPB e rádios ao vivo. Aceite o convite e ouça no radinho.online.',
+    indexar: false,
+  }),
   artista: ([nome = '']) => ({
     titulo: `${nomeDaUrl(nome)} — músicas e álbuns`,
     descricao: `Ouça ${nomeDaUrl(nome)} online grátis: as músicas mais tocadas, álbuns e lançamentos, com letra, no radinho.online.`,

@@ -222,6 +222,8 @@ export const router = createBrowserRouter([
           { path: '/', element: page('HomePage', 'home') },
           { path: '/search', element: page('SearchPage', 'list') },
           { path: '/library', element: page('LibraryPage', 'list') },
+          { path: '/jornada', element: page('JornadaPage', 'list') },
+          { path: '/c/:handle', element: page('ConvitePage', 'home') },
           { path: '/artistas', element: page('ArtistsPage', 'home') },
           { path: '/gravadoras', element: page('LabelsPage', 'home') },
           { path: '/liked', element: page('LikedPage', 'list') },

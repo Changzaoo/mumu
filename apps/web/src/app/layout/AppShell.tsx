@@ -5,6 +5,8 @@ import { ResumeElsewhereBanner } from '@/components/media/ResumeElsewhereBanner'
 import { ShareDialogHost } from '@/components/media/ShareDialog';
 import { AdicionarAPlaylistHost } from '@/components/media/AdicionarAPlaylist';
 import { AberturaAnimada } from '@/components/brand/AberturaAnimada';
+import { AvisosDaJornada } from '@/components/jornada/AvisosDaJornada';
+import { ConquistaNoPlayer } from '@/components/jornada/ConquistaNoPlayer';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import * as gostoInicial from '@/lib/local/gostoInicial';
@@ -300,6 +302,9 @@ export function AppShell() {
         <TrackAnnouncer />
         {/* A abertura: o rádio manda o sinal enquanto o app sobe por baixo. */}
         <AberturaAnimada />
+        {/* A jornada: conquistas saltando do player e os avisos discretos. */}
+        <ConquistaNoPlayer />
+        <AvisosDaJornada />
       </div>
     </ScrollContainerContext.Provider>
   );

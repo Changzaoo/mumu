@@ -3,11 +3,43 @@ import { defineConfig } from 'vite';
 import react from '@vitejs/plugin-react';
 import tailwindcss from '@tailwindcss/vite';
 import { VitePWA } from 'vite-plugin-pwa';
+import type { Plugin } from 'vite';
+import {
+  CSS_DA_CENA,
+  htmlDaCena,
+  scriptDaCena,
+  scriptDoHead,
+} from './src/components/brand/aberturaCena';
+
+/**
+ * A ABERTURA DENTRO DO index.html (ver src/components/brand/aberturaCena.ts):
+ * a cena começa no primeiro quadro, antes do JS do app chegar, e o tema
+ * guardado é aplicado antes de qualquer pintura.
+ */
+function aberturaNoHtml(): Plugin {
+  return {
+    name: 'radinho-abertura-no-html',
+    transformIndexHtml(html) {
+      return html
+        .replace(
+          '<meta charset="UTF-8" />',
+          `<meta charset="UTF-8" />
+    <script>${scriptDoHead()}</script>
+    <style>${CSS_DA_CENA}</style>`,
+        )
+        .replace(
+          '<div id="root"></div>',
+          `<div id="root"></div>${htmlDaCena()}<script>${scriptDaCena()}</script>`,
+        );
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
     react(),
     tailwindcss(),
+    aberturaNoHtml(),
     VitePWA({
       // 'autoUpdate': o worker novo PULA A ESPERA e ASSUME os clientes sozinho
       // (skipWaiting + clientsClaim abaixo). Sem isto o SW ficava "aguardando"
@@ -99,7 +131,36 @@ export default defineConfig({
           // é do Firebase, não do app — o worker não pode responder com o index.
           /^\/__\//,
         ],
+        /**
+         * A PÁGINA VEM DA REDE, NÃO DO CACHE (29/10/2026). Com o index.html
+         * servido do precache, quem abria o app (o APK carrega o site) recebia
+         * o bundle da VERSÃO ANTERIOR; a nova chegava em segundo plano e a
+         * página recarregava — e a pessoa via uma abertura, depois outra, a
+         * antiga. Agora a navegação busca o index.html na rede (3 s de prazo);
+         * só sem rede (ou rede travada) o worker responde com a cópia guardada.
+         */
+        navigateFallback: null,
         runtimeCaching: [
+          {
+            urlPattern: ({ request, url }: { request: Request; url: URL }) =>
+              request.mode === 'navigate' &&
+              !/^\/(api|importer|__\/)|^\/(sitemap\.xml|robots\.txt|og\.png|radinho\.apk)$/.test(
+                url.pathname,
+              ),
+            handler: 'NetworkFirst',
+            options: {
+              cacheName: 'radinho-paginas',
+              networkTimeoutSeconds: 3,
+              expiration: { maxEntries: 20 },
+              plugins: [
+                {
+                  // Sem rede e sem cópia desta URL: a casca do app no precache.
+                  handlerDidError: async () =>
+                    (await caches.match('/index.html', { ignoreSearch: true })) ?? undefined,
+                },
+              ],
+            },
+          },
           {
             // Os chunks pesados e raros fora do precache (ver `globIgnores`).
             // Nome com hash do conteúdo = imutável → CacheFirst é seguro; a

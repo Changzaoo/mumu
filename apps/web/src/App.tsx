@@ -76,6 +76,7 @@ export default function App() {
     // paralelo com a renderização; alguns milissegundos mais tarde, invisíveis
     // para o usuário, mas fora da frente da tela.
     let pararPesquisador: (() => void) | null = null;
+    let pararJornada: (() => void) | null = null;
     let pararReparador: (() => void) | null = null;
     let pararAssimilador: (() => void) | null = null;
     let cancelado = false;
@@ -148,6 +149,20 @@ export default function App() {
       // pesquisador.worker.ts) — aqui só a escolha da pessoa, que mora na
       // CONTA para valer em todos os aparelhos e com o app fechado.
       pararPesquisador = ajustesDaConta.initAjustesDaConta();
+      // A JORNADA (foguinho, conquistas, liga, amigos): conta o tempo que o
+      // player toca. Depois da biblioteca, para as conquistas de curtidas e
+      // playlists lerem a coleção de verdade. Ver lib/jornada/jornada.ts.
+      void Promise.all([import('@/lib/jornada/jornada'), import('@/lib/jornada/servidor')]).then(
+        ([j, s]) => {
+          if (cancelado) return;
+          const a = j.initJornada();
+          const b = s.initJornadaNoServidor();
+          pararJornada = () => {
+            a();
+            b();
+          };
+        },
+      );
       // Filtro de idade: julga as letras já guardadas no aparelho (só quem tem
       // restrição; em pedaços, fora da primeira tela).
       void import('@/lib/conteudo/faixaEtaria').then((m) => m.julgarLetrasGuardadas());
@@ -176,6 +191,7 @@ export default function App() {
     return () => {
       cancelado = true;
       pararPesquisador?.();
+      pararJornada?.();
       pararReparador?.();
       pararAssimilador?.();
       document.removeEventListener('contextmenu', blockContextMenu);
