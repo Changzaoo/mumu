@@ -188,6 +188,7 @@ class Vigia {
   desde: number | null = null;
   semMetadado = false;
   ultimoPedido = Date.now();
+  private readonly conectadoEm = Date.now();
   readonly pronto: Promise<void>;
   private avisarPronto!: () => void;
   private readonly abort = new AbortController();
@@ -204,8 +205,13 @@ class Vigia {
 
   private trocou(titulo: string): void {
     if (titulo === this.bruto) return;
-    // O primeiro título é o da música que JÁ tocava: início desconhecido.
-    this.desde = this.bruto === null ? null : Date.now();
+    // O primeiro título é o da música que JÁ tocava: início desconhecido. Um
+    // título VAZIO logo na conexão também não conta como "música anterior" —
+    // há servidor que manda vazio no primeiro bloco e o título real segundos
+    // depois (Heart 80s, medido), e isso não é a música começando.
+    const anteriorConhecido =
+      this.bruto !== null && (this.bruto !== '' || Date.now() - this.conectadoEm > 15_000);
+    this.desde = anteriorConhecido ? Date.now() : null;
     this.bruto = titulo;
     this.avisarPronto();
   }
