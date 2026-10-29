@@ -67,17 +67,19 @@ export function usePodcasts(): UseQueryResult<PodcastDto[]> {
   });
 }
 
-export function usePodcast(id: string): UseQueryResult<PodcastDto> {
+export function usePodcast(id: string, enabled = true): UseQueryResult<PodcastDto> {
   return useQuery({
     queryKey: ['podcast', id],
+    enabled,
     staleTime: 10 * 60_000,
     queryFn: async () => (await api.get<PodcastDto>(`/podcasts/${id}`)).data,
   });
 }
 
-export function usePodcastEpisodes(id: string): UseQueryResult<EpisodeDto[]> {
+export function usePodcastEpisodes(id: string, enabled = true): UseQueryResult<EpisodeDto[]> {
   return useQuery({
     queryKey: ['podcast-episodes', id],
+    enabled,
     staleTime: 10 * 60_000,
     queryFn: async () => (await api.get<EpisodeDto[]>(`/podcasts/${id}/episodes`)).data,
   });
