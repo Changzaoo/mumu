@@ -104,14 +104,6 @@ export function nomeDoPais(codigo: string | null | undefined, reserva = ''): str
   }
 }
 
-/** "🇧🇷" a partir de "BR". */
-export function bandeira(codigo: string | null | undefined): string {
-  if (!codigo || !/^[a-z]{2}$/i.test(codigo)) return '🌐';
-  return String.fromCodePoint(
-    ...[...codigo.toUpperCase()].map((c) => 0x1f1e6 + c.charCodeAt(0) - 65),
-  );
-}
-
 function capitalizar(texto: string): string {
   return texto.replace(/(^|\s)\p{L}/gu, (m) => m.toUpperCase());
 }

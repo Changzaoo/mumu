@@ -21,7 +21,8 @@ import {
   PAISES_DE_PODCAST,
   paradaDePodcasts,
 } from '@/lib/aoVivo/podcastsAbertos';
-import { bandeira, nomeDoPais, paisDoAparelho } from '@/lib/aoVivo/radioBrowser';
+import { nomeDoPais, paisDoAparelho } from '@/lib/aoVivo/radioBrowser';
+import { Desenho } from '@/components/icones/Desenho';
 import { cn } from '@/lib/utils';
 
 const CHAVE_PAIS = 'radinho:podcasts:pais';
@@ -189,7 +190,7 @@ export default function PodcastsPage() {
             >
               {PAISES_DE_PODCAST.map((p) => (
                 <option key={p} value={p}>
-                  {bandeira(p)} {nomeDoPais(p, p)}
+                  {nomeDoPais(p, p)}
                 </option>
               ))}
             </select>
@@ -208,7 +209,7 @@ export default function PodcastsPage() {
                 ativo={categoria === c.id}
                 onClick={() => setCategoria(categoria === c.id ? null : c.id)}
               >
-                {c.emoji} {c.nome}
+                <Desenho nome={c.icone} className="size-4" /> {c.nome}
               </Chip>
             ))}
           </div>
@@ -239,9 +240,7 @@ export default function PodcastsPage() {
           <section className="space-y-3" aria-label="Parada">
             <h2 className="text-xl font-semibold tracking-tight text-fg">
               {nomeCategoria ? `Top ${nomeCategoria}` : 'Mais ouvidos'}{' '}
-              <span className="text-fg-muted">
-                {bandeira(pais)} {nomePais}
-              </span>
+              <span className="text-fg-muted">{nomePais}</span>
             </h2>
             {parada.isError && <ErrorState onRetry={() => void parada.refetch()} />}
             <Grade podcasts={parada.data} carregando={parada.isLoading} numerar />
@@ -274,7 +273,7 @@ function Chip({
       aria-pressed={ativo}
       onClick={onClick}
       className={cn(
-        'h-8 shrink-0 rounded-full border px-3.5 text-[13px] font-medium transition-colors duration-200',
+        'inline-flex h-8 shrink-0 items-center gap-1.5 rounded-full border px-3.5 text-[13px] font-medium transition-colors duration-200',
         ativo
           ? 'border-transparent bg-fg text-bg'
           : 'border-border bg-bg-elevated text-fg-muted hover:text-fg',

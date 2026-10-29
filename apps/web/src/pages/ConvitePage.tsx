@@ -11,6 +11,7 @@ import { Link, useParams } from 'react-router';
 import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import { api } from '@/lib/api';
 import { entregarConvite, guardarConvite, PRECO_DO_STREAMING } from '@/lib/jornada/servidor';
+import { Desenho } from '@/components/icones/Desenho';
 
 interface Padrinho {
   handle: string;
@@ -20,14 +21,14 @@ interface Padrinho {
 }
 
 const VANTAGENS = [
-  ['🎧', 'Música de graça', 'Funk, rap, pop, sertanejo, MPB, rock e muito mais.'],
-  ['🚫', 'Sem anúncio', 'Nada interrompendo a sua música.'],
+  ['fone', 'Música de graça', 'Funk, rap, pop, sertanejo, MPB, rock e muito mais.'],
+  ['sem-anuncio', 'Sem anúncio', 'Nada interrompendo a sua música.'],
   [
-    '💸',
+    'gratis',
     'Sem mensalidade',
     `Os ≈ R$ ${PRECO_DO_STREAMING.toFixed(2).replace('.', ',')} do streaming ficam no seu bolso.`,
   ],
-  ['📻', 'Rádios e podcasts', 'Ao vivo, direto no navegador ou no app.'],
+  ['radio', 'Rádios e podcasts', 'Ao vivo, direto no navegador ou no app.'],
 ] as const;
 
 export default function ConvitePage() {
@@ -58,14 +59,14 @@ export default function ConvitePage() {
       </p>
       {padrinho && padrinho.amigos > 0 && (
         <p className="mt-3 text-sm font-medium text-emerald-400">
-          🕊️ {nome} já libertou {padrinho.amigos} {padrinho.amigos === 1 ? 'amigo' : 'amigos'}. Você
-          é o próximo.
+          <Desenho nome="pomba" /> {nome} já libertou {padrinho.amigos}{' '}
+          {padrinho.amigos === 1 ? 'amigo' : 'amigos'}. Você é o próximo.
         </p>
       )}
       <ul className="mt-8 grid w-full gap-3 text-left sm:grid-cols-2">
         {VANTAGENS.map(([icone, titulo, texto]) => (
           <li key={titulo} className="rounded-2xl border border-border p-4">
-            <span className="text-2xl">{icone}</span>
+            <Desenho nome={icone} className="size-7 text-accent" />
             <p className="mt-1 font-semibold">{titulo}</p>
             <p className="text-sm text-fg-muted">{texto}</p>
           </li>

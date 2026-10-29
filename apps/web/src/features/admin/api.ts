@@ -109,7 +109,13 @@ export function useAdminJobs(): UseQueryResult<AdminJobsDto> {
   return useQuery({
     queryKey: ['admin', 'jobs'],
     refetchInterval: 15_000,
-    queryFn: async () => (await api.get<AdminJobsDto>('/admin/jobs')).data,
+    // A API antiga devolve só a lista de filas (sem `failed`): a tela quebrava
+    // no `.map` de undefined. Aceita os dois formatos.
+    queryFn: async () => {
+      const dados = (await api.get<AdminJobsDto | AdminJobsDto['queues']>('/admin/jobs')).data;
+      if (Array.isArray(dados)) return { queues: dados, failed: [] };
+      return { queues: dados.queues ?? [], failed: dados.failed ?? [] };
+    },
   });
 }
 

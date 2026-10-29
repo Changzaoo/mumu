@@ -19,6 +19,7 @@ import { tocarPlim } from '@/lib/jornada/som';
 import { COR_DA_RARIDADE } from '@/lib/jornada/visual';
 import { cn } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
+import { Desenho } from '@/components/icones/Desenho';
 
 /** Quanto a pílula fica aberta sem toque. */
 const NA_TELA_MS = 5_200;
@@ -144,7 +145,7 @@ export function ConquistaNoPlayer() {
                       transition={{ duration: 0.9, ease: 'easeOut', delay: 0.15 }}
                     />
                   )}
-                  <span aria-hidden>{atual.icone}</span>
+                  <Desenho nome={atual.icone} />
                 </span>
                 <span
                   className={cn(
@@ -156,7 +157,7 @@ export function ConquistaNoPlayer() {
                     className="block text-[11px] font-medium uppercase tracking-[0.12em]"
                     style={{ color: cor }}
                   >
-                    🏆 Conquista desbloqueada
+                    <Desenho nome="trofeu" /> Conquista desbloqueada
                   </span>
                   <span className="block truncate text-[15px] font-semibold">
                     {atual.nome}
@@ -182,7 +183,7 @@ export function ConquistaNoPlayer() {
                     <span className="block rounded-xl bg-white/5 p-3">
                       <span className="flex items-center justify-between text-xs text-white/70">
                         <span>
-                          Próxima: {proxima.icone} {proxima.nome}
+                          Próxima: <Desenho nome={proxima.icone} /> {proxima.nome}
                         </span>
                         <span>
                           {Math.min(progresso[0], progresso[1])}/{progresso[1]}

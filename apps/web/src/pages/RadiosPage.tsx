@@ -23,7 +23,6 @@ import {
   useRadiosRecentes,
 } from '@/lib/aoVivo/guardados';
 import {
-  bandeira,
   buscarRadios,
   contarClique,
   nomeDoPais,
@@ -120,7 +119,7 @@ function RadioCard({ radio, className }: { radio: RadioStationDto; className?: s
 
   const play = (): void => tocarRadio(radio);
   const detalhe = [
-    aberta?.countryCode ? bandeira(aberta.countryCode) : null,
+    aberta?.countryCode ?? null,
     radio.genre,
     aberta?.bitrate ? `${aberta.bitrate} kbps` : null,
   ]
@@ -375,15 +374,13 @@ export default function RadiosPage() {
               onChange={(e) => setPais(e.target.value)}
               className="h-11 w-full appearance-none rounded-full border border-border bg-bg-elevated px-4 pr-8 text-sm text-fg focus:border-accent focus:outline-none"
             >
-              <option value="WORLD">🌐 Mundo inteiro</option>
+              <option value="WORLD">Mundo inteiro</option>
               {!paises.data?.some((p) => p.codigo === pais) && pais !== 'WORLD' && (
-                <option value={pais}>
-                  {bandeira(pais)} {nomeDoPais(pais, pais)}
-                </option>
+                <option value={pais}>{nomeDoPais(pais, pais)}</option>
               )}
               {paises.data?.map((p) => (
                 <option key={p.codigo} value={p.codigo}>
-                  {bandeira(p.codigo)} {p.nome} ({p.estacoes.toLocaleString('pt-BR')})
+                  {p.nome} ({p.estacoes.toLocaleString('pt-BR')})
                 </option>
               ))}
             </select>

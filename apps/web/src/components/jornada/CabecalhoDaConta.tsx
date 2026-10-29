@@ -10,6 +10,7 @@ import { Avatar, AvatarFallback, AvatarImage } from '@/components/ui/avatar';
 import * as jornada from '@/lib/jornada/jornada';
 import { progressoDeHoje, useJornada } from '@/hooks/useJornada';
 import { LARANJA } from '@/lib/jornada/visual';
+import { Desenho } from '@/components/icones/Desenho';
 
 export function CabecalhoDaConta({
   nome,
@@ -58,8 +59,14 @@ export function CabecalhoDaConta({
         <span className="flex items-center gap-1 text-fg-muted">
           <Shield className="size-4" /> {e.protetores}
         </span>
-        <span className="text-fg-muted">🏆 {Object.keys(e.conquistas).length}</span>
-        {e.amigos > 0 && <span className="text-fg-muted">🕊️ {e.amigos}</span>}
+        <span className="flex items-center gap-1 text-fg-muted">
+          <Desenho nome="trofeu" className="size-4" /> {Object.keys(e.conquistas).length}
+        </span>
+        {e.amigos > 0 && (
+          <span className="flex items-center gap-1 text-fg-muted">
+            <Desenho nome="pomba" className="size-4" /> {e.amigos}
+          </span>
+        )}
       </span>
     </Link>
   );

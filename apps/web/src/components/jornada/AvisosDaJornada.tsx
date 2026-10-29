@@ -17,6 +17,7 @@ import { toast } from 'sonner';
 import { chaveDoDia } from '@/lib/jornada/datas';
 import * as jornada from '@/lib/jornada/jornada';
 import { aoChegarJornada, LIGAS } from '@/lib/jornada/servidor';
+import { Desenho } from '@/components/icones/Desenho';
 
 const CHAVE_LEMBRETE = 'radinho:jornada-lembrete';
 // No TOPO: discreto, longe do player (onde as conquistas saltam) e das abas.
@@ -52,7 +53,7 @@ function lembreteDoFimDoDia(): void {
   }
   toast(`Sua sequência de ${e.sequencia} dias acaba à meia-noite`, {
     ...DISCRETO,
-    icon: '🦉',
+    icon: <Desenho nome="coruja" />,
     description: `Faltam ${faltaHoje(e)} min de música para manter o foguinho.`,
   });
 }
@@ -66,30 +67,32 @@ export function AvisosDaJornada() {
       if (e.apagou > 0) {
         toast(`Sua sequência de ${dias(e.apagou)} apagou`, {
           ...DISCRETO,
-          icon: '🕯️',
+          icon: <Desenho nome="vela" />,
           description: `Ouça ${e.metaMin} min hoje e acenda de novo. Seu recorde: ${e.recorde}.`,
         });
         jornada.esquecerApagada();
       } else if (e.ultimoDia && Object.keys(e.dias).length === 0) {
         toast('Novidade: o foguinho do radinho', {
           ...DISCRETO,
-          icon: '🔥',
+          icon: <Desenho nome="chama" />,
           description: `Ouça ${e.metaMin} min por dia e veja sua sequência crescer.`,
         });
       } else if (e.sequencia > 0 && hoje) {
-        toast(`🔥 ${dias(e.sequencia)}`, {
+        toast(dias(e.sequencia), {
           ...DISCRETO,
+          icon: <Desenho nome="chama" />,
           description: 'Meta de hoje batida. Bom te ver!',
         });
       } else if (e.sequencia > 0) {
-        toast(`Bem-vindo de volta! 🔥 ${dias(e.sequencia)}`, {
+        toast(`Bem-vindo de volta! ${dias(e.sequencia)}`, {
           ...DISCRETO,
+          icon: <Desenho nome="chama" />,
           description: `Faltam ${faltaHoje(e)} min hoje para manter.`,
         });
       } else {
         toast('Bem-vindo de volta!', {
           ...DISCRETO,
-          icon: '🔥',
+          icon: <Desenho nome="chama" />,
           description: `Ouça ${e.metaMin} min hoje e comece uma sequência.`,
         });
       }
@@ -109,18 +112,21 @@ export function AvisosDaJornada() {
   useEffect(() => {
     const parar = jornada.aoAcontecer((ev) => {
       if (ev.tipo === 'meta') {
-        toast(`Meta do dia batida! 🔥 ${dias(ev.sequencia)}`, {
+        toast(`Meta do dia batida! ${dias(ev.sequencia)}`, {
           ...DISCRETO,
+          icon: <Desenho nome="chama" />,
           description: '+20 XP',
         });
       } else if (ev.tipo === 'protetor-ganho') {
-        toast('Você ganhou um protetor 🛡️', {
+        toast('Você ganhou um protetor', {
           ...DISCRETO,
+          icon: <Desenho nome="escudo" />,
           description: 'Se um dia passar sem música, ele segura sua sequência.',
         });
       } else if (ev.tipo === 'protegeu') {
-        toast('🛡️ Um protetor salvou sua sequência', {
+        toast('Um protetor salvou sua sequência', {
           ...DISCRETO,
+          icon: <Desenho nome="escudo" />,
           description:
             ev.dias === 1
               ? 'Ontem passou sem música, mas a chama continua.'
@@ -135,7 +141,11 @@ export function AvisosDaJornada() {
         j.mudouDeLiga === 'subiu'
           ? `Você subiu para a Liga ${liga.nome}!`
           : `Você caiu para a Liga ${liga.nome}`,
-        { ...DISCRETO, icon: liga.icone, description: 'Nova semana, nova disputa.' },
+        {
+          ...DISCRETO,
+          icon: <Desenho nome={liga.icone} />,
+          description: 'Nova semana, nova disputa.',
+        },
       );
     });
     return () => {

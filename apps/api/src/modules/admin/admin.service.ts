@@ -29,16 +29,18 @@ async function audit(
   await adminRepository.writeAudit(actorId, action, targetType, targetId, metadata);
 }
 
-async function queueCounts(): Promise<AdminStatsDto['queues']> {
+function filasNomeadas() {
   const queueSet = getQueues();
+  return [
+    ['audio-process', queueSet.audioProcess],
+    ['import-sync', queueSet.importSync],
+    ['notifications', queueSet.notifications],
+  ] as const;
+}
+
+async function queueCounts(): Promise<AdminStatsDto['queues']> {
   return Promise.all(
-    (
-      [
-        ['audio-process', queueSet.audioProcess],
-        ['import-sync', queueSet.importSync],
-        ['notifications', queueSet.notifications],
-      ] as const
-    ).map(async ([name, queue]) => {
+    filasNomeadas().map(async ([name, queue]) => {
       const counts = await queue.getJobCounts('waiting', 'active', 'completed', 'failed');
       return {
         name,
@@ -49,6 +51,15 @@ async function queueCounts(): Promise<AdminStatsDto['queues']> {
       };
     }),
   );
+}
+
+interface FalhaDeJob {
+  id: string;
+  queue: string;
+  name: string;
+  failedReason: string;
+  attemptsMade: number;
+  timestamp: string;
 }
 
 export const adminService = {
@@ -135,8 +146,28 @@ export const adminService = {
     return { items, meta: pageMeta(page, perPage, total) };
   },
 
-  jobs(): Promise<AdminStatsDto['queues']> {
-    return queueCounts();
+  /** Contagem por fila + as 20 falhas mais recentes de cada (aba "Fila"). */
+  async jobs(): Promise<{ queues: AdminStatsDto['queues']; failed: FalhaDeJob[] }> {
+    const [queues, falhas] = await Promise.all([
+      queueCounts(),
+      Promise.all(
+        filasNomeadas().map(async ([name, queue]) =>
+          (await queue.getFailed(0, 19)).filter(Boolean).map((job) => ({
+            id: `${name}:${job.id ?? ''}`,
+            queue: name,
+            name: job.name,
+            failedReason: job.failedReason ?? '',
+            attemptsMade: job.attemptsMade,
+            timestamp: new Date(job.finishedOn ?? job.timestamp).toISOString(),
+          })),
+        ),
+      ),
+    ]);
+    const failed = falhas
+      .flat()
+      .sort((x, y) => y.timestamp.localeCompare(x.timestamp))
+      .slice(0, 50);
+    return { queues, failed };
   },
 
   async auditLogs(

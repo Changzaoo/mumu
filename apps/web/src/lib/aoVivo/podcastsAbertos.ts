@@ -11,6 +11,7 @@
  * dos podcasts cadastrados na API do radinho (ids cuid) na rota /podcast/:id.
  */
 import type { EpisodeDto, PodcastDto } from '@radinho/shared';
+import type { NomeDeDesenho } from '@/components/icones/Desenho';
 
 export interface PodcastAberto extends PodcastDto {
   categoria: string | null;
@@ -19,29 +20,29 @@ export interface PodcastAberto extends PodcastDto {
 export interface CategoriaDePodcast {
   id: number;
   nome: string;
-  emoji: string;
+  icone: NomeDeDesenho;
 }
 
 /** Categorias da Apple Podcasts (ids fixos do diretório deles). */
 export const CATEGORIAS_DE_PODCAST: CategoriaDePodcast[] = [
-  { id: 1489, nome: 'Notícias', emoji: '📰' },
-  { id: 1303, nome: 'Comédia', emoji: '😂' },
-  { id: 1324, nome: 'Sociedade e cultura', emoji: '🌎' },
-  { id: 1488, nome: 'True crime', emoji: '🔎' },
-  { id: 1321, nome: 'Negócios', emoji: '💼' },
-  { id: 1304, nome: 'Educação', emoji: '🎓' },
-  { id: 1545, nome: 'Esportes', emoji: '⚽' },
-  { id: 1512, nome: 'Saúde e bem-estar', emoji: '🧘' },
-  { id: 1318, nome: 'Tecnologia', emoji: '💻' },
-  { id: 1310, nome: 'Música', emoji: '🎵' },
-  { id: 1314, nome: 'Religião e espiritualidade', emoji: '🙏' },
-  { id: 1487, nome: 'História', emoji: '🏛️' },
-  { id: 1533, nome: 'Ciência', emoji: '🔬' },
-  { id: 1309, nome: 'TV e cinema', emoji: '🎬' },
-  { id: 1301, nome: 'Artes', emoji: '🎨' },
-  { id: 1483, nome: 'Ficção', emoji: '📖' },
-  { id: 1305, nome: 'Infantil e família', emoji: '🧸' },
-  { id: 1502, nome: 'Lazer', emoji: '🎮' },
+  { id: 1489, nome: 'Notícias', icone: 'jornal' },
+  { id: 1303, nome: 'Comédia', icone: 'risada' },
+  { id: 1324, nome: 'Sociedade e cultura', icone: 'sociedade' },
+  { id: 1488, nome: 'True crime', icone: 'lupa' },
+  { id: 1321, nome: 'Negócios', icone: 'maleta' },
+  { id: 1304, nome: 'Educação', icone: 'capelo' },
+  { id: 1545, nome: 'Esportes', icone: 'bola' },
+  { id: 1512, nome: 'Saúde e bem-estar', icone: 'lotus' },
+  { id: 1318, nome: 'Tecnologia', icone: 'notebook' },
+  { id: 1310, nome: 'Música', icone: 'nota' },
+  { id: 1314, nome: 'Religião e espiritualidade', icone: 'estrela-guia' },
+  { id: 1487, nome: 'História', icone: 'coluna' },
+  { id: 1533, nome: 'Ciência', icone: 'atomo' },
+  { id: 1309, nome: 'TV e cinema', icone: 'claquete' },
+  { id: 1301, nome: 'Artes', icone: 'paleta' },
+  { id: 1483, nome: 'Ficção', icone: 'livro' },
+  { id: 1305, nome: 'Infantil e família', icone: 'pipa' },
+  { id: 1502, nome: 'Lazer', icone: 'controle' },
 ];
 
 /** Países com parada própria na Apple Podcasts que mais interessam aqui. */

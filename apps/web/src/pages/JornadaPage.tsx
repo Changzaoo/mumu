@@ -28,6 +28,7 @@ import {
 } from '@/lib/jornada/servidor';
 import { COR_DA_RARIDADE, LARANJA } from '@/lib/jornada/visual';
 import { cn } from '@/lib/utils';
+import { Desenho } from '@/components/icones/Desenho';
 
 const DIAS_DA_SEMANA = ['S', 'T', 'Q', 'Q', 'S', 'S', 'D'];
 const METAS = [10, 15, 30, 60];
@@ -127,7 +128,9 @@ function Liga({ logado }: { logado: boolean }) {
     return (
       <Cartao>
         <Titulo>Liga semanal</Titulo>
-        <p className="text-lg font-semibold">🏆 Dispute com quem ouve tanto quanto você</p>
+        <p className="text-lg font-semibold">
+          <Desenho nome="trofeu" /> Dispute com quem ouve tanto quanto você
+        </p>
         <p className="mt-1 text-sm text-fg-muted">
           Toda semana, grupos de até 30 pessoas. Os {SOBEM} primeiros sobem de liga — do Bronze ao
           Diamante.
@@ -149,7 +152,7 @@ function Liga({ logado }: { logado: boolean }) {
         <div>
           <Titulo>Liga semanal</Titulo>
           <p className="text-2xl font-bold" style={{ color: liga.cor }}>
-            {liga.icone} Liga {liga.nome}
+            <Desenho nome={liga.icone} /> Liga {liga.nome}
           </p>
           <p className="mt-1 text-sm text-fg-muted">
             {dados ? `Você está em ${dados.posicao}º · ` : ''}acaba em {fimDaSemana}
@@ -158,7 +161,7 @@ function Liga({ logado }: { logado: boolean }) {
         <div className="flex gap-1 text-xl" aria-hidden>
           {LIGAS.map((l, i) => (
             <span key={l.nome} className={i === (dados?.liga ?? 0) ? '' : 'opacity-25 grayscale'}>
-              {l.icone}
+              <Desenho nome={l.icone} />
             </span>
           ))}
         </div>
@@ -362,7 +365,7 @@ function Conquistas({ e }: { e: jornada.EstadoJornada }) {
                           : { background: 'rgb(127 127 127 / .12)' }
                       }
                     >
-                      {q.icone}
+                      <Desenho nome={q.icone} />
                     </span>
                     <span
                       className={cn(

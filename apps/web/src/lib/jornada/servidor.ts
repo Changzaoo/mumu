@@ -35,12 +35,12 @@ export interface JornadaDoServidor {
 }
 
 export const LIGAS = [
-  { nome: 'Bronze', cor: '#c8834f', icone: '🥉' },
-  { nome: 'Prata', cor: '#a9b4c2', icone: '🥈' },
-  { nome: 'Ouro', cor: '#f2c14e', icone: '🥇' },
-  { nome: 'Safira', cor: '#4f8df2', icone: '🔷' },
-  { nome: 'Rubi', cor: '#e2486b', icone: '♦️' },
-  { nome: 'Diamante', cor: '#7fe3ff', icone: '💎' },
+  { nome: 'Bronze', cor: '#c8834f', icone: 'medalha-3' },
+  { nome: 'Prata', cor: '#a9b4c2', icone: 'medalha-2' },
+  { nome: 'Ouro', cor: '#f2c14e', icone: 'medalha-1' },
+  { nome: 'Safira', cor: '#4f8df2', icone: 'safira' },
+  { nome: 'Rubi', cor: '#e2486b', icone: 'rubi' },
+  { nome: 'Diamante', cor: '#7fe3ff', icone: 'diamante' },
 ] as const;
 
 /** Quantos sobem e descem por semana (o servidor decide; aqui é só para pintar as zonas). */

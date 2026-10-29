@@ -9,6 +9,7 @@
  * que mais move o app é QUEM JÁ OUVE voltar amanhã — por isso a maioria fala
  * de dias seguidos e de hábito, não de volume.
  */
+import type { NomeDeDesenho } from '@/components/icones/Desenho';
 import type { EstadoJornada } from './jornada';
 import { diaDaSemana, somarDias } from './datas';
 
@@ -24,7 +25,7 @@ export interface Conquista {
   id: string;
   nome: string;
   descricao: string;
-  icone: string;
+  icone: NomeDeDesenho;
   raridade: Raridade;
   xp: number;
   grupo: 'Sequência' | 'Hábito' | 'Escuta' | 'Exploração' | 'Amigos' | 'Liga' | 'Coleção';
@@ -64,7 +65,7 @@ function c(
   id: string,
   nome: string,
   descricao: string,
-  icone: string,
+  icone: NomeDeDesenho,
   raridade: Raridade,
   grupo: Conquista['grupo'],
   progresso: Conquista['progresso'],
@@ -84,7 +85,7 @@ export const CONQUISTAS: Conquista[] = [
     'primeira-faixa',
     'Dei o play',
     'Ouviu a primeira música no radinho.',
-    '▶️',
+    'play',
     'comum',
     'Escuta',
     (x) => [x.estado.faixas, 1],
@@ -93,17 +94,17 @@ export const CONQUISTAS: Conquista[] = [
     'meta-batida',
     'Meta batida',
     'Cumpriu a meta do dia pela primeira vez.',
-    '🎯',
+    'alvo',
     'comum',
     'Hábito',
     (x) => [Object.values(x.estado.dias).some((s) => s >= x.estado.metaMin * 60) ? 1 : 0, 1],
   ),
-  c('seq-3', 'Acendeu', '3 dias seguidos ouvindo.', '🔥', 'comum', 'Sequência', seq(3)),
+  c('seq-3', 'Acendeu', '3 dias seguidos ouvindo.', 'chama', 'comum', 'Sequência', seq(3)),
   c(
     'seq-7',
     'Semana de fogo',
     '7 dias seguidos. Agora vira hábito.',
-    '🔥',
+    'chama',
     'rara',
     'Sequência',
     seq(7),
@@ -112,7 +113,7 @@ export const CONQUISTAS: Conquista[] = [
     'seq-14',
     'Quinzena acesa',
     '14 dias seguidos sem deixar a chama apagar.',
-    '🔥',
+    'chama',
     'rara',
     'Sequência',
     seq(14),
@@ -121,17 +122,25 @@ export const CONQUISTAS: Conquista[] = [
     'seq-30',
     'Mês em chamas',
     '30 dias seguidos. Pouca gente chega aqui.',
-    '☄️',
+    'cometa',
     'epica',
     'Sequência',
     seq(30),
   ),
-  c('seq-100', 'Centenário', '100 dias seguidos de radinho.', '💯', 'epica', 'Sequência', seq(100)),
+  c(
+    'seq-100',
+    'Centenário',
+    '100 dias seguidos de radinho.',
+    'cem',
+    'epica',
+    'Sequência',
+    seq(100),
+  ),
   c(
     'seq-365',
     'Um ano no ar',
     '365 dias seguidos. Lenda.',
-    '👑',
+    'coroa',
     'lendaria',
     'Sequência',
     seq(365),
@@ -140,7 +149,7 @@ export const CONQUISTAS: Conquista[] = [
     'protetor',
     'Salvo pelo gongo',
     'Um protetor segurou sua sequência num dia sem música.',
-    '🛡️',
+    'escudo',
     'comum',
     'Hábito',
     (x) => [x.estado.protegidos.length, 1],
@@ -149,7 +158,7 @@ export const CONQUISTAS: Conquista[] = [
     'fim-de-semana',
     'Fim de semana sonoro',
     'Bateu a meta no sábado e no domingo.',
-    '🎉',
+    'confete',
     'comum',
     'Hábito',
     (x) => [finsDeSemanaCompletos(x.estado), 1],
@@ -158,7 +167,7 @@ export const CONQUISTAS: Conquista[] = [
     'coruja',
     'Coruja da madrugada',
     'Ouviu música entre meia-noite e 5 da manhã.',
-    '🦉',
+    'coruja',
     'rara',
     'Hábito',
     (x) => [x.estado.madrugada ? 1 : 0, 1],
@@ -167,7 +176,7 @@ export const CONQUISTAS: Conquista[] = [
     'galo',
     'Galo do radinho',
     'Começou o dia com música antes das 7.',
-    '🐓',
+    'galo',
     'rara',
     'Hábito',
     (x) => [x.estado.cedo ? 1 : 0, 1],
@@ -176,20 +185,25 @@ export const CONQUISTAS: Conquista[] = [
     'retorno',
     'O retorno',
     'Voltou depois de uma semana fora. A gente sentiu falta.',
-    '🫶',
+    'maos-coracao',
     'rara',
     'Hábito',
     (x) => [x.estado.voltas, 1],
   ),
-  c('horas-1', 'Primeira hora', '1 hora de música no total.', '⏱️', 'comum', 'Escuta', (x) => [
-    horas(x.estado),
-    1,
-  ]),
-  c('horas-10', 'Ouvido treinado', '10 horas de música.', '🎧', 'rara', 'Escuta', (x) => [
+  c(
+    'horas-1',
+    'Primeira hora',
+    '1 hora de música no total.',
+    'cronometro',
+    'comum',
+    'Escuta',
+    (x) => [horas(x.estado), 1],
+  ),
+  c('horas-10', 'Ouvido treinado', '10 horas de música.', 'fone', 'rara', 'Escuta', (x) => [
     horas(x.estado),
     10,
   ]),
-  c('horas-100', 'Maratonista', '100 horas de música.', '🏃', 'epica', 'Escuta', (x) => [
+  c('horas-100', 'Maratonista', '100 horas de música.', 'corredor', 'epica', 'Escuta', (x) => [
     horas(x.estado),
     100,
   ]),
@@ -197,16 +211,16 @@ export const CONQUISTAS: Conquista[] = [
     'horas-1000',
     'Mil horas',
     '1.000 horas. Você É o radinho.',
-    '🌌',
+    'galaxia',
     'lendaria',
     'Escuta',
     (x) => [horas(x.estado), 1000],
   ),
-  c('faixas-100', 'Cem faixas', '100 músicas ouvidas.', '💿', 'comum', 'Escuta', (x) => [
+  c('faixas-100', 'Cem faixas', '100 músicas ouvidas.', 'disco', 'comum', 'Escuta', (x) => [
     x.estado.faixas,
     100,
   ]),
-  c('faixas-1000', 'Discoteca', '1.000 músicas ouvidas.', '📀', 'epica', 'Escuta', (x) => [
+  c('faixas-1000', 'Discoteca', '1.000 músicas ouvidas.', 'disco-ouro', 'epica', 'Escuta', (x) => [
     x.estado.faixas,
     1000,
   ]),
@@ -214,7 +228,7 @@ export const CONQUISTAS: Conquista[] = [
     'artistas-25',
     'Explorador',
     'Ouviu 25 artistas diferentes.',
-    '🧭',
+    'bussola',
     'comum',
     'Exploração',
     (x) => [x.estado.artistas.length, 25],
@@ -223,20 +237,20 @@ export const CONQUISTAS: Conquista[] = [
     'artistas-100',
     'Enciclopédia',
     'Ouviu 100 artistas diferentes.',
-    '📚',
+    'livros',
     'epica',
     'Exploração',
     (x) => [x.estado.artistas.length, 100],
   ),
-  c('generos-5', 'Eclético', 'Passeou por 5 gêneros.', '🌈', 'rara', 'Exploração', (x) => [
+  c('generos-5', 'Eclético', 'Passeou por 5 gêneros.', 'arco-iris', 'rara', 'Exploração', (x) => [
     x.estado.generos.length,
     5,
   ]),
-  c('curtidas-50', 'Coração aberto', 'Curtiu 50 músicas.', '💜', 'rara', 'Coleção', (x) => [
+  c('curtidas-50', 'Coração aberto', 'Curtiu 50 músicas.', 'coracao', 'rara', 'Coleção', (x) => [
     x.curtidas,
     50,
   ]),
-  c('playlist', 'Curador', 'Criou a primeira playlist.', '🗂️', 'comum', 'Coleção', (x) => [
+  c('playlist', 'Curador', 'Criou a primeira playlist.', 'pasta', 'comum', 'Coleção', (x) => [
     x.playlists,
     1,
   ]),
@@ -244,12 +258,12 @@ export const CONQUISTAS: Conquista[] = [
     'amigo-1',
     'Libertador',
     'Tirou 1 amigo dos anúncios e do streaming pago.',
-    '🕊️',
+    'pomba',
     'rara',
     'Amigos',
     (x) => [x.estado.amigos, 1],
   ),
-  c('amigo-5', 'Revolucionário', 'Libertou 5 amigos.', '✊', 'epica', 'Amigos', (x) => [
+  c('amigo-5', 'Revolucionário', 'Libertou 5 amigos.', 'punho', 'epica', 'Amigos', (x) => [
     x.estado.amigos,
     5,
   ]),
@@ -257,12 +271,12 @@ export const CONQUISTAS: Conquista[] = [
     'amigo-25',
     'Movimento',
     'Libertou 25 amigos. Isso é um movimento.',
-    '📣',
+    'megafone',
     'lendaria',
     'Amigos',
     (x) => [x.estado.amigos, 25],
   ),
-  c('liga-ouro', 'Liga Ouro', 'Subiu até a Liga Ouro.', '🥇', 'rara', 'Liga', (x) => [
+  c('liga-ouro', 'Liga Ouro', 'Subiu até a Liga Ouro.', 'medalha-1', 'rara', 'Liga', (x) => [
     x.estado.liga,
     2,
   ]),
@@ -270,7 +284,7 @@ export const CONQUISTAS: Conquista[] = [
     'liga-diamante',
     'Diamante',
     'Chegou à Liga Diamante, o topo.',
-    '💎',
+    'diamante',
     'lendaria',
     'Liga',
     (x) => [x.estado.liga, 5],
