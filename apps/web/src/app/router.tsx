@@ -8,7 +8,7 @@
  * conventional path automatically wires (and code-splits) the route.
  */
 import { Suspense, lazy, type ComponentType, type ReactNode } from 'react';
-import { createBrowserRouter } from 'react-router';
+import { createBrowserRouter, Navigate } from 'react-router';
 import { Construction } from 'lucide-react';
 import { EmptyState } from '@/components/media/EmptyState';
 import { PageSkeleton, type PageSkeletonProps } from '@/components/media/PageSkeleton';
@@ -52,7 +52,6 @@ const ROTA_POR_PREFIXO: [string, string][] = [
   ['/podcasts', 'PodcastsPage'],
   ['/podcast', 'PodcastPage'],
   ['/profile', 'ProfilePage'],
-  ['/telemetria', 'TelemetryPage'],
   ['/dispositivo', 'DevicePage'],
   ['/diagnostico', 'DiagnosticoPage'],
   ['/compartilhar', 'SharePage'],
@@ -240,10 +239,8 @@ export const router = createBrowserRouter([
             path: '/dispositivo',
             element: <AuthorizedRoute>{page('DevicePage', 'list')}</AuthorizedRoute>,
           },
-          {
-            path: '/telemetria',
-            element: <AuthorizedRoute>{page('TelemetryPage', 'list')}</AuthorizedRoute>,
-          },
+          // A telemetria virou aba da Administração (29/10/2026).
+          { path: '/telemetria', element: <Navigate to="/admin/telemetria" replace /> },
           { path: '/compartilhar', element: page('SharePage', 'list') },
           // Sem AuthorizedRoute de propósito: o diagnóstico precisa funcionar
           // JUSTAMENTE quando o login é a coisa que está quebrada.

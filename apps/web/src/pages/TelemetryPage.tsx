@@ -804,11 +804,7 @@ function RelatosDoOuvinte({ relatos }: { relatos: Relato[] }) {
   );
 }
 
-export function DiarioDeBordo({
-  diario,
-}: {
-  diario: { linhas: Linha[]; resumo: ResumoDoDiario };
-}) {
+export function DiarioDeBordo({ diario }: { diario: { linhas: Linha[]; resumo: ResumoDoDiario } }) {
   const [aberto, setAberto] = useState(false);
   const [canal, setCanal] = useState<Canal | 'tudo' | 'sintomas'>('tudo');
   const { linhas, resumo } = diario;
@@ -1815,7 +1811,11 @@ function Diagnostics({ telemetria }: { telemetria: CheckStatus }) {
   );
 }
 
-export default function TelemetryPage() {
+/**
+ * `embutida`: a telemetria mora numa aba da Administração (pedido do dono,
+ * 29/10/2026) — lá o cabeçalho da página já existe, então este some.
+ */
+export default function TelemetryPage({ embutida = false }: { embutida?: boolean }) {
   const [docs, setDocs] = useState<TelemetryDoc[] | null>(null);
   const [error, setError] = useState(false);
   const [view, setView] = useState<ViewMode>('lista');
@@ -1938,8 +1938,14 @@ export default function TelemetryPage() {
   return (
     <div className="space-y-6 py-4">
       <header>
-        <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-fg-subtle">Admin</p>
-        <h1 className="text-3xl font-bold tracking-tight text-fg">Telemetria</h1>
+        {!embutida && (
+          <>
+            <p className="text-[11px] font-medium uppercase tracking-[0.16em] text-fg-subtle">
+              Admin
+            </p>
+            <h1 className="text-3xl font-bold tracking-tight text-fg">Telemetria</h1>
+          </>
+        )}
         <p className="mt-1 text-sm text-fg-muted">
           Rede, tempo de uso por página/horário, sessões, cliques, dispositivo e o que cada usuário
           mais escuta — para melhorar a plataforma.

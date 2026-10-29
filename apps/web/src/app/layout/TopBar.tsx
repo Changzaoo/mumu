@@ -26,6 +26,7 @@ import { IconButton } from '@/components/ui/icon-button';
 import { NotificationBell } from '@/app/layout/NotificationBell';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useIsAuthorized } from '@/lib/auth/roles';
 import { logout } from '@/lib/firebase';
 import { cn } from '@/lib/utils';
 import { resolveTheme, useSettingsStore } from '@/stores/settingsStore';
@@ -104,7 +105,8 @@ export function TopBar() {
 
   const resolved = resolveTheme(theme);
   const displayName = profile?.displayName ?? user?.displayName ?? 'Conta';
-  const canModerate = profile?.role === 'ADMIN' || profile?.role === 'MODERATOR';
+  // Mesmo critério das rotas restritas (papel na API OU e-mail autorizado).
+  const canModerate = useIsAuthorized();
 
   return (
     <div

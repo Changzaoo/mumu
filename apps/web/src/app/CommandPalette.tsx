@@ -18,7 +18,6 @@ import {
   Shuffle,
   SkipForward,
   Sun,
-  Upload,
 } from 'lucide-react';
 import type { LucideIcon } from 'lucide-react';
 import {
@@ -43,7 +42,6 @@ const NAV_ITEMS: Array<{ to: string; label: string; icon: LucideIcon }> = [
   { to: '/liked', label: 'Curtidas', icon: Heart },
   { to: '/history', label: 'Histórico', icon: History },
   { to: '/downloads', label: 'Downloads', icon: Download },
-  { to: '/uploads', label: 'Uploads', icon: Upload },
   { to: '/radios', label: 'Rádios', icon: Radio },
   { to: '/podcasts', label: 'Podcasts', icon: Podcast },
   { to: '/settings', label: 'Configurações', icon: Settings },

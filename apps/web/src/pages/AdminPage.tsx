@@ -1,8 +1,12 @@
 /**
- * /admin/* — moderation console. Guarded by profile.role; inner tabs synced
- * with the URL splat (visão geral, usuários, uploads, fila, logs).
+ * /admin/* — moderation console. Inner tabs synced with the URL splat (visão
+ * geral, telemetria, usuários, uploads, fila, logs).
+ *
+ * A TELEMETRIA MORA AQUI (pedido do dono, 29/10/2026): era uma página própria
+ * (/telemetria, que agora redireciona para /admin/telemetria). A aba carrega a
+ * TelemetryPage sob demanda — ela é grande e só o admin abre.
  */
-import { useState, type ReactNode } from 'react';
+import { lazy, Suspense, useState, type ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router';
 import { toast } from 'sonner';
 import {
@@ -54,10 +58,14 @@ import {
 } from '@/features/admin/api';
 import { useAuthUser } from '@/hooks/useAuthUser';
 import { useDebounce } from '@/hooks/useDebounce';
+import { useIsAuthorized } from '@/lib/auth/roles';
 import { cn, formatBytes, formatCompactNumber } from '@/lib/utils';
+
+const TelemetryPage = lazy(() => import('./TelemetryPage'));
 
 const TABS = [
   { path: '', label: 'Visão geral' },
+  { path: 'telemetria', label: 'Telemetria' },
   { path: 'users', label: 'Usuários' },
   { path: 'uploads', label: 'Uploads' },
   { path: 'jobs', label: 'Fila' },
@@ -579,6 +587,9 @@ function LogsTab() {
 
 export default function AdminPage() {
   const { profile, loading } = useAuthUser();
+  // Mesmo critério das outras telas restritas: papel na API OU e-mail
+  // autorizado (a telemetria sempre foi assim, e agora mora aqui).
+  const authorized = useIsAuthorized();
   const navigate = useNavigate();
   const location = useLocation();
 
@@ -594,8 +605,7 @@ export default function AdminPage() {
     );
   }
 
-  const allowed = profile?.role === 'ADMIN' || profile?.role === 'MODERATOR';
-  if (!allowed) {
+  if (!authorized) {
     return (
       <div className="flex min-h-[60vh] flex-col items-center justify-center gap-6 text-center">
         <span className="grid size-16 place-items-center rounded-full bg-danger/10 text-danger">
@@ -621,7 +631,7 @@ export default function AdminPage() {
         <h1 className="flex items-center gap-3 text-3xl font-bold tracking-tight text-fg">
           <ShieldCheck className="size-7 text-fg-muted" /> Administração
         </h1>
-        <Badge variant="info">{profile?.role === 'ADMIN' ? 'Admin' : 'Moderador'}</Badge>
+        <Badge variant="info">{profile?.role === 'MODERATOR' ? 'Moderador' : 'Admin'}</Badge>
       </header>
 
       <nav
@@ -647,6 +657,11 @@ export default function AdminPage() {
       </nav>
 
       {activeTab === '' && <OverviewTab />}
+      {activeTab === 'telemetria' && (
+        <Suspense fallback={<Skeleton className="h-72 rounded-xl" />}>
+          <TelemetryPage embutida />
+        </Suspense>
+      )}
       {activeTab === 'users' && <UsersTab />}
       {activeTab === 'uploads' && <UploadsTab />}
       {activeTab === 'jobs' && <JobsTab />}

@@ -3,26 +3,35 @@
  * floating over a soft gradient (no hard bar), iOS-feel Ionicons with the
  * FILLED variant when active. Safe-area aware; the MiniPlayer floats above.
  */
-import { useState } from 'react';
+import { useState, useSyncExternalStore } from 'react';
 import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
-  IoAddCircleOutline,
   IoCompassOutline,
+  IoDownloadOutline,
   IoEllipsisHorizontal,
-  IoHeartOutline,
+  IoHeart,
   IoHome,
   IoHomeOutline,
   IoLibrary,
   IoLibraryOutline,
+  IoMicOutline,
+  IoMusicalNotesOutline,
   IoPeopleOutline,
-  IoPulseOutline,
+  IoRadioOutline,
   IoSearch,
   IoSearchOutline,
+  IoSettingsOutline,
+  IoShareSocialOutline,
+  IoShieldCheckmarkOutline,
   IoTimeOutline,
 } from 'react-icons/io5';
-import { Sheet, SheetClose, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
+import { Sheet, SheetContent, SheetHeader, SheetTitle } from '@/components/ui/sheet';
 import { useIsAuthorized } from '@/lib/auth/roles';
+import { capaNoTamanho } from '@/lib/capaNoTamanho';
+import * as localLibrary from '@/lib/local/localLibrary';
+import * as localLikes from '@/lib/local/localLikes';
+import * as localPlaylists from '@/lib/local/localPlaylists';
 import { cn } from '@/lib/utils';
 import { useVoltarAoTopo } from '@/app/layout/useVoltarAoTopo';
 
@@ -44,36 +53,138 @@ interface MenuGroup {
   items: Array<{ to: string; label: string; icon: IconType }>;
 }
 
-/** Everything not on the bottom bar — reachable from the "Mais" sheet. */
+/**
+ * Tudo o que não está na barra de baixo — no menu "Mais". Pedido do dono
+ * (29/10/2026): mais coisas aqui, começando pelas playlists da pessoa (ver
+ * `MinhasPlaylists`, que vem antes destes grupos). "Adicionar músicas" saiu: o
+ * acervo vem do YouTube. A telemetria é uma aba da Administração.
+ */
 const MENU: MenuGroup[] = [
   {
     heading: 'Descobrir',
-    items: [{ to: '/discover', label: 'Descobrir', icon: IoCompassOutline }],
-  },
-  {
-    heading: 'Meu espaço',
     items: [
-      { to: '/dispositivo', label: 'Adicionar músicas', icon: IoAddCircleOutline },
-      { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
+      { to: '/discover', label: 'Descobrir', icon: IoCompassOutline },
+      { to: '/radios', label: 'Rádios', icon: IoRadioOutline },
+      { to: '/podcasts', label: 'Podcasts', icon: IoMicOutline },
+      { to: '/artistas', label: 'Artistas', icon: IoPeopleOutline },
     ],
   },
   {
     heading: 'Biblioteca',
     items: [
-      { to: '/artistas', label: 'Artistas', icon: IoPeopleOutline },
       // GRAVADORA NÃO É DESTINO, é atalho. A lista de selos não é algo que se
       // navega ("quero ver minhas gravadoras"); ela só faz sentido quando você
       // já está olhando um artista ou uma faixa e quer saber quem lançou. A
       // página do selo continua existindo — chega-se a ela clicando no nome
-      // onde ele aparece, não por uma aba na barra.
-      { to: '/liked', label: 'Curtidas', icon: IoHeartOutline },
+      // onde ele aparece, não por uma aba na barra. (Curtidas está em "Minhas
+      // playlists", lá em cima.)
       { to: '/history', label: 'Histórico', icon: IoTimeOutline },
+      { to: '/dispositivo', label: 'Baixadas', icon: IoDownloadOutline },
+      { to: '/compartilhar', label: 'Compartilhar', icon: IoShareSocialOutline },
+    ],
+  },
+  {
+    heading: 'Conta',
+    items: [
+      { to: '/settings', label: 'Configurações', icon: IoSettingsOutline },
+      { to: '/admin', label: 'Administração', icon: IoShieldCheckmarkOutline },
     ],
   },
 ];
 
-/** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
+/** Entradas restritas a quem tem acesso (as rotas são gateadas). */
+const ADMIN_ONLY = new Set(['/admin', '/dispositivo']);
+
+/** Quantas playlists o menu mostra antes do "Ver todas". */
+const PLAYLISTS_NO_MENU = 6;
+
+/** As playlists da pessoa, com capa, no topo do menu "Mais". */
+function MinhasPlaylists({ fechar }: { fechar: () => void }) {
+  const playlists = useSyncExternalStore(localPlaylists.subscribe, localPlaylists.list, () => []);
+  const curtidas = useSyncExternalStore(localLikes.subscribe, localLikes.count, () => 0);
+  const capaDe = (p: localPlaylists.LocalPlaylist): string | null => {
+    if (p.coverUrl) return p.coverUrl;
+    for (const id of p.trackIds) {
+      const capa = localLibrary.entryFor(id)?.track.coverUrl;
+      if (capa) return capa;
+    }
+    return null;
+  };
+  const item =
+    'flex items-center gap-3 rounded-xl border border-border p-2 text-sm font-medium transition-colors duration-200';
+  return (
+    <div>
+      <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-subtle">
+        Minhas playlists
+      </p>
+      <div className="grid grid-cols-2 gap-2">
+        <NavLink
+          to="/liked"
+          onClick={fechar}
+          className={({ isActive }) =>
+            cn(item, isActive ? 'border-accent/40 bg-accent/12' : 'hover:bg-fg/5')
+          }
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-accent/15 text-accent">
+            <IoHeart className="size-5" />
+          </span>
+          <span className="min-w-0">
+            <span className="block truncate text-fg">Curtidas</span>
+            <span className="block truncate text-[11px] text-fg-muted">
+              {curtidas} {curtidas === 1 ? 'música' : 'músicas'}
+            </span>
+          </span>
+        </NavLink>
+        {playlists.slice(0, PLAYLISTS_NO_MENU).map((p) => {
+          const capa = capaDe(p);
+          return (
+            <NavLink
+              key={p.id}
+              onClick={fechar}
+              to={`/playlist/${p.id}`}
+              className={({ isActive }) =>
+                cn(item, isActive ? 'border-accent/40 bg-accent/12' : 'hover:bg-fg/5')
+              }
+            >
+              <span className="grid size-10 shrink-0 place-items-center overflow-hidden rounded-md bg-fg/8 text-fg-subtle">
+                {capa ? (
+                  <img
+                    src={capaNoTamanho(capa, 'linha') ?? undefined}
+                    alt=""
+                    loading="lazy"
+                    className="size-full object-cover"
+                  />
+                ) : (
+                  <IoMusicalNotesOutline className="size-5" />
+                )}
+              </span>
+              <span className="min-w-0">
+                <span className="block truncate text-fg">{p.title}</span>
+                <span className="block truncate text-[11px] text-fg-muted">
+                  {p.trackIds.length} {p.trackIds.length === 1 ? 'música' : 'músicas'}
+                </span>
+              </span>
+            </NavLink>
+          );
+        })}
+        <NavLink
+          to="/library"
+          onClick={fechar}
+          className={cn(item, 'text-fg-muted hover:bg-fg/5 hover:text-fg')}
+        >
+          <span className="grid size-10 shrink-0 place-items-center rounded-md bg-fg/8">
+            <IoLibraryOutline className="size-5" />
+          </span>
+          <span className="truncate">
+            {playlists.length > PLAYLISTS_NO_MENU
+              ? `Ver todas (${playlists.length})`
+              : 'Biblioteca'}
+          </span>
+        </NavLink>
+      </div>
+    </div>
+  );
+}
 
 export function MobileNav() {
   const [open, setOpen] = useState(false);
@@ -143,6 +254,7 @@ export function MobileNav() {
             <SheetTitle>Menu</SheetTitle>
           </SheetHeader>
           <div className="space-y-5 pb-2">
+            <MinhasPlaylists fechar={() => setOpen(false)} />
             {menu.map((group) => (
               <div key={group.heading}>
                 <p className="px-1 pb-2 text-[11px] font-medium uppercase tracking-[0.14em] text-fg-subtle">
@@ -150,23 +262,23 @@ export function MobileNav() {
                 </p>
                 <div className="grid grid-cols-2 gap-2">
                   {group.items.map(({ to, label, icon: Icon }) => (
-                    <SheetClose asChild key={`${group.heading}:${to}`}>
-                      <NavLink
-                        to={to}
-                        end={to === '/'}
-                        className={({ isActive }) =>
-                          cn(
-                            'flex items-center gap-3 rounded-xl border border-border p-3 text-sm font-medium transition-colors duration-200',
-                            isActive
-                              ? 'border-accent/40 bg-accent/12 text-accent'
-                              : 'text-fg hover:bg-fg/5',
-                          )
-                        }
-                      >
-                        <Icon className="size-4.5 shrink-0" />
-                        <span className="truncate">{label}</span>
-                      </NavLink>
-                    </SheetClose>
+                    <NavLink
+                      key={`${group.heading}:${to}`}
+                      onClick={() => setOpen(false)}
+                      to={to}
+                      end={to === '/'}
+                      className={({ isActive }) =>
+                        cn(
+                          'flex items-center gap-3 rounded-xl border border-border p-3 text-sm font-medium transition-colors duration-200',
+                          isActive
+                            ? 'border-accent/40 bg-accent/12 text-accent'
+                            : 'text-fg hover:bg-fg/5',
+                        )
+                      }
+                    >
+                      <Icon className="size-4.5 shrink-0" />
+                      <span className="truncate">{label}</span>
+                    </NavLink>
                   ))}
                 </div>
               </div>

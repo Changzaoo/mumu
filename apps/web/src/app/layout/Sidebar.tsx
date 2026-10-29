@@ -13,7 +13,6 @@ import { useMemo, useState, useSyncExternalStore, type ReactNode } from 'react';
 import { NavLink } from 'react-router';
 import type { IconType } from 'react-icons';
 import {
-  IoAddCircleOutline,
   IoCompass,
   IoCompassOutline,
   IoDiscOutline,
@@ -22,12 +21,16 @@ import {
   IoHome,
   IoHomeOutline,
   IoLibraryOutline,
+  IoMic,
+  IoMicOutline,
   IoMusicalNotesOutline,
   IoPeopleOutline,
   IoPlay,
-  IoPulseOutline,
+  IoRadio,
+  IoRadioOutline,
   IoSearch,
   IoSearchOutline,
+  IoShieldCheckmarkOutline,
   IoTimeOutline,
 } from 'react-icons/io5';
 import { PanelLeft } from 'lucide-react';
@@ -62,14 +65,18 @@ const MAIN_NAV: NavEntry[] = [
   { to: '/', label: 'Início', icon: IoHomeOutline, iconActive: IoHome },
   { to: '/search', label: 'Buscar', icon: IoSearchOutline, iconActive: IoSearch },
   { to: '/discover', label: 'Descobrir', icon: IoCompassOutline, iconActive: IoCompass },
+  { to: '/radios', label: 'Rádios', icon: IoRadioOutline, iconActive: IoRadio },
+  { to: '/podcasts', label: 'Podcasts', icon: IoMicOutline, iconActive: IoMic },
 ];
 
-/** Device/management entries restricted to authorized users. */
-const ADMIN_ONLY = new Set(['/dispositivo', '/telemetria']);
+/** Management entries restricted to authorized users. */
+const ADMIN_ONLY = new Set(['/admin']);
 
+// "Adicionar músicas" saiu (pedido do dono, 29/10/2026): o acervo vem do
+// YouTube, ninguém mais alimenta o app à mão. A telemetria mora dentro da
+// Administração, numa aba (ver AdminPage).
 const TOOLS_NAV: NavEntry[] = [
-  { to: '/dispositivo', label: 'Adicionar músicas', icon: IoAddCircleOutline },
-  { to: '/telemetria', label: 'Telemetria', icon: IoPulseOutline },
+  { to: '/admin', label: 'Administração', icon: IoShieldCheckmarkOutline },
 ];
 
 type LibraryFilter = 'playlists' | 'artistas' | 'albuns';
