@@ -49,7 +49,21 @@ const BATIDA_MS = 250;
  * mais limpa). Na troca de faixa o clipe some antes, e a capa nova segura a
  * tela enquanto o clipe novo carrega no mesmo player (sem recriar o iframe).
  */
-export function ClipeView({ track, className }: { track: TrackDto; className?: string }) {
+export function ClipeView({
+  track,
+  className,
+  posicao,
+}: {
+  track: TrackDto;
+  className?: string;
+  /**
+   * Relógio da música, quando NÃO é o do motor: na rádio, o segundo da música
+   * que a emissora está tocando (ver lib/aoVivo/musicaDaRadio).
+   */
+  posicao?: () => number;
+}) {
+  const relogioRef = useRef<() => number>(() => audioEngine.getPosition());
+  relogioRef.current = posicao ?? (() => audioEngine.getPosition());
   // 1. Qual vídeo? O link de origem da faixa (buscado no acervo se faltar) —
   //    e, se ele falhar ou não existir, a mesma música em outro vídeo.
   //    `undefined` = ainda escolhendo; `null` = não há clipe para esta faixa.
@@ -109,7 +123,7 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
     querRef.current = chave;
     // Mantém a correção aprendida: o atraso do salto é da rede, não da faixa.
     syncRef.current = estadoInicial(syncRef.current.compensacao);
-    const inicio = Math.max(0, audioEngine.getPosition() + ADIANTO_DO_OUVIDO_S);
+    const inicio = Math.max(0, relogioRef.current() + ADIANTO_DO_OUVIDO_S);
 
     if (iframeRef.current) {
       const p = playerRef.current;
@@ -143,7 +157,7 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
             carregadoRef.current = quer;
             p.loadVideoById({
               videoId: quer.split('|')[1] as string,
-              startSeconds: audioEngine.getPosition() + ADIANTO_DO_OUVIDO_S,
+              startSeconds: relogioRef.current() + ADIANTO_DO_OUVIDO_S,
             });
           }
           conferir();
@@ -207,7 +221,7 @@ export function ClipeView({ track, className }: { track: TrackDto; className?: s
     // Pausa de verdade (ou tela apagada): a capa volta. Um engasgo do áudio
     // só segura o vídeo — piscar a capa a cada buffer seria pior que o atraso.
     const pausado = !s.isPlaying || document.hidden;
-    const audio = audioEngine.getPosition();
+    const audio = relogioRef.current();
     const duracao = p.getDuration();
 
     // O clipe pode acabar antes do áudio (créditos cortados): a capa assume —

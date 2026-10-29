@@ -30,6 +30,7 @@ import { ConviteDeRetomada, PlayDoPlayer, StatusDeCarga } from '@/components/med
 import { TrocaDeFaixa } from '@/components/media/TrocaDeFaixa';
 import { useDirecaoDaTroca } from '@/hooks/useDirecaoDaTroca';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
+import { useMusicaDaRadio } from '@/lib/aoVivo/musicaDaRadio';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useUiStore } from '@/stores/uiStore';
 import { capaNoTamanho } from '@/lib/capaNoTamanho';
@@ -85,6 +86,8 @@ export function PlayerBar() {
   const track = np;
   // A faixa DESTE aparelho (o `np` pode ser a de outro, no controle remoto).
   const faixaAtual = usePlayerStore((s) => s.currentTrack);
+  // Rádio: embaixo do nome da estação, a música que ela está tocando agora.
+  const musicaDaRadio = useMusicaDaRadio();
   const isPlaying = np?.isPlaying ?? false;
   const toggle = np?.toggle ?? (() => undefined);
   // O lado da troca é carimbado antes de pedir a faixa (ver `TrocaDeFaixa`).
@@ -165,6 +168,11 @@ export function PlayerBar() {
                   {track.title}
                 </button>
                 <p className="line-clamp-1 text-[13px] text-fg-muted">
+                  {track.source === 'local' && musicaDaRadio && (
+                    <span>
+                      {musicaDaRadio.faixa.artists[0]?.name} — {musicaDaRadio.faixa.title}
+                    </span>
+                  )}
                   {track.artists.map((artist, i) => {
                     // A BARRA MANDAVA TODO MUNDO PARA A PÁGINA QUE ERRA.
                     //

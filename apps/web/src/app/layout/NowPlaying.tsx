@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import type { TrackDto } from '@radinho/shared';
 import { acharFaixa, posicaoDoQueToca } from '@/lib/devices/presence';
 import { Link } from 'react-router';
@@ -57,6 +57,7 @@ import { useDominantColor } from '@/hooks/useDominantColor';
 import { useMediaQuery } from '@/hooks/useMediaQuery';
 import { api } from '@/lib/api';
 import { useNowPlaying, useNowPlayingProgress } from '@/lib/devices/useNowPlaying';
+import { useMusicaDaRadio } from '@/lib/aoVivo/musicaDaRadio';
 import { cn, formatTime, trackArtistNames } from '@/lib/utils';
 import { usePlayerStore } from '@/stores/playerStore';
 import { useSettingsStore } from '@/stores/settingsStore';
@@ -167,6 +168,13 @@ export function NowPlaying() {
   // Com o remoto no comando, a faixa daqui não deve pintar nada: capa, letra,
   // créditos e fila são dela, não da que está tocando.
   const faixaLocal = remoto ? null : track;
+  // RÁDIO: letra, clipe e capa são da MÚSICA que a emissora está tocando (ver
+  // lib/aoVivo/musicaDaRadio), andando no relógio dela — não da estação.
+  const musicaDaRadio = useMusicaDaRadio();
+  const ehRadio = !remoto && Boolean(track?.id.startsWith('radio:'));
+  const faixaDoConteudo = ehRadio ? (musicaDaRadio?.faixa ?? null) : faixaLocal;
+  const posicaoNaRadio = (): number => musicaDaRadio?.posicao() ?? 0;
+  const radioSincronizada = musicaDaRadio?.posicao() != null;
   // Selo "E" como na lista: pelo veredito de conteúdo, não por `track.explicit`.
   const explicita = useEhExplicita(faixaLocal);
   // A faixa do OUTRO aparelho, achada pelo id na biblioteca daqui — é o que
@@ -186,7 +194,9 @@ export function NowPlaying() {
       vivo = false;
     };
   }, [idRemoto]);
-  const capaUrl = remoto ? remoto.coverUrl : (track?.coverUrl ?? null);
+  const capaUrl = remoto
+    ? remoto.coverUrl
+    : ((ehRadio ? musicaDaRadio?.faixa.coverUrl : null) ?? track?.coverUrl ?? null);
   const titulo = remoto ? remoto.title : track?.title;
   const artistas = remoto ? remoto.artists : (track?.artists ?? []);
   const tocando = remoto ? remoto.isPlaying : isPlaying;
@@ -202,7 +212,7 @@ export function NowPlaying() {
 
   const [visualizer, setVisualizer] = useState(false);
   // O clipe é do áudio DESTE aparelho; com o remoto no comando não há o que casar.
-  const clipeAtivo = clipeOpen && Boolean(faixaLocal) && !visualizer;
+  const clipeAtivo = clipeOpen && Boolean(faixaDoConteudo) && !visualizer;
   // Abriu a tela cheia: já abre as conexões e baixa a API do YouTube, para o
   // clipe aparecer no instante do clique em vez de esperar o aperto de mão.
   // E já pergunta ao acervo o link de origem da faixa, para o id do vídeo
@@ -405,8 +415,37 @@ export function NowPlaying() {
                   <div className="absolute inset-0 grid place-items-end bg-bg-elevated p-6">
                     <SpectrumVisualizer className="h-3/4" />
                   </div>
-                ) : clipeAtivo && faixaLocal ? (
-                  <ClipeView track={faixaLocal} className="absolute inset-0" />
+                ) : clipeAtivo && faixaDoConteudo && ehRadio ? (
+                  radioSincronizada ? (
+                    <ClipeView
+                      track={faixaDoConteudo}
+                      posicao={posicaoNaRadio}
+                      className="absolute inset-0"
+                    />
+                  ) : (
+                    <AvisoDaRadio>
+                      O vídeo entra no ponto certo quando a próxima música começar.
+                    </AvisoDaRadio>
+                  )
+                ) : clipeAtivo && faixaDoConteudo ? (
+                  <ClipeView track={faixaDoConteudo} className="absolute inset-0" />
+                ) : lyricsOpen && faixaDoConteudo && ehRadio ? (
+                  <LyricsView
+                    track={faixaDoConteudo}
+                    className="h-full px-2"
+                    remoto={{
+                      posicao: posicaoNaRadio,
+                      // Sem saber onde a música está, a letra fica parada no começo.
+                      tocando: isPlaying && radioSincronizada,
+                      buscar: () => undefined,
+                    }}
+                  />
+                ) : lyricsOpen && ehRadio ? (
+                  <AvisoDaRadio>
+                    {isPlaying
+                      ? 'Esta rádio não informa qual música está tocando agora.'
+                      : 'Dê o play para ver a música que está tocando.'}
+                  </AvisoDaRadio>
                 ) : lyricsOpen && faixaLocal ? (
                   <LyricsView track={faixaLocal} className="h-full px-2" />
                 ) : lyricsOpen && remoto && faixaRemota ? (
@@ -474,6 +513,8 @@ export function NowPlaying() {
                       >
                         {trackArtistNames({ artists: artistas })}
                       </Link>
+                    ) : ehRadio && musicaDaRadio ? (
+                      `Tocando agora: ${musicaDaRadio.faixa.artists[0]?.name ?? ''} — ${musicaDaRadio.faixa.title}`
                     ) : (
                       trackArtistNames({ artists: artistas })
                     )}
@@ -712,5 +753,14 @@ export function NowPlaying() {
         </motion.section>
       )}
     </AnimatePresence>
+  );
+}
+
+/** Recado no quadro da capa quando a rádio não dá letra/vídeo sincronizados. */
+function AvisoDaRadio({ children }: { children: ReactNode }) {
+  return (
+    <div className="absolute inset-0 grid place-items-center bg-bg-elevated/90 p-8 text-center text-sm text-fg-muted">
+      <p className="max-w-60">{children}</p>
+    </div>
   );
 }

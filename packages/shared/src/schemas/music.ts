@@ -146,3 +146,27 @@ export const radioStationSchema = z.object({
   isLive: z.boolean(),
 });
 export type RadioStationDto = z.infer<typeof radioStationSchema>;
+
+/**
+ * O que está tocando AGORA numa rádio ao vivo (GET /radios/agora/:estacao).
+ * `musica` só vem quando o título informado pela rádio foi confirmado no
+ * catálogo; `inicioMs` (relógio do servidor, epoch) só quando se sabe o
+ * instante em que a música começou — é ele que posiciona letra e vídeo.
+ */
+export const musicaDaRadioSchema = z.object({
+  musica: z
+    .object({
+      titulo: z.string(),
+      artista: z.string(),
+      capaUrl: z.string().nullable(),
+      duracaoMs: z.number().int(),
+    })
+    .nullable(),
+  inicioMs: z.number().nullable(),
+  /** O texto cru que a rádio mandou (ICY/Triton), para depurar. */
+  bruto: z.string().nullable(),
+  fonte: z.enum(['icy', 'triton']).nullable(),
+  /** Relógio do servidor na resposta: o aparelho corrige o próprio relógio por ele. */
+  agoraMs: z.number(),
+});
+export type MusicaDaRadioDto = z.infer<typeof musicaDaRadioSchema>;

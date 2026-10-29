@@ -70,6 +70,16 @@ const duracaoJaAnotada = new Set<string>();
  * por mil produzia o "NaN:aN" que aparecia na barra e no relógio do player.
  * `0` significa "ainda não se sabe", e é o que a interface já trata como 0:00.
  */
+/**
+ * Rádio ao vivo: não tem linha do tempo. Buscar uma posição salva num stream
+ * recém-aberto deixa o elemento em 'waiting' até dar erro (medido 29/10/2026:
+ * `currentTime = 900` na Antena 1 → waiting → error) — era por isso que a rádio
+ * não voltava depois de atualizar o app. Ao vivo volta sempre "agora".
+ */
+function ehAoVivo(track: { id: string } | null | undefined): boolean {
+  return !!track && track.id.startsWith('radio:');
+}
+
 function segundosConhecidos(track: { durationMs?: number | null }): number {
   const ms = track.durationMs;
   return typeof ms === 'number' && Number.isFinite(ms) && ms > 0 ? ms / 1000 : 0;
@@ -2474,7 +2484,7 @@ export const usePlayerStore = create<PlayerState>()(
           // Faixa restaurada de outra sessão (ou engine resetado): o engine
           // ainda não a carregou — carrega agora e retoma NA POSIÇÃO salva.
           if (audioEngine.currentTrack?.id !== currentTrack.id) {
-            const resumeAt = progress > 1 ? progress : null;
+            const resumeAt = progress > 1 && !ehAoVivo(currentTrack) ? progress : null;
             // Começa JÁ no ponto — nunca tocar o início antes de pular.
             audioEngine.iniciarEm(resumeAt);
             loadIndex(Math.max(0, queueIndex), true);
@@ -2746,15 +2756,20 @@ export function initPlayerEngine(): void {
   // o primeiro play carrega o áudio e busca a posição (ver play()).
   const resume = readResume();
   if (resume && !store.getState().currentTrack) {
+    const aoVivo = ehAoVivo(resume.track);
     store.setState({
       currentTrack: resume.track,
       queue: [resume.track],
       originalQueue: [resume.track],
       queueIndex: 0,
-      progress: resume.progress,
+      progress: aoVivo ? 0 : resume.progress,
       duration: segundosConhecidos(resume.track),
       isPlaying: false,
-      context: { source: 'queue' },
+      // Rádio volta como RÁDIO: com contexto de fila, a continuação automática
+      // e o vigia de travamento a tratavam como música e pulavam para outra.
+      context: aoVivo
+        ? { source: 'radio', sourceId: resume.track.id.slice('radio:'.length) }
+        : { source: 'queue' },
     });
     // Recarregou por causa de uma versão nova COM a música tocando: volta
     // tocando de onde estava. Apaga a marca primeiro — é de uso único, para uma
@@ -2765,7 +2780,7 @@ export function initPlayerEngine(): void {
     // erro — a faixa já fica pronta e no ponto certo de qualquer jeito.
     if (resume.tocando) {
       saveResume(true, true); // consome a marca: uso único
-      resumeAt(resume.progress);
+      if (!aoVivo) resumeAt(resume.progress);
       armarRetomandoAoAbrir();
       void store.getState().play();
     }
@@ -3428,6 +3443,9 @@ export function initPlayerEngine(): void {
     const loadedId = store.getState().currentTrack?.id;
     if (loadedId) armLoadWatchdog(loadedId, STALL_CHECK_MS);
     // Retomada: a faixa restaurada terminou de carregar → busca a posição salva.
+    if (pendingResumeSeek !== null && ehAoVivo(store.getState().currentTrack)) {
+      pendingResumeSeek = null;
+    }
     if (pendingResumeSeek !== null) {
       const at = Math.min(pendingResumeSeek, Math.max(0, (duration || Infinity) - 1));
       pendingResumeSeek = null;
