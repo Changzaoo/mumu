@@ -137,18 +137,18 @@ describe('importador: cache e limite por usuário', () => {
     expect(rodar).toHaveBeenCalledTimes(2);
   });
 
-  it('o 11º termo novo no mesmo minuto é recusado, só para quem abusou', async () => {
+  it('o 41º termo novo no mesmo minuto é recusado, só para quem abusou', async () => {
     const { criarBuscaYoutube, LimiteDeBusca } = await carregarModulo();
     let t = 1_000_000;
     const busca = criarBuscaYoutube({ rodar: () => Promise.resolve('{}'), agora: () => t });
-    for (let i = 0; i < 10; i++) await busca.buscar(`termo ${i}`, 'abusado');
-    await expect(busca.buscar('termo 10', 'abusado')).rejects.toBeInstanceOf(LimiteDeBusca);
+    for (let i = 0; i < 40; i++) await busca.buscar(`termo ${i}`, 'abusado');
+    await expect(busca.buscar('termo 40', 'abusado')).rejects.toBeInstanceOf(LimiteDeBusca);
     // Outra pessoa segue buscando; e o que já está em cache não conta.
-    await expect(busca.buscar('termo 10', 'outra')).resolves.toEqual([]);
+    await expect(busca.buscar('termo 40', 'outra')).resolves.toEqual([]);
     await expect(busca.buscar('termo 3', 'abusado')).resolves.toEqual([]);
     // Passado o minuto, volta.
     t += 60_001;
-    await expect(busca.buscar('termo 11', 'abusado')).resolves.toEqual([]);
+    await expect(busca.buscar('termo 41', 'abusado')).resolves.toEqual([]);
   });
 });
 

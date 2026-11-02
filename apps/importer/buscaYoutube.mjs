@@ -28,9 +28,10 @@ const CACHE_TTL_MS = 10 * 60_000;
 const CACHE_MAX_TERMOS = 500;
 /**
  * Por quem pergunta: cada termo novo custa DUAS idas ao YouTube (as músicas e
- * os artistas), então 20 por minuto são as mesmas ~10 buscas de quem digita.
+ * os artistas), então 40 por minuto são ~20 buscas de quem digita. Dobrou quando
+ * a tela passou a perguntar na metade da pausa de digitação.
  */
-const LIMITE_POR_JANELA = 20;
+const LIMITE_POR_JANELA = 40;
 const JANELA_MS = 60_000;
 /** yt-dlp simultâneos só desta rota — o resto do importador precisa de CPU. */
 const MAX_SIMULTANEAS = 3;
@@ -145,9 +146,9 @@ export function parseResultados(bruto) {
  * não está em catálogo nenhum — o canal é o único lugar onde ele existe. A
  * busca com filtro de canal traz nome, foto e inscritos numa página só.
  *
- * O canal "<Nome> - Topic" é o espelho automático das distribuidoras: mesma
- * pessoa, sem vídeo próprio na aba de vídeos. Sai da lista — repetiria o
- * artista e abriria uma página vazia.
+ * O canal "<Nome> - Topic" ("- Tema" em português) é o espelho automático das
+ * distribuidoras: mesma pessoa, sem vídeo próprio na aba de vídeos. Sai da
+ * lista — repetiria o artista e abriria uma página vazia.
  */
 export function parseCanais(bruto) {
   const dados = lerJson(bruto);
@@ -159,7 +160,7 @@ export function parseCanais(bruto) {
     const id = String(e.channel_id ?? e.id ?? '');
     if (!ID_CANAL.test(id) || vistos.has(id)) continue;
     const nome = [e.channel, e.title, e.uploader].find((c) => typeof c === 'string' && c.trim());
-    if (!nome || / - Topic$/i.test(nome.trim())) continue;
+    if (!nome || / - (Topic|Tema)$/i.test(nome.trim())) continue;
     vistos.add(id);
     const miniaturas = Array.isArray(e.thumbnails) ? e.thumbnails : [];
     let foto = miniaturas.length ? String(miniaturas[miniaturas.length - 1]?.url ?? '') : '';
@@ -239,6 +240,114 @@ async function capasSemFaixaPreta(resultados, conferir) {
   return resultados;
 }
 
+/**
+ * A MESMA PERGUNTA SEM ABRIR O PYTHON. O yt-dlp em lista plana só faz um POST
+ * neste endereço — e gasta 1,6 s dos seus 1,8 s para iniciar. Medido no vnmax
+ * (01/11/2026): 3,6 s com o yt-dlp e as capas contra 0,4 s aqui.
+ *
+ * A resposta também diz qual capa existe, então não há HEAD nenhum: a `hq720`
+ * que não existe levava 1 s para dar 404, e era ela que segurava a lista.
+ *
+ * `hl: 'pt'` porque em inglês o YouTube traduz o título: "Imagina o Trabalho",
+ * da Ana Castela, chegava como "Imagine the Effort". `gl: 'BR'` põe na frente o
+ * que se ouve aqui. Versão de cliente que um dia for recusada não derruba a
+ * busca: qualquer falha cai no yt-dlp.
+ */
+const INNERTUBE_URL = 'https://www.youtube.com/youtubei/v1/search?prettyPrint=false';
+const INNERTUBE_CLIENTE = {
+  clientName: 'WEB',
+  clientVersion: '2.20261001.00.00',
+  hl: 'pt',
+  gl: 'BR',
+};
+const INNERTUBE_TIMEOUT_MS = 3_000;
+const SO_VIDEOS = 'EgIQAQ==';
+
+async function perguntarInnertubePadrao(termo, filtro) {
+  const res = await fetch(INNERTUBE_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', 'User-Agent': 'Mozilla/5.0' },
+    body: JSON.stringify({
+      context: { client: INNERTUBE_CLIENTE },
+      query: termo,
+      params: filtro,
+    }),
+    signal: AbortSignal.timeout(INNERTUBE_TIMEOUT_MS),
+  });
+  if (!res.ok) throw new Error(`InnerTube respondeu ${res.status}`);
+  return res.json();
+}
+
+/** Todos os blocos `nome` da resposta, onde quer que a página os tenha posto. */
+function acharBlocos(no, nome, achados = []) {
+  if (Array.isArray(no)) {
+    for (const item of no) acharBlocos(item, nome, achados);
+  } else if (no && typeof no === 'object') {
+    for (const [chave, valor] of Object.entries(no)) {
+      if (chave === nome) achados.push(valor);
+      else acharBlocos(valor, nome, achados);
+    }
+  }
+  return achados;
+}
+
+/** "3:33" ou "1:02:10" → segundos. Live não tem duração: vira 0 e sai no filtro. */
+function segundosDe(texto) {
+  if (!/^\d+(:\d+)+$/.test(String(texto ?? ''))) return 0;
+  return String(texto)
+    .split(':')
+    .reduce((total, parte) => total * 60 + Number(parte), 0);
+}
+
+/** "5,2 mi de inscritos" → 5200000. O YouTube põe isso no campo da contagem de vídeos. */
+function inscritosDe(canal) {
+  for (const campo of [canal?.videoCountText, canal?.subscriberCountText]) {
+    const m = /^([\d.,]+)\s*(mil|mi|bi)?\s+(?:de\s+)?inscritos?/i.exec(
+      String(campo?.simpleText ?? ''),
+    );
+    if (!m) continue;
+    const mult = { mil: 1e3, mi: 1e6, bi: 1e9 }[String(m[2]).toLowerCase()];
+    return mult
+      ? Math.round(Number(m[1].replace(',', '.')) * mult)
+      : Number(m[1].replace(/[.,]/g, ''));
+  }
+  return null;
+}
+
+/** Resposta da InnerTube → resultados iguais aos do yt-dlp, com a capa certa. */
+export function resultadosDoInnertube(resposta, quantos = 10) {
+  const videos = acharBlocos(resposta, 'videoRenderer');
+  const temAlta = new Set();
+  const entries = videos.map((v) => {
+    const miniaturas = Array.isArray(v?.thumbnail?.thumbnails) ? v.thumbnail.thumbnails : [];
+    if (miniaturas.some((m) => String(m?.url).includes('/hq720'))) temAlta.add(v.videoId);
+    return {
+      id: v?.videoId,
+      title: v?.title?.runs?.[0]?.text,
+      channel: v?.ownerText?.runs?.[0]?.text,
+      duration: segundosDe(v?.lengthText?.simpleText),
+    };
+  });
+  return parseResultados({ entries })
+    .slice(0, quantos)
+    .map((r) => {
+      const id = r.url.split('v=')[1];
+      const capa = temAlta.has(id) ? 'hq720' : 'mqdefault';
+      return { ...r, capa: `https://i.ytimg.com/vi/${id}/${capa}.jpg` };
+    });
+}
+
+/** Canais da InnerTube → passam pelo mesmo `parseCanais` dos do yt-dlp. */
+export function canaisDoInnertube(resposta) {
+  const entries = acharBlocos(resposta, 'channelRenderer').map((c) => ({
+    channel_id: c?.channelId,
+    title: c?.title?.simpleText,
+    thumbnails: c?.thumbnail?.thumbnails,
+    channel_follower_count: inscritosDe(c),
+  }));
+  return parseCanais({ entries });
+}
+
 export class LimiteDeBusca extends Error {
   constructor(esperarSeg) {
     super('Muitas buscas seguidas. Espere um pouco.');
@@ -263,6 +372,7 @@ export function criarBuscaYoutube({
   esperaPorVagaMs = ESPERA_POR_VAGA_MS,
   // Com `rodar` injetado (testes) não sai pedido de rede para conferir capa.
   conferirCapa = rodar ? null : conferirCapaPadrao,
+  perguntarInnertube = rodar ? null : perguntarInnertubePadrao,
 } = {}) {
   const executar = rodar ?? rodarYtdlpPadrao({ binario, argsExtras });
   const executarUrl = rodarUrl ?? executar.url;
@@ -349,10 +459,24 @@ export function criarBuscaYoutube({
     return promessa;
   }
 
+  /** O caminho rápido; lista vazia ou falha dizem "pergunte ao yt-dlp". */
+  async function peloInnertube(termo, filtro, ler) {
+    if (!perguntarInnertube) return [];
+    try {
+      return ler(await perguntarInnertube(termo, filtro));
+    } catch {
+      return [];
+    }
+  }
+
   async function buscar(termoCru, chaveUsuario = 'anonimo') {
     const termo = normalizarTermo(termoCru);
     if (!termo) return [];
     return comCache(termo.toLowerCase(), chaveUsuario, CACHE_TTL_MS, async () => {
+      const rapido = await peloInnertube(termo, SO_VIDEOS, (r) =>
+        resultadosDoInnertube(r, quantos),
+      );
+      if (rapido.length > 0) return rapido;
       const resultados = parseResultados(await executar(termo, quantos));
       return conferirCapa ? capasSemFaixaPreta(resultados, conferirCapa) : resultados;
     });
@@ -363,9 +487,12 @@ export function criarBuscaYoutube({
     const termo = normalizarTermo(termoCru);
     if (!termo) return [];
     const url = `https://www.youtube.com/results?search_query=${encodeURIComponent(termo)}&sp=${SO_CANAIS}`;
-    return comCache(`artistas:${termo.toLowerCase()}`, chaveUsuario, CACHE_TTL_MS, async () =>
-      parseCanais(await executarUrl(url, 8)),
-    );
+    return comCache(`artistas:${termo.toLowerCase()}`, chaveUsuario, CACHE_TTL_MS, async () => {
+      const rapido = await peloInnertube(termo, decodeURIComponent(SO_CANAIS), (r) =>
+        canaisDoInnertube(r).slice(0, 8),
+      );
+      return rapido.length > 0 ? rapido : parseCanais(await executarUrl(url, 8));
+    });
   }
 
   /** As músicas que o próprio artista subiu no canal, das mais novas às antigas. */

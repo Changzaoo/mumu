@@ -1,7 +1,13 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
-import { criarBuscaYoutube, parseCanais, parseResultados } from './buscaYoutube.mjs';
+import {
+  canaisDoInnertube,
+  criarBuscaYoutube,
+  parseCanais,
+  parseResultados,
+  resultadosDoInnertube,
+} from './buscaYoutube.mjs';
 
 // Saídas reais do yt-dlp (busca só de canais e aba de vídeos de um canal),
 // enxugadas para os campos que o parse lê.
@@ -71,6 +77,115 @@ test('canal com id inválido não vira pedido ao YouTube', async () => {
   });
   assert.deepEqual(await busca.musicasDoCanal('../../etc', 'u1'), { nome: '', musicas: [] });
   assert.equal(rodou, false);
+});
+
+const respostaInnertube = {
+  contents: {
+    secoes: [
+      {
+        videoRenderer: {
+          videoId: 'b7d6wnaRm2E',
+          title: { runs: [{ text: 'Baby' }] },
+          ownerText: { runs: [{ text: 'Gal Costa' }] },
+          lengthText: { simpleText: '3:33' },
+          thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/vi/b7d6wnaRm2E/hq720.jpg?x=1' }] },
+        },
+      },
+      {
+        videoRenderer: {
+          videoId: 'Sc1hkI4jVU8',
+          title: { runs: [{ text: 'Baby ao vivo' }] },
+          ownerText: { runs: [{ text: 'Brasilidades' }] },
+          lengthText: { simpleText: '3:53' },
+          thumbnail: { thumbnails: [{ url: 'https://i.ytimg.com/vi/Sc1hkI4jVU8/hqdefault.jpg' }] },
+        },
+      },
+      // Live não traz duração; show de 1h fica fora: nenhum dos dois é faixa.
+      { videoRenderer: { videoId: 'aaaaaaaaaaa', title: { runs: [{ text: 'Live' }] } } },
+      {
+        videoRenderer: {
+          videoId: 'bbbbbbbbbbb',
+          title: { runs: [{ text: 'Show' }] },
+          lengthText: { simpleText: '1:02:10' },
+        },
+      },
+    ],
+  },
+};
+
+test('InnerTube: vira o mesmo resultado do yt-dlp, com a capa que existe', () => {
+  assert.deepEqual(resultadosDoInnertube(respostaInnertube), [
+    {
+      url: 'https://www.youtube.com/watch?v=b7d6wnaRm2E',
+      titulo: 'Baby',
+      canal: 'Gal Costa',
+      duracaoSeg: 213,
+      capa: 'https://i.ytimg.com/vi/b7d6wnaRm2E/hq720.jpg',
+    },
+    {
+      url: 'https://www.youtube.com/watch?v=Sc1hkI4jVU8',
+      titulo: 'Baby ao vivo',
+      canal: 'Brasilidades',
+      duracaoSeg: 233,
+      capa: 'https://i.ytimg.com/vi/Sc1hkI4jVU8/mqdefault.jpg',
+    },
+  ]);
+  assert.equal(resultadosDoInnertube(respostaInnertube, 1).length, 1);
+  assert.deepEqual(resultadosDoInnertube({ qualquer: 'coisa' }), []);
+});
+
+test('InnerTube: canais com foto e inscritos; o espelho "- Tema" sai', () => {
+  const canal = (channelId, nome, contagem) => ({
+    channelRenderer: {
+      channelId,
+      title: { simpleText: nome },
+      videoCountText: { simpleText: contagem },
+      thumbnail: { thumbnails: [{ url: '//yt3.ggpht.com/foto' }] },
+    },
+  });
+  const artistas = canaisDoInnertube([
+    canal('UCfgJsv_g8HEsBZ2c3onYPxg', 'Alceu Valença', '2,41 mi de inscritos'),
+    canal('UC785M9D8B5H5CdUDuJHy8Ig', 'Alceu Valença - Tema', undefined),
+    canal('UCZA-32pESdvrVjuKXWpKemw', 'Gal Costa', '751 mil inscritos'),
+    canal('UC8tInndwxutMOg7ylb67ePA', 'MC do Bairro', '1.234 inscritos'),
+  ]);
+  assert.deepEqual(
+    artistas.map((a) => [a.nome, a.inscritos, a.foto]),
+    [
+      ['Alceu Valença', 2410000, 'https://yt3.ggpht.com/foto'],
+      ['Gal Costa', 751000, 'https://yt3.ggpht.com/foto'],
+      ['MC do Bairro', 1234, 'https://yt3.ggpht.com/foto'],
+    ],
+  );
+});
+
+test('a busca responde pela InnerTube sem abrir o yt-dlp', async () => {
+  let rodou = false;
+  const busca = criarBuscaYoutube({
+    rodar: async () => {
+      rodou = true;
+      return '{"entries":[]}';
+    },
+    perguntarInnertube: async () => respostaInnertube,
+  });
+  assert.equal((await busca.buscar('gal costa baby', 'u1')).length, 2);
+  assert.equal(rodou, false);
+});
+
+test('InnerTube que falha ou vem vazia cai no yt-dlp, e a busca não fica sem resposta', async () => {
+  const umVideo = JSON.stringify({
+    entries: [{ id: 'b7d6wnaRm2E', title: 'Baby', channel: 'Gal Costa', duration: 213 }],
+  });
+  for (const perguntarInnertube of [
+    async () => {
+      throw new Error('recusou a versão do cliente');
+    },
+    async () => ({}),
+  ]) {
+    const busca = criarBuscaYoutube({ rodar: async () => umVideo, perguntarInnertube });
+    const [faixa] = await busca.buscar('gal costa baby', 'u1');
+    assert.equal(faixa.titulo, 'Baby');
+  }
 });
 
 test('sem vaga, a busca espera a vez em vez de ser recusada', async () => {
