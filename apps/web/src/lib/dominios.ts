@@ -10,6 +10,26 @@
 
 export const IMPORTADOR = 'https://importer.radinho.online';
 export const API_ORIGEM = 'https://api.radinho.online';
+/**
+ * A borda do GitHub (infra/cdn/github-worker): toca a cópia do cofre, serve o
+ * relógio da letra pré-computado e o ESPELHO do acervo (`/acervo`) — é o que
+ * mantém o app de pé quando o servidor da API e o importador caem.
+ */
+export const BORDA_DO_GITHUB = 'https://musicas.radinho.online';
+/**
+ * Importadores de RESERVA (nuvem), na ordem de tentativa, para quando o
+ * principal não responde: o médico (telemetry/medico.ts) sonda o `/health` de
+ * cada um e o app passa a falar com o primeiro que responder, até o principal
+ * voltar. `VITE_IMPORTADOR_RESERVA` (csv) manda no lugar da lista padrão; o
+ * padrão é o serviço do Render descrito em render.yaml.
+ */
+export const IMPORTADORES_RESERVA: readonly string[] = (
+  (import.meta.env.VITE_IMPORTADOR_RESERVA as string | undefined) ??
+  'https://radinho-importador.onrender.com'
+)
+  .split(',')
+  .map((s) => s.trim().replace(/\/+$/, ''))
+  .filter((s) => /^https?:\/\//.test(s));
 
 const ANTIGOS: ReadonlyArray<readonly [RegExp, string]> = [
   [/^https?:\/\/importer\.nexusholding\.xyz(?=[/?#]|$)/i, IMPORTADOR],

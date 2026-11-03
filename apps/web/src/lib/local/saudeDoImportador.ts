@@ -43,6 +43,7 @@ export function abrirCircuito(porMs: number = ABERTURA_MAXIMA_MS): void {
 export function fecharCircuito(): void {
   const estavaAberto = circuitoAberto();
   abertoAte = 0;
+  reserva = null;
   if (estavaAberto) avisar(false);
 }
 
@@ -64,8 +65,30 @@ function avisar(aberto: boolean): void {
   }
 }
 
+// ── Reserva na nuvem ────────────────────────────────────────────────────────
+//
+// Enquanto o circuito está aberto (principal fora), o médico pode apontar um
+// importador de RESERVA que respondeu ao /health. `helperUrl()` passa a
+// devolvê-lo; a alta do principal (fecharCircuito) desfaz sozinha.
+
+let reserva: string | null = null;
+
+/** O importador de reserva em uso, ou `null` (principal vivo, ou sem reserva). */
+export function reservaAtiva(): string | null {
+  return circuitoAberto() && reserva ? reserva : null;
+}
+
+export function ativarReserva(url: string): void {
+  reserva = url.replace(/\/+$/, '') || null;
+}
+
+export function desativarReserva(): void {
+  reserva = null;
+}
+
 /** Só para teste. */
 export function zerarSaudeDoImportador(): void {
   abertoAte = 0;
   ouvintes = [];
+  reserva = null;
 }

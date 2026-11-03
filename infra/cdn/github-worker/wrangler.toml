@@ -6,8 +6,23 @@ routes = [{ pattern = "musicas.radinho.online", custom_domain = true }]
 
 [vars]
 DONO = "Changzaoo"
+# A API cuja listagem é espelhada no KV (GET /acervo) e a origem do cofre, cuja
+# URL é o que o acervo grava em `remoteUrl` (o app troca pela borda ao tocar).
+API_ORIGEM = "https://api.radinho.online"
+ORIGEM_COFRE = "https://importer.radinho.online"
 
-# Segredo (não vai no repositório):
-#   npx wrangler secret put GITHUB_TOKEN
-# Token fine-grained do GitHub, só leitura de Contents, em "All repositories"
-# (contêineres novos aparecem sozinhos ao longo do envio).
+# Espelho do acervo: a cada 20 min a borda copia /api/v1/catalogo para o KV.
+[triggers]
+crons = ["*/20 * * * *"]
+
+# `npx wrangler kv namespace create ACERVO` cria e imprime o id abaixo.
+[[kv_namespaces]]
+binding = "ACERVO"
+id = "130a6b139fa54dc19f141a2bf4a375f8"
+
+# Segredos (não vão no repositório):
+#   npx wrangler secret put GITHUB_TOKEN   — token fine-grained do GitHub, só
+#     leitura de Contents, em "All repositories" (contêineres novos aparecem
+#     sozinhos ao longo do envio).
+#   npx wrangler secret put ESPELHO_TOKEN  — quem pode fazer PUT /acervo (o
+#     worker da API), para quando a busca feita daqui for desafiada.

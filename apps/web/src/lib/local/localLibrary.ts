@@ -1567,13 +1567,6 @@ export async function importFiles(files: File[]): Promise<TrackDto[]> {
   }
   // Non-blocking: fetch real covers/metadata from iTunes for what we just added.
   void enrichSequentially(imported.map((t) => t.id));
-  if (imported.length > 0) {
-    pushNotification({
-      type: 'import',
-      title: imported.length === 1 ? 'Faixa importada' : `${imported.length} faixas importadas`,
-      body: imported.length === 1 ? imported[0]?.title : undefined,
-    });
-  }
   return imported;
 }
 
@@ -1941,7 +1934,7 @@ async function saveBlobAsLocalTrack(
  * stores it locally and enriches its cover/metadata. Throws friendly pt-BR
  * errors the caller shows as a toast.
  */
-export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Promise<TrackDto> {
+export async function addByUrl(url: string, _opts: { silent?: boolean } = {}): Promise<TrackDto> {
   let parsed: URL;
   try {
     parsed = new URL(url.trim());
@@ -1975,8 +1968,6 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
     });
     void enrichLocalTrack(track.id).catch(() => undefined);
     void publishSharedTrack(track, origem); // share with the community
-    if (!opts.silent)
-      pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
     return track;
   }
 
@@ -2017,8 +2008,6 @@ export async function addByUrl(url: string, opts: { silent?: boolean } = {}): Pr
   const track = await saveBlobAsLocalTrack(blob, { title: fileName, sourceUrl: parsed.toString() });
   void enrichLocalTrack(track.id).catch(() => undefined);
   void publishSharedTrack(track, parsed.toString()); // share with the community
-  if (!opts.silent)
-    pushNotification({ type: 'import', title: 'Música baixada', body: track.title });
   return track;
 }
 
@@ -2046,11 +2035,6 @@ export async function addPlaylistByUrl(
       /* skip a failed entry, keep going */
     }
   }
-  pushNotification({
-    type: 'import',
-    title: 'Playlist importada',
-    body: `${imported} de ${entries.length} faixas adicionadas`,
-  });
   return { imported, total: entries.length };
 }
 

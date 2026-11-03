@@ -206,14 +206,7 @@ export function PrateleiraEmAlta() {
           `${artista} ${track.title}`,
           sinalComTempoLimite(TEMPO_LIMITE_MS),
         );
-        if (!busca.ok && busca.motivo !== 'login') {
-          pushNotification({
-            type: 'error',
-            title: 'O importador não respondeu',
-            body: 'Tente de novo em instantes.',
-          });
-          return;
-        }
+        if (!busca.ok && busca.motivo !== 'login') return;
         video = busca.ok ? escolherVideo(busca.resultados, track) : null;
       }
       const faixa = video ? await comTempoLimite(faixaDoYoutube(video), TEMPO_LIMITE_MS) : null;
@@ -232,12 +225,8 @@ export function PrateleiraEmAlta() {
       // O mesmo caminho de qualquer link colado: a fila de import normal.
       importQueue.enqueue([{ url: video.url, title: `${artista} - ${track.title}` }]);
     } catch {
-      // Tempo limite ou crachá indisponível: o botão volta e a pessoa sabe.
-      pushNotification({
-        type: 'error',
-        title: 'O importador não respondeu',
-        body: 'Tente de novo em instantes.',
-      });
+      // Tempo limite ou crachá indisponível: o botão volta, sem aviso (o dono
+      // pediu, 03/11/2026: nada de notificação do importador).
     } finally {
       setTrazendo(null);
     }

@@ -30,8 +30,15 @@
  * sobe para quem está ouvindo música.
  */
 import { anotar, curar, ouvirDiario, relogioDoDiario, type Linha } from './diario';
-import { helperUrl } from '@/lib/local/importerHelper';
-import { abrirCircuito, fecharCircuito } from '@/lib/local/saudeDoImportador';
+import { helperUrl, urlPrimariaDoImportador } from '@/lib/local/importerHelper';
+import {
+  abrirCircuito,
+  ativarReserva,
+  desativarReserva,
+  fecharCircuito,
+  reservaAtiva,
+} from '@/lib/local/saudeDoImportador';
+import { IMPORTADORES_RESERVA } from '@/lib/dominios';
 import { ouvirLrclib, type EventoDoLrclib } from '@/lib/lyrics/portaoDoLrclib';
 
 /** Duas falhas nesta janela é doença, não soluço. */
@@ -119,7 +126,9 @@ async function comPrazo<T>(executar: (signal: AbortSignal) => Promise<T>): Promi
  * também aí prova que nem a borda foi alcançada (rede, túnel).
  */
 export async function sondarImportador(): Promise<Diagnostico> {
-  const url = `${helperUrl()}/health`;
+  // O PRINCIPAL, sempre: com a reserva ativa, `helperUrl()` apontaria para ela
+  // e a sonda nunca saberia que o principal voltou.
+  const url = `${urlPrimariaDoImportador()}/health`;
   try {
     const r = await comPrazo((signal) => fetch(url, { cache: 'no-store', signal }));
     return r.ok ? 'ok' : `http ${r.status}`;
@@ -131,6 +140,29 @@ export async function sondarImportador(): Promise<Diagnostico> {
       return 'sem-alcance';
     }
   }
+}
+
+/**
+ * Com o principal fora, procura uma RESERVA na nuvem que responda ao /health
+ * (lista em dominios.ts) e a ativa. Uma por vez, na ordem; a primeira que
+ * responde ganha. Sem reserva configurada não faz nada.
+ */
+export async function sondarReservas(): Promise<string | null> {
+  if (reservaAtiva()) return reservaAtiva();
+  for (const base of IMPORTADORES_RESERVA) {
+    if (base === urlPrimariaDoImportador()) continue;
+    try {
+      const r = await comPrazo((signal) => fetch(`${base}/health`, { cache: 'no-store', signal }));
+      if (r.ok) {
+        ativarReserva(base);
+        anotar('medico', 'reserva', `importador de reserva ativo: ${new URL(base).host}`);
+        return base;
+      }
+    } catch {
+      /* próxima */
+    }
+  }
+  return null;
 }
 
 function descrever(diag: Diagnostico): string {
@@ -174,10 +206,16 @@ async function sondar(): Promise<void> {
   // médico morrer; enquanto ele sonda, quem manda é a sonda).
   abrirCircuito();
   anotar('medico', 'sondando', `importador ${descrever(diag)}`);
+  // Enquanto o principal não volta, a nuvem segura a operação.
+  if (!reservaAtiva()) await sondarReservas();
   if (!caso.desistiu && Date.now() - caso.abertoEm >= DESISTE_APOS_MS) {
     caso.desistiu = true;
     const min = Math.round((Date.now() - caso.abertoEm) / 60_000);
-    anotar('medico', 'desistiu', `importador fora há ${min} min (${descrever(diag)}); sigo sondando a cada 60 s`);
+    anotar(
+      'medico',
+      'desistiu',
+      `importador fora há ${min} min (${descrever(diag)}); sigo sondando a cada 60 s`,
+    );
   }
   agendarSonda(SONDAS_MS[Math.min(caso.sondas, SONDAS_MS.length - 1)] ?? 60_000);
 }
@@ -208,6 +246,7 @@ function darAltaAoImportador(): void {
   if (timer !== null) clearTimeout(timer);
   caso = null;
   falhasRecentes = [];
+  desativarReserva();
   fecharCircuito();
   const curadas = curar(
     (l) =>
@@ -215,7 +254,11 @@ function darAltaAoImportador(): void {
       (ehQueixaDoImportador(l, host) || (l.c === 'medico' && l.e === 'desistiu')),
   );
   const segundos = Math.max(1, Math.round((Date.now() - abertoEm) / 1000));
-  anotar('medico', 'curou', `importador voltou depois de ${segundos}s: ${curadas} falha(s) curada(s)`);
+  anotar(
+    'medico',
+    'curou',
+    `importador voltou depois de ${segundos}s: ${curadas} falha(s) curada(s)`,
+  );
   avisarAlta('importador');
 }
 

@@ -37,6 +37,7 @@
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
+import { vereditoDaCopia, vereditoDeStatus, type Veredito } from './copiaViva.js';
 import { hostConfiavel } from './hostConfiavel.js';
 
 const log = logger.child({ worker: 'acervo-fiel' });
@@ -45,29 +46,13 @@ const log = logger.child({ worker: 'acervo-fiel' });
 const LOTE = 60;
 /** Quantas conferências em voo ao mesmo tempo. Espera rede, não CPU. */
 const SIMULTANEAS = 6;
-/** Uma cópia que não respondeu neste tempo não provou nada. */
-const TIMEOUT_MS = 10_000;
 /** Mortas seguidas numa volta que fazem desconfiar do cofre, não das faixas. */
 export const MORTAS_SEGUIDAS_PARA_PARAR = 8;
 
 /** Onde a varredura parou — o cursor dá a volta no acervo sozinho. */
 let cursor: string | null = null;
 
-export type Veredito = 'viva' | 'morta' | 'incerta';
-
-/**
- * O que a resposta do cofre significa.
- *
- * Separado da rede para ser testável sem servidor: é aqui que mora a regra que
- * decide se uma faixa some do acervo, e ela precisa ser óbvia de ler.
- */
-export function vereditoDeStatus(status: number): Veredito {
-  if (status === 404) return 'morta';
-  if (status >= 200 && status < 400) return 'viva';
-  // 403 (desafio da Cloudflare, token trocado), 416, 5xx, 429, 503 do cofre
-  // reconstruindo… nada disso prova que a cópia sumiu.
-  return 'incerta';
-}
+export { vereditoDeStatus, type Veredito };
 
 /** Pergunta ao cofre se a cópia ainda serve, sem baixar a música inteira. */
 export async function conferirCopia(
@@ -78,19 +63,8 @@ export async function conferirCopia(
     avisar?.(url);
     return 'incerta'; // host fora do cofre: nunca consultado, nunca "morta"
   }
-  const controller = new AbortController();
-  const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
-  try {
-    const res = await fetch(url, {
-      headers: { Range: 'bytes=0-0' },
-      signal: controller.signal,
-    });
-    return vereditoDeStatus(res.status);
-  } catch {
-    return 'incerta'; // rede/abort: nada provado
-  } finally {
-    clearTimeout(timer);
-  }
+  // Borda primeiro; "morta" só com 404 da borda E da origem (ver copiaViva).
+  return vereditoDaCopia(url);
 }
 
 interface EntradaDoAcervo {

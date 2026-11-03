@@ -143,3 +143,83 @@ describe('acervo servido pelo nosso servidor', () => {
     await expect(api.publicarEntrada(faixa('x') as never)).rejects.toThrow('403');
   });
 });
+
+describe('o servidor caiu: o espelho na borda segura a Home', () => {
+  let api: typeof CatalogoApi;
+  let fetchMock: ReturnType<typeof vi.fn>;
+  let status: typeof import('@/lib/sync/syncStatus');
+
+  beforeEach(async () => {
+    vi.resetModules();
+    vi.stubGlobal('indexedDB', undefined);
+    fetchMock = vi.fn();
+    vi.stubGlobal('fetch', fetchMock);
+    status = await import('@/lib/sync/syncStatus');
+    api = await import('@/lib/sync/catalogoApi');
+  });
+
+  const espelho = (n: number) =>
+    resposta(
+      {
+        data: Array.from({ length: n }, (_, i) => ({
+          ...faixa(`e${i}`),
+          remoteUrl: `https://importer.radinho.online/blob/e${i}?k=k${i}`,
+          tocavel: true,
+        })),
+      },
+      '',
+    );
+
+  it('rede caída na API → lê /acervo da borda e entrega com origem "espelho"', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('musicas.radinho.online/acervo')) return espelho(3);
+      throw new TypeError('Failed to fetch');
+    });
+    const recebidas: unknown[][] = [];
+    const parar = api.subscribeCatalogo((e) => recebidas.push(e));
+    await escoar();
+    await escoar();
+    parar();
+    expect(recebidas).toHaveLength(1);
+    expect(recebidas[0]).toHaveLength(3);
+    expect((recebidas[0]![0] as { remoteUrl?: string }).remoteUrl).toContain('/blob/e0?k=k0');
+    expect(status.registrarSnapshot).toHaveBeenCalledWith('catalogo', 3, 'espelho');
+    const urls = fetchMock.mock.calls.map((c) => String(c[0]));
+    expect(urls.some((u) => u.endsWith('/catalogo'))).toBe(true);
+    expect(urls.some((u) => u === 'https://musicas.radinho.online/acervo')).toBe(true);
+  });
+
+  it('530/503 da API também cai para o espelho; 304 e 2xx nunca o consultam', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/acervo')) return espelho(2);
+      return resposta({}, '', 530);
+    });
+    const recebidas: unknown[][] = [];
+    const parar = api.subscribeCatalogo((e) => recebidas.push(e));
+    await escoar();
+    await escoar();
+    parar();
+    expect(recebidas[0]).toHaveLength(2);
+
+    fetchMock.mockReset();
+    fetchMock.mockResolvedValueOnce(resposta({ data: [faixa('a')] }, 'W/"1"'));
+    const parar2 = api.subscribeCatalogo(() => undefined);
+    await escoar();
+    parar2();
+    expect(fetchMock.mock.calls.every((c) => !String(c[0]).includes('/acervo'))).toBe(true);
+  });
+
+  it('espelho vazio ou fora: o erro original é registrado, nada é entregue', async () => {
+    fetchMock.mockImplementation(async (url: string) => {
+      if (String(url).includes('/acervo')) return resposta('espelho-vazio', '', 503);
+      throw new TypeError('Failed to fetch');
+    });
+    const recebidas: unknown[][] = [];
+    const parar = api.subscribeCatalogo((e) => recebidas.push(e));
+    await escoar();
+    await escoar();
+    parar();
+    expect(recebidas).toHaveLength(0);
+    expect(status.registrarErro).toHaveBeenCalled();
+  });
+});

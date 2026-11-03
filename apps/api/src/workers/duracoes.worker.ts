@@ -34,6 +34,7 @@ import { duracaoDoMp3, tamanhoDoId3 } from '@radinho/shared';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
+import { lerBordaDepoisOrigem } from './copiaViva.js';
 import { hostConfiavel } from './hostConfiavel.js';
 import { baseInterna } from './varreduraNoturna.worker.js';
 
@@ -267,7 +268,8 @@ export async function medirLote(
       }
       continue; // incerta: nada lido, nada marcado
     }
-    const r = url ? await medirCopia(url) : null;
+    // Borda primeiro: 404 da origem sozinho não é morte (cofre novo em 28/10).
+    const r = url ? await lerBordaDepoisOrigem(remota, url, medirCopia) : null;
     if (r === 'incerta') continue; // tenta na próxima volta
     if (r === 'morta') {
       // Morta é assunto do acervo fiel; aqui só sai da fila de durações — mas

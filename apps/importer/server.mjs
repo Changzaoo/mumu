@@ -3401,6 +3401,26 @@ async function main() {
         try {
           meta = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
         } catch {
+          // Sem meta local o áudio pode estar na borda (GitHub): em 28/10 o
+          // cofre mudou de máquina e 404 aqui fazia o servidor da API apagar
+          // a cópia de 5,6 mil faixas que continuavam vivas. Com o k, manda
+          // para a borda (quem confere o token é ela); sem k, 403.
+          if (AUDIO_BORDA) {
+            const kPedido = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get(
+              'k',
+            );
+            if (!kPedido) {
+              res.writeHead(403, { 'Content-Type': 'text/plain', 'Cache-Control': 'no-store' });
+              res.end('forbidden');
+              return;
+            }
+            res.writeHead(302, {
+              Location: `${AUDIO_BORDA}/blob/${encodeURIComponent(id)}?k=${encodeURIComponent(kPedido)}`,
+              'Cache-Control': 'no-store',
+            });
+            res.end();
+            return;
+          }
           res.writeHead(404, { 'Content-Type': 'text/plain' });
           res.end('not found');
           return;

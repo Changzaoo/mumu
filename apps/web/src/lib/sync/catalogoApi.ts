@@ -28,6 +28,7 @@ import type { LibraryEntry } from '@/lib/local/localLibrary';
 import { getIdToken } from '@/lib/firebase';
 import { registrarErro, registrarSnapshot } from '@/lib/sync/syncStatus';
 import { API_BASE_URL } from '@/lib/apiBase';
+import { BORDA_DO_GITHUB } from '@/lib/dominios';
 import { cederAThread } from '@/lib/perf/ceder';
 
 const BASE_URL = API_BASE_URL;
@@ -225,17 +226,53 @@ interface Resposta {
   /** `null` quando o servidor respondeu 304 — nada mudou, mantenha o que tem. */
   entradas: LibraryEntry[] | null;
   etag: string | null;
+  /** De onde veio: o servidor, ou o espelho na borda quando o servidor caiu. */
+  origem: 'servidor' | 'espelho';
+}
+
+/**
+ * O ESPELHO NA BORDA (infra/cdn/github-worker, `GET /acervo`): a mesma
+ * listagem, copiada para o KV da Cloudflare pelo worker da API a cada 20 min,
+ * com a `remoteUrl` de cada faixa remontada pelo índice do GitHub. É o que faz
+ * a Home ter música quando o servidor está fora do ar — a música mora no
+ * GitHub, não no servidor. Sem ETag de propósito: a próxima conferência vai ao
+ * servidor de novo, sem `If-None-Match`, e traz o acervo de verdade quando ele
+ * voltar.
+ */
+async function buscarNoEspelho(): Promise<Resposta | null> {
+  try {
+    const res = await fetch(`${BORDA_DO_GITHUB}/acervo`, { cache: 'no-store' });
+    if (!res.ok) return null;
+    const corpo = (await res.json()) as { data?: unknown };
+    const entradas = Array.isArray(corpo.data) ? (corpo.data as LibraryEntry[]) : [];
+    if (entradas.length === 0) return null;
+    return { entradas, etag: null, origem: 'espelho' };
+  } catch {
+    return null;
+  }
 }
 
 async function buscar(etagAtual: string | null): Promise<Resposta> {
-  const res = await fetch(`${BASE_URL}/catalogo`, {
-    headers: etagAtual ? { 'If-None-Match': etagAtual } : {},
-  });
-  if (res.status === 304) return { entradas: null, etag: etagAtual };
-  if (!res.ok) throw new Error(`acervo: HTTP ${res.status}`);
+  let res: Response;
+  try {
+    res = await fetch(`${BASE_URL}/catalogo`, {
+      headers: etagAtual ? { 'If-None-Match': etagAtual } : {},
+    });
+  } catch (erro) {
+    // Servidor fora (rede, túnel, 530 sem CORS): o espelho segura a Home.
+    const espelho = await buscarNoEspelho();
+    if (espelho) return espelho;
+    throw erro;
+  }
+  if (res.status === 304) return { entradas: null, etag: etagAtual, origem: 'servidor' };
+  if (!res.ok) {
+    const espelho = res.status >= 500 || res.status === 403 ? await buscarNoEspelho() : null;
+    if (espelho) return espelho;
+    throw new Error(`acervo: HTTP ${res.status}`);
+  }
   const corpo = (await res.json()) as { data?: unknown };
   const entradas = Array.isArray(corpo.data) ? (corpo.data as LibraryEntry[]) : [];
-  return { entradas, etag: res.headers.get('ETag') };
+  return { entradas, etag: res.headers.get('ETag'), origem: 'servidor' };
 }
 
 // ── assinatura ──────────────────────────────────────────────────────────────
@@ -260,10 +297,10 @@ export function subscribeCatalogo(
   const revalidar = async (): Promise<void> => {
     if (cancelado) return;
     try {
-      const { entradas, etag: novo } = await buscar(etag);
+      const { entradas, etag: novo, origem } = await buscar(etag);
       etag = novo;
       if (cancelado || !entradas) return; // 304: nada mudou
-      registrarSnapshot(COLECAO, entradas.length, 'servidor');
+      registrarSnapshot(COLECAO, entradas.length, origem);
       // Entrega PRIMEIRO, grava depois (na folga): ver `gravarCache`.
       void gravarCache({ etag, entradas });
       callback(entradas);

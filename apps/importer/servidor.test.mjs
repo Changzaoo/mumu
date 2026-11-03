@@ -131,3 +131,82 @@ test('cofre: reenvio com bytes diferentes exige o k; DELETE exige o k', async ()
   assert.equal((await fetch(`${base}/blob/naoexiste`, { method: 'DELETE' })).status, 404);
   assert.equal((await fetch(`${base}/blob/faixa1?k=${token}`, { method: 'DELETE' })).status, 204);
 });
+
+// ── /blob/:id sem meta local: borda do GitHub (302) em vez de 404 ───────────
+const semRedirect = (url, opts = {}) => fetch(url, { redirect: 'manual', ...opts });
+
+test('blob sem meta: 302 para a borda repassando o k (GET e HEAD iguais)', async () => {
+  const id = 'local:6198b985-a11c-4d44-8c87-286ad7270d6e';
+  const alvo = `https://musicas.radinho.online/blob/${encodeURIComponent(id)}?k=abc123`;
+  for (const method of ['GET', 'HEAD']) {
+    const r = await semRedirect(`${base}/blob/${encodeURIComponent(id)}?k=abc123`, { method });
+    assert.equal(r.status, 302, method);
+    assert.equal(r.headers.get('location'), alvo, method);
+    assert.equal(r.headers.get('cache-control'), 'no-store', method);
+  }
+});
+
+test('blob sem meta e sem k: 403 (GET e HEAD)', async () => {
+  for (const method of ['GET', 'HEAD']) {
+    const r = await semRedirect(`${base}/blob/naoexiste2`, { method });
+    assert.equal(r.status, 403, method);
+  }
+});
+
+test('blob com meta local: 200 normal, sem redirecionar', async () => {
+  const r1 = await fetch(`${base}/blob`, {
+    method: 'POST',
+    headers: { 'X-Blob-Id': 'faixa-local', 'Content-Type': 'audio/mpeg' },
+    body: mp3('local'),
+  });
+  const { token } = await r1.json();
+  const g = await semRedirect(`${base}/blob/faixa-local?k=${token}`);
+  assert.equal(g.status, 200);
+  await g.arrayBuffer();
+  const h = await semRedirect(`${base}/blob/faixa-local?k=${token}`, { method: 'HEAD' });
+  assert.equal(h.status, 200);
+  assert.equal((await semRedirect(`${base}/blob/faixa-local?k=errado`)).status, 403);
+});
+
+test('blob sem meta com AUDIO_BORDA vazio: 404', async () => {
+  const port = await livre();
+  const b = `http://127.0.0.1:${port}`;
+  const dir = await mkdtemp(path.join(os.tmpdir(), 'importer-srv2-'));
+  const f = spawn(process.execPath, [path.join(AQUI, 'server.mjs')], {
+    env: {
+      ...process.env,
+      PORT: String(port),
+      HOST: '127.0.0.1',
+      BLOB_DIR: path.join(dir, 'blobs'),
+      COFRE_EXIGE_MARCADOR: '0',
+      JEV_DIR: path.join(dir, 'jev'),
+      TEMPO_DIR: path.join(dir, 'tempos'),
+      AUDIO_BORDA: '',
+      IMPORT_REQUIRE_LOGIN: '',
+      IMPORT_ALLOWED_EMAILS: '',
+      IMPORT_TOKEN: '',
+      IMPORT_SERVICE_TOKEN: '',
+    },
+    stdio: 'ignore',
+    windowsHide: true,
+  });
+  try {
+    let ok = false;
+    for (let i = 0; i < 100 && !ok; i++) {
+      try {
+        ok = (await fetch(`${b}/health`)).ok;
+      } catch {
+        await new Promise((r) => setTimeout(r, 200));
+      }
+    }
+    assert.ok(ok, 'servidor não subiu');
+    for (const method of ['GET', 'HEAD']) {
+      const r = await semRedirect(`${b}/blob/naoexiste?k=x`, { method });
+      assert.equal(r.status, 404, method);
+    }
+  } finally {
+    f.kill('SIGKILL');
+    await new Promise((r) => setTimeout(r, 200));
+    await rm(dir, { recursive: true, force: true }).catch(() => undefined);
+  }
+});

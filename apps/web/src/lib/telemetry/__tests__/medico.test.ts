@@ -12,6 +12,11 @@ vi.mock('@/lib/local/cofreLocal', () => ({
 }));
 vi.mock('@/lib/local/importerHelper', () => ({
   helperUrl: () => 'https://importer.radinho.online',
+  urlPrimariaDoImportador: () => 'https://importer.radinho.online',
+}));
+vi.mock('@/lib/dominios', async (importar) => ({
+  ...(await importar<typeof import('@/lib/dominios')>()),
+  IMPORTADORES_RESERVA: ['https://radinho-importador.onrender.com'],
 }));
 
 import { anotar, lerDiario, resumoDoDiario, zerarDiario } from '../diario';
@@ -25,15 +30,24 @@ import {
   ehQueixaDoLrclib,
   instalarMedico,
 } from '../medico';
-import { circuitoAberto, zerarSaudeDoImportador } from '@/lib/local/saudeDoImportador';
+import {
+  circuitoAberto,
+  reservaAtiva,
+  zerarSaudeDoImportador,
+} from '@/lib/local/saudeDoImportador';
 import { pedirAoLrclib, zerarPortaoDoLrclib } from '@/lib/lyrics/portaoDoLrclib';
 
 const resposta = (status: number, cabecalhos: Record<string, string> = {}): Response =>
   ({ ok: status >= 200 && status < 300, status, headers: new Headers(cabecalhos) }) as Response;
 
-/** O importador: `saude` diz se o /health responde; o resto sempre responde. */
-function stubDoImportador(estado: { saude: boolean; bloqueado?: boolean }) {
+/** O importador: `saude` diz se o /health responde; o resto sempre responde.
+ *  `reserva` diz se o importador de reserva (nuvem) responde ao /health. */
+function stubDoImportador(estado: { saude: boolean; bloqueado?: boolean; reserva?: boolean }) {
   return vi.fn(async (url: string, init?: RequestInit) => {
+    if (String(url).startsWith('https://radinho-importador.onrender.com/health')) {
+      if (estado.reserva) return resposta(200);
+      throw new TypeError('Failed to fetch');
+    }
     if (String(url).endsWith('/health')) {
       if (estado.saude) return resposta(200);
       // Sem CORS a borda responde opaco quando está só bloqueando; quando nem
@@ -48,12 +62,16 @@ function stubDoImportador(estado: { saude: boolean; bloqueado?: boolean }) {
 function falhasDoImportador(quantas: number): void {
   const rotas = ['/letra/outras-fontes', '/ai/chat', '/aquecer', '/speed'];
   for (let i = 0; i < quantas; i++) {
-    anotar('rede', 'falhou', `GET importer.radinho.online${rotas[i % rotas.length]} Failed to fetch`);
+    anotar(
+      'rede',
+      'falhou',
+      `GET importer.radinho.online${rotas[i % rotas.length]} Failed to fetch`,
+    );
   }
 }
 
 describe('o médico e o importador fora do ar', () => {
-  let estado: { saude: boolean; bloqueado?: boolean };
+  let estado: { saude: boolean; bloqueado?: boolean; reserva?: boolean };
   let altas: string[];
   const aoDarAlta = (e: Event): void => {
     altas.push((e as CustomEvent<{ doenca: string }>).detail.doenca);
@@ -81,10 +99,18 @@ describe('o médico e o importador fora do ar', () => {
 
   it('reconhece a queixa pelo host, não pelo caminho', () => {
     const linha = (e: string, d: string) => ({ em: '', ms: 0, c: 'rede' as const, e, d });
-    expect(ehQueixaDoImportador(linha('falhou', 'GET importer.radinho.online/stream Failed to fetch'))).toBe(true);
-    expect(ehQueixaDoImportador(linha('http', '503 POST importer.radinho.online/ai/chat'))).toBe(true);
-    expect(ehQueixaDoImportador(linha('http', '404 GET importer.radinho.online/cover'))).toBe(false);
-    expect(ehQueixaDoImportador(linha('falhou', 'GET lrclib.net/api/get Failed to fetch'))).toBe(false);
+    expect(
+      ehQueixaDoImportador(linha('falhou', 'GET importer.radinho.online/stream Failed to fetch')),
+    ).toBe(true);
+    expect(ehQueixaDoImportador(linha('http', '503 POST importer.radinho.online/ai/chat'))).toBe(
+      true,
+    );
+    expect(ehQueixaDoImportador(linha('http', '404 GET importer.radinho.online/cover'))).toBe(
+      false,
+    );
+    expect(ehQueixaDoImportador(linha('falhou', 'GET lrclib.net/api/get Failed to fetch'))).toBe(
+      false,
+    );
     expect(ehQueixaDoLrclib(linha('http', '429 GET lrclib.net/api/search'))).toBe(true);
     expect(ehQueixaDoLrclib(linha('http', '400 GET lrclib.net/api/get'))).toBe(false);
   });
@@ -128,6 +154,39 @@ describe('o médico e o importador fora do ar', () => {
     expect(resumoDoDiario().sintomas).toBe(0);
     expect(resumoDoDiario().curados).toBe(5);
     expect(altas).toEqual(['importador']);
+  });
+
+  it('principal fora e reserva na nuvem viva: a reserva assume e cai com a alta do principal', async () => {
+    estado.reserva = true;
+    falhasDoImportador(FALHAS_PARA_TRATAR);
+    expect(circuitoAberto()).toBe(true);
+    expect(reservaAtiva()).toBeNull();
+    // Primeira sonda: principal segue fora → procura reserva.
+    await vi.advanceTimersByTimeAsync(SONDAS_MS[0]! + 50);
+    expect(reservaAtiva()).toBe('https://radinho-importador.onrender.com');
+    expect(lerDiario().some((l) => l.c === 'medico' && l.e === 'reserva')).toBe(true);
+    // Só a sonda do PRINCIPAL continua; a reserva não é sondada de novo.
+    const sondasNaReserva = () =>
+      (fetch as ReturnType<typeof vi.fn>).mock.calls.filter((c) =>
+        String(c[0]).startsWith('https://radinho-importador.onrender.com'),
+      ).length;
+    const antes = sondasNaReserva();
+    await vi.advanceTimersByTimeAsync(SONDAS_MS[1]! + 50);
+    expect(sondasNaReserva()).toBe(antes);
+    // O principal volta: alta, e a reserva sai de cena.
+    estado.saude = true;
+    await vi.advanceTimersByTimeAsync(SONDAS_MS[2]! + 50);
+    expect(circuitoAberto()).toBe(false);
+    expect(reservaAtiva()).toBeNull();
+    expect(casoAberto()).toBeNull();
+  });
+
+  it('principal fora e reserva também fora: segue sem reserva, sondando', async () => {
+    estado.reserva = false;
+    falhasDoImportador(FALHAS_PARA_TRATAR);
+    await vi.advanceTimersByTimeAsync(SONDAS_MS[0]! + 50);
+    expect(circuitoAberto()).toBe(true);
+    expect(reservaAtiva()).toBeNull();
   });
 
   it('distingue "sem alcance" de "alcança a borda mas é bloqueado"', async () => {

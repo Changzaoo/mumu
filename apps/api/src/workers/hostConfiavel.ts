@@ -30,7 +30,7 @@ export function hostConfiavel(url: string): boolean {
   if (!/^https?:$/.test(u.protocol)) return false;
   const e = env as Record<string, unknown>;
   const permitidos = new Set<string>(HOSTS_FIXOS);
-  for (const v of [e.IMPORTER_PUBLIC_URL, e.IMPORTER_URL]) {
+  for (const v of [e.IMPORTER_PUBLIC_URL, e.IMPORTER_URL, e.AUDIO_BORDA_URL]) {
     const h = hostDe(typeof v === 'string' ? v : null);
     if (h) permitidos.add(h);
   }

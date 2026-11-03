@@ -183,6 +183,15 @@ const envSchema = z
      */
     IMPORTER_PUBLIC_URL: optionalString,
     /**
+     * A borda do áudio (Cloudflare Worker sobre os repositórios do GitHub).
+     * Os agentes do acervo conferem a cópia aqui ANTES da origem: 404 da origem
+     * sozinho não prova morte (o cofre mudou de máquina em 28/10). Vazio desliga.
+     */
+    AUDIO_BORDA_URL: z.preprocess(
+      (v) => (typeof v === 'string' && v.trim() === '' ? undefined : v),
+      z.string().default('https://musicas.radinho.online'),
+    ),
+    /**
      * Hosts (csv) de onde o ACERVO aceita audio de usuario comum (`remoteUrl`,
      * `streamUrl`, `sourceUrl`). Soma-se aos hosts do IMPORTER_URL e
      * IMPORTER_PUBLIC_URL. Admin nao passa por esta validacao.
@@ -197,6 +206,11 @@ const envSchema = z
      * é fechado por conta do Firebase e um worker não tem conta.
      */
     IMPORT_SERVICE_TOKEN: optionalString,
+    /**
+     * Quem pode gravar o espelho do acervo na borda (`PUT <AUDIO_BORDA_URL>/acervo`,
+     * segredo ESPELHO_TOKEN do Worker). Sem ele o agente espelhoDoAcervo não sobe.
+     */
+    ESPELHO_TOKEN: optionalString,
     /**
      * A JANELA — por que "de madrugada" e não "o tempo todo".
      *

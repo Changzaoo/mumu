@@ -17,7 +17,7 @@ import type { TrackDto } from '@radinho/shared';
 import { useSettingsStore } from '@/stores/settingsStore';
 import { qualidadeEfetiva } from '@/lib/perf/adaptacao';
 import { IMPORTADOR } from '@/lib/dominios';
-import { circuitoAberto } from '@/lib/local/saudeDoImportador';
+import { circuitoAberto, reservaAtiva } from '@/lib/local/saudeDoImportador';
 
 /**
  * Erro de uma chamada ao helper que carrega o status HTTP da resposta. A fila
@@ -150,7 +150,11 @@ const UNREACHABLE_OVERRIDE =
 // them so the device self-heals onto the current same-origin default.
 const STALE_OVERRIDE = /ngrok|prance-mummified-subscript|nexusholding.xyz/i;
 
-export function helperUrl(): string {
+/**
+ * O endereço do importador PRINCIPAL (configurado ou padrão), ignorando a
+ * reserva. É o que o médico sonda para saber se o principal voltou.
+ */
+export function urlPrimariaDoImportador(): string {
   try {
     const stored = window.localStorage.getItem(STORAGE_KEY)?.replace(/\/$/, '');
     if (stored && (UNREACHABLE_OVERRIDE.test(stored) || STALE_OVERRIDE.test(stored))) {
@@ -161,6 +165,14 @@ export function helperUrl(): string {
   } catch {
     return DEFAULT_HELPER_URL;
   }
+}
+
+/**
+ * Com quem o app fala AGORA: a reserva na nuvem enquanto o principal está
+ * fora (ver saudeDoImportador/medico), senão o principal.
+ */
+export function helperUrl(): string {
+  return reservaAtiva() ?? urlPrimariaDoImportador();
 }
 
 export function setHelperUrl(url: string): void {

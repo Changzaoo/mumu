@@ -26,7 +26,7 @@ export interface EstadoColecao {
   /** Quando o último snapshot chegou. */
   ultimoSnapshotEm: string | null;
   /** Veio do cache local ou do servidor? */
-  origem: 'cache' | 'servidor' | null;
+  origem: 'cache' | 'servidor' | 'espelho' | null;
   /** Itens locais empurrados para a nuvem na união inicial. */
   enviadosNaUniao: number;
   /** Escritas que falharam desde o boot (regra, cota, rede). */
@@ -66,7 +66,11 @@ export function registrarUsuario(nome: string, uid: string | null): void {
   }
 }
 
-export function registrarSnapshot(nome: string, docs: number, origem: 'cache' | 'servidor'): void {
+export function registrarSnapshot(
+  nome: string,
+  docs: number,
+  origem: 'cache' | 'servidor' | 'espelho',
+): void {
   const e = estado(nome);
   e.assinou = true;
   e.docsNaNuvem = docs;
@@ -224,7 +228,12 @@ export function relatorioSyncTexto(resumo: ResumoBiblioteca, conta?: Conta): str
       linhas.push(`  ${c.ultimoErro ?? 'sem erro registrado — provavelmente sem rede'}`);
       continue;
     }
-    const origem = c.origem === 'cache' ? 'cache do aparelho' : 'servidor';
+    const origem =
+      c.origem === 'cache'
+        ? 'cache do aparelho'
+        : c.origem === 'espelho'
+          ? 'espelho na borda (servidor fora)'
+          : 'servidor';
     linhas.push(`✓ ${c.nome}: ${c.docsNaNuvem} na nuvem (${origem}, ${c.ultimoSnapshotEm})`);
     if (c.enviadosNaUniao > 0) {
       linhas.push(`  ${c.enviadosNaUniao} item(ns) daqui foram enviados para a nuvem`);

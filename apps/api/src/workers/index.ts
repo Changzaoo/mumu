@@ -17,6 +17,7 @@ import { startPesquisadorWorker } from './pesquisador.worker.js';
 import { startImportacoesWorker } from './importacoes.worker.js';
 import { startConteudoDaFaixaWorker } from './conteudoDaFaixa.worker.js';
 import { startEmAltaWorker } from './emAlta.worker.js';
+import { startEspelhoDoAcervoWorker } from './espelhoDoAcervo.worker.js';
 import { startDuracoesWorker } from './duracoes.worker.js';
 import { startMundoWorker } from './mundo.worker.js';
 import { startCreditosWorker } from './creditos.worker.js';
@@ -78,6 +79,10 @@ const stopConteudo = startConteudoDaFaixaWorker();
 // tempos em tempos e grava um retrato que a Home lê. Ver emAlta.worker.
 const stopEmAlta = startEmAltaWorker();
 
+// A listagem do acervo espelhada na borda do áudio (KV do Worker do GitHub):
+// quando este servidor cai, o app carrega a Home dali. Ver espelhoDoAcervo.worker.
+const stopEspelho = startEspelhoDoAcervoWorker();
+
 // Um terço do acervo nasceu com `durationMs: 0` e mostrava "0:00" na lista.
 // Este agente lê a duração no cabeçalho da cópia do cofre (sem baixar a música)
 // e a leva ao acervo e às bibliotecas. Ver duracoes.worker.
@@ -118,6 +123,7 @@ async function shutdown(signal: string): Promise<void> {
   stopVarredura();
   stopPesquisador();
   stopEmAlta();
+  stopEspelho();
   stopImportacoes();
   stopConteudo();
   stopDuracoes();

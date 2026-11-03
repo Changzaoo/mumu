@@ -12,7 +12,6 @@ import type { TrackDto } from '@radinho/shared';
 import { isFirstPartyUrl } from '@/lib/api';
 import { getIdToken } from '@/lib/firebase';
 import { queueLyricsSync } from '@/lib/lyrics/syncFromAudio';
-import { pushNotification } from '@/stores/notificationsStore';
 import { anotar } from '@/lib/telemetry/diario';
 import {
   cacheSupported,
@@ -444,7 +443,6 @@ async function baixarComVaga(
       inFlight.delete(track.id);
       emit();
       anotar('download', 'concluido', `${track.title} · ${Math.round(blob.size / 1024)} KB`);
-      pushNotification({ type: 'download', title: 'Download concluído', body: track.title });
       return;
     } catch (err) {
       if (cancelada()) return; // o usuário apagou: não é falha nem pede retomada

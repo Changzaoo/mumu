@@ -1,0 +1,38 @@
+# IMPORTADOR DE RESERVA NA NUVEM (Render, plano grátis) — fallback para quando o
+# importador principal (servidor vnmax) está fora do ar.
+#
+# Como ligar (uma vez, no painel do Render): New → Blueprint → este repositório.
+# O nome do serviço define a URL pública: https://radinho-importador.onrender.com
+# — é a que o app já tem como reserva padrão (apps/web/src/lib/dominios.ts,
+# IMPORTADORES_RESERVA). Mudou o nome? Ajuste VITE_IMPORTADOR_RESERVA na Vercel.
+#
+# Segredos (sync: false): preencha no painel, nunca aqui.
+#   IMPORT_SERVICE_TOKEN — o mesmo crachá de máquina da API (radinho-api.env).
+#   NVIDIA_API_KEY       — opcional; sem ela /ai/* responde 503 e o resto funciona.
+#   YTDLP_COOKIES_B64    — opcional; cookies.txt em base64 para o YouTube exigir
+#                          menos verificação (o entrypoint grava em /data/cookies.txt).
+#
+# Plano grátis: o serviço dorme após 15 min sem tráfego e acorda em ~1 min no
+# primeiro pedido (o médico do app sonda o /health e só então passa a usá-lo).
+# 512 MB de RAM, disco descartável: nada aqui precisa sobreviver a um reinício.
+services:
+  - type: web
+    name: radinho-importador
+    runtime: docker
+    plan: free
+    region: oregon
+    dockerfilePath: ./apps/importer/Dockerfile
+    dockerContext: .
+    healthCheckPath: /health
+    autoDeploy: true
+    envVars:
+      - key: FIREBASE_PROJECT_ID
+        value: mumu-2f54e
+      - key: AUDIO_BORDA
+        value: https://musicas.radinho.online
+      - key: IMPORT_SERVICE_TOKEN
+        sync: false
+      - key: NVIDIA_API_KEY
+        sync: false
+      - key: YTDLP_COOKIES_B64
+        sync: false

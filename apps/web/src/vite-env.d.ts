@@ -10,6 +10,8 @@ interface ImportMetaEnv {
   readonly VITE_SIGNALING_URL?: string;
   /** Nós/PoPs da CDN de áudio, separados por vírgula (ver lib/audio/cdn.ts). */
   readonly VITE_AUDIO_CDN?: string;
+  /** Importadores de reserva na nuvem (csv), sondados quando o principal cai. */
+  readonly VITE_IMPORTADOR_RESERVA?: string;
   /** Onde baixar o APK do Android (padrão: /radinho.apk, servido pelo site). */
   readonly VITE_ANDROID_APK_URL?: string;
   /** '1' = o login com Google já pede o aniversário (depois de o Google aprovar o escopo). */
