@@ -1,0 +1,28 @@
+# Semeador do acervo (lista do ouvirmusica.com.br) no vnmax, disparado pelo timer
+# radinho-semeador.timer (uma vez por noite, 40 músicas). Lê apps/api/dados/ouvirmusica.json
+# da pasta publicada e guarda o estado em dados/ (não repete o que já tentou).
+# A trava (flock) evita colidir com uma rodada manual do mesmo script.
+# Instalar (unidade de usuário, como as outras):
+#   cp radinho-semeador.{service,timer} ~/.config/systemd/user/ && systemctl --user daemon-reload
+#   systemctl --user enable --now radinho-semeador.timer
+[Unit]
+Description=radinho semeador (semearDoOuvirMusica.js --max 40) - /home/v/radinho-api
+After=network-online.target radinho-api.service radinho-importer.service
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+WorkingDirectory=/home/v/radinho-api
+EnvironmentFile=/home/v/radinho-api.env
+Environment=NODE_ENV=production
+Environment=NODE_OPTIONS=--max-old-space-size=384
+ExecStart=/usr/bin/flock -n /home/v/radinho-semeador.lock /usr/bin/node dist/scripts/semearDoOuvirMusica.js --lista dados/ouvirmusica.json --max 40 --pausa-ms 5000
+TimeoutStartSec=3h
+Nice=15
+CPUWeight=30
+IOSchedulingClass=idle
+MemoryHigh=512M
+MemoryMax=640M
+OOMScoreAdjust=500
+StandardOutput=append:/home/v/radinho-semeador.log
+StandardError=append:/home/v/radinho-semeador.log

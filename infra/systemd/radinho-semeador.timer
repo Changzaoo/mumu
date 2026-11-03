@@ -1,0 +1,12 @@
+# Dispara radinho-semeador.service toda noite às 06:10 UTC (o vnmax roda em UTC; 03:10 em Brasília).
+# Se o vnmax estava desligado na hora, roda ao ligar (Persistent).
+[Unit]
+Description=radinho semeador toda noite (40 músicas do ouvirmusica)
+
+[Timer]
+OnCalendar=*-*-* 06:10:00
+Persistent=true
+RandomizedDelaySec=15min
+
+[Install]
+WantedBy=timers.target
