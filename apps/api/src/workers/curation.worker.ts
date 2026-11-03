@@ -70,6 +70,7 @@ import {
   type TrackFacts,
 } from './agents.js';
 import { miniaturaDoVideo, procurarAlbum, type AlbumEncontrado } from './albuns.js';
+import { confirmarNoDeezer, decidirArtistas } from './guardaDeArtista.js';
 
 const log = logger.child({ worker: 'curation' });
 
@@ -132,6 +133,9 @@ function artistNames(track: LibraryTrack): string[] {
     .map((n) => n.trim());
 }
 
+/** Confirmação de artista na fonte real (Deezer), reaproveitada entre faixas. */
+const confirmarArtistaNaFonte = confirmarNoDeezer();
+
 /** Entrada elegível: tem título, tem artista atribuído e não foi vista há um tempo. */
 function isDue(entry: LibraryEntry, now: number): boolean {
   const track = entry.track;
@@ -174,7 +178,45 @@ async function auditTrack(entry: LibraryEntry): Promise<Record<string, unknown> 
     identity.artists.length === names.length &&
     identity.artists.every((a, i) => a.toLowerCase() === names[i]?.toLowerCase());
 
+  // GUARDA CONTRA ARTISTA INVENTADO: a IA responde do que sabe sobre o título,
+  // e música de nome comum tem dezenas de intérpretes. Só vale nome que a faixa
+  // prova (título, título original, canal, artistas atuais/originais, selo) ou
+  // que uma fonte real confirma; senão fica o que já estava, e o log diz por quê.
+  let reescritaAceita = false;
   if (!mesmosArtistas) {
+    const bruto = track as Record<string, unknown>;
+    const nomesDe = (v: unknown): string[] =>
+      Array.isArray(v)
+        ? v
+            .map((a) => (a && typeof a === 'object' ? (a as { name?: unknown }).name : a))
+            .filter((n): n is string => typeof n === 'string')
+        : [];
+    const decisao = await decidirArtistas(
+      identity.artists,
+      {
+        tituloAtual: title,
+        tituloOriginal: typeof bruto.tituloOriginal === 'string' ? bruto.tituloOriginal : null,
+        artistasAtuais: names,
+        artistasOriginais: nomesDe(bruto.artistasOriginais),
+        selo: typeof bruto.label === 'string' ? bruto.label : null,
+      },
+      confirmarArtistaNaFonte,
+    );
+    reescritaAceita = decisao.aceita;
+    if (!decisao.aceita) {
+      log.warn(
+        {
+          title,
+          atual: current || '(vazio)',
+          proposto: identity.artists.join(', '),
+          inventados: decisao.inventados,
+        },
+        'reescrita de artista RECUSADA: nome sem prova no vídeo nem na fonte',
+      );
+    }
+  }
+
+  if (!mesmosArtistas && reescritaAceita) {
     log.info(
       { title, de: current || '(vazio)', para: identity.artists.join(', ') },
       'atribuição corrigida',
@@ -1954,3 +1996,6 @@ export function startCurationWorker(): () => void {
     if (timer) clearTimeout(timer);
   };
 }
+
+/** Só para teste: audita UMA faixa e devolve o patch (ou null). */
+export const __auditarFaixaParaTeste = auditTrack;

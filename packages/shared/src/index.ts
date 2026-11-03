@@ -29,3 +29,4 @@ export * from './utils/robos.js';
 export * from './ai/creditosDeArtista.js';
 export * from './utils/identidadeDoArtista.js';
 export * from './schemas/jornada.js';
+export * from './letra/index.js';

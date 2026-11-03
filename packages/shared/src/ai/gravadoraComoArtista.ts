@@ -52,6 +52,19 @@ const GRAVADORAS = [
   'universal music',
   'sony music',
   'warner music',
+  'universal music brasil',
+  'universal music group',
+  'sony music brasil',
+  'sony music entertainment',
+  'warner music brasil',
+  'warner records',
+  'atlantic records',
+  'def jam recordings',
+  'hybe labels',
+  'jyp entertainment',
+  'sm entertainment',
+  'yg entertainment',
+  'big hit music',
   'emi music',
   'deckdisc',
   'biscoito fino',
@@ -186,4 +199,23 @@ export function promoverArtistaReal<T extends ArtistaMinimo>(artistas: readonly 
 
   const promovido = artistas[real]!;
   return [promovido, ...artistas.filter((_, i) => i !== real)];
+}
+
+/**
+ * CANAL QUE NÃO É GENTE — agregador, playlist, letra, karaokê, rádio.
+ *
+ * Quando o vídeo não diz quem canta, o canal vira o artista (é o único dado que
+ * sobra). Isso é certo para "Gabriela Rocha" e errado para "Letras Top Hits":
+ * o canal de letras publica música de TODO MUNDO, e cada faixa dele sairia com o
+ * nome do canal no lugar do cantor — a queixa "músicas com o nome de outro
+ * artista". Aqui mora o reconhecimento por palavra típica; na dúvida (nome que
+ * parece de gente), devolve false e o canal segue valendo como artista.
+ */
+const PALAVRA_DE_AGREGADOR =
+  /\b(?:letras?|lyrics?|hits?|playlists?|musicas?|mix|radio|top|karaoke|karaoque|videoclipes?|clipes?|legendados?|traducoes|traducao|trap nation|funk mix|as melhores|melhores)\b/;
+
+export function canalNaoEhGente(nome: string): boolean {
+  const k = chave(nome);
+  if (!k) return true;
+  return ehSelo(nome) || PALAVRA_DE_AGREGADOR.test(k);
 }

@@ -10,6 +10,14 @@ vi.mock('@/lib/local/cofreLocal', () => ({
 }));
 vi.mock('@/lib/ai/ai', () => ({ aiCleanSongTitle: vi.fn().mockResolvedValue(null) }));
 vi.mock('@/lib/local/importerHelper', () => ({ fetchOutraFonteDeLetra: vi.fn() }));
+// A outra fonte agora diz POR QUE não achou (outraFonte.ts); estes testes
+// continuam dublando só o achado, sempre como resposta de verdade.
+vi.mock('@/lib/lyrics/outraFonte', () => ({
+  buscarOutraFonte: async (t: string, a: string | undefined, d: number) => {
+    const { fetchOutraFonteDeLetra: f } = await import('@/lib/local/importerHelper');
+    return { achado: (await f(t, a, d)) ?? null, falhou: false };
+  },
+}));
 vi.mock('@/lib/conteudo/faixaEtaria', () => ({ registrarLetra: vi.fn() }));
 
 import type { Lyrics } from '@/lib/lyrics/lyrics';

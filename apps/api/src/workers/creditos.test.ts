@@ -63,6 +63,22 @@ describe('qual gravação é a nossa', () => {
     expect(f.escolherGravacaoMB('Outra', 'Matuê', candidatas)).toBeNull();
     expect(f.escolherGravacaoMB('Mantém', 'Anitta', candidatas)).toBeNull();
   });
+
+  it('prefixo só vale em fronteira de palavra: "Love" não é "Lovely" (créditos de outra música)', () => {
+    const candidatas = [
+      { id: 'x', title: 'Lovely', score: 100, 'artist-credit': [{ name: 'Billie Eilish' }] },
+    ];
+    expect(f.escolherGravacaoMB('Love', 'Billie Eilish', candidatas)).toBeNull();
+    const ok = [
+      {
+        id: 'y',
+        title: 'Love (Remastered)',
+        score: 80,
+        'artist-credit': [{ name: 'Billie Eilish' }],
+      },
+    ];
+    expect(f.escolherGravacaoMB('Love', 'Billie Eilish', ok)?.id).toBe('y');
+  });
 });
 
 describe('fundir fontes', () => {

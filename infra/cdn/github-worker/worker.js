@@ -96,6 +96,15 @@ const json = (status, corpo, extra = {}) =>
     },
   });
 
+/**
+ * Nome do arquivo do alinhamento no repositório do índice: o id sem os
+ * caracteres que o Windows recusa em nome de arquivo (o `:` de `local:`). A
+ * mesma regra de apps/importer/relogioDoAcervo.mjs, que é quem grava.
+ */
+export function nomeDoArquivoDeAlinhamento(id) {
+  return `${id.replace(/[^A-Za-z0-9._-]/g, '_')}.json`;
+}
+
 /** `remoteUrl` que o acervo grava para uma cópia do cofre, remontada do índice. */
 export function remoteUrlDoIndice(origemCofre, id, k) {
   return `${origemCofre}/blob/${encodeURIComponent(id)}?k=${k}`;
@@ -176,7 +185,7 @@ async function responderAlinhamento(req, env, id, k) {
   if (!faixa) return texto(404, 'not found');
   if (k !== faixa.k) return texto(403, 'forbidden');
   const cima = await fetch(
-    `https://raw.githubusercontent.com/${env.DONO}/aurial-indice-musicas/main/alinhamentos/${encodeURIComponent(id)}.json`,
+    `https://raw.githubusercontent.com/${env.DONO}/aurial-indice-musicas/main/alinhamentos/${nomeDoArquivoDeAlinhamento(id)}`,
     { headers: cabecalhosGithub(env), cf: { cacheEverything: true, cacheTtl: ALINHAMENTO_S } },
   );
   if (cima.status === 404) return texto(404, 'sem-alinhamento');

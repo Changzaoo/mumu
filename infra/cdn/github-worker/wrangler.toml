@@ -11,9 +11,13 @@ DONO = "Changzaoo"
 API_ORIGEM = "https://api.radinho.online"
 ORIGEM_COFRE = "https://importer.radinho.online"
 
-# Espelho do acervo: a cada 20 min a borda copia /api/v1/catalogo para o KV.
-[triggers]
-crons = ["*/20 * * * *"]
+# Espelho do acervo: quem grava o KV é o worker da API (PUT /acervo com
+# ESPELHO_TOKEN, a cada 20 min quando o ETag muda). O gatilho de cron abaixo
+# faria a própria borda buscar /api/v1/catalogo, mas a conta ainda não tem
+# subdomínio workers.dev (o painel cria ao abrir "Workers" uma vez); sem ele o
+# deploy recusa o cron. Descomente quando o subdomínio existir.
+# [triggers]
+# crons = ["*/20 * * * *"]
 
 # `npx wrangler kv namespace create ACERVO` cria e imprime o id abaixo.
 [[kv_namespaces]]

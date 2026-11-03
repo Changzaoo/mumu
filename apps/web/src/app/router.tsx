@@ -20,6 +20,8 @@ import { RootLayout } from '@/app/RootLayout';
 // O gerente de camadas precisa registrar o `popstate` ANTES do router.
 import '@/lib/historico/camadas';
 import { garantirHomePorBaixo } from '@/lib/historico/raiz';
+import { anotar } from '@/lib/telemetry/diario';
+import { recarregarPreservandoMusica } from '@/lib/recarregar';
 
 const RetornoDoSpotify = lazy(() => import('@/components/media/RetornoDoSpotify'));
 
@@ -172,9 +174,60 @@ function Placeholder() {
   );
 }
 
+/**
+ * O CHUNK DA PÁGINA NÃO CHEGOU — recarrega JÁ, preservando a música.
+ *
+ * Acontece quando o bundle em memória é de uma versão que já saiu do ar (ou do
+ * precache): o arquivo da página não existe mais em lugar nenhum, e esperar
+ * não resolve. Antes a tela ficava no esqueleto até o vigia do menu
+ * recarregar (3 s) ou a pessoa desistir. A recarga traz a versão nova e volta
+ * na mesma rota, com a música de onde estava. No máximo uma por 30 s: um erro
+ * de rede de verdade não vira laço de recargas — cai na tela de erro.
+ */
+const RECARGA_DE_CHUNK_MIN_MS = 30_000;
+const CHAVE_RECARGA_DE_CHUNK = 'aurial:recarga-de-chunk';
+const PARECE_CHUNK_PERDIDO =
+  /dynamically imported module|Importing a module script failed|Failed to fetch|Load failed|ChunkLoadError|error loading dynamically imported/i;
+
+export function chunkPerdido(err: unknown): boolean {
+  const texto = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+  return PARECE_CHUNK_PERDIDO.test(texto);
+}
+
+/** Pode recarregar agora? Anota a vez; `false` quando já recarregou há pouco. */
+export function podeRecarregarPorChunk(agora = Date.now()): boolean {
+  try {
+    const ultima = Number(sessionStorage.getItem(CHAVE_RECARGA_DE_CHUNK) ?? 0);
+    if (agora - ultima < RECARGA_DE_CHUNK_MIN_MS) return false;
+    sessionStorage.setItem(CHAVE_RECARGA_DE_CHUNK, String(agora));
+  } catch {
+    /* sem sessionStorage: recarrega mesmo assim */
+  }
+  return true;
+}
+
+type Carregador = () => Promise<{ default: ComponentType }>;
+
+export function comRecargaSeFaltar(name: string, loader: Carregador): Carregador {
+  return () =>
+    loader().catch((err: unknown) => {
+      if (chunkPerdido(err) && typeof navigator !== 'undefined' && navigator.onLine !== false) {
+        anotar('erro', 'chunk', `${name}: ${err instanceof Error ? err.message : String(err)}`);
+        if (podeRecarregarPorChunk()) {
+          recarregarPreservandoMusica();
+          // A página vai embora: nada para desenhar até lá.
+          return new Promise<never>(() => undefined);
+        }
+      }
+      throw err;
+    });
+}
+
 function lazyPage(name: string): ComponentType {
   const loader = pageModules[`/src/pages/${name}.tsx`];
-  return lazy(loader ?? (() => Promise.resolve({ default: Placeholder })));
+  return lazy(
+    loader ? comRecargaSeFaltar(name, loader) : () => Promise.resolve({ default: Placeholder }),
+  );
 }
 
 function page(name: string, skeleton: PageSkeletonProps['variant'] = 'home'): ReactNode {

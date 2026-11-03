@@ -2,15 +2,13 @@
  * SEMEADOR — lógica pura (testável). O executável é `semearDoOuvirMusica.ts`.
  *
  * Regra de ouro: sem certeza, não baixa. `escolherResultado` só devolve um vídeo
- * que seja a música pedida, do artista pedido, em duração de música — nunca chute.
+ * que seja a música pedida, do artista pedido (palavras inteiras), sem versão
+ * alterada e em duração de música — nunca chute. A régua é a de escolhaEstrita.ts.
  */
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import {
-  chaveDaMusica,
-  faixaDoResultado,
-  norm,
-  type ResultadoDaBusca,
-} from '../workers/pesquisador.worker.js';
+import { separarCreditos } from '@radinho/shared';
+import { escolherVideoEstrito } from '../workers/escolhaEstrita.js';
+import { chaveDaMusica, type ResultadoDaBusca } from '../workers/pesquisador.worker.js';
 
 export interface MusicaDaLista {
   artista: string;
@@ -70,16 +68,11 @@ export function semRepetidas(musicas: MusicaDaLista[]): MusicaDaLista[] {
   });
 }
 
-const DURACAO_MIN_S = 90;
-const DURACAO_MAX_S = 8 * 60;
-
 /** `base` contém `trecho` em fronteira de palavra (ambos já normalizados). */
 export function contemPalavras(base: string, trecho: string): boolean {
   if (!trecho) return false;
   return ` ${base} `.includes(` ${trecho} `);
 }
-
-const OFICIAL = /\b(?:topic|vevo|oficial|official)\b/i;
 
 export interface Escolha {
   resultado: ResultadoDaBusca;
@@ -87,34 +80,38 @@ export interface Escolha {
 }
 
 /**
- * Entre os resultados da busca, o melhor que É a música pedida; ou null.
- * Preferência: canal "- Topic"/oficial/o próprio artista; depois a ordem da busca.
+ * Entre os resultados da busca, o vídeo que É a música pedida — pela régua
+ * ESTRITA única (escolhaEstrita.ts) —, ou null com o motivo. Empate ou dúvida
+ * = null: nunca palpite.
+ *
+ * A faixa gravada leva o título e o artista DA LISTA: o vídeo só passa se for
+ * exatamente essa música desse artista (palavras inteiras), então o crédito é
+ * verdadeiro e nenhum nome de outro vídeo entra no acervo.
  */
+export function escolherComMotivo(
+  artista: string,
+  titulo: string,
+  resultados: ResultadoDaBusca[],
+  duracaoSeg?: number | null,
+): { escolha: Escolha | null; motivo: string } {
+  const artistas = [...new Set([artista, ...separarCreditos(artista)])].filter(Boolean);
+  const d = escolherVideoEstrito<ResultadoDaBusca>(
+    { artistas, titulo, ...(duracaoSeg ? { duracaoSeg } : {}) },
+    resultados,
+  );
+  if (!d.escolhido) return { escolha: null, motivo: d.motivo };
+  return {
+    escolha: { resultado: d.escolhido, faixa: { title: titulo.trim(), artists: [artista.trim()] } },
+    motivo: d.motivo,
+  };
+}
+
 export function escolherResultado(
   artista: string,
   titulo: string,
   resultados: ResultadoDaBusca[],
 ): Escolha | null {
-  const alvo = norm(titulo);
-  if (!alvo) return null;
-  const aceitos: Array<Escolha & { nota: number; i: number }> = [];
-  resultados.forEach((r, i) => {
-    if (!r || typeof r.titulo !== 'string' || typeof r.canal !== 'string') return;
-    if (!(r.duracaoSeg >= DURACAO_MIN_S && r.duracaoSeg <= DURACAO_MAX_S)) return;
-    const faixa = faixaDoResultado(artista, r);
-    if (!faixa) return;
-    if (!contemPalavras(norm(r.titulo), alvo)) return;
-    const canal = norm(r.canal);
-    const dono = norm(artista);
-    let nota = 0;
-    if (OFICIAL.test(r.canal)) nota += 2;
-    if (canal === dono || canal.startsWith(`${dono} `)) nota += 2;
-    aceitos.push({ resultado: r, faixa, nota, i });
-  });
-  if (aceitos.length === 0) return null;
-  aceitos.sort((a, b) => b.nota - a.nota || a.i - b.i);
-  const melhor = aceitos[0]!;
-  return { resultado: melhor.resultado, faixa: melhor.faixa };
+  return escolherComMotivo(artista, titulo, resultados).escolha;
 }
 
 /** Estado retomável da semeadura, por chave "artista|título". */

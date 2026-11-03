@@ -29,7 +29,8 @@
  * as partes separadas. Nada de rede, nada de IA — a IA entra depois, e entra
  * melhor, porque recebe campos já separados em vez de uma frase inteira.
  */
-import { acharGravadora, ehGravadora, ehSelo } from './gravadoraComoArtista.js';
+import { acharGravadora, canalNaoEhGente, ehGravadora, ehSelo } from './gravadoraComoArtista.js';
+import { aparar, ehGrupo, partir } from './creditosDeArtista.js';
 
 /**
  * Ruído que canal põe no nome do vídeo e que não é parte de nada.
@@ -66,6 +67,9 @@ const RUIDO_PALAVRAS = [
   'hd',
   'full hd',
   '4k',
+  'dvd',
+  'remasterizado',
+  'remasterizada',
   'shorts',
   'visualizer',
   'videoletra',
@@ -101,6 +105,8 @@ const RUIDO_PALAVRAS = [
  * um título.
  */
 const RUIDO_SO_ENTRE_PARENTESES = [
+  'lançamento',
+  'lançamento oficial',
   'oficial',
   'official',
   'videoclipe',
@@ -219,6 +225,11 @@ function achatarParenteses(texto: string): string {
 // "The Prodigy" e "Menó Prodígio" eram lidos como crédito de produção.
 const PRODUCAO_SOLTA = /\s*[-–—|]?\s*\bprod(?:\.|\s+by\b|\s*:)\s*\S.*$/i;
 
+const RUIDO_NO_FIM = new RegExp(
+  String.raw`\s+[-–—|]?\s*\b(?:${RUIDO_PALAVRAS.join('|')})\b\s*$`,
+  'i',
+);
+
 function limpar(texto: string): string {
   return (
     // A descrição vem PRIMEIRO: ela leva o separador junto, e sem separador a
@@ -241,12 +252,23 @@ function limpar(texto: string): string {
       // "…BAR & VIOLÃO HD" era o que sobrava na prateleira.
       .replace(/\b\d{3,4}\s*[x×]\s*\d{3,4}\b/g, ' ')
       .replace(/[®™©]/g, ' ')
-      .replace(/#\w+/g, ' ')
-      // Ruído solto, sem parênteses, no fim da frase.
-      .replace(
-        new RegExp(String.raw`\s+[-–—|]?\s*\b(?:${RUIDO_PALAVRAS.join('|')})\b\s*$`, 'i'),
-        ' ',
-      )
+      .replace(/#[\p{L}\p{N}_]+/gu, ' ')
+      // Resolução e taxa de quadros ("1080p", "60fps", "1080p60"), selo de
+      // formato ("M/V") e divulgação ("Lançamento 2026") não são do nome.
+      .replace(/\b\d{3,4}p(?:\s*\d{2,3}\s*fps|\d{2,3})?\b/gi, ' ')
+      .replace(/\b\d{2,3}\s*fps\b/gi, ' ')
+      .replace(/\bm\s*\/\s*v\b/gi, ' ')
+      .replace(/\s*[-–—|]?\s*\blan[çc]amento(?:\s+(?:19|20)\d{2})?\s*$/i, ' ')
+      // "DVD Fulano - Música" (o DVD abrindo o nome) e "… | DVD Ao Vivo em X"
+      // (o DVD fechando) são o álbum de onde o vídeo veio, não o artista nem a
+      // música.
+      .replace(/^\s*dvd\s+(?=\S)/i, '')
+      .replace(/\s+[-–—|]\s*dvd\b[^-–—|]*$/i, ' ')
+      // Ruído solto, sem parênteses, no fim da frase (até três vezes:
+      // "Remasterizado 4K" são duas palavras de ruído em fila).
+      .replace(RUIDO_NO_FIM, ' ')
+      .replace(RUIDO_NO_FIM, ' ')
+      .replace(RUIDO_NO_FIM, ' ')
       // Número de FAIXA no começo — e o corte é estreito de propósito.
       //
       // A regra era `^\d{1,2}\s*[-.]?\s+`, que engolia qualquer número solto na
@@ -274,6 +296,52 @@ function limpar(texto: string): string {
  * perderiam pedaços no meio da palavra.
  */
 export function separarNomes(texto: string): string[] {
+  return separarNomesDaLista(texto);
+}
+
+function separarNomesDaLista(texto: string): string[] {
+  if (ehGrupo(texto)) return [limparNomeDeArtista(texto)];
+  // Dupla/grupo com separador no nome ("Jorge e Mateus", "Earth, Wind & Fire"):
+  // parte em pedaços, mas REMONTA os vizinhos que juntos são um grupo conhecido.
+  const { partes, seps } = partir(texto, SEPARADOR_DE_NOMES_G);
+  if (partes.length > 1) {
+    const saida: string[] = [];
+    let achouGrupo = false;
+    for (let i = 0; i < partes.length;) {
+      let juntou = false;
+      for (const tamanho of [4, 3, 2]) {
+        if (i + tamanho > partes.length) continue;
+        let bloco = partes[i]!;
+        for (let k = 1; k < tamanho; k += 1) bloco += seps[i + k - 1]! + partes[i + k]!;
+        const limpo = aparar(bloco);
+        if (limpo && ehGrupo(limpo)) {
+          saida.push(limpo);
+          i += tamanho;
+          juntou = true;
+          achouGrupo = true;
+          break;
+        }
+      }
+      if (!juntou) {
+        saida.push(partes[i]!);
+        i += 1;
+      }
+    }
+    if (achouGrupo) {
+      return saida
+        .flatMap((p) => (ehGrupo(p) ? [p] : separarNomesSimples(p)))
+        .map((n) => limparNomeDeArtista(n))
+        .filter((n) => n.length > 1 && n.length < 60);
+    }
+  }
+  return separarNomesSimples(texto);
+}
+
+const SEPARADOR_DE_NOMES =
+  /\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bpart\.|\bparticipa[cç][aã]o\b|\bcom\b|\be\b|\band\b)\s*|\s+(?:vs\.?|x)\s+|\s+\/\s+/i;
+const SEPARADOR_DE_NOMES_G = new RegExp(SEPARADOR_DE_NOMES.source, 'gi');
+
+function separarNomesSimples(texto: string): string[] {
   return (
     texto
       // A barra exige espaço dos dois lados. Sem isso "AC/DC" virava DOIS
@@ -285,9 +353,7 @@ export function separarNomes(texto: string): string[] {
       // borda no fim da string, o nome era decepado para "MC PP da" — um artista
       // que não existe. Com espaço obrigatório depois, um "VS" no fim não é mais
       // confundido com o "vs" de "Alok vs. Sevenn".
-      .split(
-        /\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bcom\b|\be\b|\band\b)\s*|\s+(?:vs\.?|x)\s+|\s+\/\s+/i,
-      )
+      .split(SEPARADOR_DE_NOMES)
       .map((n) => limparNomeDeArtista(n))
       .filter((n) => n.length > 1 && n.length < 60)
   );
@@ -557,7 +623,7 @@ function grudarConvidados(partes: string[]): string[] {
   const juntas: string[] = [];
   for (const p of partes) {
     if (juntas.length > 0 && ABRE_COM_CONVIDADO.test(p)) {
-      juntas[juntas.length - 1] = `${juntas[juntas.length - 1]} ${p}`;
+      juntas[juntas.length - 1] = `${juntas[juntas.length - 1]} - ${p}`;
     } else {
       juntas.push(p);
     }
@@ -571,7 +637,11 @@ function extrairConvidados(titulo: string): { titulo: string; convidados: string
   // O convidado acaba no próximo separador: em "Saudades Feat. MC IG e MC PH -
   // DVD Mundão Girou" o nome do DVD não é gente.
   const trecho = m[1]!.split(SEPARADOR)[0]!;
-  const convidados = separarNomes(trecho.replace(/[)\]]+\s*$/, '')).filter((n) => !ehGravadora(n));
+  // "Part 2", "Pt. 10": o que vem depois de "part" tem de ser NOME (tem letra);
+  // número é a parte da música, não convidado.
+  const convidados = separarNomes(trecho.replace(/[)\]]+\s*$/, ''))
+    .filter((n) => !ehGravadora(n))
+    .filter((n) => /\p{L}/u.test(n));
   if (convidados.length === 0) return { titulo, convidados: [] };
   return { titulo: limpar(titulo.slice(0, m.index)), convidados };
 }
@@ -645,7 +715,7 @@ function ehListaDeNomes(texto: string): boolean {
  */
 function cantaNoPedaco(canal?: string | null): ((pedaco: string) => boolean) | null {
   const nome = limparNomeDeArtista(canal?.trim() ?? '');
-  if (!nome || ehGravadora(nome)) return null;
+  if (!nome || canalNaoEhGente(nome)) return null;
   const doCanal = separarNomes(nome)
     .map((n) => chave(n))
     .filter(Boolean);
@@ -665,7 +735,8 @@ function montar(titulo: string, artistas: string[], label: string | null): Parte
   for (const c of convidados) {
     if (!nomes.some((n) => chave(n) === chave(c))) nomes.push(c);
   }
-  return { title: tirarDjNoFim(nome), artists: nomes, label };
+  const semAspasSimples = nome.replace(/^['‘](.{2,})['’]$/, '$1');
+  return { title: tirarDjNoFim(semAspasSimples), artists: nomes, label };
 }
 
 /**
@@ -674,12 +745,29 @@ function montar(titulo: string, artistas: string[], label: string | null): Parte
  * `canal` é o nome do canal que publicou — usado só como último recurso para o
  * artista, e descartado quando é gravadora ou agregador.
  */
+/** Chave de LISTA: "Kawe & Wiu", "Kawe e Wiu" e "kawe wiu" são a mesma. */
+function chaveDeLista(texto: string): string {
+  return chave(texto)
+    .replace(/\b(?:e|and)\b/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDoVideo {
+  // Dupla que não está na lista fechada mas É o canal ("Kawe e Wiu" publicando
+  // "Kawe e Wiu - Sem Você"): o nome inteiro do canal é UM artista, não dois.
+  const nomeDoCanal = limparNomeDeArtista(canal?.trim() ?? '');
+  const canalEhGente = Boolean(nomeDoCanal) && !canalNaoEhGente(nomeDoCanal);
+  const separarNomes = (texto: string): string[] =>
+    canalEhGente && chaveDeLista(texto) === chaveDeLista(nomeDoCanal)
+      ? [limparNomeDeArtista(texto)]
+      : separarNomesDaLista(texto);
   const limpo = limpar(bruto ?? '');
   // O selo também mora DENTRO do nome do vídeo — "Não Pare ( MK Music)",
   // "Deus Proverá [Som Livre]". `limpar` já tirou o trecho do título; aqui ele
   // é recuperado do texto bruto para virar o campo que é dele.
-  const label = canal && ehGravadora(canal) ? canal.trim() : acharGravadora(bruto ?? '');
+  // Selo no canal: lista fechada OU o token de selo ("Universal Music Brasil").
+  const label = canal && ehSelo(canal) ? canal.trim() : acharGravadora(bruto ?? '');
 
   // 1) Aspas mandam: o que está dentro é a música, o que está fora são nomes.
   const citado = trechoEntreAspas(limpo);
@@ -742,9 +830,13 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
     if (partes.length === 2) {
       const [a, b] = partes as [string, string];
       const canta = cantaNoPedaco(canal);
+      const listaNaDireita = ehListaDeNomes(tirarDjsEntreParenteses(b)) && !ehListaDeNomes(a);
+      // Dupla/grupo CONHECIDO de um lado só ("Liberdade Provisória - Henrique e
+      // Juliano") decide sem precisar do canal.
+      const grupoNaDireita = ehGrupo(b) && !ehGrupo(a);
       const invertido = canta
-        ? canta(b) && !canta(a)
-        : ehListaDeNomes(tirarDjsEntreParenteses(b)) && !ehListaDeNomes(a);
+        ? (canta(b) && !canta(a)) || (!canta(a) && !canta(b) && (listaNaDireita || grupoNaDireita))
+        : listaNaDireita || grupoNaDireita;
       if (invertido) {
         const artistas = separarNomes(tirarDjsEntreParenteses(b)).filter((n) => !ehGravadora(n));
         if (artistas.length > 0) return montar(a, artistas, label);
@@ -753,7 +845,15 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
     // "Brenninho VJ - Proibido Amar - DJ Boy e DJ Gu": os DJs que FECHAM o
     // título são crédito de produção, como o "(DJ Boy)" entre parênteses.
     while (partes.length > 2 && ehListaDeCreditos(partes[partes.length - 1]!)) partes.pop();
-    const [esquerda, ...resto] = partes;
+    const [esquerda, ...restoBruto] = partes;
+    // "Oceano | Djavan Oficial": o pedaço do fim que só repete o artista ou o
+    // canal é assinatura, não parte do nome da música.
+    const assinatura = new Set(
+      [esquerda!, nomeDoCanal].filter(Boolean).map((n) => chave(limparNomeDeArtista(n))),
+    );
+    const resto = restoBruto.filter(
+      (r, i) => i === 0 || !assinatura.has(chave(limparNomeDeArtista(r))),
+    );
     const direita = resto.join(' - ');
     const artistas = separarNomes(esquerda!).filter((n) => !ehGravadora(n));
     // Lado esquerdo era só o selo ("MK MUSIC - Raridade"): o artista some, mas
@@ -764,8 +864,10 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
   // 3) Sem separador nem aspas: o nome inteiro é a música. O canal vira artista
   //    SÓ quando não é gravadora nem agregador — canal de terceiro no lugar do
   //    cantor é o erro que este módulo existe para não repetir.
+  // Canal de letra/playlist/karaokê/rádio publica música de TODO MUNDO: ele
+  // não é quem canta, e gravá-lo como artista é a faixa "com o nome de outro".
   const doCanal = limparNomeDeArtista(canal?.trim() ?? '');
-  const artistas = doCanal && !ehGravadora(doCanal) ? [doCanal] : [];
+  const artistas = doCanal && !canalNaoEhGente(doCanal) ? [doCanal] : [];
   return montar(partes[0] ?? limpo, artistas, label);
 }
 
@@ -798,7 +900,7 @@ export function chaveDeIdentidade(titulo: string, artista?: string | null): stri
   const nomes = artista ? separarNomes(artista).filter((n) => !ehGravadora(n)) : [];
   // O `?? artista` é a rede: nome de uma letra só ou impronunciável pelo
   // separador não pode virar chave vazia e colidir com todo mundo.
-  const a = nomes.length > 0 ? chave(nomes[0]!) : chave(artista ?? '');
+  const a = nomes.length > 0 ? chaveDeLista(nomes[0]!) : chave(artista ?? '');
   return a ? `${a}::${t}` : t;
 }
 

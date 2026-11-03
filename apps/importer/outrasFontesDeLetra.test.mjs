@@ -169,3 +169,95 @@ test('tentarGenius: artista não bate em nenhum resultado — recusa tudo, nunca
     globalThis.fetch = original;
   }
 });
+
+// ── auditoria 03/11/2026 (5.2): letra alheia com duração 0 e lyrics.ovh às cegas ──
+import { tentarLyricsOvh } from './outrasFontesDeLetra.mjs';
+
+const TABELA = [
+  // [nome, candidato, pedido, esperado]
+  ['"Amor" não casa com "Amora"', { titulo: 'Amora', artistas: ['MC X'], duracaoSeg: null }, { titulo: 'Amor', artista: 'MC X', duracaoSeg: 0 }, false],
+  ['"Eu" não casa com "Medo"', { titulo: 'Eu', artistas: ['Ana'], duracaoSeg: 180 }, { titulo: 'Medo', artista: 'Ana', duracaoSeg: 180 }, false],
+  ['"Ana" não é "Mariana"', { titulo: 'Warzone', artistas: ['Mariana Souza'], duracaoSeg: null }, { titulo: 'Warzone', artista: 'Ana', duracaoSeg: 0 }, false],
+  ['"MC" sozinho não prova', { titulo: 'Warzone', artistas: ['MC'], duracaoSeg: null }, { titulo: 'Warzone', artista: 'MC Kevin', duracaoSeg: 0 }, false],
+  ['duração 0: Pt. 1 não serve para Pt. 2', { titulo: 'Vida Loka, Pt. 1', artistas: ["Racionais MC's"], duracaoSeg: null }, { titulo: 'Vida Loka, Pt. 2', artista: "Racionais MC's", duracaoSeg: 0 }, false],
+  ['duração 0: título só contido não basta', { titulo: 'Vida Loka', artistas: ["Racionais MC's"], duracaoSeg: null }, { titulo: 'Vida Loka, Pt. 2', artista: "Racionais MC's", duracaoSeg: 0 }, false],
+  ['duração 0: título igual + artista', { titulo: 'Vida Loka, Pt. 2', artistas: ["Racionais MC's"], duracaoSeg: null }, { titulo: 'Vida Loka, Pt. 2', artista: "Racionais MC's", duracaoSeg: 0 }, true],
+  ['duração confirma o título frouxo', { titulo: 'Warzone Pt 2', artistas: ['Brandão85'], duracaoSeg: 166 }, { titulo: 'Warzone', artista: 'Brandão85', duracaoSeg: 166 }, true],
+  ['dupla com & e com e', { titulo: 'Evidências', artistas: ['Chitãozinho & Xororó'], duracaoSeg: null }, { titulo: 'Evidências', artista: 'Chitaozinho e Xororo', duracaoSeg: 0 }, true],
+  ['acento e caixa', { titulo: 'CORAÇÃO', artistas: ['LUDMILLA'], duracaoSeg: 200 }, { titulo: 'coracao', artista: 'Ludmilla', duracaoSeg: 202 }, true],
+  ['coreano igual', { titulo: '사랑해', artistas: ['아이유'], duracaoSeg: 200 }, { titulo: '사랑해', artista: '아이유', duracaoSeg: 200 }, true],
+  ['duração a 6 s recusa', { titulo: 'Warzone', artistas: ['Brandão85'], duracaoSeg: 172 }, { titulo: 'Warzone', artista: 'Brandão85', duracaoSeg: 166 }, false],
+  ['duração negativa conta como desconhecida', { titulo: 'Warzone', artistas: ['Brandão85'], duracaoSeg: -1 }, { titulo: 'Warzone', artista: 'Brandão85', duracaoSeg: 166 }, true],
+];
+for (const [nome, cand, ped, esperado] of TABELA) {
+  test(`casaCandidato: ${nome}`, () => {
+    assert.equal(casaCandidato(cand, ped), esperado);
+  });
+}
+
+/** fetch dublado: rota → resposta; guarda as URLs pedidas. */
+function dublarFetch(rotas) {
+  const pedidas = [];
+  const original = globalThis.fetch;
+  globalThis.fetch = async (url) => {
+    const u = String(url);
+    pedidas.push(u);
+    const rota = Object.keys(rotas).find((r) => u.includes(r));
+    if (!rota) return new Response('', { status: 404 });
+    const r = rotas[rota];
+    return new Response(JSON.stringify(r.corpo ?? null), { status: r.status ?? 200 });
+  };
+  return { pedidas, restaurar: () => (globalThis.fetch = original) };
+}
+
+test('lyrics.ovh: confere a identidade pelo /suggest e pede com o nome canônico', async () => {
+  const f = dublarFetch({
+    '/suggest/': {
+      corpo: {
+        data: [
+          { title: 'Amora', artist: { name: 'MC X' }, duration: 200 },
+          { title: 'Amor', artist: { name: 'Outro' }, duration: 200 },
+          { title: 'Amor', artist: { name: 'MC X' }, duration: 201 },
+        ],
+      },
+    },
+    '/v1/': { corpo: { lyrics: 'é o amor\nque mexe' } },
+  });
+  try {
+    const r = await tentarLyricsOvh({ titulo: 'amor', artista: 'mc x', duracaoSeg: 200 });
+    assert.deepEqual(r, { synced: false, plain: 'é o amor\nque mexe', fonte: 'lyrics.ovh' });
+    assert.ok(f.pedidas.some((u) => u.endsWith('/v1/MC%20X/Amor')));
+  } finally {
+    f.restaurar();
+  }
+});
+
+for (const [nome, sugestoes] of [
+  ['nenhuma sugestão', []],
+  ['só outro artista', [{ title: 'Amor', artist: { name: 'Outro' }, duration: 200 }]],
+  ['duração longe', [{ title: 'Amor', artist: { name: 'MC X' }, duration: 260 }]],
+  ['título só parecido', [{ title: 'Amora', artist: { name: 'MC X' }, duration: 200 }]],
+]) {
+  test(`lyrics.ovh: ${nome} → nem pede a letra`, async () => {
+    const f = dublarFetch({
+      '/suggest/': { corpo: { data: sugestoes } },
+      '/v1/': { corpo: { lyrics: 'letra de outra música' } },
+    });
+    try {
+      assert.equal(await tentarLyricsOvh({ titulo: 'Amor', artista: 'MC X', duracaoSeg: 200 }), null);
+      assert.ok(!f.pedidas.some((u) => u.includes('/v1/')));
+    } finally {
+      f.restaurar();
+    }
+  });
+}
+
+test('lyrics.ovh: sem artista nem tenta', async () => {
+  const f = dublarFetch({});
+  try {
+    assert.equal(await tentarLyricsOvh({ titulo: 'Amor', artista: '', duracaoSeg: 200 }), null);
+    assert.equal(f.pedidas.length, 0);
+  } finally {
+    f.restaurar();
+  }
+});

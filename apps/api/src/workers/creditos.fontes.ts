@@ -182,7 +182,10 @@ export function escolherGravacaoMB(
   let melhor: { g: MbGravacao; nota: number } | null = null;
   for (const g of candidatas) {
     const gt = normalizar(g.title ?? '');
-    const notaTitulo = gt === t ? 3 : gt.startsWith(t) || t.startsWith(gt) ? 1 : 0;
+    // Prefixo SÓ em fronteira de palavra: "love" não é "lovely", e a gravação
+    // de OUTRA música do mesmo artista levava os créditos (produtor, compositor)
+    // da música errada.
+    const notaTitulo = gt === t ? 3 : gt.startsWith(`${t} `) || t.startsWith(`${gt} `) ? 1 : 0;
     if (!gt || notaTitulo === 0) continue;
     const creditos = g['artist-credit'] ?? [];
     const bate = creditos.some(

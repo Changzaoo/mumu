@@ -44,7 +44,8 @@ export function silabas(palavra: string): number {
  * (ou `null` na última). Palavras com tempo real são devolvidas como vieram.
  */
 export function palavrasDaLinha(linha: LinhaDeLetra, proximaMs: number | null): PalavraComTempo[] {
-  if (linha.words && linha.words.length > 0) return linha.words;
+  if (linha.words && linha.words.length > 0)
+    return dentroDaLinha(linha.words, linha.timeMs, proximaMs);
   const textos = linha.text.split(/\s+/).filter(Boolean);
   if (textos.length === 0) return [];
   const pesos = textos.map(silabas);
@@ -64,6 +65,32 @@ export function palavrasDaLinha(linha: LinhaDeLetra, proximaMs: number | null): 
     acumulado += pesos[i] as number;
   }
   return saida;
+}
+
+/**
+ * Palavra com tempo real ainda tem de caber NA LINHA: o verso foi movido
+ * (recalibrado, monotonicidade) e as palavras às vezes ficavam com o tempo de
+ * antes — antes do início dele ou já no verso seguinte, e o destaque pulava
+ * de volta ou acendia a palavra errada. Prende cada uma entre o início da
+ * linha e 1 ms antes da próxima, em ordem não decrescente.
+ */
+function dentroDaLinha(
+  words: PalavraComTempo[],
+  inicioMs: number,
+  proximaMs: number | null,
+): PalavraComTempo[] {
+  const teto =
+    proximaMs !== null && proximaMs > inicioMs ? proximaMs - 1 : Number.POSITIVE_INFINITY;
+  let anterior = inicioMs;
+  let mudou = false;
+  const saida = words.map((w) => {
+    const t = Math.min(Math.max(w.timeMs, anterior), teto);
+    anterior = t;
+    if (t === w.timeMs) return w;
+    mudou = true;
+    return { ...w, timeMs: t };
+  });
+  return mudou ? saida : words;
 }
 
 /** Última linha cujo tempo já chegou; -1 antes da primeira. Busca binária. */
@@ -88,45 +115,12 @@ export function palavraAtiva(palavras: readonly PalavraComTempo[], posMs: number
   return linhaAtiva(palavras, posMs);
 }
 
-const TAG_DE_PALAVRA = /<(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?>/g;
-
 /**
- * LRC ESTENDIDO ("A2"): `[00:12.00]<00:12.00>Eu <00:12.40>vou <00:12.90>ali`.
- *
- * Antes estas marcas passavam direto para a tela, como texto. Devolve o texto
- * limpo e, quando havia marcas, o tempo real de cada palavra.
- *
- * LRC por palavra INCOMPLETO (`[00:01.00]Eu vou <00:02.00>ali`): o texto antes
- * da primeira marca também é cantado. Sem dar tempo a ele, `words` ficava só
- * com "ali" e a tela, que desenha `words` quando existe, perdia "Eu vou". Essas
- * palavras entram no instante da linha (`inicioMs`, já com o offset aplicado).
+ * LRC ESTENDIDO ("A2"): `[00:12.00]<00:12.00>Eu <00:12.40>vou <00:12.90>ali` —
+ * texto limpo e o tempo real de cada palavra. Mora em packages/shared/src/letra
+ * (o script Node também lê LRC).
  */
-export function lerPalavrasMarcadas(
-  bruto: string,
-  offsetMs: number,
-  inicioMs = 0,
-): { text: string; words?: PalavraComTempo[] } {
-  TAG_DE_PALAVRA.lastIndex = 0;
-  if (!TAG_DE_PALAVRA.test(bruto)) return { text: bruto.trim() };
-  TAG_DE_PALAVRA.lastIndex = 0;
-  const words: PalavraComTempo[] = [];
-  const partes = bruto.split(TAG_DE_PALAVRA);
-  for (const texto of (partes[0] ?? '').split(/\s+/).filter(Boolean)) {
-    words.push({ text: texto, timeMs: inicioMs });
-  }
-  // split com 3 grupos: [texto, min, seg, frac, texto, min, seg, frac, texto…]
-  for (let i = 1; i + 3 < partes.length + 1; i += 4) {
-    const min = Number(partes[i]);
-    const seg = Number(partes[i + 1]);
-    const frac = partes[i + 2] ? Number(`${partes[i + 2]}000`.slice(0, 3)) : 0;
-    const t = Math.max(0, (min * 60 + seg) * 1000 + frac - offsetMs);
-    for (const texto of (partes[i + 3] ?? '').split(/\s+/).filter(Boolean)) {
-      words.push({ text: texto, timeMs: t });
-    }
-  }
-  const text = bruto.replace(TAG_DE_PALAVRA, '').replace(/\s+/g, ' ').trim();
-  return words.length > 0 ? { text, words } : { text };
-}
+export { lerPalavrasMarcadas } from '@radinho/shared';
 
 /**
  * VOZ DE FUNDO — o que a letra põe entre parênteses ("tô aqui (tô aqui)") é o

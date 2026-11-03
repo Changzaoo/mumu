@@ -41,12 +41,17 @@ export default defineConfig({
     tailwindcss(),
     aberturaNoHtml(),
     VitePWA({
-      // 'autoUpdate': o worker novo PULA A ESPERA e ASSUME os clientes sozinho
-      // (skipWaiting + clientsClaim abaixo). Sem isto o SW ficava "aguardando"
-      // e servia o bundle velho por tempo indeterminado — e não dá para pedir
-      // a cada usuário que limpe o cache na mão. Quem cuida de recarregar a
-      // página preservando a música é `src/pwa.ts` (no `controllerchange`).
-      registerType: 'autoUpdate',
+      // 'prompt': o worker novo fica EM ESPERA até a página mandar
+      // (`src/pwa.ts` → SKIP_WAITING quando a pessoa sossega) e a página se
+      // recarrega logo em seguida. O 'autoUpdate' de antes ativava o worker
+      // novo na hora e APAGAVA o precache antigo enquanto a página velha ainda
+      // estava aberta: a próxima tela que a pessoa tocava pedia um chunk que
+      // já não existia, nada pintava, o vigia do menu recarregava, e a recarga
+      // encadeava outras — "o app trava e reinicia" (iPhone do dono, 03/11/2026,
+      // quatro boots em 30 s na hora do deploy). Com a espera, a troca de
+      // versão é UMA recarga, preservando a música, com o precache antigo
+      // intacto até ela.
+      registerType: 'prompt',
       injectRegister: false,
       includeAssets: ['icons/favicon.png', 'icons/apple-touch-icon.png', 'robots.txt'],
       manifest: {
@@ -86,12 +91,12 @@ export default defineConfig({
         ],
       },
       workbox: {
-        // O worker novo assume IMEDIATAMENTE, sem esperar todas as abas
-        // fecharem, e passa a controlar as abas já abertas. É o par que faz o
-        // `controllerchange` disparar em `src/pwa.ts` e a página se atualizar
-        // sozinha. `cleanupOutdatedCaches` apaga o precache da versão anterior
-        // para não sobrar bundle velho ocupando espaço nem sendo servido.
-        skipWaiting: true,
+        // O worker novo NÃO pula a espera sozinho: quem manda é a página
+        // (`src/pwa.ts`, SKIP_WAITING quando a pessoa sossega), e aí ele
+        // assume as abas (`clientsClaim`), dispara `controllerchange` e a
+        // página recarrega. `cleanupOutdatedCaches` apaga o precache antigo —
+        // só na ativação, que agora acontece junto com a recarga.
+        skipWaiting: false,
         clientsClaim: true,
         cleanupOutdatedCaches: true,
         /**

@@ -102,3 +102,33 @@ describe('agruparDuplicatas — a varredura da biblioteca inteira', () => {
     expect(nosso?.manter.id).toBe('a');
   });
 });
+
+/**
+ * "DESCONHECIDO" NÃO É ARTISTA: duas faixas sem crédito não são "do mesmo
+ * artista". Com o marcador contando como nome, o portão do artista abria entre
+ * músicas diferentes de título parecido e mesma duração.
+ */
+describe('saoAMesma — "Desconhecido" não confirma artista', () => {
+  it('não usa o marcador como prova de que é o mesmo artista', () => {
+    const a = f({ id: '1', title: 'Amor Perfeito', artists: ['Desconhecido'] });
+    const b = f({
+      id: '2',
+      title: 'Amor Perfeito Eterno',
+      artists: ['Desconhecido'],
+      durationMs: 250_500,
+    });
+    // Sem artista dos dois lados, vale a barra ALTA (título quase idêntico).
+    expect(saoAMesma(a, b)).toBeNull();
+  });
+
+  it('cópia idêntica sem artista continua sendo a mesma', () => {
+    const a = f({ id: '1', title: 'Amor Perfeito', artists: ['Desconhecido'] });
+    const b = f({
+      id: '2',
+      title: 'Amor Perfeito (Official Video)',
+      artists: ['Desconhecido'],
+      durationMs: 250_500,
+    });
+    expect(saoAMesma(a, b)).not.toBeNull();
+  });
+});

@@ -168,8 +168,13 @@ def alinhar(audio, saida, idioma, modelo, arquivo_texto):
     res = model.align(audio, "\n".join(linhas), language=idioma or "pt", original_split=True)
     saida_linhas = []
     for seg in res.segments:
+        # O TEXTO VAI JUNTO: o stable-ts pode juntar ou partir segmentos, e
+        # então a contagem não bate com a das linhas enviadas. Sem o texto o
+        # app descartava o alinhamento inteiro (exigia 1 para 1); com ele, o
+        # app casa linha a linha pelo texto (alinhamentoDaBorda.ts).
         saida_linhas.append(
             {
+                "text": (seg.text or "").strip(),
                 "startMs": ms(seg.start),
                 "endMs": ms(seg.end),
                 "words": [

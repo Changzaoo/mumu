@@ -36,6 +36,24 @@ describe('o que o pesquisador traz', () => {
     expect(faixaDoResultado('Matuê', r('Matuê - Show completo', 'Matuê', 3600))).toBeNull();
   });
 
+  it('"Ana" não pega vídeo de Mariana nem de Ana Castela (palavra inteira)', () => {
+    expect(faixaDoResultado('Ana', r('Mariana - Pipoco', 'Mariana'))).toBeNull();
+    expect(faixaDoResultado('Ana', r('Ana Castela - Pipoco', 'Ana Castela'))).toBeNull();
+  });
+
+  it('cover, reação e vídeo que só cita o artista não são dele', () => {
+    expect(faixaDoResultado('Matuê', r('Pedro - Mantém (cover Matuê)', 'Pedro'))).toBeNull();
+    expect(faixaDoResultado('Matuê', r('REAGINDO a Matuê - Mantém', 'Reator'))).toBeNull();
+    expect(faixaDoResultado('Matuê', r('Mantém', 'Letras e Músicas'))).toBeNull();
+  });
+
+  it('só o título no canal Topic do artista vale; o artista da faixa é o pesquisado', () => {
+    expect(faixaDoResultado('Matuê', r('Mantém', 'Matuê - Topic'))).toEqual({
+      title: 'Mantém',
+      artists: ['Matuê'],
+    });
+  });
+
   it('a mesma música em grafias diferentes tem a mesma chave', () => {
     expect(chaveDaMusica('Matuê', 'Mantém (Clipe Oficial)')).toBe(chaveDaMusica('MATUE', 'mantem'));
   });

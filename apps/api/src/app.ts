@@ -1,10 +1,11 @@
 import path from 'node:path';
-import express, { type Express } from 'express';
+import express, { type Express, type RequestHandler } from 'express';
 import cors from 'cors';
 import helmet from 'helmet';
 import { env, webOrigins } from './config/index.js';
 import { ForbiddenError } from './core/errors/index.js';
 import { requestId } from './middlewares/requestId.js';
+import { semNulo } from './middlewares/semNulo.js';
 import { httpLogger } from './middlewares/httpLogger.js';
 import { authenticate } from './middlewares/auth.js';
 import { errorHandler, notFoundHandler } from './middlewares/errorHandler.js';
@@ -37,6 +38,12 @@ import { categoriesRoutes } from './modules/categories/index.js';
 import { mundoRoutes } from './modules/mundo/index.js';
 import { jornadaRoutes } from './modules/jornada/index.js';
 
+/** Deixa passar GET/HEAD/OPTIONS; o resto cai no 404 JSON padrao. */
+const apenasLeitura: RequestHandler = (req, res, next) => {
+  if (req.method === 'GET' || req.method === 'HEAD' || req.method === 'OPTIONS') next();
+  else notFoundHandler(req, res, next);
+};
+
 export function createApp(): Express {
   registerFeedProjection();
 
@@ -65,6 +72,8 @@ export function createApp(): Express {
     }),
   );
   app.use(express.json({ limit: '1mb' }));
+  // NUL em id/campo vira erro do Postgres (500); aqui vira 400.
+  app.use(semNulo);
   app.use(requestId);
   app.use(httpLogger);
 
@@ -128,7 +137,8 @@ export function createApp(): Express {
   api.use('/jornada', jornadaRoutes);
 
   app.use('/api/v1', api);
-  app.use('/api/docs', createDocsRouter());
+  // So leitura: o router do Swagger UI responde 200 a qualquer metodo (DELETE incluido).
+  app.use('/api/docs', apenasLeitura, createDocsRouter());
 
   app.use(notFoundHandler);
   app.use(errorHandler);

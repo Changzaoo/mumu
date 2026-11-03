@@ -1,7 +1,8 @@
 import os from 'node:os';
 import path from 'node:path';
 import { mkdirSync } from 'node:fs';
-import { Router } from 'express';
+import { Router, type RequestHandler } from 'express';
+import { AppError } from '../../core/errors/index.js';
 import multer from 'multer';
 import { nanoid } from 'nanoid';
 import {
@@ -32,6 +33,27 @@ const upload = multer({
   },
 });
 
+/**
+ * O busboy (por baixo do multer) recusa multipart torto com `Error` cru
+ * ("Boundary not found", "Malformed part header", "Unexpected end of form"): sem
+ * traducao isso caia no ramo final do errorHandler como 500 + pilha no log, por
+ * culpa de um cliente que mandou lixo. MulterError segue para o handler de
+ * sempre (413/400 com codigo proprio); o resto e corpo malformado = 400.
+ */
+const arquivoUnico: RequestHandler = (req, res, next) => {
+  upload.single('file')(req, res, (err?: unknown) => {
+    if (!err) {
+      next();
+      return;
+    }
+    if ((err as Error).name === 'MulterError' || err instanceof AppError) {
+      next(err);
+      return;
+    }
+    next(new AppError('BAD_REQUEST', 'Malformed multipart body', 400));
+  });
+};
+
 /** Mounted at /uploads (plus GET /me/uploads wired in app.ts via meUploadsRoutes). */
 export const uploadsRoutes: Router = Router();
 
@@ -39,7 +61,7 @@ uploadsRoutes.post(
   '/',
   requireAuth,
   uploadRateLimit,
-  upload.single('file'),
+  arquivoUnico,
   validate({ body: uploadMetadataSchema }),
   uploadsController.create,
 );

@@ -5,6 +5,7 @@ import { describe, expect, it } from 'vitest';
 import {
   chaveDeDedup,
   deveTentar,
+  escolherComMotivo,
   escolherResultado,
   estadoVazio,
   gravarEstado,
@@ -97,5 +98,54 @@ describe('estado retomável', () => {
     } finally {
       rmSync(dir, { recursive: true, force: true });
     }
+  });
+});
+
+describe('escolherResultado — régua estrita (03/11/2026)', () => {
+  it('"Ana" não casa "Mariana" nem "Ana Castela"', () => {
+    expect(escolherResultado('Ana', 'Pipoco', [r('Mariana - Pipoco', 'Mariana', 171)])).toBeNull();
+    expect(
+      escolherResultado('Ana', 'Pipoco', [r('Ana Castela - Pipoco', 'Ana Castela', 171)]),
+    ).toBeNull();
+  });
+  it('vídeo de OUTRO artista com o mesmo título não é escolhido', () => {
+    expect(
+      escolherResultado('Djavan', 'Oceano', [
+        r('Gal Costa - Oceano', 'Gal Costa'),
+        r('Oceano', 'Fulano'),
+      ]),
+    ).toBeNull();
+  });
+  it('cover, karaokê, reação e playlist não passam', () => {
+    for (const t of [
+      'Djavan - Oceano (cover)',
+      'Oceano - Karaokê - Djavan',
+      'REAGINDO a Djavan - Oceano',
+      'Playlist Djavan: Oceano e mais',
+      'Djavan - Oceano (slowed + reverb)',
+      'Djavan - Oceano (Versão Estendida)',
+    ]) {
+      expect(escolherResultado('Djavan', 'Oceano', [r(t)])).toBeNull();
+    }
+  });
+  it('empate entre gravações diferentes devolve null com o motivo', () => {
+    const d = escolherComMotivo('Djavan', 'Oceano', [
+      r('Djavan - Oceano', 'Canal A', 200),
+      r('Djavan - Oceano (Lyrics)', 'Canal B', 290),
+    ]);
+    expect(d.escolha).toBeNull();
+    expect(d.motivo).toMatch(/empate/);
+  });
+  it('a faixa gravada leva o artista e o título DA LISTA', () => {
+    const e = escolherResultado('Djavan', 'Oceano', [r('DJAVAN - OCEANO (Clipe Oficial)')]);
+    expect(e?.faixa).toEqual({ title: 'Oceano', artists: ['Djavan'] });
+  });
+  it('duração conhecida: ±15% ou 20 s', () => {
+    expect(
+      escolherComMotivo('Djavan', 'Oceano', [r('Djavan - Oceano', 'Djavan', 250)], 240).escolha,
+    ).not.toBeNull();
+    expect(
+      escolherComMotivo('Djavan', 'Oceano', [r('Djavan - Oceano', 'Djavan', 330)], 240).escolha,
+    ).toBeNull();
   });
 });

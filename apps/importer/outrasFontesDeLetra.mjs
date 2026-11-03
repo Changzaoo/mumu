@@ -70,13 +70,44 @@ function limparTitulo(titulo) {
     .trim();
 }
 
-function tituloBate(tituloCandidato, tituloPedido) {
+/** `menor` aparece em `maior` como PALAVRA(S) inteira(s): "Amor" não está em "Amora". */
+function contemPalavras(maior, menor) {
+  return Boolean(menor) && ` ${maior} `.includes(` ${menor} `);
+}
+
+/**
+ * `forte` = o mesmo título depois de limpo; `frouxo` = um contém o outro como
+ * palavras inteiras ("Warzone" ~ "Warzone (Remix)"). Antes era `includes` puro:
+ * "Amor" casava com "Amora" e "Eu" com "Medo".
+ */
+function comparaTitulos(tituloCandidato, tituloPedido) {
   const a = normalizarTexto(limparTitulo(tituloCandidato));
   const b = normalizarTexto(limparTitulo(tituloPedido));
+  if (!a || !b) return { forte: false, frouxo: false };
+  const forte = a === b;
+  return { forte, frouxo: forte || contemPalavras(a, b) || contemPalavras(b, a) };
+}
+
+/** Sozinhas, estas palavras não identificam artista nenhum ("MC", "DJ"…). */
+const GENERICOS = new Set([
+  'mc', 'dj', 'mr', 'lil', 'the', 'os', 'as', 'o', 'a', 'banda', 'grupo', 'trio', 'duo',
+  'various', 'artists', 'varios', 'artistas', 'unknown', 'desconhecido',
+]);
+
+function temNucleo(nome) {
+  return nome.split(' ').some((t) => !GENERICOS.has(t) && t.length >= 2);
+}
+
+/**
+ * Mesmo artista: igual, ou um contido no outro como PALAVRAS inteiras e com
+ * algo além de "MC"/"DJ". Antes era `includes` puro — "Ana" casava com
+ * "Mariana" e "MC" com qualquer MC.
+ */
+function artistaBateCom(a, b) {
   if (!a || !b) return false;
-  // Frouxo de propósito ("Warzone" casa com "Warzone (Remix)") — e por isso
-  // nunca pode bastar sozinho, ver a prova mínima no fim de `casaCandidato`.
-  return a === b || a.includes(b) || b.includes(a);
+  if (a === b) return true;
+  const [menor, maior] = a.length <= b.length ? [a, b] : [b, a];
+  return contemPalavras(maior, menor) && temNucleo(menor);
 }
 
 /**
@@ -89,20 +120,26 @@ function tituloBate(tituloCandidato, tituloPedido) {
  * por título sozinho — e a letra errada entraria no cache para sempre.
  */
 export function casaCandidato(candidato, pedido) {
-  if (!tituloBate(candidato.titulo, pedido.titulo)) return false;
+  const titulo = comparaTitulos(candidato.titulo, pedido.titulo);
+  if (!titulo.frouxo) return false;
 
   const alvoArtista = normalizarArtista(pedido.artista);
   const artistasCandidato = (candidato.artistas ?? []).map(normalizarArtista).filter(Boolean);
   const temArtistaParaComparar = alvoArtista.length > 0 && artistasCandidato.length > 0;
   const artistaBate =
-    temArtistaParaComparar &&
-    artistasCandidato.some((a) => a.includes(alvoArtista) || alvoArtista.includes(a));
+    temArtistaParaComparar && artistasCandidato.some((a) => artistaBateCom(a, alvoArtista));
   if (temArtistaParaComparar && !artistaBate) return false; // artista conhecido e diferente
 
-  const temDuracaoParaComparar = Boolean(pedido.duracaoSeg) && Boolean(candidato.duracaoSeg);
-  const duracaoBate =
-    temDuracaoParaComparar && Math.abs(candidato.duracaoSeg - pedido.duracaoSeg) <= 5;
+  const durPedido = Number(pedido.duracaoSeg) > 0 ? Number(pedido.duracaoSeg) : 0;
+  const durCandidato = Number(candidato.duracaoSeg) > 0 ? Number(candidato.duracaoSeg) : 0;
+  const temDuracaoParaComparar = durPedido > 0 && durCandidato > 0;
+  const duracaoBate = temDuracaoParaComparar && Math.abs(durCandidato - durPedido) <= 5;
   if (temDuracaoParaComparar && !duracaoBate) return false; // duração conhecida e diferente
+
+  // SEM A DURAÇÃO CONFIRMANDO, o título tem de ser o MESMO (depois de limpo):
+  // com duração 0 entrava a letra de "Vida Loka, Pt. 1" para "Vida Loka" do
+  // mesmo artista (auditoria 03/11/2026, 5.2).
+  if (!duracaoBate && !titulo.forte) return false;
 
   // PROVA MÍNIMA: título parecido não é evidência. Ou o artista bate, ou a
   // duração bate — nunca os dois ausentes ao mesmo tempo.
@@ -349,14 +386,40 @@ export async function tentarGenius(pedido) {
 // ── lyrics.ovh (só texto puro, sem metadado para conferir) ─────────────────
 
 /**
- * A API resolve por artista+título direto na URL e não devolve NADA para
- * conferir a identidade da faixa (sem duração, sem título canônico de volta).
- * Por isso só entra em jogo quando os DOIS lados são conhecidos — um título
- * sozinho aqui seria aceitar de olhos fechados.
+ * A API `/v1/<artista>/<título>` resolve direto pela URL e não devolve NADA
+ * para conferir a identidade da faixa. Antes ela era chamada às cegas — e
+ * devolvia a letra de outra gravação, ou de um homônimo. Agora a identidade é
+ * conferida ANTES pelo `/suggest` (busca que devolve título, artista e
+ * DURAÇÃO de cada candidata): só um candidato que passa em `casaCandidato`
+ * vira pedido de letra, e com o título/artista canônicos dele.
  */
-async function tentarLyricsOvh(pedido) {
+async function lyricsOvhSugestoes(termo) {
+  const res = await fetch(`https://api.lyrics.ovh/suggest/${encodeURIComponent(termo)}`, {
+    signal: AbortSignal.timeout(FONTE_TIMEOUT_MS),
+  });
+  if (!res.ok) return [];
+  const data = await res.json().catch(() => null);
+  return Array.isArray(data?.data) ? data.data : [];
+}
+
+export async function tentarLyricsOvh(pedido) {
   if (!pedido.titulo || !pedido.artista) return null;
-  const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(pedido.artista)}/${encodeURIComponent(pedido.titulo)}`;
+  const sugestoes = await lyricsOvhSugestoes(`${pedido.artista} ${pedido.titulo}`);
+  const certa = sugestoes.find(
+    (s) =>
+      typeof s?.title === 'string' &&
+      typeof s?.artist?.name === 'string' &&
+      casaCandidato(
+        {
+          titulo: s.title,
+          artistas: [s.artist.name],
+          duracaoSeg: typeof s.duration === 'number' ? s.duration : null,
+        },
+        pedido,
+      ),
+  );
+  if (!certa) return null;
+  const url = `https://api.lyrics.ovh/v1/${encodeURIComponent(certa.artist.name)}/${encodeURIComponent(certa.title)}`;
   const res = await fetch(url, { signal: AbortSignal.timeout(FONTE_TIMEOUT_MS) });
   if (!res.ok) return null;
   const data = await res.json().catch(() => null);

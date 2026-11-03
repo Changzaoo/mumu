@@ -47,6 +47,25 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
+  // Erros CONHECIDOS do Prisma que nascem de entrada do cliente (e nao de defeito nosso).
+  if ((err as Error).name === 'PrismaClientKnownRequestError') {
+    const codigo = (err as { code?: string }).code;
+    const mapa: Record<string, [number, string]> = {
+      P2025: [404, 'NOT_FOUND'], // registro a alterar/apagar nao existe
+      P2002: [409, 'CONFLICT'], // unicidade
+      P2003: [409, 'CONFLICT'], // chave estrangeira
+      P2000: [400, 'BAD_REQUEST'], // valor longo demais para a coluna
+      P2023: [400, 'BAD_REQUEST'], // dado inconsistente (ex.: byte invalido)
+    };
+    const alvo = codigo ? mapa[codigo] : undefined;
+    if (alvo) {
+      res
+        .status(alvo[0])
+        .json({ error: { code: alvo[1], message: 'Request could not be applied' } });
+      return;
+    }
+  }
+
   // Payload/JSON errors from express.json / multer expose a status.
   const status =
     (err as { status?: number; statusCode?: number }).status ??

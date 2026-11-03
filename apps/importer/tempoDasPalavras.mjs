@@ -56,6 +56,14 @@ const TETO_MS = Number(process.env.TEMPO_TETO_MS ?? 25 * 60_000);
  * letra sem o relógio daqui.
  */
 const LOCAL_LIGADO = process.env.TEMPO_LOCAL !== '0';
+
+/** O whisper desta máquina está ligado? (TEMPO_LOCAL=0 desliga.) */
+export function localLigado() {
+  return LOCAL_LIGADO;
+}
+
+/** Quanto tempo uma falha do motor vale antes de tentar a mesma chave de novo. */
+const FALHA_VALE_MS = 6 * 3600_000;
 /** Fila curta: o que interessa é a faixa tocando agora, não um acúmulo. */
 const FILA_MAX = 20;
 /** Versão do formato em disco — mudou o modelo/saída, muda a chave. */
@@ -115,7 +123,20 @@ export function proximaChave(entradas) {
  *   vocabulario?: { promptPara: (artista: string) => Promise<string> },
  * }} opcoes
  */
-export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
+export function criarTempoDasPalavras({
+  dir,
+  log,
+  rivaPalavras,
+  vocabulario,
+  local = LOCAL_LIGADO,
+}) {
+  /**
+   * Esta tarefa tem quem a calcule AQUI? Alinhar e transcrever em pt pedem o
+   * whisper local; transcrever em inglês vai ao Riva (nuvem) e funciona mesmo
+   * com TEMPO_LOCAL=0 — antes o 422 vinha antes de olhar o Riva.
+   */
+  const podeCalcular = (tarefa) =>
+    local || (tarefa.tipo === 'transcrever' && tarefa.idioma === 'en' && Boolean(rivaPalavras));
   /** chave → tarefa esperando vez. Map preserva ordem de chegada. */
   const fila = new Map();
   /** chave em processamento agora. */
@@ -185,7 +206,7 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
       });
       if (words && words.length > 0) return { words, motor: 'riva', language: 'en' };
     }
-    if (!LOCAL_LIGADO) throw new Error('whisper local desligado (TEMPO_LOCAL=0)');
+    if (!local) throw new Error('whisper local desligado (TEMPO_LOCAL=0)');
     const lingua = idioma === 'en' ? 'en' : idioma === 'auto' ? '' : 'pt';
     // VOCABULÁRIO DO ARTISTA como `initial_prompt`: primar o whisper com as
     // gírias/palavras que a letra publicada já confirmou no passado para
@@ -260,9 +281,9 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
   async function pedirPorChave(chave, tarefa) {
     const pronto = await lerPronto(chave);
     if (pronto) return { pronto };
-    if (!LOCAL_LIGADO) return { status: 'falhou' };
+    if (!podeCalcular(tarefa)) return { status: 'falhou' };
     const quando = falhou.get(chave);
-    if (quando && Date.now() - quando < 6 * 3600_000) return { status: 'falhou' };
+    if (quando && Date.now() - quando < FALHA_VALE_MS) return { status: 'falhou' };
     if (atual === chave) {
       // AO VIVO: o que a transcrição já ouviu até aqui (ver palavras.py).
       const parcial = saidaAtual
@@ -288,16 +309,50 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
    * disco já gravado não é refeito, mas a próxima faixa NOVA daquele artista
    * já sai mais certa.
    */
+  const chaveDaTranscricao = (id, idioma) =>
+    `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO_TRANSCRICAO}`;
+  const chaveDoAlinhamento = (id, linhas) =>
+    `${id}.al-${createHash('sha1').update(linhas.join('\n')).digest('hex').slice(0, 12)}.${VERSAO}`;
+
   function pedir(id, arquivo, idioma, artista) {
-    const chave = `${id}.${idioma === 'en' ? 'en' : 'xx'}.${VERSAO_TRANSCRICAO}`;
-    return pedirPorChave(chave, { tipo: 'transcrever', id, arquivo, idioma, artista });
+    return pedirPorChave(chaveDaTranscricao(id, idioma), {
+      tipo: 'transcrever',
+      id,
+      arquivo,
+      idioma,
+      artista,
+    });
   }
 
   /** Alinhamento de uma letra conhecida: tempo de cada linha e palavra. */
   function pedirAlinhamento(id, arquivo, idioma, linhas) {
-    const hash = createHash('sha1').update(linhas.join('\n')).digest('hex').slice(0, 12);
-    const chave = `${id}.al-${hash}.${VERSAO}`;
-    return pedirPorChave(chave, { tipo: 'alinhar', id, arquivo, idioma, linhas });
+    return pedirPorChave(chaveDoAlinhamento(id, linhas), {
+      tipo: 'alinhar',
+      id,
+      arquivo,
+      idioma,
+      linhas,
+    });
+  }
+
+  /**
+   * RESPONDER 422 SEM BAIXAR O ÁUDIO. O server.mjs buscava a faixa inteira na
+   * borda (audioDoRelogio, dezenas de MB) só para então ouvir "falhou" daqui —
+   * em produção (TEMPO_LOCAL=0) isso era TODO pedido de /tempo e /alinhar.
+   * True quando a resposta já é certa: ninguém aqui calcula esta tarefa (ou
+   * ela falhou há pouco) e não há resultado pronto em disco. Pronto em disco
+   * devolve false: o servidor segue o caminho normal, que confere o `k`.
+   *
+   * @param {{ tipo: 'alinhar' | 'transcrever', id: string, idioma?: string, linhas?: string[] }} pedido
+   */
+  async function recusaSemAudio({ tipo, id, idioma, linhas }) {
+    const chave =
+      tipo === 'alinhar' ? chaveDoAlinhamento(id, linhas ?? []) : chaveDaTranscricao(id, idioma);
+    const tarefa = { tipo, idioma };
+    const quando = falhou.get(chave);
+    const falhouHaPouco = Boolean(quando && Date.now() - quando < FALHA_VALE_MS);
+    if (podeCalcular(tarefa) && !falhouHaPouco) return false;
+    return !(await lerPronto(chave));
   }
 
   /**
@@ -308,5 +363,11 @@ export function criarTempoDasPalavras({ dir, log, rivaPalavras, vocabulario }) {
     return transcrever({ arquivo, idioma: idioma ?? 'auto' });
   }
 
-  return { pedir, pedirAlinhamento, transcreverAgora };
+  return {
+    pedir,
+    pedirAlinhamento,
+    transcreverAgora,
+    recusaSemAudio,
+    localLigado: () => local,
+  };
 }

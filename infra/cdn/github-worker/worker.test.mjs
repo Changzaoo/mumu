@@ -1,7 +1,12 @@
 // node --test infra/cdn/github-worker/worker.test.mjs
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker, { espelharAcervo, esquecerIndice, remoteUrlDoIndice } from './worker.js';
+import worker, {
+  espelharAcervo,
+  esquecerIndice,
+  nomeDoArquivoDeAlinhamento,
+  remoteUrlDoIndice,
+} from './worker.js';
 
 const INDICE = {
   'local:a': { c: 'aurial-musicas-001', a: 'faixas/A - a.mp3', k: 'kA', t: 'audio/mpeg' },
@@ -45,6 +50,11 @@ const env = () => ({
 const req = (caminho, init) => new Request(`https://musicas.radinho.online${caminho}`, init);
 
 test.beforeEach(() => esquecerIndice());
+
+test('nomeDoArquivoDeAlinhamento troca o que o Windows recusa', () => {
+  assert.equal(nomeDoArquivoDeAlinhamento('local:ab-1'), 'local_ab-1.json');
+  assert.equal(nomeDoArquivoDeAlinhamento('x/y?z'), 'x_y_z.json');
+});
 
 test('remoteUrlDoIndice codifica o id como o acervo grava', () => {
   assert.equal(
@@ -109,7 +119,7 @@ test('GET /blob/<id> continua como antes (206 com Range, k conferido)', async ()
 test('GET /blob/<id>/alinhar serve o alinhamento do índice, com k, 404 sem arquivo', async () => {
   const chamadas = fetchFalso([
     ['indice.json', () => new Response(JSON.stringify(INDICE))],
-    ['alinhamentos/local%3Aa.json', () => new Response('{"linhas":[{"text":"oi","startMs":1}]}')],
+    ['alinhamentos/local_a.json', () => new Response('{"linhas":[{"text":"oi","startMs":1}]}')],
   ]);
   const r = await worker.fetch(req('/blob/local%3Aa/alinhar?k=kA'), env());
   assert.equal(r.status, 200);
@@ -118,7 +128,7 @@ test('GET /blob/<id>/alinhar serve o alinhamento do índice, com k, 404 sem arqu
   assert.deepEqual(await r.json(), { linhas: [{ text: 'oi', startMs: 1 }] });
   assert.ok(
     chamadas.some((c) =>
-      c.url.includes('aurial-indice-musicas/main/alinhamentos/local%3Aa.json'),
+      c.url.includes('aurial-indice-musicas/main/alinhamentos/local_a.json'),
     ),
   );
   assert.equal((await worker.fetch(req('/blob/local%3Aa/alinhar?k=x'), env())).status, 403);

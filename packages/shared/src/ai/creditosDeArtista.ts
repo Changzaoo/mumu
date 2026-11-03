@@ -176,7 +176,7 @@ export const GRUPOS_COM_SEPARADOR_NO_NOME: ReadonlySet<string> = new Set(
 );
 
 /** O crédito inteiro (ou um pedaço dele) é um nome legítimo com separador? */
-function ehGrupo(nome: string): boolean {
+export function ehGrupo(nome: string): boolean {
   return GRUPOS_COM_SEPARADOR_NO_NOME.has(chave(nome));
 }
 
@@ -222,7 +222,7 @@ function deveSepararConjuncao(lados: readonly string[], opcoes: OpcoesDeSeparaca
  * O ponto final FICA ("Charlie Brown Jr.", "R.E.M.") e o parêntese de fecho
  * também ("Black Orpheus (Manha de Carnaval)") — são parte do nome.
  */
-function aparar(pedaco: string): string {
+export function aparar(pedaco: string): string {
   let p = pedaco
     .replace(/^[\s)\].,;:\-–—]+/, '')
     .replace(/[\s,;:\-–—]+$/, '')
@@ -241,7 +241,7 @@ function aparar(pedaco: string): string {
 }
 
 /** Parte o texto e GUARDA os separadores, para remontar um grupo com o texto original. */
-function partir(texto: string, sep: RegExp): { partes: string[]; seps: string[] } {
+export function partir(texto: string, sep: RegExp): { partes: string[]; seps: string[] } {
   const partes: string[] = [];
   const seps: string[] = [];
   let ultimo = 0;

@@ -6,14 +6,24 @@
  * lyrics offline. `previewOnly` (30s Apple) tracks search by name only, since
  * their duration won't match the full song.
  */
-import type { TrackDto } from '@radinho/shared';
+import {
+  escolherLinhaDoLrclib,
+  limparTituloDaLetra,
+  linhaDoLrclibBate,
+  lrcSemTempo,
+  normalizarParaComparar,
+  parseLrc as parseLrcCompartilhado,
+  type LrclibRow,
+  type TrackDto,
+} from '@radinho/shared';
 import { aiCleanSongTitle } from '@/lib/ai/ai';
 import { gravarCache, registrarDescartavel } from '@/lib/local/cofreLocal';
-import { fetchOutraFonteDeLetra } from '@/lib/local/importerHelper';
 import { circuitoAberto } from '@/lib/local/saudeDoImportador';
 import { pedirAoLrclib } from './portaoDoLrclib';
-import { lerPalavrasMarcadas } from './karaoke';
 import { semCabecalhos } from './cabecalhos';
+import { buscarOutraFonte } from './outraFonte';
+
+export type { LrclibRow };
 
 export interface LyricLine {
   timeMs: number;
@@ -57,106 +67,29 @@ interface CachedLyricsEntry {
   fingerprint: string;
   /** Quando a busca voltou vazia. Só existe em entrada NEGATIVA. */
   vazioEm?: number;
+  /**
+   * Quando a letra (entrada POSITIVA) foi buscada. Sem isto a letra em cache
+   * valia para sempre: a versão corrigida no LRCLIB nunca chegava. Ausente =
+   * entrada antiga, revalidada uma vez.
+   */
+  buscadaEm?: number;
 }
 
 const CACHE_KEY = 'aurial:lyrics-cache';
-const LRC_TIME = /\[(\d{1,2}):(\d{2})(?:[.:](\d{1,3}))?\]/g;
-const LRC_OFFSET = /\[offset:\s*([+-]?\d+)\s*\]/i;
 
+/** LRC → linhas (ver packages/shared/src/letra/lrc.ts: offset, multi-tempo, A2). */
 function parseLrc(lrc: string): LyricLine[] {
-  // `[offset:±ms]` é um deslocamento global do arquivo; convenção dos players:
-  // tempo efetivo = tempo - offset (positivo adianta a letra). Ignorá-lo deixa
-  // TODAS as linhas fora de sincronia por esse valor fixo.
-  const offset = Number(LRC_OFFSET.exec(lrc)?.[1] ?? 0) || 0;
-  const out: LyricLine[] = [];
-  for (const raw of lrc.split(/\r?\n/)) {
-    LRC_TIME.lastIndex = 0;
-    const times: number[] = [];
-    let match: RegExpExecArray | null;
-    let end = 0;
-    while ((match = LRC_TIME.exec(raw)) !== null) {
-      const min = Number(match[1]);
-      const sec = Number(match[2]);
-      const frac = match[3] ? Number((match[3] + '000').slice(0, 3)) : 0;
-      times.push((min * 60 + sec) * 1000 + frac);
-      end = LRC_TIME.lastIndex;
-    }
-    if (times.length === 0) continue;
-    // LRC estendido traz `<mm:ss.xx>` por palavra: vira tempo real por
-    // palavra em vez de aparecer como texto na tela.
-    const { text, words } = lerPalavrasMarcadas(
-      raw.slice(end),
-      offset,
-      Math.max(0, (times[0] ?? 0) - offset),
-    );
-    for (const t of times) {
-      // Marcas de palavra são absolutas: só valem para uma linha de tempo único.
-      const comPalavras = words && times.length === 1;
-      out.push({ timeMs: Math.max(0, t - offset), text, ...(comPalavras ? { words } : {}) });
-    }
-  }
-  return out.sort((a, b) => a.timeMs - b.timeMs);
+  return parseLrcCompartilhado(lrc);
 }
 
-export interface LrclibRow {
-  id?: number | null;
-  syncedLyrics?: string | null;
-  plainLyrics?: string | null;
-  trackName?: string | null;
-  artistName?: string | null;
-  duration?: number | null;
-  instrumental?: boolean | null;
-}
+/** Normalização de comparação, em qualquer alfabeto (packages/shared/src/letra). */
+const normLoose = normalizarParaComparar;
 
 /**
- * Normalização frouxa para comparar título/artista — EM QUALQUER ALFABETO.
- *
- * A versão anterior terminava em `.replace(/[^a-z0-9]+/g, ' ')`, e essa linha
- * deixava fora do app toda música que não se escreve com o alfabeto latino.
- * Para o português ela só tirava a pontuação; para um título inteiro em
- * coreano, japonês, chinês, russo, grego, árabe, hebraico ou tailandês ela
- * apagava TUDO e devolvia string vazia — e `rowMatches` recusa vazio na
- * primeira linha.
- *
- * O modo de falha era invisível, que é o que o tornava difícil: o LRCLIB
- * ENCONTRAVA a letra certa e devolvia a linha correta; era o nosso próprio
- * guarda que a jogava fora. Sem erro, sem log — a faixa simplesmente nunca
- * ganhava letra, para sempre.
- *
- * `\p{L}` e `\p{N}` guardam letra e número de qualquer escrita, que é o que
- * "letra e número" sempre quis dizer aqui. O passo dos acentos vira `\p{M}`
- * (toda marca combinante, não só o bloco latino) entre NFD e NFC: decompor
- * separa o acento para ele poder cair, e recompor devolve o hangul ao seu
- * silabário — sem o NFC final, 한 voltaria como três jamo soltos.
- *
- * EFEITO COLATERAL ACEITO: isto muda o `trackFingerprint` de faixas com título
- * não-latino, então a letra que estiver em cache para elas será rebuscada uma
- * vez. Ela estava errada ou ausente de qualquer forma.
- */
-function normLoose(s: string): string {
-  return s
-    .toLowerCase()
-    .normalize('NFD')
-    .replace(/\p{M}+/gu, '')
-    .normalize('NFC')
-    .replace(/[^\p{L}\p{N}]+/gu, ' ')
-    .trim();
-}
-
-/**
- * `menor` aparece em `maior` como PALAVRA(S) inteira(s), não no meio de outra. Com
- * `includes` puro "Amor" casava com "Amora" e o artista "Ana" com "Mariana" — e
- * numa faixa de preview (sem duração) só título+artista seguram a letra alheia.
- */
-function contemPalavras(maior: string, menor: string): boolean {
-  return ` ${maior} `.includes(` ${menor} `);
-}
-
-/**
- * True when a fuzzy `/api/search` row plausibly IS this track — the search
- * endpoint is loose full-text and returns many unrelated songs, so accepting
- * the first row with synced lyrics is exactly how WRONG lyrics get locked in.
- * Guard on title similarity + artist overlap + duration proximity.
+ * True quando uma linha do LRCLIB É mesmo esta faixa — a prova mínima mora em
+ * packages/shared/src/letra/aceitacao.ts (o script Node usa a mesma): título,
+ * marca de versão, artista e duração; falta de prova é reprovação, e sem a
+ * duração confirmando o título limpo tem de ser IGUAL.
  */
 export function rowMatches(
   row: LrclibRow,
@@ -164,36 +97,7 @@ export function rowMatches(
   names: string[],
   durationSec: number,
 ): boolean {
-  const rt = normLoose(row.trackName ?? '');
-  const qt = normLoose(title);
-  if (!rt || !qt) return false;
-  // O casamento de título é de propósito FROUXO ("Warzone" casa com "Warzone
-  // (Remix)"), e por isso ele sozinho nunca pode bastar — ver a prova mínima
-  // no fim desta função.
-  const titleOk = rt === qt || contemPalavras(rt, qt) || contemPalavras(qt, rt);
-  if (!titleOk) return false;
-
-  const ra = normLoose(row.artistName ?? '');
-  const nomes = names.map(normLoose).filter(Boolean);
-  const daParaCompararArtista = ra.length > 0 && nomes.length > 0;
-  const artistaBate =
-    daParaCompararArtista && nomes.some((n) => contemPalavras(ra, n) || contemPalavras(n, ra));
-  if (daParaCompararArtista && !artistaBate) return false; // artista conhecido e diferente
-
-  const daParaCompararDuracao = durationSec > 0 && typeof row.duration === 'number';
-  const duracaoBate = daParaCompararDuracao && Math.abs((row.duration ?? 0) - durationSec) <= 3;
-  if (daParaCompararDuracao && !duracaoBate) return false; // duração conhecida e diferente
-
-  // PROVA MÍNIMA: título parecido NÃO É EVIDÊNCIA.
-  //
-  // Antes, a ausência de dado contava como aprovação: sem artista conhecido
-  // (faixa creditada a "Desconhecido", que a busca descarta) e sem duração na
-  // linha, sobrava só o título frouxo — e a letra de outra música entrava e
-  // ficava em cache. É o defeito clássico de "a letra não é dessa música", e
-  // ele nascia aqui, de um `||` que lia "não sei" como "pode".
-  //
-  // Agora falta de prova é reprovação: ou o artista bate, ou a duração bate.
-  return artistaBate || duracaoBate;
+  return linhaDoLrclibBate(row, title, names, durationSec);
 }
 
 /**
@@ -218,10 +122,7 @@ export function toLyrics(row: LrclibRow | null | undefined, semTempo = false): L
   // sobre um clipe seriam desincronia garantida. A letra vale, o tempo não —
   // cai para texto puro (o próprio LRC sem as marcas, se não houver plain).
   if (semTempo && !row.plainLyrics?.trim() && row.syncedLyrics?.trim()) {
-    const texto = row.syncedLyrics
-      .split(/\r?\n/)
-      .map((l) => l.replace(/\[[^\]]*\]|<\d{1,2}:\d{2}(?:[.:]\d{1,3})?>/g, '').trim())
-      .filter(Boolean);
+    const texto = lrcSemTempo(row.syncedLyrics);
     return texto.length > 0
       ? soALetra({ synced: false, lines: texto.map((text) => ({ timeMs: 0, text })), source: null })
       : null;
@@ -406,13 +307,23 @@ function julgarConteudo(trackId: string, titulo: string, lyrics: Lyrics | null):
     .catch(() => undefined);
 }
 
-export function writeLyrics(trackId: string, lyrics: Lyrics): void {
+export function writeLyrics(trackId: string, lyrics: Lyrics, track?: TrackDto): void {
   julgarConteudo(trackId, '', lyrics);
   const current = readCache()[trackId];
-  const fingerprint = current && 'lyrics' in current ? current.fingerprint : '';
+  const entrada = current && typeof current === 'object' && 'lyrics' in current ? current : null;
+  // Com a faixa em mãos, o fingerprint é o DELA: sem isto a letra calibrada de
+  // uma faixa sem entrada no cache era gravada sem fingerprint (formato legado)
+  // e a próxima busca online a jogava fora.
+  const fingerprint = track ? trackFingerprint(track) : (entrada?.fingerprint ?? '');
   writeCache({
     ...readCache(),
-    [trackId]: fingerprint ? ({ lyrics, fingerprint } satisfies CachedLyricsEntry) : lyrics,
+    [trackId]: fingerprint
+      ? ({
+          lyrics,
+          fingerprint,
+          buscadaEm: entrada?.buscadaEm ?? Date.now(),
+        } satisfies CachedLyricsEntry)
+      : lyrics,
   });
 }
 
@@ -431,17 +342,7 @@ export function lyricsCacheEntries(): Array<[string, Lyrics]> {
 // ── fetch ───────────────────────────────────────────────────────
 
 /** Strip parentheticals / feat / live-remaster noise that hurts LRCLIB matching. */
-function cleanTitleForLyrics(title: string): string {
-  return title
-    .replace(/[([{][^)\]}]*[)\]}]/g, ' ') // (feat …), [Official Video]
-    .replace(
-      /\s*[-–—]\s*(?:ao\s+vivo|live|(?:\d{4}\s+)?remaster(?:ed)?.*|slowed.*|sped\s*up.*)$/i,
-      ' ',
-    )
-    .replace(/\bfeat\.?\b.*$|\bft\.?\b.*$/i, ' ') // trailing "feat X" without parens
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-}
+const cleanTitleForLyrics = limparTituloDaLetra;
 
 /**
  * `falhou` vira true quando uma ida à fonte ERROU (rede caiu, timeout, 5xx, JSON
@@ -565,10 +466,9 @@ async function lrclibGet(
     if (!Array.isArray(rows) || rows.length === 0) return null;
     // Só aceita uma linha que REALMENTE bate com a faixa (título+artista+
     // duração) — a busca é full-text solta e devolve músicas alheias.
-    const synced = rows.find((r) => r.syncedLyrics && rowMatches(r, title, names, durationSec));
-    if (synced) return toLyrics(synced, track.previewOnly);
-    const plain = rows.find((r) => rowMatches(r, title, names, durationSec));
-    return plain ? toLyrics(plain, track.previewOnly) : null;
+    // Entre as que batem: com tempo primeiro, depois a duração mais perto.
+    const melhor = escolherLinhaDoLrclib(rows, title, names, durationSec);
+    return melhor ? toLyrics(melhor, track.previewOnly) : null;
   };
 
   const soltos = escolher(
@@ -638,6 +538,13 @@ export async function letrasComOMesmoTitulo(track: TrackDto): Promise<LrclibRow[
 const VALIDADE_DO_VAZIO_MS = 7 * 24 * 3600_000;
 
 /**
+ * Quanto vale uma letra ACHADA (não calibrada) antes de ser conferida de novo
+ * no LRCLIB. Antes era para sempre. A conferência não apaga: se a busca nova
+ * não achar nada (ou errar), a letra de antes fica.
+ */
+export const VALIDADE_DA_LETRA_MS = 30 * 24 * 3600_000;
+
+/**
  * PLANO B quando o LRCLIB não tem versão COM TEMPO — pergunta ao importador
  * por outras fontes (NetEase, lyrics.ovh; ver apps/importer/outrasFontesDeLetra.mjs).
  * O navegador não alcança essas fontes sozinho (exigem `Referer`/driblam CORS),
@@ -648,14 +555,24 @@ const VALIDADE_DO_VAZIO_MS = 7 * 24 * 3600_000;
  * têm são da música INTEIRA, e aplicá-los a um clipe de 30s é desincronia
  * garantida — o mesmo motivo que já faz `lrclibGet` zerar a duração aqui.
  */
-async function outrasFontesDeLetra(track: TrackDto): Promise<Lyrics | null> {
+async function outrasFontesDeLetra(
+  track: TrackDto,
+  estado: { falhou: boolean } = { falhou: false },
+): Promise<Lyrics | null> {
   if (track.previewOnly) return null;
   const rawTitle = track.title.trim();
   if (!rawTitle) return null;
   const title = cleanTitleForLyrics(rawTitle) || rawTitle;
   const artist = track.artists.find((a) => a.name && a.name !== 'Desconhecido')?.name;
   const durationSec = Math.round((track.durationMs || 0) / 1000);
-  const achado = await fetchOutraFonteDeLetra(title, artist, durationSec).catch(() => null);
+  // 429/5xx/rede do importador NÃO é "nenhuma fonte tinha": marca a falha, e
+  // quem chama não grava "sem letra" por uma semana (auditoria 03/11, 5.2).
+  const resposta = await buscarOutraFonte(title, artist, durationSec).catch(() => ({
+    achado: null,
+    falhou: true,
+  }));
+  if (resposta.falhou) estado.falhou = true;
+  const achado = resposta.achado;
   if (!achado) return null;
   if (achado.synced && achado.lrc) {
     const lines = parseLrc(achado.lrc);
@@ -704,27 +621,45 @@ export function fetchLyrics(track: TrackDto): Promise<Lyrics | null> {
 async function buscarLetra(track: TrackDto): Promise<Lyrics | null> {
   const fingerprint = trackFingerprint(track);
   const guardada = readCache()[track.id];
+  const offline = typeof navigator !== 'undefined' && !navigator.onLine;
   // Entrada que não é objeto (cache sujo) conta como ausente — `in` lançaria.
   const rawCached = guardada && typeof guardada === 'object' ? guardada : undefined;
+  /** Letra que já estava aqui e vale como reserva se a revalidação não achar nada. */
+  let reserva: Lyrics | null = null;
   if (rawCached) {
     if ('lyrics' in rawCached) {
+      const letra = letraDaEntrada(rawCached);
+      // CARIMBADA vale pelo áudio, não pelo título: nem metadado corrigido a derruba.
+      if (letra?.selada) return letra;
       if (rawCached.fingerprint === fingerprint) {
         // Entrada NEGATIVA ainda no prazo: nada de rede. É o que impede uma
         // faixa sem letra de refazer a busca inteira a cada reprodução.
         if (rawCached.lyrics === null) {
           const vazioEm = rawCached.vazioEm ?? 0;
-          if (Date.now() - vazioEm < VALIDADE_DO_VAZIO_MS) return null;
-        } else {
-          julgarConteudo(track.id, track.title ?? '', rawCached.lyrics);
-          return rawCached.lyrics;
+          if (offline || Date.now() - vazioEm < VALIDADE_DO_VAZIO_MS) return null;
+        } else if (letra) {
+          julgarConteudo(track.id, track.title ?? '', letra);
+          // POSITIVA TAMBÉM VENCE: a letra do LRCLIB é corrigida (tempo,
+          // texto) e a correção nunca chegava. Letra calibrada no áudio não
+          // vence — o relógio dela veio daqui, não do LRCLIB.
+          if (letra.calibrada || offline) return letra;
+          if (rawCached.buscadaEm === undefined) {
+            // Entrada de antes desta regra: começa a contar agora.
+            writeCache({ ...readCache(), [track.id]: { ...rawCached, buscadaEm: Date.now() } });
+            return letra;
+          }
+          if (Date.now() - rawCached.buscadaEm < VALIDADE_DA_LETRA_MS) return letra;
+          reserva = letra;
         }
+      } else if (offline) {
+        // Sem rede e a letra guardada é de OUTRO título/artista: mostrar a
+        // antiga seria mostrar letra de outra música. Melhor nada.
+        return null;
       }
-      // Sem rede, usa o cache mesmo antigo em vez de falhar em branco.
-      if (typeof navigator !== 'undefined' && !navigator.onLine) return rawCached.lyrics;
     } else {
       // Cache legado (sem fingerprint): tenta renovar quando online para evitar
       // manter letra de música errada após correção de metadados.
-      if (typeof navigator !== 'undefined' && !navigator.onLine) return rawCached;
+      if (offline) return letraDaEntrada(rawCached);
     }
   }
   if (!track.title?.trim()) return null;
@@ -753,7 +688,7 @@ async function buscarLetra(track: TrackDto): Promise<Lyrics | null> {
     // puro OU um vazio; uma fonte de texto puro só entra quando não havia
     // NADA do LRCLIB — ver a ordem de preferência acima.
     if (!lyrics || !lyrics.synced) {
-      const outra = await outrasFontesDeLetra(track);
+      const outra = await outrasFontesDeLetra(track, estado);
       if (outra?.synced) lyrics = outra;
       else if (!lyrics) lyrics = outra;
     }
@@ -762,17 +697,19 @@ async function buscarLetra(track: TrackDto): Promise<Lyrics | null> {
     // rede — melhor perguntar de novo na próxima reprodução.
     // O mesmo vale com o importador dado como fora pelo médico: as outras
     // fontes nem foram perguntadas.
-    if (!lyrics && (estado.falhou || circuitoAberto())) return null;
+    if (!lyrics && (estado.falhou || circuitoAberto())) return reserva;
+    // Revalidação que não achou nada: a letra de antes continua (o prazo recomeça).
+    if (!lyrics && reserva) lyrics = reserva;
     julgarConteudo(track.id, track.title ?? '', lyrics);
     writeCache({
       ...readCache(),
       [track.id]: lyrics
-        ? ({ lyrics, fingerprint } satisfies CachedLyricsEntry)
+        ? ({ lyrics, fingerprint, buscadaEm: Date.now() } satisfies CachedLyricsEntry)
         : ({ lyrics: null, fingerprint, vazioEm: Date.now() } satisfies CachedLyricsEntry),
     });
     return lyrics;
   } catch {
-    return null;
+    return reserva;
   }
 }
 

@@ -13,6 +13,8 @@
  * os endereços de metadados são REMONTADOS a partir do id, em hosts fixos.
  */
 
+import { escolherVideoEstrito, nivelDoCanal, palavrasLimpas } from './escolhaEstrita.mjs';
+
 const TAMANHO_MAX = 2048;
 const ID_SPOTIFY = /^[A-Za-z0-9]{22}$/;
 const ID_NUMERICO = /^\d{1,15}$/;
@@ -368,35 +370,12 @@ export function youtubeDoSongLink(json) {
   return { url, meta };
 }
 
-// ── Escolher o vídeo certo (mesma régua de apps/web/.../acharPelaBusca.ts) ──
-
-const DIACRITICOS = new RegExp('[̀-ͯ]', 'g');
-/** Versões mexidas: nunca são "a mesma música". */
-const VERSAO_ALTERADA =
-  /\b(?:speed ?up|sped ?up|slowed|reverb|8d|nightcore|bass ?boost(?:ed)?|karaok[eê]|instrumental|cover|reac(?:t|tion|ting)|reagindo|tutorial|aula)\b/i;
-/**
- * Outras gravações da mesma música: só valem se a própria faixa do serviço
- * já for essa versão ("X - Ao Vivo" pede o ao vivo; "X" pede o de estúdio).
- */
-const OUTRA_GRAVACAO =
-  /\b(?:remix|rmx|ao vivo|live|acustico|acoustic|unplugged|extended|mashup|medley|lyric video with)\b/i;
-
-function norm(s) {
-  return String(s ?? '')
-    .normalize('NFD')
-    .replace(DIACRITICOS, '')
-    .toLowerCase()
-    .replace(/\([^)]*\)|\[[^\]]*\]/g, ' ')
-    .replace(/\b(?:feat|ft|part|participacao)\b\.?.*$/, ' ')
-    .replace(/[^a-z0-9]+/g, ' ')
-    .trim();
-}
-
-function normSemAcento(s) {
-  return String(s ?? '')
-    .normalize('NFD')
-    .replace(DIACRITICOS, '');
-}
+// ── Escolher o vídeo certo: a régua ESTRITA única (escolhaEstrita.mjs) ──────
+//
+// Artista E título por palavras inteiras, sem versão alterada, duração dentro
+// de ±15% ou 20 s, preferência Topic/oficial, e empate ou dúvida = null. É o
+// espelho gerado de apps/api/src/workers/escolhaEstrita.ts (o mesmo que o
+// semeador e o pesquisador usam), testado com o mesmo corpus de cenários.
 
 /**
  * O título "de catálogo" sem o sufixo do Spotify/Deezer ("Song - Remastered
@@ -406,44 +385,37 @@ export function tituloBase(titulo) {
   return String(titulo ?? '').replace(/\s+-\s+.*$/, '');
 }
 
-/** Nota do resultado da busca para esta faixa; 0 = não é ela. */
-export function notaDoResultado(f, r) {
-  const titulo = norm(tituloBase(f.titulo));
-  if (!titulo) return 0;
-  const doVideo = norm(r.titulo);
-  if (!doVideo.includes(titulo)) return 0;
-  const bruto = normSemAcento(`${r.titulo} ${r.canal ?? ''}`);
-  const original = normSemAcento(f.titulo);
-  if (VERSAO_ALTERADA.test(bruto) && !VERSAO_ALTERADA.test(original)) return 0;
-  if (OUTRA_GRAVACAO.test(normSemAcento(r.titulo)) && !OUTRA_GRAVACAO.test(original)) return 0;
-  const onde = `${doVideo} ${norm(r.canal)}`;
-  const artistaBate = f.artistas.some((a) => {
-    const n = norm(a);
-    return n.length >= 2 && onde.includes(n);
-  });
+function pedidoDaFaixa(f) {
   const esperado = (f.duracaoMs ?? 0) / 1000;
-  const temDuracao = esperado > 0 && r.duracaoSeg > 0;
-  const diferenca = temDuracao ? Math.abs(r.duracaoSeg - esperado) : 0;
-  // Muito mais longo/curto que a faixa: é álbum inteiro, versão estendida ou trecho.
-  if (temDuracao && diferenca > Math.max(60, esperado * 0.4)) return 0;
-  const duracaoBate = temDuracao && diferenca <= Math.max(8, esperado * 0.1);
-  if (!artistaBate && !duracaoBate) return 0;
-  // Título exato vale mais que título contido ("Mantém" vs "Mantém Remix").
-  return (artistaBate ? 2 : 0) + (duracaoBate ? 2 : 0) + (doVideo === titulo ? 1 : 0);
+  return {
+    artistas: Array.isArray(f.artistas) ? f.artistas : [],
+    titulo: String(f.titulo ?? ''),
+    ...(esperado > 0 ? { duracaoSeg: esperado } : {}),
+  };
 }
 
-/** O melhor resultado (empate: o primeiro, que é a ordem de relevância do YouTube). */
+/** Nota do resultado da busca para esta faixa; 0 = não é ela. */
+export function notaDoResultado(f, r) {
+  const d = escolherVideoEstrito(pedidoDaFaixa(f), [r]);
+  return d.escolhido ? 1 + nivelDoCanal(r.canal ?? '', artistasLimpos(f)) : 0;
+}
+
+function artistasLimpos(f) {
+  return (Array.isArray(f.artistas) ? f.artistas : [])
+    .map((a) => palavrasLimpas(a, false))
+    .filter((a) => a.length > 0);
+}
+
+/**
+ * O vídeo da faixa, ou null (empate/dúvida também é null). `motivoDaEscolha`
+ * devolve a razão, para o erro relatado ao usuário e ao log.
+ */
 export function melhorResultado(f, resultados) {
-  let melhor = null;
-  let nota = 0;
-  for (const r of resultados ?? []) {
-    const n = notaDoResultado(f, r);
-    if (n > nota) {
-      melhor = r;
-      nota = n;
-    }
-  }
-  return melhor;
+  return escolherVideoEstrito(pedidoDaFaixa(f), resultados ?? []).escolhido;
+}
+
+export function motivoDaEscolha(f, resultados) {
+  return escolherVideoEstrito(pedidoDaFaixa(f), resultados ?? []).motivo;
 }
 
 /** O que se digita na busca do YouTube para achar esta faixa. */

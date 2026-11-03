@@ -38,6 +38,7 @@ import {
   palavrasEmLinhas,
   recalibrarLetra,
   transcricaoConfiavel,
+  type LinhaAlinhada,
   type TranscricaoParcial,
   urlDoAlinhamento,
   urlDoTempo,
@@ -49,6 +50,14 @@ import {
   palavrasOuvidas,
 } from '@/lib/lyrics/confirmarPelaVoz';
 import { aprenderComATranscricao } from '@/lib/lyrics/aprendizado';
+import {
+  alinhadasParaAsLinhas,
+  buscarAlinhamentoNaBorda,
+  confiancaDasCasadas,
+  urlDoAlinhamentoNaBorda,
+  type LinhaDaBorda,
+} from '@/lib/lyrics/alinhamentoDaBorda';
+import { desistiuHaPouco, marcarDesistencia } from '@/lib/lyrics/desistencias';
 
 /**
  * Espaço entre perguntas ao importador e o número de tentativas.
@@ -128,6 +137,15 @@ export type LetraAlinhada = Lyrics & {
   verificadaPelaVoz?: 'confirmada' | 'inconclusiva';
 };
 
+/**
+ * O "não" do importador vale para os próximos plays? 4xx (422: TEMPO_LOCAL=0
+ * ou o motor já falhou nesta faixa; 403: token) é resposta de verdade; 5xx e
+ * rede caída são soluço — perguntar de novo no próximo play é o certo.
+ */
+function definitiva(r: { tipo: string; status?: number }): boolean {
+  return r.tipo === 'desistir' && typeof r.status === 'number' && r.status < 500;
+}
+
 /** Uma entrada por faixa em voo — o que impede o pedido duplicado. */
 const emVoo = new Map<string, Promise<Lyrics | null>>();
 
@@ -164,17 +182,17 @@ async function usarLetraConfirmada(
   manterVivo: () => boolean,
 ): Promise<Lyrics | null> {
   const trackId = track.id;
-  writeLyrics(trackId, letra);
+  writeLyrics(trackId, letra, track);
   publicar(trackId, { fase: 'alinhando', letra });
   aprenderComATranscricao(track.artists[0]?.name, ouvidas, letra.lines);
   const url = urlDoAlinhamento(remota, idiomaPara(letra));
-  const r = url ? await alinharAteChegar(trackId, url, letra, manterVivo) : null;
+  const r = url ? await alinharAteChegar(track, url, letra, manterVivo) : null;
   if (!r) return letra;
   if ('pronta' in r) return r.pronta;
   // A voz JÁ confirmou esta letra: alinhamento fraco aqui é o autotune, não
   // a música errada. Fica como veio.
   const pronta: LetraAlinhada = { ...r.suspeita, verificadaPelaVoz: 'confirmada', selada: true };
-  writeLyrics(trackId, pronta);
+  writeLyrics(trackId, pronta, track);
   return pronta;
 }
 
@@ -213,10 +231,15 @@ async function perguntarAteChegar(
         alinhada: true,
         procuradaPelaVoz: true,
       };
-      writeLyrics(trackId, pronta);
+      writeLyrics(trackId, pronta, track);
       return pronta;
     }
-    if (r.tipo !== 'esperar') return null;
+    if (r.tipo !== 'esperar') {
+      // 422: o importador não faz (TEMPO_LOCAL=0, ou já falhou nesta faixa).
+      // Não pergunta de novo no próximo play — ver desistencias.ts.
+      if (definitiva(r)) marcarDesistencia(trackId, 'tempo');
+      return null;
+    }
     // CEDO: com o começo da música já ouvido, procura a letra de verdade — se a
     // voz a confirmar, ela chega em segundos em vez de ao fim da transcrição.
     if (
@@ -260,13 +283,26 @@ async function perguntarAteChegar(
 type ResultadoDoAlinhamento =
   { pronta: LetraAlinhada } | { suspeita: LetraAlinhada; confianca: number };
 
+/**
+ * As linhas do alinhador na ordem das linhas enviadas. Com texto (palavras.py
+ * novo), casa pelo texto — a contagem pode não bater (o stable-ts junta ou
+ * parte segmentos) e antes isso jogava o alinhamento inteiro fora. Sem texto
+ * (resultado antigo em disco), vale a posição, como sempre foi.
+ */
+function linhasNaOrdemDaLetra(textos: string[], linhas: LinhaAlinhada[]): LinhaAlinhada[] {
+  const comTexto = linhas.filter((l) => typeof l.text === 'string' && l.text.trim()).length;
+  if (comTexto < linhas.length * 0.8) return linhas;
+  return alinhadasParaAsLinhas(textos, linhas as LinhaDaBorda[]).linhas;
+}
+
 /** Pede o alinhamento da letra conhecida até ele chegar (ou desistir). */
 async function alinharAteChegar(
-  trackId: string,
+  track: TrackDto,
   url: string,
   letra: Lyrics,
   manterVivo: () => boolean,
 ): Promise<ResultadoDoAlinhamento | null> {
+  const trackId = track.id;
   const indices = linhasParaAlinhar(letra);
   const textos = indices.map((i) => letra.lines[i]?.text ?? '');
   if (textos.length === 0) return null;
@@ -274,8 +310,9 @@ async function alinharAteChegar(
   while (manterVivo()) {
     const r = await buscarAlinhamento(url, textos);
     if (r.tipo === 'pronto') {
-      const nova = aplicarAlinhamento(letra, indices, r.linhas);
-      const confianca = confiancaDoAlinhamento(indices, r.linhas);
+      const linhas = linhasNaOrdemDaLetra(textos, r.linhas);
+      const nova = aplicarAlinhamento(letra, indices, linhas);
+      const confianca = confiancaDoAlinhamento(indices, linhas);
       const pronta: LetraAlinhada = {
         ...(nova ?? letra),
         calibrada: true,
@@ -291,12 +328,15 @@ async function alinharAteChegar(
       // de outra música — e era gravada como "alinhada" para sempre. Agora
       // ela sai daqui como suspeita e vai à prova da voz (verificarPelaVoz).
       if (nova && confianca >= ALINHAMENTO_SUSPEITO) {
-        writeLyrics(trackId, pronta);
+        writeLyrics(trackId, pronta, track);
         return { pronta };
       }
       return { suspeita: pronta, confianca };
     }
-    if (r.tipo !== 'esperar') return null;
+    if (r.tipo !== 'esperar') {
+      if (definitiva(r)) marcarDesistencia(trackId, 'alinhar');
+      return null;
+    }
     publicar(trackId, { fase: 'alinhando' });
     // Só conta tentativa (e só espera o INTERVALO_MS lento) quando o job
     // ainda nem começou — enquanto processa, o orçamento não é gasto: o job
@@ -340,10 +380,10 @@ async function verificarPelaVoz(
           ...(verificadaPelaVoz === 'confirmada' ? { selada: true } : {}),
         }
       : suspeita;
-    writeLyrics(trackId, pronta);
+    writeLyrics(trackId, pronta, track);
     return pronta;
   };
-  if (!url) return manter();
+  if (!url || desistiuHaPouco(trackId, 'tempo')) return manter();
   let tentativas = 0;
   let julgouCedo = false;
   const limite = Date.now() + 10 * 60_000;
@@ -365,7 +405,7 @@ async function verificarPelaVoz(
           verificadaPelaVoz: 'confirmada',
           selada: true,
         };
-        writeLyrics(trackId, pronta);
+        writeLyrics(trackId, pronta, track);
         return pronta;
       }
       // RECUSADA: é letra de outra música. A certa pode estar no LRCLIB com
@@ -385,14 +425,17 @@ async function verificarPelaVoz(
           procuradaPelaVoz: true,
         };
         if (pronta.lines.length > 0) {
-          writeLyrics(trackId, pronta);
+          writeLyrics(trackId, pronta, track);
           return pronta;
         }
       }
       recusarLetra(track);
       return null;
     }
-    if (r.tipo !== 'esperar') return manter();
+    if (r.tipo !== 'esperar') {
+      if (definitiva(r)) marcarDesistencia(trackId, 'tempo');
+      return manter();
+    }
     // CEDO: com o começo já ouvido, se a letra já cobre o que o modelo ouviu,
     // não há por que esperar a música inteira ser transcrita.
     if (
@@ -411,6 +454,89 @@ async function verificarPelaVoz(
     await new Promise((resolve) => setTimeout(resolve, r.processando ? AO_VIVO_MS : INTERVALO_MS));
   }
   return manter();
+}
+
+/** Fração das linhas da letra que precisa achar par na borda para carimbar. */
+const COBERTURA_PARA_SELAR = 0.8;
+
+/** Linhas da borda casadas com esta letra viram o alinhamento dela. */
+function resultadoDaBorda(
+  track: TrackDto,
+  letra: Lyrics,
+  daBorda: LinhaDaBorda[],
+): ResultadoDoAlinhamento | null {
+  const indices = linhasParaAlinhar(letra);
+  const textos = indices.map((i) => letra.lines[i]?.text ?? '');
+  if (textos.length === 0) return null;
+  const { linhas, casadas } = alinhadasParaAsLinhas(textos, daBorda);
+  const nova = aplicarAlinhamento(letra, indices, linhas);
+  if (!nova) return null;
+  const confianca = confiancaDasCasadas(linhas);
+  const cobertura = casadas / textos.length;
+  const pronta: LetraAlinhada = {
+    ...nova,
+    calibrada: true,
+    alinhada: true,
+    confianca,
+    // Carimbo só com quase todas as linhas casadas: o relógio é do áudio E o
+    // texto é o mesmo que foi alinhado.
+    ...(confianca >= ALINHAMENTO_SELADO && cobertura >= COBERTURA_PARA_SELAR
+      ? { selada: true }
+      : {}),
+  };
+  if (confianca >= ALINHAMENTO_SUSPEITO) {
+    writeLyrics(track.id, pronta, track);
+    return { pronta };
+  }
+  return { suspeita: pronta, confianca };
+}
+
+/**
+ * O alinhamento pronto da borda para a letra que o aparelho tem.
+ * `undefined` = a borda não tem (404) ou o que tem não casa: vale o importador.
+ * `null` = a borda errou (403, 5xx, rede): para aqui, sem importador.
+ */
+async function alinharPelaBorda(
+  track: TrackDto,
+  remota: string,
+  letra: Lyrics,
+): Promise<ResultadoDoAlinhamento | null | undefined> {
+  if (desistiuHaPouco(track.id, 'borda')) return undefined;
+  const url = urlDoAlinhamentoNaBorda(remota);
+  if (!url) return undefined;
+  const r = await buscarAlinhamentoNaBorda(url);
+  if (r.tipo === 'erro') return null;
+  if (r.tipo === 'nao-tem') {
+    marcarDesistencia(track.id, 'borda');
+    return undefined;
+  }
+  const resultado = resultadoDaBorda(track, letra, r.linhas);
+  if (!resultado) marcarDesistencia(track.id, 'borda');
+  return resultado ?? undefined;
+}
+
+/**
+ * Faixa SEM letra: o alinhamento da borda traz o texto junto. Só vale com
+ * confiança de carimbo — abaixo disso pode ser a letra de outra música.
+ */
+async function letraDaBorda(track: TrackDto, remota: string): Promise<Lyrics | null> {
+  if (desistiuHaPouco(track.id, 'borda')) return null;
+  const url = urlDoAlinhamentoNaBorda(remota);
+  if (!url) return null;
+  const r = await buscarAlinhamentoNaBorda(url);
+  if (r.tipo !== 'pronto') {
+    if (r.tipo === 'nao-tem') marcarDesistencia(track.id, 'borda');
+    return null;
+  }
+  const textos = r.linhas.map((l) => l.text.trim()).filter(Boolean);
+  if (textos.length === 0 || confiancaDasCasadas(r.linhas) < ALINHAMENTO_SELADO) return null;
+  const base: Lyrics = {
+    synced: false,
+    source: null,
+    lines: textos.map((text) => ({ timeMs: 0, text })),
+  };
+  const resultado = resultadoDaBorda(track, base, r.linhas);
+  return resultado && 'pronta' in resultado ? resultado.pronta : null;
 }
 
 export function pedirCalibracao(
@@ -462,13 +588,31 @@ export function pedirCalibracao(
     // relógio vem do áudio. Nunca inventa palavra. SEM LETRA: transcrição, e
     // só com o que o modelo ouviu com confiança (ver `transcricaoConfiavel`).
     if (letra && letra.lines.length > 0) {
+      // 1º A BORDA: o alinhamento já calculado (ver alinhamentoDaBorda.ts). O
+      // importador só é perguntado quando a borda ainda não tem (404) ou o
+      // que ela tem não casa com esta letra.
+      const daBorda = await alinharPelaBorda(track, remota, letra);
+      if (daBorda) {
+        if ('pronta' in daBorda) return daBorda.pronta;
+        return manterVivo()
+          ? verificarPelaVoz(track, remota, letra, daBorda.suspeita, manterVivo)
+          : null;
+      }
+      if (daBorda === null || !manterVivo()) return null;
+      // O importador já disse 422 para esta faixa há pouco: não repete o POST.
+      if (desistiuHaPouco(track.id, 'alinhar')) return null;
       const url = urlDoAlinhamento(remota, idiomaPara(letra));
       if (!url) return null;
-      const r = await alinharAteChegar(track.id, url, letra, manterVivo);
+      const r = await alinharAteChegar(track, url, letra, manterVivo);
       if (!r) return null;
       if ('pronta' in r) return r.pronta;
       return manterVivo() ? verificarPelaVoz(track, remota, letra, r.suspeita, manterVivo) : null;
     }
+    // SEM LETRA NENHUMA: a borda pode ter o alinhamento de uma letra que o
+    // servidor achou — texto E relógio de uma vez.
+    const daBorda = await letraDaBorda(track, remota);
+    if (daBorda) return daBorda;
+    if (!manterVivo() || desistiuHaPouco(track.id, 'tempo')) return null;
     // Vocabulário do artista (ver vocabulario.mjs no importador) só faz
     // sentido aqui: é a TRANSCRIÇÃO livre, o único caminho onde o modelo
     // "adivinha" a palavra em vez de recebê-la pronta.

@@ -184,13 +184,18 @@ export function semelhancaSimetrica(a: string, b: string): number {
  * exatamente o caso que este arquivo promete nunca fundir.
  */
 const NOMES_LIMPOS = new WeakMap<FaixaComparavel, string[]>();
+const SEM_ARTISTA = /^(?:desconhecido|unknown|unknown artist|artista desconhecido|n a)$/;
+
 function nomesDeArtista(f: FaixaComparavel): string[] {
   let v = NOMES_LIMPOS.get(f);
   if (v === undefined) {
+    // "Desconhecido" é o marcador de "sem artista", não um artista: duas faixas
+    // sem crédito não são "do mesmo artista" (o falso positivo fundia músicas
+    // diferentes de título parecido e mesma duração).
     v = f.artists
       .filter((n) => !ehGravadora(n))
       .map(limparArtista)
-      .filter(Boolean);
+      .filter((n) => Boolean(n) && !SEM_ARTISTA.test(n));
     NOMES_LIMPOS.set(f, v);
   }
   return v;

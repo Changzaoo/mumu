@@ -34,6 +34,8 @@ import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
+import { musicaDoArtista } from './escolhaEstrita.js';
+import { nomeApareceEm } from './guardaDeArtista.js';
 import {
   baixar,
   baseInterna,
@@ -55,14 +57,8 @@ const NOVAS_POR_ARTISTA = 2;
 const DESCANSO_DO_ARTISTA_MS = 6 * 3600_000;
 /** Quem já tem tantas faixas do artista no acervo não precisa de mais agora. */
 const JA_TEM_O_BASTANTE = 25;
-/** Duração de música (s): fora disso é trecho, short, mix ou show. */
-const DURACAO_MIN_S = 90;
-const DURACAO_MAX_S = 8 * 60;
 /** Folga mínima no cofre (bytes) para baixar faixa nova. */
 const FOLGA_MINIMA = 200 * 1024 * 1024;
-
-const VERSAO_ALTERADA =
-  /\b(?:speed ?up|sped ?up|slowed|reverb|8d|nightcore|bass ?boost(?:ed)?|karaok[eê]|instrumental|cover|reac(?:t|tion|ting)|reagindo|tutorial|aula|remix|ao vivo|live)\b/i;
 
 const DIACRITICOS = new RegExp('[\\u0300-\\u036f]', 'g');
 
@@ -96,29 +92,30 @@ export interface ResultadoDaBusca {
 /**
  * O resultado é uma música DESTE artista que vale trazer? Devolve título e
  * artistas limpos, ou null. Puro (testável).
+ *
+ * Régua ESTRITA (escolhaEstrita.ts): o vídeo tem de ser "ARTISTA — música" com o
+ * artista por PALAVRAS INTEIRAS (não "Ana" em "Mariana" nem em "Ana Castela"),
+ * ou só o título num canal que É o artista (Topic/VEVO/oficial); versão
+ * alterada, cover, reação, playlist, show e duração fora de música não passam.
+ * Antes, "o nome no título OU no canal" (includes) deixava passar o vídeo de
+ * outro artista, que era gravado com o nome do artista pesquisado.
  */
 export function faixaDoResultado(
   artista: string,
   r: ResultadoDaBusca,
 ): { title: string; artists: string[] } | null {
-  const alvo = norm(artista);
-  if (alvo.length < 2) return null;
-  if (!(norm(r.titulo).includes(alvo) || norm(r.canal).includes(alvo))) return null;
-  if (VERSAO_ALTERADA.test(`${r.titulo} ${r.canal}`)) return null;
-  if (!(r.duracaoSeg >= DURACAO_MIN_S && r.duracaoSeg <= DURACAO_MAX_S)) return null;
+  const musica = musicaDoArtista(artista, r);
+  if (!musica) return null;
   const lido = lerTituloDoAcervo(r.titulo, [artista]);
-  if (lido?.title) return { title: lido.title, artists: lido.artists };
-  // Sem o leitor do acervo: "ARTISTA - MÚSICA (Clipe Oficial)" → "MÚSICA".
-  const partes = r.titulo.split(/\s[-–—|]\s/);
-  const bruto = partes.length >= 2 ? partes.slice(1).join(' - ') : r.titulo;
-  const title = bruto
-    .replace(
-      /[([][^)\]]*(?:oficial|official|clipe|video|vídeo|audio|áudio|lyric|visualizer)[^)\]]*[)\]]/gi,
-      ' ',
-    )
-    .replace(/\s{2,}/g, ' ')
-    .trim();
-  return title ? { title, artists: [artista] } : null;
+  const title = (lido?.title && norm(lido.title) ? lido.title : musica.tituloBruto).trim();
+  if (!title || !norm(title)) return null;
+  // Convidados que o leitor tirou do texto só valem se o NOME está no vídeo
+  // (título ou canal); o artista pesquisado vem sempre primeiro.
+  const doVideo = `${r.titulo} ${r.canal}`;
+  const convidados = (lido?.artists ?? []).filter(
+    (n) => norm(n) !== norm(artista) && nomeApareceEm(n, doVideo),
+  );
+  return { title, artists: [artista, ...convidados] };
 }
 
 /**

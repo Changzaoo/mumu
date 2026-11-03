@@ -15,6 +15,14 @@ vi.mock('@/lib/ai/ai', () => ({ aiCleanSongTitle: vi.fn().mockResolvedValue(null
 vi.mock('@/lib/local/importerHelper', () => ({
   fetchOutraFonteDeLetra: vi.fn().mockResolvedValue(null),
 }));
+// A outra fonte agora diz POR QUE não achou (outraFonte.ts); estes testes
+// continuam dublando só o achado, sempre como resposta de verdade.
+vi.mock('@/lib/lyrics/outraFonte', () => ({
+  buscarOutraFonte: async (t: string, a: string | undefined, d: number) => {
+    const { fetchOutraFonteDeLetra: f } = await import('@/lib/local/importerHelper');
+    return { achado: (await f(t, a, d)) ?? null, falhou: false };
+  },
+}));
 vi.mock('@/lib/conteudo/faixaEtaria', () => ({ registrarLetra: vi.fn() }));
 
 const faixa = (over: Partial<TrackDto> = {}): TrackDto =>
@@ -48,7 +56,8 @@ function fonteSegurada() {
           resolve({
             ok: true,
             status: 200,
-            json: () => Promise.resolve(u.pathname.endsWith('/api/get') ? linha(nome) : [linha(nome)]),
+            json: () =>
+              Promise.resolve(u.pathname.endsWith('/api/get') ? linha(nome) : [linha(nome)]),
           } as Response);
         if (aberta) responder();
         else pendentes.push(responder);

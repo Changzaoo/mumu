@@ -1,0 +1,4500 @@
+[
+  {
+    "id": "b0",
+    "grupo": "funk/clipe-oficial",
+    "video": "MC Hariel - Ilusão (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel"]
+    }
+  },
+  {
+    "id": "b1",
+    "grupo": "funk/shorts",
+    "video": "MC Hariel - Ilusão #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel"]
+    }
+  },
+  {
+    "id": "b2",
+    "grupo": "funk/caixa-alta",
+    "video": "MC HARIEL - ILUSÃO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "ILUSÃO",
+      "artistas": ["MC HARIEL"]
+    }
+  },
+  {
+    "id": "b3",
+    "grupo": "funk/official-video",
+    "video": "MC Hariel - Ilusão [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel"]
+    }
+  },
+  {
+    "id": "b4",
+    "grupo": "funk/audio-60fps",
+    "video": "MC Hariel - Ilusão (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel"]
+    }
+  },
+  {
+    "id": "b5",
+    "grupo": "funk/ao-vivo",
+    "video": "MC Ryan SP e MC Davi - Tá Tranquilo (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"]
+    }
+  },
+  {
+    "id": "b6",
+    "grupo": "funk/invertido-pipe",
+    "video": "Tá Tranquilo | MC Ryan SP e MC Davi",
+    "canal": "MC Ryan SP",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"]
+    }
+  },
+  {
+    "id": "b7",
+    "grupo": "funk/pipe-4k",
+    "video": "MC Ryan SP e MC Davi | Tá Tranquilo | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"]
+    }
+  },
+  {
+    "id": "b8",
+    "grupo": "funk/aspas",
+    "video": "MC Ryan SP e MC Davi - \"Tá Tranquilo\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"]
+    }
+  },
+  {
+    "id": "b9",
+    "grupo": "funk/audio-60fps",
+    "video": "MC Kevinho - Olha a Explosão (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"]
+    }
+  },
+  {
+    "id": "b10",
+    "grupo": "funk/dvd",
+    "video": "MC Kevinho - Olha a Explosão | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"]
+    }
+  },
+  {
+    "id": "b11",
+    "grupo": "funk/lyrics",
+    "video": "MC Kevinho - Olha a Explosão (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"]
+    }
+  },
+  {
+    "id": "b12",
+    "grupo": "funk/invertido-canal",
+    "video": "Olha a Explosão - MC Kevinho",
+    "canal": "MC Kevinho",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"]
+    }
+  },
+  {
+    "id": "b13",
+    "grupo": "funk/lancamento",
+    "video": "MC Kevinho - Olha a Explosão (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"]
+    }
+  },
+  {
+    "id": "b14",
+    "grupo": "funk/aspas",
+    "video": "MC Cabelinho - \"Vai Lá Em Casa\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"]
+    }
+  },
+  {
+    "id": "b15",
+    "grupo": "funk/clipe-oficial",
+    "video": "MC Cabelinho - Vai Lá Em Casa (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"]
+    }
+  },
+  {
+    "id": "b16",
+    "grupo": "funk/shorts",
+    "video": "MC Cabelinho - Vai Lá Em Casa #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"]
+    }
+  },
+  {
+    "id": "b17",
+    "grupo": "funk/caixa-alta",
+    "video": "MC CABELINHO - VAI LÁ EM CASA (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "VAI LÁ EM CASA",
+      "artistas": ["MC CABELINHO"]
+    }
+  },
+  {
+    "id": "b18",
+    "grupo": "funk/official-video",
+    "video": "MC Cabelinho - Vai Lá Em Casa [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"]
+    }
+  },
+  {
+    "id": "b19",
+    "grupo": "funk/lancamento",
+    "video": "Anitta, Ludmilla - Onda Diferente (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Onda Diferente",
+      "artistas": ["Anitta", "Ludmilla"]
+    }
+  },
+  {
+    "id": "b20",
+    "grupo": "funk/ao-vivo",
+    "video": "Anitta, Ludmilla - Onda Diferente (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Onda Diferente",
+      "artistas": ["Anitta", "Ludmilla"]
+    }
+  },
+  {
+    "id": "b21",
+    "grupo": "funk/invertido-pipe",
+    "video": "Onda Diferente | Anitta, Ludmilla",
+    "canal": "Anitta",
+    "esperado": {
+      "titulo": "Onda Diferente",
+      "artistas": ["Anitta", "Ludmilla"]
+    }
+  },
+  {
+    "id": "b22",
+    "grupo": "funk/pipe-4k",
+    "video": "Anitta, Ludmilla | Onda Diferente | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Onda Diferente",
+      "artistas": ["Anitta", "Ludmilla"]
+    }
+  },
+  {
+    "id": "b23",
+    "grupo": "funk/official-video",
+    "video": "MC Livinho - Fazer Falta [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"]
+    }
+  },
+  {
+    "id": "b24",
+    "grupo": "funk/audio-60fps",
+    "video": "MC Livinho - Fazer Falta (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"]
+    }
+  },
+  {
+    "id": "b25",
+    "grupo": "funk/dvd",
+    "video": "MC Livinho - Fazer Falta | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"]
+    }
+  },
+  {
+    "id": "b26",
+    "grupo": "funk/lyrics",
+    "video": "MC Livinho - Fazer Falta (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"]
+    }
+  },
+  {
+    "id": "b27",
+    "grupo": "funk/invertido-canal",
+    "video": "Fazer Falta - MC Livinho",
+    "canal": "MC Livinho",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"]
+    }
+  },
+  {
+    "id": "b28",
+    "grupo": "funk/pipe-4k",
+    "video": "MC Don Juan, MC Poze do Rodo | Bola de Cristal | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bola de Cristal",
+      "artistas": ["MC Don Juan", "MC Poze do Rodo"]
+    }
+  },
+  {
+    "id": "b29",
+    "grupo": "funk/aspas",
+    "video": "MC Don Juan, MC Poze do Rodo - \"Bola de Cristal\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bola de Cristal",
+      "artistas": ["MC Don Juan", "MC Poze do Rodo"]
+    }
+  },
+  {
+    "id": "b30",
+    "grupo": "funk/clipe-oficial",
+    "video": "MC Don Juan, MC Poze do Rodo - Bola de Cristal (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bola de Cristal",
+      "artistas": ["MC Don Juan", "MC Poze do Rodo"]
+    }
+  },
+  {
+    "id": "b31",
+    "grupo": "funk/shorts",
+    "video": "MC Don Juan, MC Poze do Rodo - Bola de Cristal #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bola de Cristal",
+      "artistas": ["MC Don Juan", "MC Poze do Rodo"]
+    }
+  },
+  {
+    "id": "b32",
+    "grupo": "funk/caixa-alta",
+    "video": "MC DON JUAN, MC POZE DO RODO - BOLA DE CRISTAL (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "BOLA DE CRISTAL",
+      "artistas": ["MC DON JUAN", "MC POZE DO RODO"]
+    }
+  },
+  {
+    "id": "b33",
+    "grupo": "funk/invertido-canal",
+    "video": "Rolê Aleatório - MC Paiva ZS",
+    "canal": "MC Paiva ZS",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"]
+    }
+  },
+  {
+    "id": "b34",
+    "grupo": "funk/lancamento",
+    "video": "MC Paiva ZS - Rolê Aleatório (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"]
+    }
+  },
+  {
+    "id": "b35",
+    "grupo": "funk/ao-vivo",
+    "video": "MC Paiva ZS - Rolê Aleatório (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"]
+    }
+  },
+  {
+    "id": "b36",
+    "grupo": "funk/invertido-pipe",
+    "video": "Rolê Aleatório | MC Paiva ZS",
+    "canal": "MC Paiva ZS",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"]
+    }
+  },
+  {
+    "id": "b37",
+    "grupo": "funk/so-titulo-canal-artista",
+    "video": "Rolê Aleatório",
+    "canal": "MC Paiva ZS",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"]
+    }
+  },
+  {
+    "id": "b38",
+    "grupo": "sertanejo/caixa-alta",
+    "video": "JORGE E MATEUS - PODE CHORAR (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "PODE CHORAR",
+      "artistas": ["JORGE E MATEUS"]
+    }
+  },
+  {
+    "id": "b39",
+    "grupo": "sertanejo/official-video",
+    "video": "Jorge e Mateus - Pode Chorar [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": ["Jorge e Mateus"]
+    }
+  },
+  {
+    "id": "b40",
+    "grupo": "sertanejo/audio-60fps",
+    "video": "Jorge e Mateus - Pode Chorar (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": ["Jorge e Mateus"]
+    }
+  },
+  {
+    "id": "b41",
+    "grupo": "sertanejo/dvd",
+    "video": "Jorge e Mateus - Pode Chorar | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": ["Jorge e Mateus"]
+    }
+  },
+  {
+    "id": "b42",
+    "grupo": "sertanejo/lyrics",
+    "video": "Jorge e Mateus - Pode Chorar (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": ["Jorge e Mateus"]
+    }
+  },
+  {
+    "id": "b43",
+    "grupo": "sertanejo/so-titulo-canal-artista",
+    "video": "Flor e o Beija-Flor",
+    "canal": "Henrique e Juliano",
+    "esperado": {
+      "titulo": "Flor e o Beija-Flor",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "b44",
+    "grupo": "sertanejo/pipe-4k",
+    "video": "Henrique e Juliano | Flor e o Beija-Flor | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Flor e o Beija-Flor",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "b45",
+    "grupo": "sertanejo/aspas",
+    "video": "Henrique e Juliano - \"Flor e o Beija-Flor\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Flor e o Beija-Flor",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "b46",
+    "grupo": "sertanejo/clipe-oficial",
+    "video": "Henrique e Juliano - Flor e o Beija-Flor (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Flor e o Beija-Flor",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "b47",
+    "grupo": "sertanejo/shorts",
+    "video": "Henrique e Juliano - Flor e o Beija-Flor #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Flor e o Beija-Flor",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "b48",
+    "grupo": "sertanejo/lyrics",
+    "video": "Maiara e Maraisa - 10% (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "10%",
+      "artistas": ["Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "b49",
+    "grupo": "sertanejo/invertido-canal",
+    "video": "10% - Maiara e Maraisa",
+    "canal": "Maiara e Maraisa",
+    "esperado": {
+      "titulo": "10%",
+      "artistas": ["Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "b50",
+    "grupo": "sertanejo/lancamento",
+    "video": "Maiara e Maraisa - 10% (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "10%",
+      "artistas": ["Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "b51",
+    "grupo": "sertanejo/ao-vivo",
+    "video": "Maiara e Maraisa - 10% (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "10%",
+      "artistas": ["Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "b52",
+    "grupo": "sertanejo/invertido-pipe",
+    "video": "10% | Maiara e Maraisa",
+    "canal": "Maiara e Maraisa",
+    "esperado": {
+      "titulo": "10%",
+      "artistas": ["Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "b53",
+    "grupo": "sertanejo/shorts",
+    "video": "Chitãozinho e Xororó - Evidências #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho e Xororó"]
+    }
+  },
+  {
+    "id": "b54",
+    "grupo": "sertanejo/caixa-alta",
+    "video": "CHITÃOZINHO E XORORÓ - EVIDÊNCIAS (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "EVIDÊNCIAS",
+      "artistas": ["CHITÃOZINHO E XORORÓ"]
+    }
+  },
+  {
+    "id": "b55",
+    "grupo": "sertanejo/official-video",
+    "video": "Chitãozinho e Xororó - Evidências [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho e Xororó"]
+    }
+  },
+  {
+    "id": "b56",
+    "grupo": "sertanejo/audio-60fps",
+    "video": "Chitãozinho e Xororó - Evidências (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho e Xororó"]
+    }
+  },
+  {
+    "id": "b57",
+    "grupo": "sertanejo/dvd",
+    "video": "Chitãozinho e Xororó - Evidências | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho e Xororó"]
+    }
+  },
+  {
+    "id": "b58",
+    "grupo": "sertanejo/invertido-pipe",
+    "video": "Bloqueado | Gusttavo Lima",
+    "canal": "Gusttavo Lima",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "b59",
+    "grupo": "sertanejo/so-titulo-canal-artista",
+    "video": "Bloqueado",
+    "canal": "Gusttavo Lima",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "b60",
+    "grupo": "sertanejo/pipe-4k",
+    "video": "Gusttavo Lima | Bloqueado | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "b61",
+    "grupo": "sertanejo/aspas",
+    "video": "Gusttavo Lima - \"Bloqueado\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "b62",
+    "grupo": "sertanejo/clipe-oficial",
+    "video": "Gusttavo Lima - Bloqueado (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "b63",
+    "grupo": "sertanejo/dvd",
+    "video": "Zé Neto e Cristiano - Largado às Traças | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Largado às Traças",
+      "artistas": ["Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "b64",
+    "grupo": "sertanejo/lyrics",
+    "video": "Zé Neto e Cristiano - Largado às Traças (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Largado às Traças",
+      "artistas": ["Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "b65",
+    "grupo": "sertanejo/invertido-canal",
+    "video": "Largado às Traças - Zé Neto e Cristiano",
+    "canal": "Zé Neto e Cristiano",
+    "esperado": {
+      "titulo": "Largado às Traças",
+      "artistas": ["Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "b66",
+    "grupo": "sertanejo/lancamento",
+    "video": "Zé Neto e Cristiano - Largado às Traças (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Largado às Traças",
+      "artistas": ["Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "b67",
+    "grupo": "sertanejo/ao-vivo",
+    "video": "Zé Neto e Cristiano - Largado às Traças (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Largado às Traças",
+      "artistas": ["Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "b68",
+    "grupo": "sertanejo/clipe-oficial",
+    "video": "Marília Mendonça - Supera (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Supera",
+      "artistas": ["Marília Mendonça"]
+    }
+  },
+  {
+    "id": "b69",
+    "grupo": "sertanejo/shorts",
+    "video": "Marília Mendonça - Supera #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Supera",
+      "artistas": ["Marília Mendonça"]
+    }
+  },
+  {
+    "id": "b70",
+    "grupo": "sertanejo/caixa-alta",
+    "video": "MARÍLIA MENDONÇA - SUPERA (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SUPERA",
+      "artistas": ["MARÍLIA MENDONÇA"]
+    }
+  },
+  {
+    "id": "b71",
+    "grupo": "sertanejo/official-video",
+    "video": "Marília Mendonça - Supera [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Supera",
+      "artistas": ["Marília Mendonça"]
+    }
+  },
+  {
+    "id": "b72",
+    "grupo": "sertanejo/audio-60fps",
+    "video": "Marília Mendonça - Supera (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Supera",
+      "artistas": ["Marília Mendonça"]
+    }
+  },
+  {
+    "id": "b73",
+    "grupo": "sertanejo/ao-vivo",
+    "video": "Luan Santana - Meteoro (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana"]
+    }
+  },
+  {
+    "id": "b74",
+    "grupo": "sertanejo/invertido-pipe",
+    "video": "Meteoro | Luan Santana",
+    "canal": "Luan Santana",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana"]
+    }
+  },
+  {
+    "id": "b75",
+    "grupo": "sertanejo/so-titulo-canal-artista",
+    "video": "Meteoro",
+    "canal": "Luan Santana",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana"]
+    }
+  },
+  {
+    "id": "b76",
+    "grupo": "sertanejo/pipe-4k",
+    "video": "Luan Santana | Meteoro | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana"]
+    }
+  },
+  {
+    "id": "b77",
+    "grupo": "sertanejo/aspas",
+    "video": "Luan Santana - \"Meteoro\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana"]
+    }
+  },
+  {
+    "id": "b78",
+    "grupo": "trap/audio-60fps",
+    "video": "Matuê - Máquina do Tempo (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "b79",
+    "grupo": "trap/dvd",
+    "video": "Matuê - Máquina do Tempo | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "b80",
+    "grupo": "trap/lyrics",
+    "video": "Matuê - Máquina do Tempo (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "b81",
+    "grupo": "trap/invertido-canal",
+    "video": "Máquina do Tempo - Matuê",
+    "canal": "Matuê",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "b82",
+    "grupo": "trap/lancamento",
+    "video": "Matuê - Máquina do Tempo (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "b83",
+    "grupo": "trap/aspas",
+    "video": "Teto e WIU - \"Sinto Muito\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sinto Muito",
+      "artistas": ["Teto", "WIU"]
+    }
+  },
+  {
+    "id": "b84",
+    "grupo": "trap/clipe-oficial",
+    "video": "Teto e WIU - Sinto Muito (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sinto Muito",
+      "artistas": ["Teto", "WIU"]
+    }
+  },
+  {
+    "id": "b85",
+    "grupo": "trap/shorts",
+    "video": "Teto e WIU - Sinto Muito #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sinto Muito",
+      "artistas": ["Teto", "WIU"]
+    }
+  },
+  {
+    "id": "b86",
+    "grupo": "trap/caixa-alta",
+    "video": "TETO E WIU - SINTO MUITO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SINTO MUITO",
+      "artistas": ["TETO", "WIU"]
+    }
+  },
+  {
+    "id": "b87",
+    "grupo": "trap/official-video",
+    "video": "Teto e WIU - Sinto Muito [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sinto Muito",
+      "artistas": ["Teto", "WIU"]
+    }
+  },
+  {
+    "id": "b88",
+    "grupo": "trap/lancamento",
+    "video": "Djonga - Leal (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Leal",
+      "artistas": ["Djonga"]
+    }
+  },
+  {
+    "id": "b89",
+    "grupo": "trap/ao-vivo",
+    "video": "Djonga - Leal (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Leal",
+      "artistas": ["Djonga"]
+    }
+  },
+  {
+    "id": "b90",
+    "grupo": "trap/invertido-pipe",
+    "video": "Leal | Djonga",
+    "canal": "Djonga",
+    "esperado": {
+      "titulo": "Leal",
+      "artistas": ["Djonga"]
+    }
+  },
+  {
+    "id": "b91",
+    "grupo": "trap/so-titulo-canal-artista",
+    "video": "Leal",
+    "canal": "Djonga",
+    "esperado": {
+      "titulo": "Leal",
+      "artistas": ["Djonga"]
+    }
+  },
+  {
+    "id": "b92",
+    "grupo": "trap/pipe-4k",
+    "video": "Djonga | Leal | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Leal",
+      "artistas": ["Djonga"]
+    }
+  },
+  {
+    "id": "b93",
+    "grupo": "trap/official-video",
+    "video": "Orochi - Passa Pra Cá [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Passa Pra Cá",
+      "artistas": ["Orochi"]
+    }
+  },
+  {
+    "id": "b94",
+    "grupo": "trap/audio-60fps",
+    "video": "Orochi - Passa Pra Cá (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Passa Pra Cá",
+      "artistas": ["Orochi"]
+    }
+  },
+  {
+    "id": "b95",
+    "grupo": "trap/dvd",
+    "video": "Orochi - Passa Pra Cá | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Passa Pra Cá",
+      "artistas": ["Orochi"]
+    }
+  },
+  {
+    "id": "b96",
+    "grupo": "trap/lyrics",
+    "video": "Orochi - Passa Pra Cá (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Passa Pra Cá",
+      "artistas": ["Orochi"]
+    }
+  },
+  {
+    "id": "b97",
+    "grupo": "trap/invertido-canal",
+    "video": "Passa Pra Cá - Orochi",
+    "canal": "Orochi",
+    "esperado": {
+      "titulo": "Passa Pra Cá",
+      "artistas": ["Orochi"]
+    }
+  },
+  {
+    "id": "b98",
+    "grupo": "trap/pipe-4k",
+    "video": "L7NNON | Recomeço | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Recomeço",
+      "artistas": ["L7NNON"]
+    }
+  },
+  {
+    "id": "b99",
+    "grupo": "trap/aspas",
+    "video": "L7NNON - \"Recomeço\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Recomeço",
+      "artistas": ["L7NNON"]
+    }
+  },
+  {
+    "id": "b100",
+    "grupo": "trap/clipe-oficial",
+    "video": "L7NNON - Recomeço (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Recomeço",
+      "artistas": ["L7NNON"]
+    }
+  },
+  {
+    "id": "b101",
+    "grupo": "trap/shorts",
+    "video": "L7NNON - Recomeço #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Recomeço",
+      "artistas": ["L7NNON"]
+    }
+  },
+  {
+    "id": "b102",
+    "grupo": "trap/caixa-alta",
+    "video": "L7NNON - RECOMEÇO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "RECOMEÇO",
+      "artistas": ["L7NNON"]
+    }
+  },
+  {
+    "id": "b103",
+    "grupo": "pagode/invertido-canal",
+    "video": "Tudo Que Eu Sempre Quis - Thiaguinho",
+    "canal": "Thiaguinho",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "b104",
+    "grupo": "pagode/lancamento",
+    "video": "Thiaguinho - Tudo Que Eu Sempre Quis (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "b105",
+    "grupo": "pagode/ao-vivo",
+    "video": "Thiaguinho - Tudo Que Eu Sempre Quis (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "b106",
+    "grupo": "pagode/invertido-pipe",
+    "video": "Tudo Que Eu Sempre Quis | Thiaguinho",
+    "canal": "Thiaguinho",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "b107",
+    "grupo": "pagode/so-titulo-canal-artista",
+    "video": "Tudo Que Eu Sempre Quis",
+    "canal": "Thiaguinho",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "b108",
+    "grupo": "pagode/caixa-alta",
+    "video": "FERRUGEM - PRA VIDA INTEIRA (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "PRA VIDA INTEIRA",
+      "artistas": ["FERRUGEM"]
+    }
+  },
+  {
+    "id": "b109",
+    "grupo": "pagode/official-video",
+    "video": "Ferrugem - Pra Vida Inteira [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pra Vida Inteira",
+      "artistas": ["Ferrugem"]
+    }
+  },
+  {
+    "id": "b110",
+    "grupo": "pagode/audio-60fps",
+    "video": "Ferrugem - Pra Vida Inteira (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pra Vida Inteira",
+      "artistas": ["Ferrugem"]
+    }
+  },
+  {
+    "id": "b111",
+    "grupo": "pagode/dvd",
+    "video": "Ferrugem - Pra Vida Inteira | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pra Vida Inteira",
+      "artistas": ["Ferrugem"]
+    }
+  },
+  {
+    "id": "b112",
+    "grupo": "pagode/lyrics",
+    "video": "Ferrugem - Pra Vida Inteira (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pra Vida Inteira",
+      "artistas": ["Ferrugem"]
+    }
+  },
+  {
+    "id": "b113",
+    "grupo": "pagode/so-titulo-canal-artista",
+    "video": "Meu Abrigo",
+    "canal": "Grupo Menos É Mais",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"]
+    }
+  },
+  {
+    "id": "b114",
+    "grupo": "pagode/pipe-4k",
+    "video": "Grupo Menos É Mais | Meu Abrigo | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"]
+    }
+  },
+  {
+    "id": "b115",
+    "grupo": "pagode/aspas",
+    "video": "Grupo Menos É Mais - \"Meu Abrigo\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"]
+    }
+  },
+  {
+    "id": "b116",
+    "grupo": "pagode/clipe-oficial",
+    "video": "Grupo Menos É Mais - Meu Abrigo (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"]
+    }
+  },
+  {
+    "id": "b117",
+    "grupo": "pagode/shorts",
+    "video": "Grupo Menos É Mais - Meu Abrigo #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"]
+    }
+  },
+  {
+    "id": "b118",
+    "grupo": "pagode/lyrics",
+    "video": "Péricles - Esqueci de Te Esquecer (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Esqueci de Te Esquecer",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "b119",
+    "grupo": "pagode/invertido-canal",
+    "video": "Esqueci de Te Esquecer - Péricles",
+    "canal": "Péricles",
+    "esperado": {
+      "titulo": "Esqueci de Te Esquecer",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "b120",
+    "grupo": "pagode/lancamento",
+    "video": "Péricles - Esqueci de Te Esquecer (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Esqueci de Te Esquecer",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "b121",
+    "grupo": "pagode/ao-vivo",
+    "video": "Péricles - Esqueci de Te Esquecer (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Esqueci de Te Esquecer",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "b122",
+    "grupo": "pagode/invertido-pipe",
+    "video": "Esqueci de Te Esquecer | Péricles",
+    "canal": "Péricles",
+    "esperado": {
+      "titulo": "Esqueci de Te Esquecer",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "b123",
+    "grupo": "gospel/shorts",
+    "video": "Gabriela Rocha - Lugar Secreto #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "b124",
+    "grupo": "gospel/caixa-alta",
+    "video": "GABRIELA ROCHA - LUGAR SECRETO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "LUGAR SECRETO",
+      "artistas": ["GABRIELA ROCHA"]
+    }
+  },
+  {
+    "id": "b125",
+    "grupo": "gospel/official-video",
+    "video": "Gabriela Rocha - Lugar Secreto [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "b126",
+    "grupo": "gospel/audio-60fps",
+    "video": "Gabriela Rocha - Lugar Secreto (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "b127",
+    "grupo": "gospel/dvd",
+    "video": "Gabriela Rocha - Lugar Secreto | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "b128",
+    "grupo": "gospel/invertido-pipe",
+    "video": "Raridade | Anderson Freire",
+    "canal": "Anderson Freire",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"]
+    }
+  },
+  {
+    "id": "b129",
+    "grupo": "gospel/so-titulo-canal-artista",
+    "video": "Raridade",
+    "canal": "Anderson Freire",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"]
+    }
+  },
+  {
+    "id": "b130",
+    "grupo": "gospel/pipe-4k",
+    "video": "Anderson Freire | Raridade | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"]
+    }
+  },
+  {
+    "id": "b131",
+    "grupo": "gospel/aspas",
+    "video": "Anderson Freire - \"Raridade\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"]
+    }
+  },
+  {
+    "id": "b132",
+    "grupo": "gospel/clipe-oficial",
+    "video": "Anderson Freire - Raridade (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"]
+    }
+  },
+  {
+    "id": "b133",
+    "grupo": "gospel/dvd",
+    "video": "Aline Barros - Ressuscita-me | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "b134",
+    "grupo": "gospel/lyrics",
+    "video": "Aline Barros - Ressuscita-me (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "b135",
+    "grupo": "gospel/invertido-canal",
+    "video": "Ressuscita-me - Aline Barros",
+    "canal": "Aline Barros",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "b136",
+    "grupo": "gospel/lancamento",
+    "video": "Aline Barros - Ressuscita-me (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "b137",
+    "grupo": "gospel/ao-vivo",
+    "video": "Aline Barros - Ressuscita-me (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "b138",
+    "grupo": "gospel/clipe-oficial",
+    "video": "Fernandinho - Uma Nova História (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Uma Nova História",
+      "artistas": ["Fernandinho"]
+    }
+  },
+  {
+    "id": "b139",
+    "grupo": "gospel/shorts",
+    "video": "Fernandinho - Uma Nova História #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Uma Nova História",
+      "artistas": ["Fernandinho"]
+    }
+  },
+  {
+    "id": "b140",
+    "grupo": "gospel/caixa-alta",
+    "video": "FERNANDINHO - UMA NOVA HISTÓRIA (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "UMA NOVA HISTÓRIA",
+      "artistas": ["FERNANDINHO"]
+    }
+  },
+  {
+    "id": "b141",
+    "grupo": "gospel/official-video",
+    "video": "Fernandinho - Uma Nova História [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Uma Nova História",
+      "artistas": ["Fernandinho"]
+    }
+  },
+  {
+    "id": "b142",
+    "grupo": "gospel/audio-60fps",
+    "video": "Fernandinho - Uma Nova História (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Uma Nova História",
+      "artistas": ["Fernandinho"]
+    }
+  },
+  {
+    "id": "b143",
+    "grupo": "forro/ao-vivo",
+    "video": "Wesley Safadão - Camarote (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "b144",
+    "grupo": "forro/invertido-pipe",
+    "video": "Camarote | Wesley Safadão",
+    "canal": "Wesley Safadão",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "b145",
+    "grupo": "forro/so-titulo-canal-artista",
+    "video": "Camarote",
+    "canal": "Wesley Safadão",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "b146",
+    "grupo": "forro/pipe-4k",
+    "video": "Wesley Safadão | Camarote | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "b147",
+    "grupo": "forro/aspas",
+    "video": "Wesley Safadão - \"Camarote\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "b148",
+    "grupo": "forro/audio-60fps",
+    "video": "Xand Avião - Saudade de Você (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Saudade de Você",
+      "artistas": ["Xand Avião"]
+    }
+  },
+  {
+    "id": "b149",
+    "grupo": "forro/dvd",
+    "video": "Xand Avião - Saudade de Você | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Saudade de Você",
+      "artistas": ["Xand Avião"]
+    }
+  },
+  {
+    "id": "b150",
+    "grupo": "forro/lyrics",
+    "video": "Xand Avião - Saudade de Você (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Saudade de Você",
+      "artistas": ["Xand Avião"]
+    }
+  },
+  {
+    "id": "b151",
+    "grupo": "forro/invertido-canal",
+    "video": "Saudade de Você - Xand Avião",
+    "canal": "Xand Avião",
+    "esperado": {
+      "titulo": "Saudade de Você",
+      "artistas": ["Xand Avião"]
+    }
+  },
+  {
+    "id": "b152",
+    "grupo": "forro/lancamento",
+    "video": "Xand Avião - Saudade de Você (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Saudade de Você",
+      "artistas": ["Xand Avião"]
+    }
+  },
+  {
+    "id": "b153",
+    "grupo": "forro/aspas",
+    "video": "Calcinha Preta - \"Ainda Te Amo\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Te Amo",
+      "artistas": ["Calcinha Preta"]
+    }
+  },
+  {
+    "id": "b154",
+    "grupo": "forro/clipe-oficial",
+    "video": "Calcinha Preta - Ainda Te Amo (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Te Amo",
+      "artistas": ["Calcinha Preta"]
+    }
+  },
+  {
+    "id": "b155",
+    "grupo": "forro/shorts",
+    "video": "Calcinha Preta - Ainda Te Amo #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Te Amo",
+      "artistas": ["Calcinha Preta"]
+    }
+  },
+  {
+    "id": "b156",
+    "grupo": "forro/caixa-alta",
+    "video": "CALCINHA PRETA - AINDA TE AMO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AINDA TE AMO",
+      "artistas": ["CALCINHA PRETA"]
+    }
+  },
+  {
+    "id": "b157",
+    "grupo": "forro/official-video",
+    "video": "Calcinha Preta - Ainda Te Amo [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Te Amo",
+      "artistas": ["Calcinha Preta"]
+    }
+  },
+  {
+    "id": "b158",
+    "grupo": "pop/lancamento",
+    "video": "Dua Lipa - Levitating (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "b159",
+    "grupo": "pop/ao-vivo",
+    "video": "Dua Lipa - Levitating (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "b160",
+    "grupo": "pop/invertido-pipe",
+    "video": "Levitating | Dua Lipa",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "b161",
+    "grupo": "pop/so-titulo-canal-artista",
+    "video": "Levitating",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "b162",
+    "grupo": "pop/pipe-4k",
+    "video": "Dua Lipa | Levitating | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "b163",
+    "grupo": "pop/official-video",
+    "video": "The Weeknd - Blinding Lights [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Blinding Lights",
+      "artistas": ["The Weeknd"]
+    }
+  },
+  {
+    "id": "b164",
+    "grupo": "pop/audio-60fps",
+    "video": "The Weeknd - Blinding Lights (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Blinding Lights",
+      "artistas": ["The Weeknd"]
+    }
+  },
+  {
+    "id": "b165",
+    "grupo": "pop/dvd",
+    "video": "The Weeknd - Blinding Lights | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Blinding Lights",
+      "artistas": ["The Weeknd"]
+    }
+  },
+  {
+    "id": "b166",
+    "grupo": "pop/lyrics",
+    "video": "The Weeknd - Blinding Lights (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Blinding Lights",
+      "artistas": ["The Weeknd"]
+    }
+  },
+  {
+    "id": "b167",
+    "grupo": "pop/invertido-canal",
+    "video": "Blinding Lights - The Weeknd",
+    "canal": "The Weeknd",
+    "esperado": {
+      "titulo": "Blinding Lights",
+      "artistas": ["The Weeknd"]
+    }
+  },
+  {
+    "id": "b168",
+    "grupo": "pop/pipe-4k",
+    "video": "Taylor Swift | Anti-Hero | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Anti-Hero",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "b169",
+    "grupo": "pop/aspas",
+    "video": "Taylor Swift - \"Anti-Hero\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Anti-Hero",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "b170",
+    "grupo": "pop/clipe-oficial",
+    "video": "Taylor Swift - Anti-Hero (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Anti-Hero",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "b171",
+    "grupo": "pop/shorts",
+    "video": "Taylor Swift - Anti-Hero #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Anti-Hero",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "b172",
+    "grupo": "pop/caixa-alta",
+    "video": "TAYLOR SWIFT - ANTI-HERO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "ANTI-HERO",
+      "artistas": ["TAYLOR SWIFT"]
+    }
+  },
+  {
+    "id": "b173",
+    "grupo": "pop/invertido-canal",
+    "video": "bad guy - Billie Eilish",
+    "canal": "Billie Eilish",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "b174",
+    "grupo": "pop/lancamento",
+    "video": "Billie Eilish - bad guy (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "b175",
+    "grupo": "pop/ao-vivo",
+    "video": "Billie Eilish - bad guy (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "b176",
+    "grupo": "pop/invertido-pipe",
+    "video": "bad guy | Billie Eilish",
+    "canal": "Billie Eilish",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "b177",
+    "grupo": "pop/so-titulo-canal-artista",
+    "video": "bad guy",
+    "canal": "Billie Eilish",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "b178",
+    "grupo": "pop/caixa-alta",
+    "video": "ED SHEERAN - SHAPE OF YOU (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SHAPE OF YOU",
+      "artistas": ["ED SHEERAN"]
+    }
+  },
+  {
+    "id": "b179",
+    "grupo": "pop/official-video",
+    "video": "Ed Sheeran - Shape of You [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Shape of You",
+      "artistas": ["Ed Sheeran"]
+    }
+  },
+  {
+    "id": "b180",
+    "grupo": "pop/audio-60fps",
+    "video": "Ed Sheeran - Shape of You (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Shape of You",
+      "artistas": ["Ed Sheeran"]
+    }
+  },
+  {
+    "id": "b181",
+    "grupo": "pop/dvd",
+    "video": "Ed Sheeran - Shape of You | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Shape of You",
+      "artistas": ["Ed Sheeran"]
+    }
+  },
+  {
+    "id": "b182",
+    "grupo": "pop/lyrics",
+    "video": "Ed Sheeran - Shape of You (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Shape of You",
+      "artistas": ["Ed Sheeran"]
+    }
+  },
+  {
+    "id": "b183",
+    "grupo": "pop/so-titulo-canal-artista",
+    "video": "Empire State of Mind",
+    "canal": "Jay-Z",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "b184",
+    "grupo": "pop/pipe-4k",
+    "video": "Jay-Z | Empire State of Mind | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "b185",
+    "grupo": "pop/aspas",
+    "video": "Jay-Z - \"Empire State of Mind\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "b186",
+    "grupo": "pop/clipe-oficial",
+    "video": "Jay-Z - Empire State of Mind (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "b187",
+    "grupo": "pop/shorts",
+    "video": "Jay-Z - Empire State of Mind #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "b188",
+    "grupo": "pop/lyrics",
+    "video": "Tyler, The Creator - EARFQUAKE (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "b189",
+    "grupo": "pop/invertido-canal",
+    "video": "EARFQUAKE - Tyler, The Creator",
+    "canal": "Tyler, The Creator",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "b190",
+    "grupo": "pop/lancamento",
+    "video": "Tyler, The Creator - EARFQUAKE (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "b191",
+    "grupo": "pop/ao-vivo",
+    "video": "Tyler, The Creator - EARFQUAKE (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "b192",
+    "grupo": "pop/invertido-pipe",
+    "video": "EARFQUAKE | Tyler, The Creator",
+    "canal": "Tyler, The Creator",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "b193",
+    "grupo": "pop/shorts",
+    "video": "Earth, Wind & Fire - September #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "September",
+      "artistas": ["Earth, Wind & Fire"]
+    }
+  },
+  {
+    "id": "b194",
+    "grupo": "pop/caixa-alta",
+    "video": "EARTH, WIND & FIRE - SEPTEMBER (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SEPTEMBER",
+      "artistas": ["EARTH, WIND & FIRE"]
+    }
+  },
+  {
+    "id": "b195",
+    "grupo": "pop/official-video",
+    "video": "Earth, Wind & Fire - September [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "September",
+      "artistas": ["Earth, Wind & Fire"]
+    }
+  },
+  {
+    "id": "b196",
+    "grupo": "pop/audio-60fps",
+    "video": "Earth, Wind & Fire - September (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "September",
+      "artistas": ["Earth, Wind & Fire"]
+    }
+  },
+  {
+    "id": "b197",
+    "grupo": "pop/dvd",
+    "video": "Earth, Wind & Fire - September | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "September",
+      "artistas": ["Earth, Wind & Fire"]
+    }
+  },
+  {
+    "id": "b198",
+    "grupo": "pop/invertido-pipe",
+    "video": "The Sound of Silence | Simon & Garfunkel",
+    "canal": "Simon & Garfunkel",
+    "esperado": {
+      "titulo": "The Sound of Silence",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "b199",
+    "grupo": "pop/so-titulo-canal-artista",
+    "video": "The Sound of Silence",
+    "canal": "Simon & Garfunkel",
+    "esperado": {
+      "titulo": "The Sound of Silence",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "b200",
+    "grupo": "pop/pipe-4k",
+    "video": "Simon & Garfunkel | The Sound of Silence | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "The Sound of Silence",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "b201",
+    "grupo": "pop/aspas",
+    "video": "Simon & Garfunkel - \"The Sound of Silence\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "The Sound of Silence",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "b202",
+    "grupo": "pop/clipe-oficial",
+    "video": "Simon & Garfunkel - The Sound of Silence (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "The Sound of Silence",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "b203",
+    "grupo": "pop/dvd",
+    "video": "Florence + The Machine - Dog Days Are Over | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dog Days Are Over",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "b204",
+    "grupo": "pop/lyrics",
+    "video": "Florence + The Machine - Dog Days Are Over (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dog Days Are Over",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "b205",
+    "grupo": "pop/invertido-canal",
+    "video": "Dog Days Are Over - Florence + The Machine",
+    "canal": "Florence + The Machine",
+    "esperado": {
+      "titulo": "Dog Days Are Over",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "b206",
+    "grupo": "pop/lancamento",
+    "video": "Florence + The Machine - Dog Days Are Over (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dog Days Are Over",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "b207",
+    "grupo": "pop/ao-vivo",
+    "video": "Florence + The Machine - Dog Days Are Over (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dog Days Are Over",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "b208",
+    "grupo": "kpop/clipe-oficial",
+    "video": "BTS - Dynamite (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "b209",
+    "grupo": "kpop/shorts",
+    "video": "BTS - Dynamite #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "b210",
+    "grupo": "kpop/caixa-alta",
+    "video": "BTS - DYNAMITE (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "DYNAMITE",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "b211",
+    "grupo": "kpop/official-video",
+    "video": "BTS - Dynamite [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "b212",
+    "grupo": "kpop/audio-60fps",
+    "video": "BTS - Dynamite (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "b213",
+    "grupo": "kpop/ao-vivo",
+    "video": "BLACKPINK - How You Like That (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "b214",
+    "grupo": "kpop/invertido-pipe",
+    "video": "How You Like That | BLACKPINK",
+    "canal": "BLACKPINK",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "b215",
+    "grupo": "kpop/so-titulo-canal-artista",
+    "video": "How You Like That",
+    "canal": "BLACKPINK",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "b216",
+    "grupo": "kpop/pipe-4k",
+    "video": "BLACKPINK | How You Like That | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "b217",
+    "grupo": "kpop/aspas",
+    "video": "BLACKPINK - \"How You Like That\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "b218",
+    "grupo": "kpop/audio-60fps",
+    "video": "NewJeans - Ditto (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"]
+    }
+  },
+  {
+    "id": "b219",
+    "grupo": "kpop/dvd",
+    "video": "NewJeans - Ditto | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"]
+    }
+  },
+  {
+    "id": "b220",
+    "grupo": "kpop/lyrics",
+    "video": "NewJeans - Ditto (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"]
+    }
+  },
+  {
+    "id": "b221",
+    "grupo": "kpop/invertido-canal",
+    "video": "Ditto - NewJeans",
+    "canal": "NewJeans",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"]
+    }
+  },
+  {
+    "id": "b222",
+    "grupo": "kpop/lancamento",
+    "video": "NewJeans - Ditto (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"]
+    }
+  },
+  {
+    "id": "b223",
+    "grupo": "reggaeton/aspas",
+    "video": "Bad Bunny - \"Tití Me Preguntó\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tití Me Preguntó",
+      "artistas": ["Bad Bunny"]
+    }
+  },
+  {
+    "id": "b224",
+    "grupo": "reggaeton/clipe-oficial",
+    "video": "Bad Bunny - Tití Me Preguntó (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tití Me Preguntó",
+      "artistas": ["Bad Bunny"]
+    }
+  },
+  {
+    "id": "b225",
+    "grupo": "reggaeton/shorts",
+    "video": "Bad Bunny - Tití Me Preguntó #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tití Me Preguntó",
+      "artistas": ["Bad Bunny"]
+    }
+  },
+  {
+    "id": "b226",
+    "grupo": "reggaeton/caixa-alta",
+    "video": "BAD BUNNY - TITÍ ME PREGUNTÓ (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "TITÍ ME PREGUNTÓ",
+      "artistas": ["BAD BUNNY"]
+    }
+  },
+  {
+    "id": "b227",
+    "grupo": "reggaeton/official-video",
+    "video": "Bad Bunny - Tití Me Preguntó [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tití Me Preguntó",
+      "artistas": ["Bad Bunny"]
+    }
+  },
+  {
+    "id": "b228",
+    "grupo": "reggaeton/lancamento",
+    "video": "Karol G - Provenza (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Provenza",
+      "artistas": ["Karol G"]
+    }
+  },
+  {
+    "id": "b229",
+    "grupo": "reggaeton/ao-vivo",
+    "video": "Karol G - Provenza (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Provenza",
+      "artistas": ["Karol G"]
+    }
+  },
+  {
+    "id": "b230",
+    "grupo": "reggaeton/invertido-pipe",
+    "video": "Provenza | Karol G",
+    "canal": "Karol G",
+    "esperado": {
+      "titulo": "Provenza",
+      "artistas": ["Karol G"]
+    }
+  },
+  {
+    "id": "b231",
+    "grupo": "reggaeton/so-titulo-canal-artista",
+    "video": "Provenza",
+    "canal": "Karol G",
+    "esperado": {
+      "titulo": "Provenza",
+      "artistas": ["Karol G"]
+    }
+  },
+  {
+    "id": "b232",
+    "grupo": "reggaeton/pipe-4k",
+    "video": "Karol G | Provenza | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Provenza",
+      "artistas": ["Karol G"]
+    }
+  },
+  {
+    "id": "b233",
+    "grupo": "reggaeton/official-video",
+    "video": "Daddy Yankee - Gasolina [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Gasolina",
+      "artistas": ["Daddy Yankee"]
+    }
+  },
+  {
+    "id": "b234",
+    "grupo": "reggaeton/audio-60fps",
+    "video": "Daddy Yankee - Gasolina (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Gasolina",
+      "artistas": ["Daddy Yankee"]
+    }
+  },
+  {
+    "id": "b235",
+    "grupo": "reggaeton/dvd",
+    "video": "Daddy Yankee - Gasolina | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Gasolina",
+      "artistas": ["Daddy Yankee"]
+    }
+  },
+  {
+    "id": "b236",
+    "grupo": "reggaeton/lyrics",
+    "video": "Daddy Yankee - Gasolina (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Gasolina",
+      "artistas": ["Daddy Yankee"]
+    }
+  },
+  {
+    "id": "b237",
+    "grupo": "reggaeton/invertido-canal",
+    "video": "Gasolina - Daddy Yankee",
+    "canal": "Daddy Yankee",
+    "esperado": {
+      "titulo": "Gasolina",
+      "artistas": ["Daddy Yankee"]
+    }
+  },
+  {
+    "id": "b238",
+    "grupo": "rock/pipe-4k",
+    "video": "Legião Urbana | Tempo Perdido | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tempo Perdido",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "b239",
+    "grupo": "rock/aspas",
+    "video": "Legião Urbana - \"Tempo Perdido\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tempo Perdido",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "b240",
+    "grupo": "rock/clipe-oficial",
+    "video": "Legião Urbana - Tempo Perdido (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tempo Perdido",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "b241",
+    "grupo": "rock/shorts",
+    "video": "Legião Urbana - Tempo Perdido #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Tempo Perdido",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "b242",
+    "grupo": "rock/caixa-alta",
+    "video": "LEGIÃO URBANA - TEMPO PERDIDO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "TEMPO PERDIDO",
+      "artistas": ["LEGIÃO URBANA"]
+    }
+  },
+  {
+    "id": "b243",
+    "grupo": "rock/invertido-canal",
+    "video": "Bohemian Rhapsody - Queen",
+    "canal": "Queen",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "b244",
+    "grupo": "rock/lancamento",
+    "video": "Queen - Bohemian Rhapsody (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "b245",
+    "grupo": "rock/ao-vivo",
+    "video": "Queen - Bohemian Rhapsody (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "b246",
+    "grupo": "rock/invertido-pipe",
+    "video": "Bohemian Rhapsody | Queen",
+    "canal": "Queen",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "b247",
+    "grupo": "rock/so-titulo-canal-artista",
+    "video": "Bohemian Rhapsody",
+    "canal": "Queen",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "b248",
+    "grupo": "rock/caixa-alta",
+    "video": "GUNS N' ROSES - SWEET CHILD O' MINE (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SWEET CHILD O' MINE",
+      "artistas": ["GUNS N' ROSES"]
+    }
+  },
+  {
+    "id": "b249",
+    "grupo": "rock/official-video",
+    "video": "Guns N' Roses - Sweet Child O' Mine [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sweet Child O' Mine",
+      "artistas": ["Guns N' Roses"]
+    }
+  },
+  {
+    "id": "b250",
+    "grupo": "rock/audio-60fps",
+    "video": "Guns N' Roses - Sweet Child O' Mine (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sweet Child O' Mine",
+      "artistas": ["Guns N' Roses"]
+    }
+  },
+  {
+    "id": "b251",
+    "grupo": "rock/dvd",
+    "video": "Guns N' Roses - Sweet Child O' Mine | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sweet Child O' Mine",
+      "artistas": ["Guns N' Roses"]
+    }
+  },
+  {
+    "id": "b252",
+    "grupo": "rock/lyrics",
+    "video": "Guns N' Roses - Sweet Child O' Mine (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sweet Child O' Mine",
+      "artistas": ["Guns N' Roses"]
+    }
+  },
+  {
+    "id": "b253",
+    "grupo": "rock/so-titulo-canal-artista",
+    "video": "Back In Black",
+    "canal": "AC/DC",
+    "esperado": {
+      "titulo": "Back In Black",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "b254",
+    "grupo": "rock/pipe-4k",
+    "video": "AC/DC | Back In Black | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Back In Black",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "b255",
+    "grupo": "rock/aspas",
+    "video": "AC/DC - \"Back In Black\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Back In Black",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "b256",
+    "grupo": "rock/clipe-oficial",
+    "video": "AC/DC - Back In Black (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Back In Black",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "b257",
+    "grupo": "rock/shorts",
+    "video": "AC/DC - Back In Black #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Back In Black",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "b258",
+    "grupo": "rock/lyrics",
+    "video": "Capital Inicial - Primeiros Erros (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Primeiros Erros",
+      "artistas": ["Capital Inicial"]
+    }
+  },
+  {
+    "id": "b259",
+    "grupo": "rock/invertido-canal",
+    "video": "Primeiros Erros - Capital Inicial",
+    "canal": "Capital Inicial",
+    "esperado": {
+      "titulo": "Primeiros Erros",
+      "artistas": ["Capital Inicial"]
+    }
+  },
+  {
+    "id": "b260",
+    "grupo": "rock/lancamento",
+    "video": "Capital Inicial - Primeiros Erros (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Primeiros Erros",
+      "artistas": ["Capital Inicial"]
+    }
+  },
+  {
+    "id": "b261",
+    "grupo": "rock/ao-vivo",
+    "video": "Capital Inicial - Primeiros Erros (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Primeiros Erros",
+      "artistas": ["Capital Inicial"]
+    }
+  },
+  {
+    "id": "b262",
+    "grupo": "rock/invertido-pipe",
+    "video": "Primeiros Erros | Capital Inicial",
+    "canal": "Capital Inicial",
+    "esperado": {
+      "titulo": "Primeiros Erros",
+      "artistas": ["Capital Inicial"]
+    }
+  },
+  {
+    "id": "b263",
+    "grupo": "mpb/shorts",
+    "video": "Djavan - Oceano #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Oceano",
+      "artistas": ["Djavan"]
+    }
+  },
+  {
+    "id": "b264",
+    "grupo": "mpb/caixa-alta",
+    "video": "DJAVAN - OCEANO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "OCEANO",
+      "artistas": ["DJAVAN"]
+    }
+  },
+  {
+    "id": "b265",
+    "grupo": "mpb/official-video",
+    "video": "Djavan - Oceano [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Oceano",
+      "artistas": ["Djavan"]
+    }
+  },
+  {
+    "id": "b266",
+    "grupo": "mpb/audio-60fps",
+    "video": "Djavan - Oceano (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Oceano",
+      "artistas": ["Djavan"]
+    }
+  },
+  {
+    "id": "b267",
+    "grupo": "mpb/dvd",
+    "video": "Djavan - Oceano | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Oceano",
+      "artistas": ["Djavan"]
+    }
+  },
+  {
+    "id": "b268",
+    "grupo": "mpb/invertido-pipe",
+    "video": "Sozinho | Caetano Veloso",
+    "canal": "Caetano Veloso",
+    "esperado": {
+      "titulo": "Sozinho",
+      "artistas": ["Caetano Veloso"]
+    }
+  },
+  {
+    "id": "b269",
+    "grupo": "mpb/so-titulo-canal-artista",
+    "video": "Sozinho",
+    "canal": "Caetano Veloso",
+    "esperado": {
+      "titulo": "Sozinho",
+      "artistas": ["Caetano Veloso"]
+    }
+  },
+  {
+    "id": "b270",
+    "grupo": "mpb/pipe-4k",
+    "video": "Caetano Veloso | Sozinho | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sozinho",
+      "artistas": ["Caetano Veloso"]
+    }
+  },
+  {
+    "id": "b271",
+    "grupo": "mpb/aspas",
+    "video": "Caetano Veloso - \"Sozinho\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sozinho",
+      "artistas": ["Caetano Veloso"]
+    }
+  },
+  {
+    "id": "b272",
+    "grupo": "mpb/clipe-oficial",
+    "video": "Caetano Veloso - Sozinho (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Sozinho",
+      "artistas": ["Caetano Veloso"]
+    }
+  },
+  {
+    "id": "b273",
+    "grupo": "mpb/dvd",
+    "video": "Marisa Monte - Ainda Bem | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "b274",
+    "grupo": "mpb/lyrics",
+    "video": "Marisa Monte - Ainda Bem (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "b275",
+    "grupo": "mpb/invertido-canal",
+    "video": "Ainda Bem - Marisa Monte",
+    "canal": "Marisa Monte",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "b276",
+    "grupo": "mpb/lancamento",
+    "video": "Marisa Monte - Ainda Bem (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "b277",
+    "grupo": "mpb/ao-vivo",
+    "video": "Marisa Monte - Ainda Bem (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "b278",
+    "grupo": "mpb/clipe-oficial",
+    "video": "Gilberto Gil - Aquele Abraço (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Aquele Abraço",
+      "artistas": ["Gilberto Gil"]
+    }
+  },
+  {
+    "id": "b279",
+    "grupo": "mpb/shorts",
+    "video": "Gilberto Gil - Aquele Abraço #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Aquele Abraço",
+      "artistas": ["Gilberto Gil"]
+    }
+  },
+  {
+    "id": "b280",
+    "grupo": "mpb/caixa-alta",
+    "video": "GILBERTO GIL - AQUELE ABRAÇO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AQUELE ABRAÇO",
+      "artistas": ["GILBERTO GIL"]
+    }
+  },
+  {
+    "id": "b281",
+    "grupo": "mpb/official-video",
+    "video": "Gilberto Gil - Aquele Abraço [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Aquele Abraço",
+      "artistas": ["Gilberto Gil"]
+    }
+  },
+  {
+    "id": "b282",
+    "grupo": "mpb/audio-60fps",
+    "video": "Gilberto Gil - Aquele Abraço (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Aquele Abraço",
+      "artistas": ["Gilberto Gil"]
+    }
+  },
+  {
+    "id": "b283",
+    "grupo": "eletronica/ao-vivo",
+    "video": "Alok - Hear Me Now (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Hear Me Now",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "b284",
+    "grupo": "eletronica/invertido-pipe",
+    "video": "Hear Me Now | Alok",
+    "canal": "Alok",
+    "esperado": {
+      "titulo": "Hear Me Now",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "b285",
+    "grupo": "eletronica/so-titulo-canal-artista",
+    "video": "Hear Me Now",
+    "canal": "Alok",
+    "esperado": {
+      "titulo": "Hear Me Now",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "b286",
+    "grupo": "eletronica/pipe-4k",
+    "video": "Alok | Hear Me Now | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Hear Me Now",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "b287",
+    "grupo": "eletronica/aspas",
+    "video": "Alok - \"Hear Me Now\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Hear Me Now",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "b288",
+    "grupo": "eletronica/audio-60fps",
+    "video": "Vintage Culture - Wake Up (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture"]
+    }
+  },
+  {
+    "id": "b289",
+    "grupo": "eletronica/dvd",
+    "video": "Vintage Culture - Wake Up | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture"]
+    }
+  },
+  {
+    "id": "b290",
+    "grupo": "eletronica/lyrics",
+    "video": "Vintage Culture - Wake Up (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture"]
+    }
+  },
+  {
+    "id": "b291",
+    "grupo": "eletronica/invertido-canal",
+    "video": "Wake Up - Vintage Culture",
+    "canal": "Vintage Culture",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture"]
+    }
+  },
+  {
+    "id": "b292",
+    "grupo": "eletronica/lancamento",
+    "video": "Vintage Culture - Wake Up (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture"]
+    }
+  },
+  {
+    "id": "b293",
+    "grupo": "eletronica/aspas",
+    "video": "Calvin Harris - \"Summer\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Summer",
+      "artistas": ["Calvin Harris"]
+    }
+  },
+  {
+    "id": "b294",
+    "grupo": "eletronica/clipe-oficial",
+    "video": "Calvin Harris - Summer (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Summer",
+      "artistas": ["Calvin Harris"]
+    }
+  },
+  {
+    "id": "b295",
+    "grupo": "eletronica/shorts",
+    "video": "Calvin Harris - Summer #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Summer",
+      "artistas": ["Calvin Harris"]
+    }
+  },
+  {
+    "id": "b296",
+    "grupo": "eletronica/caixa-alta",
+    "video": "CALVIN HARRIS - SUMMER (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "SUMMER",
+      "artistas": ["CALVIN HARRIS"]
+    }
+  },
+  {
+    "id": "b297",
+    "grupo": "eletronica/official-video",
+    "video": "Calvin Harris - Summer [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Summer",
+      "artistas": ["Calvin Harris"]
+    }
+  },
+  {
+    "id": "b298",
+    "grupo": "eletronica/lancamento",
+    "video": "David Guetta, Sia - Titanium (Lançamento 2026)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Titanium",
+      "artistas": ["David Guetta", "Sia"]
+    }
+  },
+  {
+    "id": "b299",
+    "grupo": "eletronica/ao-vivo",
+    "video": "David Guetta, Sia - Titanium (Ao Vivo em SP)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Titanium",
+      "artistas": ["David Guetta", "Sia"]
+    }
+  },
+  {
+    "id": "b300",
+    "grupo": "eletronica/invertido-pipe",
+    "video": "Titanium | David Guetta, Sia",
+    "canal": "David Guetta",
+    "esperado": {
+      "titulo": "Titanium",
+      "artistas": ["David Guetta", "Sia"]
+    }
+  },
+  {
+    "id": "b301",
+    "grupo": "eletronica/pipe-4k",
+    "video": "David Guetta, Sia | Titanium | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Titanium",
+      "artistas": ["David Guetta", "Sia"]
+    }
+  },
+  {
+    "id": "b302",
+    "grupo": "rap/official-video",
+    "video": "Racionais MC's - Negro Drama [Official Video]",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "b303",
+    "grupo": "rap/audio-60fps",
+    "video": "Racionais MC's - Negro Drama (Official Audio) 60fps",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "b304",
+    "grupo": "rap/dvd",
+    "video": "Racionais MC's - Negro Drama | DVD Ao Vivo",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "b305",
+    "grupo": "rap/lyrics",
+    "video": "Racionais MC's - Negro Drama (Letra/Lyrics)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "b306",
+    "grupo": "rap/invertido-canal",
+    "video": "Negro Drama - Racionais MC's",
+    "canal": "Racionais MC's",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "b307",
+    "grupo": "rap/pipe-4k",
+    "video": "Emicida | AmarElo | Official Music Video 4K",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AmarElo",
+      "artistas": ["Emicida"]
+    }
+  },
+  {
+    "id": "b308",
+    "grupo": "rap/aspas",
+    "video": "Emicida - \"AmarElo\"",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AmarElo",
+      "artistas": ["Emicida"]
+    }
+  },
+  {
+    "id": "b309",
+    "grupo": "rap/clipe-oficial",
+    "video": "Emicida - AmarElo (Clipe Oficial)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AmarElo",
+      "artistas": ["Emicida"]
+    }
+  },
+  {
+    "id": "b310",
+    "grupo": "rap/shorts",
+    "video": "Emicida - AmarElo #shorts",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AmarElo",
+      "artistas": ["Emicida"]
+    }
+  },
+  {
+    "id": "b311",
+    "grupo": "rap/caixa-alta",
+    "video": "EMICIDA - AMARELO (CLIPE OFICIAL)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "AMARELO",
+      "artistas": ["EMICIDA"]
+    }
+  },
+  {
+    "id": "g312",
+    "grupo": "canal-gravadora",
+    "video": "MC Ryan SP, MC Davi - Tá Tranquilo",
+    "canal": "KondZilla",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"],
+      "gravadora": "KondZilla"
+    }
+  },
+  {
+    "id": "g313",
+    "grupo": "canal-gravadora",
+    "video": "MC Kevinho - Olha a Explosão",
+    "canal": "KondZilla",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"],
+      "gravadora": "KondZilla"
+    }
+  },
+  {
+    "id": "g314",
+    "grupo": "canal-gravadora",
+    "video": "MC Cabelinho - Vai Lá Em Casa",
+    "canal": "Love Funk",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"],
+      "gravadora": "Love Funk"
+    }
+  },
+  {
+    "id": "g315",
+    "grupo": "canal-gravadora",
+    "video": "MC Livinho - Fazer Falta",
+    "canal": "GR6 Explode",
+    "esperado": {
+      "titulo": "Fazer Falta",
+      "artistas": ["MC Livinho"],
+      "gravadora": "GR6 Explode"
+    }
+  },
+  {
+    "id": "g316",
+    "grupo": "canal-gravadora",
+    "video": "MC Don Juan, MC Poze do Rodo - Bola de Cristal",
+    "canal": "Love Funk",
+    "esperado": {
+      "titulo": "Bola de Cristal",
+      "artistas": ["MC Don Juan", "MC Poze do Rodo"],
+      "gravadora": "Love Funk"
+    }
+  },
+  {
+    "id": "g317",
+    "grupo": "canal-gravadora",
+    "video": "MC Paiva ZS - Rolê Aleatório",
+    "canal": "GR6 Explode",
+    "esperado": {
+      "titulo": "Rolê Aleatório",
+      "artistas": ["MC Paiva ZS"],
+      "gravadora": "GR6 Explode"
+    }
+  },
+  {
+    "id": "g318",
+    "grupo": "canal-gravadora",
+    "video": "Chitãozinho e Xororó - Evidências",
+    "canal": "Som Livre",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho e Xororó"],
+      "gravadora": "Som Livre"
+    }
+  },
+  {
+    "id": "g319",
+    "grupo": "canal-gravadora",
+    "video": "Gusttavo Lima - Bloqueado",
+    "canal": "Universal Music Brasil",
+    "esperado": {
+      "titulo": "Bloqueado",
+      "artistas": ["Gusttavo Lima"],
+      "gravadora": "Universal Music Brasil"
+    }
+  },
+  {
+    "id": "g320",
+    "grupo": "canal-gravadora",
+    "video": "Matuê - Máquina do Tempo",
+    "canal": "30PRAUM",
+    "esperado": {
+      "titulo": "Máquina do Tempo",
+      "artistas": ["Matuê"],
+      "gravadora": "30PRAUM"
+    }
+  },
+  {
+    "id": "g321",
+    "grupo": "canal-gravadora",
+    "video": "Grupo Menos É Mais - Meu Abrigo",
+    "canal": "Som Livre",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Grupo Menos É Mais"],
+      "gravadora": "Som Livre"
+    }
+  },
+  {
+    "id": "g322",
+    "grupo": "canal-gravadora",
+    "video": "Gabriela Rocha - Lugar Secreto",
+    "canal": "MK Music",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"],
+      "gravadora": "MK Music"
+    }
+  },
+  {
+    "id": "g323",
+    "grupo": "canal-gravadora",
+    "video": "Anderson Freire - Raridade",
+    "canal": "MK Music",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": ["Anderson Freire"],
+      "gravadora": "MK Music"
+    }
+  },
+  {
+    "id": "g324",
+    "grupo": "canal-gravadora",
+    "video": "BTS - Dynamite",
+    "canal": "HYBE LABELS",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"],
+      "gravadora": "HYBE LABELS"
+    }
+  },
+  {
+    "id": "g325",
+    "grupo": "canal-gravadora",
+    "video": "NewJeans - Ditto",
+    "canal": "HYBE LABELS",
+    "esperado": {
+      "titulo": "Ditto",
+      "artistas": ["NewJeans"],
+      "gravadora": "HYBE LABELS"
+    }
+  },
+  {
+    "id": "m326",
+    "grupo": "virgula-legitima",
+    "video": "Tyler, The Creator - EARFQUAKE (Official Video)",
+    "canal": "Tyler, The Creator",
+    "esperado": {
+      "titulo": "EARFQUAKE",
+      "artistas": ["Tyler, The Creator"]
+    }
+  },
+  {
+    "id": "m327",
+    "grupo": "virgula-legitima",
+    "video": "Earth, Wind & Fire - September (Official HD Video)",
+    "canal": "Earth, Wind & Fire",
+    "esperado": {
+      "titulo": "September",
+      "artistas": ["Earth, Wind & Fire"]
+    }
+  },
+  {
+    "id": "m328",
+    "grupo": "virgula-legitima",
+    "video": "Crosby, Stills & Nash - Marrakesh Express",
+    "canal": "Rhino",
+    "esperado": {
+      "titulo": "Marrakesh Express",
+      "artistas": ["Crosby, Stills & Nash"]
+    }
+  },
+  {
+    "id": "m329",
+    "grupo": "virgula-legitima",
+    "video": "Florence + The Machine - Shake It Out (Official Video)",
+    "canal": "Florence + The Machine",
+    "esperado": {
+      "titulo": "Shake It Out",
+      "artistas": ["Florence + The Machine"]
+    }
+  },
+  {
+    "id": "m330",
+    "grupo": "virgula-legitima",
+    "video": "Mumford & Sons - Little Lion Man",
+    "canal": "Mumford & Sons",
+    "esperado": {
+      "titulo": "Little Lion Man",
+      "artistas": ["Mumford & Sons"]
+    }
+  },
+  {
+    "id": "m331",
+    "grupo": "virgula-legitima",
+    "video": "Hall & Oates - Maneater (Official Video)",
+    "canal": "Hall & Oates",
+    "esperado": {
+      "titulo": "Maneater",
+      "artistas": ["Hall & Oates"]
+    }
+  },
+  {
+    "id": "m332",
+    "grupo": "virgula-legitima",
+    "video": "Kool & The Gang - Celebration",
+    "canal": "Kool & The Gang",
+    "esperado": {
+      "titulo": "Celebration",
+      "artistas": ["Kool & The Gang"]
+    }
+  },
+  {
+    "id": "m333",
+    "grupo": "virgula-legitima",
+    "video": "Simon & Garfunkel - The Boxer",
+    "canal": "Simon & Garfunkel",
+    "esperado": {
+      "titulo": "The Boxer",
+      "artistas": ["Simon & Garfunkel"]
+    }
+  },
+  {
+    "id": "m334",
+    "grupo": "dupla",
+    "video": "Chitãozinho & Xororó - Evidências (Ao Vivo)",
+    "canal": "Som Livre",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho & Xororó"]
+    }
+  },
+  {
+    "id": "m335",
+    "grupo": "dupla",
+    "video": "Chitãozinho e Xororó - Fio de Cabelo | Clipe Oficial",
+    "canal": "Chitãozinho e Xororó",
+    "esperado": {
+      "titulo": "Fio de Cabelo",
+      "artistas": ["Chitãozinho e Xororó"]
+    }
+  },
+  {
+    "id": "m336",
+    "grupo": "dupla",
+    "video": "Jorge & Mateus - Pode Chorar (Ao Vivo)",
+    "canal": "Jorge & Mateus",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": ["Jorge & Mateus"]
+    }
+  },
+  {
+    "id": "m337",
+    "grupo": "dupla",
+    "video": "Henrique e Juliano - Até Você Voltar (Ao Vivo) - DVD Novas Histórias",
+    "canal": "Henrique & Juliano",
+    "esperado": {
+      "titulo": "Até Você Voltar",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "m338",
+    "grupo": "dupla",
+    "video": "Maiara & Maraisa - Medo Bobo (Ao Vivo)",
+    "canal": "Maiara & Maraisa",
+    "esperado": {
+      "titulo": "Medo Bobo",
+      "artistas": ["Maiara & Maraisa"]
+    }
+  },
+  {
+    "id": "m339",
+    "grupo": "dupla",
+    "video": "Simone e Simaria - Regime Fechado",
+    "canal": "Simone e Simaria",
+    "esperado": {
+      "titulo": "Regime Fechado",
+      "artistas": ["Simone e Simaria"]
+    }
+  },
+  {
+    "id": "m340",
+    "grupo": "dupla",
+    "video": "Victor e Leo - Borboletas (Clipe Oficial)",
+    "canal": "Victor & Leo",
+    "esperado": {
+      "titulo": "Borboletas",
+      "artistas": ["Victor e Leo"]
+    }
+  },
+  {
+    "id": "m341",
+    "grupo": "dupla",
+    "video": "Zezé Di Camargo e Luciano - É o Amor",
+    "canal": "Zezé Di Camargo e Luciano",
+    "esperado": {
+      "titulo": "É o Amor",
+      "artistas": ["Zezé Di Camargo e Luciano"]
+    }
+  },
+  {
+    "id": "m342",
+    "grupo": "dupla",
+    "video": "Leandro e Leonardo - Pense em Mim (Ao Vivo)",
+    "canal": "Leandro e Leonardo",
+    "esperado": {
+      "titulo": "Pense em Mim",
+      "artistas": ["Leandro e Leonardo"]
+    }
+  },
+  {
+    "id": "m343",
+    "grupo": "dupla",
+    "video": "Sandy e Junior - As Quatro Estações",
+    "canal": "Sandy e Junior",
+    "esperado": {
+      "titulo": "As Quatro Estações",
+      "artistas": ["Sandy e Junior"]
+    }
+  },
+  {
+    "id": "m344",
+    "grupo": "dupla",
+    "video": "Bruno & Marrone - Dormi na Praça",
+    "canal": "Bruno & Marrone",
+    "esperado": {
+      "titulo": "Dormi na Praça",
+      "artistas": ["Bruno & Marrone"]
+    }
+  },
+  {
+    "id": "m345",
+    "grupo": "dupla",
+    "video": "Liberdade Provisória - Henrique e Juliano",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Liberdade Provisória",
+      "artistas": ["Henrique e Juliano"]
+    }
+  },
+  {
+    "id": "m346",
+    "grupo": "hifen-no-nome",
+    "video": "Jay-Z - 99 Problems (Official Video)",
+    "canal": "Jay-Z",
+    "esperado": {
+      "titulo": "99 Problems",
+      "artistas": ["Jay-Z"]
+    }
+  },
+  {
+    "id": "m347",
+    "grupo": "hifen-no-nome",
+    "video": "Dua Lipa - Levitating",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "m348",
+    "grupo": "hifen-no-nome",
+    "video": "Wu-Tang Clan - Protect Ya Neck",
+    "canal": "Wu-Tang Clan",
+    "esperado": {
+      "titulo": "Protect Ya Neck",
+      "artistas": ["Wu-Tang Clan"]
+    }
+  },
+  {
+    "id": "m349",
+    "grupo": "hifen-no-nome",
+    "video": "Blink-182 - All The Small Things (Official Music Video)",
+    "canal": "blink-182",
+    "esperado": {
+      "titulo": "All The Small Things",
+      "artistas": ["Blink-182"]
+    }
+  },
+  {
+    "id": "m350",
+    "grupo": "hifen-no-nome",
+    "video": "Ne-Yo - So Sick",
+    "canal": "Ne-Yo",
+    "esperado": {
+      "titulo": "So Sick",
+      "artistas": ["Ne-Yo"]
+    }
+  },
+  {
+    "id": "m351",
+    "grupo": "hifen-no-nome",
+    "video": "alt-J - Breezeblocks",
+    "canal": "alt-J",
+    "esperado": {
+      "titulo": "Breezeblocks",
+      "artistas": ["alt-J"]
+    }
+  },
+  {
+    "id": "m352",
+    "grupo": "hifen-no-nome",
+    "video": "Jean-Michel Jarre - Oxygène (Part 4)",
+    "canal": "Jean-Michel Jarre",
+    "esperado": {
+      "titulo": "Oxygène (Part 4)",
+      "artistas": ["Jean-Michel Jarre"]
+    }
+  },
+  {
+    "id": "m353",
+    "grupo": "hifen-no-titulo",
+    "video": "Taylor Swift - Anti-Hero (Official Music Video)",
+    "canal": "Taylor Swift",
+    "esperado": {
+      "titulo": "Anti-Hero",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "m354",
+    "grupo": "hifen-no-titulo",
+    "video": "Aline Barros - Ressuscita-me | Clipe Oficial",
+    "canal": "Aline Barros",
+    "esperado": {
+      "titulo": "Ressuscita-me",
+      "artistas": ["Aline Barros"]
+    }
+  },
+  {
+    "id": "m355",
+    "grupo": "multiplos-hifens",
+    "video": "Matuê - Anos Luz - Official Video",
+    "canal": "Matuê",
+    "esperado": {
+      "titulo": "Anos Luz",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "m356",
+    "grupo": "multiplos-hifens",
+    "video": "Pink Floyd - Another Brick in the Wall - Part 2",
+    "canal": "Pink Floyd",
+    "esperado": {
+      "titulo": "Another Brick in the Wall - Part 2",
+      "artistas": ["Pink Floyd"]
+    }
+  },
+  {
+    "id": "m357",
+    "grupo": "numero-no-nome",
+    "video": "2Pac - California Love (Official Video)",
+    "canal": "2Pac",
+    "esperado": {
+      "titulo": "California Love",
+      "artistas": ["2Pac"]
+    }
+  },
+  {
+    "id": "m358",
+    "grupo": "numero-no-nome",
+    "video": "50 Cent - In Da Club",
+    "canal": "50 Cent",
+    "esperado": {
+      "titulo": "In Da Club",
+      "artistas": ["50 Cent"]
+    }
+  },
+  {
+    "id": "m359",
+    "grupo": "numero-no-nome",
+    "video": "21 Savage - a lot (Official Video)",
+    "canal": "21 Savage",
+    "esperado": {
+      "titulo": "a lot",
+      "artistas": ["21 Savage"]
+    }
+  },
+  {
+    "id": "m360",
+    "grupo": "numero-no-nome",
+    "video": "5 Seconds of Summer - She Looks So Perfect",
+    "canal": "5 Seconds of Summer",
+    "esperado": {
+      "titulo": "She Looks So Perfect",
+      "artistas": ["5 Seconds of Summer"]
+    }
+  },
+  {
+    "id": "m361",
+    "grupo": "feat",
+    "video": "Jay-Z - Empire State of Mind ft. Alicia Keys",
+    "canal": "Jay-Z",
+    "esperado": {
+      "titulo": "Empire State of Mind",
+      "artistas": ["Jay-Z", "Alicia Keys"]
+    }
+  },
+  {
+    "id": "m362",
+    "grupo": "feat",
+    "video": "Dua Lipa - Levitating Featuring DaBaby (Official Music Video)",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa", "DaBaby"]
+    }
+  },
+  {
+    "id": "m363",
+    "grupo": "feat",
+    "video": "Anitta feat Snoop Dogg - Onda Diferente",
+    "canal": "Anitta",
+    "esperado": {
+      "titulo": "Onda Diferente",
+      "artistas": ["Anitta", "Snoop Dogg"]
+    }
+  },
+  {
+    "id": "m364",
+    "grupo": "feat",
+    "video": "Marília Mendonça part. Maiara e Maraisa - Cuidado Que Eu Tô Apaixonada",
+    "canal": "Marília Mendonça",
+    "esperado": {
+      "titulo": "Cuidado Que Eu Tô Apaixonada",
+      "artistas": ["Marília Mendonça", "Maiara e Maraisa"]
+    }
+  },
+  {
+    "id": "m365",
+    "grupo": "feat",
+    "video": "Luan Santana - Meteoro (part. Gusttavo Lima)",
+    "canal": "Luan Santana",
+    "esperado": {
+      "titulo": "Meteoro",
+      "artistas": ["Luan Santana", "Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "m366",
+    "grupo": "feat",
+    "video": "Calvin Harris - Summer (feat. Rihanna)",
+    "canal": "Calvin Harris",
+    "esperado": {
+      "titulo": "Summer",
+      "artistas": ["Calvin Harris", "Rihanna"]
+    }
+  },
+  {
+    "id": "m367",
+    "grupo": "feat",
+    "video": "Ed Sheeran - I Don't Care (with Justin Bieber)",
+    "canal": "Ed Sheeran",
+    "esperado": {
+      "titulo": "I Don't Care",
+      "artistas": ["Ed Sheeran", "Justin Bieber"]
+    }
+  },
+  {
+    "id": "m368",
+    "grupo": "feat",
+    "video": "Bad Bunny x Jhay Cortez - Dakiti (Video Oficial)",
+    "canal": "Bad Bunny",
+    "esperado": {
+      "titulo": "Dakiti",
+      "artistas": ["Bad Bunny", "Jhay Cortez"]
+    }
+  },
+  {
+    "id": "m369",
+    "grupo": "feat",
+    "video": "Karol G, Shakira - TQG (Official Video)",
+    "canal": "Karol G",
+    "esperado": {
+      "titulo": "TQG",
+      "artistas": ["Karol G", "Shakira"]
+    }
+  },
+  {
+    "id": "m370",
+    "grupo": "feat",
+    "video": "J Balvin, Willy William - Mi Gente (Official Video)",
+    "canal": "J Balvin",
+    "esperado": {
+      "titulo": "Mi Gente",
+      "artistas": ["J Balvin", "Willy William"]
+    }
+  },
+  {
+    "id": "m371",
+    "grupo": "feat",
+    "video": "Rauw Alejandro - Todo de Ti | Video Oficial",
+    "canal": "Rauw Alejandro",
+    "esperado": {
+      "titulo": "Todo de Ti",
+      "artistas": ["Rauw Alejandro"]
+    }
+  },
+  {
+    "id": "m372",
+    "grupo": "funk",
+    "video": "MC Ryan SP e MC Davi - Tá Tranquilo (DJ Boy) Lançamento 2026",
+    "canal": "KondZilla",
+    "esperado": {
+      "titulo": "Tá Tranquilo",
+      "artistas": ["MC Ryan SP", "MC Davi"]
+    }
+  },
+  {
+    "id": "m373",
+    "grupo": "funk",
+    "video": "MC Hariel, MC Davi e MC Ryan SP - Ilusão (GR6 Explode) | CLIPE OFICIAL",
+    "canal": "GR6 Explode",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel", "MC Davi", "MC Ryan SP"],
+      "gravadora": "GR6 Explode"
+    }
+  },
+  {
+    "id": "m374",
+    "grupo": "funk",
+    "video": "Pipoco - Ana Castela, Melody, DJ Chris",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Pipoco",
+      "artistas": ["Ana Castela", "Melody", "DJ Chris"]
+    }
+  },
+  {
+    "id": "m375",
+    "grupo": "funk",
+    "video": "MC Kevinho - Olha a Explosão (KondZilla) | Clipe Oficial",
+    "canal": "KondZilla",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": ["MC Kevinho"],
+      "gravadora": "KondZilla"
+    }
+  },
+  {
+    "id": "m376",
+    "grupo": "funk",
+    "video": "Liberdade - Mc Hariel",
+    "canal": "Mc Hariel",
+    "esperado": {
+      "titulo": "Liberdade",
+      "artistas": ["Mc Hariel"]
+    }
+  },
+  {
+    "id": "m377",
+    "grupo": "funk",
+    "video": "MC Cabelinho - Vai Lá Em Casa #shorts",
+    "canal": "Love Funk",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": ["MC Cabelinho"]
+    }
+  },
+  {
+    "id": "m378",
+    "grupo": "versao",
+    "video": "Alok - Hear Me Now (Remix)",
+    "canal": "Alok",
+    "esperado": {
+      "titulo": "Hear Me Now (Remix)",
+      "artistas": ["Alok"]
+    }
+  },
+  {
+    "id": "m379",
+    "grupo": "versao",
+    "video": "Anitta - Envolver (speed up)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "Envolver (speed up)",
+      "artistas": ["Anitta"]
+    }
+  },
+  {
+    "id": "m380",
+    "grupo": "versao",
+    "video": "Drake - God's Plan (slowed + reverb)",
+    "canal": "Canal Qualquer",
+    "esperado": {
+      "titulo": "God's Plan (slowed + reverb)",
+      "artistas": ["Drake"]
+    }
+  },
+  {
+    "id": "m381",
+    "grupo": "versao",
+    "video": "Pedro Silva - Evidências (Cover)",
+    "canal": "Pedro Silva",
+    "esperado": {
+      "titulo": "Evidências (Cover)",
+      "artistas": ["Pedro Silva"]
+    }
+  },
+  {
+    "id": "m382",
+    "grupo": "versao",
+    "video": "Legião Urbana - Será (Ao Vivo)",
+    "canal": "Legião Urbana",
+    "esperado": {
+      "titulo": "Será",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "m383",
+    "grupo": "versao",
+    "video": "Titãs - Epitáfio (Acústico MTV)",
+    "canal": "Titãs",
+    "esperado": {
+      "titulo": "Epitáfio",
+      "artistas": ["Titãs"]
+    }
+  },
+  {
+    "id": "m384",
+    "grupo": "canal-topic",
+    "video": "Levitating",
+    "canal": "Dua Lipa - Topic",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "m385",
+    "grupo": "canal-topic",
+    "video": "Evidências",
+    "canal": "Chitãozinho & Xororó - Topic",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": ["Chitãozinho & Xororó"]
+    }
+  },
+  {
+    "id": "m386",
+    "grupo": "canal-vevo",
+    "video": "Hello",
+    "canal": "Taylor Swift VEVO",
+    "esperado": {
+      "titulo": "Hello",
+      "artistas": ["Taylor Swift"]
+    }
+  },
+  {
+    "id": "m387",
+    "grupo": "canal-oficial",
+    "video": "Bohemian Rhapsody",
+    "canal": "Queen Official",
+    "esperado": {
+      "titulo": "Bohemian Rhapsody",
+      "artistas": ["Queen"]
+    }
+  },
+  {
+    "id": "m388",
+    "grupo": "canal-artista",
+    "video": "Lugar Secreto | Gabriela Rocha",
+    "canal": "Gabriela Rocha",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "m389",
+    "grupo": "canal-artista",
+    "video": "Lugar Secreto",
+    "canal": "Gabriela Rocha",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": ["Gabriela Rocha"]
+    }
+  },
+  {
+    "id": "m390",
+    "grupo": "canal-gravadora",
+    "video": "Raridade",
+    "canal": "MK Music",
+    "esperado": {
+      "titulo": "Raridade",
+      "artistas": [],
+      "gravadora": "MK Music"
+    }
+  },
+  {
+    "id": "m391",
+    "grupo": "canal-gravadora",
+    "video": "Evidências",
+    "canal": "Som Livre",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": [],
+      "gravadora": "Som Livre"
+    }
+  },
+  {
+    "id": "m392",
+    "grupo": "canal-gravadora",
+    "video": "Pode Chorar",
+    "canal": "Universal Music Brasil",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m393",
+    "grupo": "canal-gravadora",
+    "video": "Dynamite",
+    "canal": "HYBE LABELS",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m394",
+    "grupo": "canal-gravadora",
+    "video": "Olha a Explosão",
+    "canal": "KondZilla",
+    "esperado": {
+      "titulo": "Olha a Explosão",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m395",
+    "grupo": "canal-gravadora",
+    "video": "Vai Lá Em Casa",
+    "canal": "Love Funk",
+    "esperado": {
+      "titulo": "Vai Lá Em Casa",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m396",
+    "grupo": "canal-gravadora",
+    "video": "Ilusão",
+    "canal": "GR6 Explode",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m397",
+    "grupo": "canal-gravadora",
+    "video": "Maquina do Tempo",
+    "canal": "Sony Music Brasil",
+    "esperado": {
+      "titulo": "Maquina do Tempo",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m398",
+    "grupo": "canal-aleatorio",
+    "video": "Evidências",
+    "canal": "Letras Top Hits",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m399",
+    "grupo": "canal-aleatorio",
+    "video": "Evidências",
+    "canal": "Playlist Sertanejo 2026",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m400",
+    "grupo": "canal-aleatorio",
+    "video": "Pode Chorar",
+    "canal": "Só Hits Funk",
+    "esperado": {
+      "titulo": "Pode Chorar",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m401",
+    "grupo": "canal-aleatorio",
+    "video": "Lugar Secreto",
+    "canal": "Musica Gospel TV",
+    "esperado": {
+      "titulo": "Lugar Secreto",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m402",
+    "grupo": "canal-aleatorio",
+    "video": "Levitating",
+    "canal": "Lyrics Brasil",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m403",
+    "grupo": "canal-aleatorio",
+    "video": "Anos Luz",
+    "canal": "Radio Mix Trap",
+    "esperado": {
+      "titulo": "Anos Luz",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m404",
+    "grupo": "karaoke",
+    "video": "Evidências (Karaokê)",
+    "canal": "Karaokê Brasil",
+    "esperado": {
+      "titulo": "Evidências",
+      "artistas": []
+    }
+  },
+  {
+    "id": "m405",
+    "grupo": "emoji",
+    "video": "🔥 MC Hariel - Ilusão 🔥 (Clipe Oficial)",
+    "canal": "GR6 Explode",
+    "esperado": {
+      "titulo": "Ilusão",
+      "artistas": ["MC Hariel"]
+    }
+  },
+  {
+    "id": "m406",
+    "grupo": "emoji",
+    "video": "Matuê - Anos Luz 🚀🚀",
+    "canal": "Matuê",
+    "esperado": {
+      "titulo": "Anos Luz",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "m407",
+    "grupo": "aspas",
+    "video": "Stray Kids \"God's Menu\" M/V",
+    "canal": "JYP Entertainment",
+    "esperado": {
+      "titulo": "God's Menu",
+      "artistas": ["Stray Kids"]
+    }
+  },
+  {
+    "id": "m408",
+    "grupo": "aspas",
+    "video": "Marisa Monte - \"Ainda Bem\" (Clipe Oficial)",
+    "canal": "Marisa Monte",
+    "esperado": {
+      "titulo": "Ainda Bem",
+      "artistas": ["Marisa Monte"]
+    }
+  },
+  {
+    "id": "m409",
+    "grupo": "caixa-baixa",
+    "video": "dua lipa - levitating (official video)",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "levitating",
+      "artistas": ["dua lipa"]
+    }
+  },
+  {
+    "id": "m410",
+    "grupo": "acentos",
+    "video": "MARÍLIA MENDONÇA - ALGUÉM COMO VOCÊ (CLIPE OFICIAL)",
+    "canal": "Marília Mendonça",
+    "esperado": {
+      "titulo": "ALGUÉM COMO VOCÊ",
+      "artistas": ["MARÍLIA MENDONÇA"]
+    }
+  },
+  {
+    "id": "m411",
+    "grupo": "hashtags",
+    "video": "Matuê - Anos Luz #matuê #trap #shorts",
+    "canal": "Matuê",
+    "esperado": {
+      "titulo": "Anos Luz",
+      "artistas": ["Matuê"]
+    }
+  },
+  {
+    "id": "m412",
+    "grupo": "resolucao",
+    "video": "Dua Lipa - Levitating (Official Music Video) 1080p HD",
+    "canal": "Dua Lipa",
+    "esperado": {
+      "titulo": "Levitating",
+      "artistas": ["Dua Lipa"]
+    }
+  },
+  {
+    "id": "m413",
+    "grupo": "resolucao",
+    "video": "BTS - Dynamite [4K] (Official MV)",
+    "canal": "HYBE LABELS",
+    "esperado": {
+      "titulo": "Dynamite",
+      "artistas": ["BTS"]
+    }
+  },
+  {
+    "id": "m414",
+    "grupo": "resolucao",
+    "video": "Billie Eilish - bad guy (Visualizer) 60fps",
+    "canal": "Billie Eilish",
+    "esperado": {
+      "titulo": "bad guy",
+      "artistas": ["Billie Eilish"]
+    }
+  },
+  {
+    "id": "m415",
+    "grupo": "apostrofo",
+    "video": "Guns N' Roses - Welcome To The Jungle",
+    "canal": "Guns N' Roses",
+    "esperado": {
+      "titulo": "Welcome To The Jungle",
+      "artistas": ["Guns N' Roses"]
+    }
+  },
+  {
+    "id": "m416",
+    "grupo": "barra",
+    "video": "AC/DC - Thunderstruck (Official Video)",
+    "canal": "AC/DC",
+    "esperado": {
+      "titulo": "Thunderstruck",
+      "artistas": ["AC/DC"]
+    }
+  },
+  {
+    "id": "m417",
+    "grupo": "ponto-no-nome",
+    "video": "will.i.am - Scream & Shout ft. Britney Spears",
+    "canal": "will.i.am",
+    "esperado": {
+      "titulo": "Scream & Shout",
+      "artistas": ["will.i.am", "Britney Spears"]
+    }
+  },
+  {
+    "id": "m418",
+    "grupo": "simbolo",
+    "video": "P!nk - What About Us (Official Video)",
+    "canal": "P!nk",
+    "esperado": {
+      "titulo": "What About Us",
+      "artistas": ["P!nk"]
+    }
+  },
+  {
+    "id": "m419",
+    "grupo": "dvd",
+    "video": "DVD Calcinha Preta - Ainda Te Amo (Ao Vivo)",
+    "canal": "Calcinha Preta",
+    "esperado": {
+      "titulo": "Ainda Te Amo",
+      "artistas": ["Calcinha Preta"]
+    }
+  },
+  {
+    "id": "m420",
+    "grupo": "dvd",
+    "video": "Wesley Safadão - Camarote | DVD Ao Vivo em Fortaleza",
+    "canal": "Wesley Safadão",
+    "esperado": {
+      "titulo": "Camarote",
+      "artistas": ["Wesley Safadão"]
+    }
+  },
+  {
+    "id": "m421",
+    "grupo": "adversarial",
+    "video": "Tyler, The Creator ft. Kali Uchis - See You Again (Official Video)",
+    "canal": "Tyler, The Creator",
+    "esperado": {
+      "titulo": "See You Again",
+      "artistas": ["Tyler, The Creator", "Kali Uchis"]
+    }
+  },
+  {
+    "id": "m422",
+    "grupo": "adversarial",
+    "video": "Eu e Você - Gusttavo Lima",
+    "canal": "Gusttavo Lima",
+    "esperado": {
+      "titulo": "Eu e Você",
+      "artistas": ["Gusttavo Lima"]
+    }
+  },
+  {
+    "id": "m423",
+    "grupo": "adversarial",
+    "video": "Lucas e Orelha - Cansei de Você (Ao Vivo)",
+    "canal": "Lucas & Orelha",
+    "esperado": {
+      "titulo": "Cansei de Você",
+      "artistas": ["Lucas e Orelha"]
+    }
+  },
+  {
+    "id": "m424",
+    "grupo": "adversarial",
+    "video": "Kawe e Wiu - Sem Você (Clipe Oficial)",
+    "canal": "Kawe e Wiu",
+    "esperado": {
+      "titulo": "Sem Você",
+      "artistas": ["Kawe e Wiu"]
+    }
+  },
+  {
+    "id": "m425",
+    "grupo": "adversarial",
+    "video": "Simone Mendes - Erro Gostoso (Ao Vivo)",
+    "canal": "Simone Mendes",
+    "esperado": {
+      "titulo": "Erro Gostoso",
+      "artistas": ["Simone Mendes"]
+    }
+  },
+  {
+    "id": "m426",
+    "grupo": "adversarial",
+    "video": "Amor e Fé - Péricles",
+    "canal": "Péricles",
+    "esperado": {
+      "titulo": "Amor e Fé",
+      "artistas": ["Péricles"]
+    }
+  },
+  {
+    "id": "m427",
+    "grupo": "adversarial",
+    "video": "Pai e Filho | Jorge e Mateus",
+    "canal": "Jorge & Mateus",
+    "esperado": {
+      "titulo": "Pai e Filho",
+      "artistas": ["Jorge e Mateus"]
+    }
+  },
+  {
+    "id": "m428",
+    "grupo": "adversarial",
+    "video": "Zeca Pagodinho - Deixa a Vida Me Levar",
+    "canal": "Zeca Pagodinho",
+    "esperado": {
+      "titulo": "Deixa a Vida Me Levar",
+      "artistas": ["Zeca Pagodinho"]
+    }
+  },
+  {
+    "id": "m429",
+    "grupo": "adversarial",
+    "video": "Milionário e José Rico - Estrada da Vida",
+    "canal": "Milionário & José Rico",
+    "esperado": {
+      "titulo": "Estrada da Vida",
+      "artistas": ["Milionário e José Rico"]
+    }
+  },
+  {
+    "id": "m430",
+    "grupo": "adversarial",
+    "video": "Racionais MC's - Negro Drama (Official Video)",
+    "canal": "Racionais MC's",
+    "esperado": {
+      "titulo": "Negro Drama",
+      "artistas": ["Racionais MC's"]
+    }
+  },
+  {
+    "id": "m431",
+    "grupo": "adversarial",
+    "video": "Emicida - AmarElo (part. Majur e Pabllo Vittar)",
+    "canal": "Emicida",
+    "esperado": {
+      "titulo": "AmarElo",
+      "artistas": ["Emicida", "Majur", "Pabllo Vittar"]
+    }
+  },
+  {
+    "id": "m432",
+    "grupo": "adversarial",
+    "video": "Alok & Sevenn - Dance With Me",
+    "canal": "Alok",
+    "esperado": {
+      "titulo": "Dance With Me",
+      "artistas": ["Alok", "Sevenn"]
+    }
+  },
+  {
+    "id": "m433",
+    "grupo": "adversarial",
+    "video": "David Guetta ft. Sia - Titanium",
+    "canal": "David Guetta",
+    "esperado": {
+      "titulo": "Titanium",
+      "artistas": ["David Guetta", "Sia"]
+    }
+  },
+  {
+    "id": "m434",
+    "grupo": "adversarial",
+    "video": "Vintage Culture & Bhaskar - Wake Up (Official Music Video)",
+    "canal": "Vintage Culture",
+    "esperado": {
+      "titulo": "Wake Up",
+      "artistas": ["Vintage Culture", "Bhaskar"]
+    }
+  },
+  {
+    "id": "m435",
+    "grupo": "adversarial",
+    "video": "Bruno Mars - That's What I Like [Official Music Video]",
+    "canal": "Bruno Mars",
+    "esperado": {
+      "titulo": "That's What I Like",
+      "artistas": ["Bruno Mars"]
+    }
+  },
+  {
+    "id": "m436",
+    "grupo": "adversarial",
+    "video": "Matuê, Teto, WIU - 333 (Clipe Oficial)",
+    "canal": "30PRAUM",
+    "esperado": {
+      "titulo": "333",
+      "artistas": ["Matuê", "Teto", "WIU"]
+    }
+  },
+  {
+    "id": "m437",
+    "grupo": "adversarial",
+    "video": "Djavan - Oceano (Ao Vivo) | Djavan Oficial",
+    "canal": "Djavan Oficial",
+    "esperado": {
+      "titulo": "Oceano",
+      "artistas": ["Djavan"]
+    }
+  },
+  {
+    "id": "m438",
+    "grupo": "adversarial",
+    "video": "Legião Urbana | Tempo Perdido | Clipe Oficial",
+    "canal": "Legião Urbana",
+    "esperado": {
+      "titulo": "Tempo Perdido",
+      "artistas": ["Legião Urbana"]
+    }
+  },
+  {
+    "id": "m439",
+    "grupo": "adversarial",
+    "video": "CAETANO VELOSO - SOZINHO (ÁUDIO OFICIAL)",
+    "canal": "Caetano Veloso",
+    "esperado": {
+      "titulo": "SOZINHO",
+      "artistas": ["CAETANO VELOSO"]
+    }
+  },
+  {
+    "id": "m440",
+    "grupo": "adversarial",
+    "video": "Gilberto Gil - Aquele Abraço (1969) | Remasterizado 4K",
+    "canal": "Gilberto Gil",
+    "esperado": {
+      "titulo": "Aquele Abraço (1969)",
+      "artistas": ["Gilberto Gil"]
+    }
+  },
+  {
+    "id": "m441",
+    "grupo": "adversarial",
+    "video": "BLACKPINK - 'How You Like That' M/V",
+    "canal": "YG Entertainment",
+    "esperado": {
+      "titulo": "How You Like That",
+      "artistas": ["BLACKPINK"]
+    }
+  },
+  {
+    "id": "m442",
+    "grupo": "adversarial",
+    "video": "Rauw Alejandro, Bad Bunny - Ke Rico (Video Oficial)",
+    "canal": "Rauw Alejandro",
+    "esperado": {
+      "titulo": "Ke Rico",
+      "artistas": ["Rauw Alejandro", "Bad Bunny"]
+    }
+  },
+  {
+    "id": "m443",
+    "grupo": "adversarial",
+    "video": "Calvin Harris, Rag'n'Bone Man - Giant (Official Video)",
+    "canal": "Calvin Harris",
+    "esperado": {
+      "titulo": "Giant",
+      "artistas": ["Calvin Harris", "Rag'n'Bone Man"]
+    }
+  },
+  {
+    "id": "m444",
+    "grupo": "adversarial",
+    "video": "Anitta - Envolver (Official Music Video) 4K 60fps",
+    "canal": "Anitta",
+    "esperado": {
+      "titulo": "Envolver",
+      "artistas": ["Anitta"]
+    }
+  },
+  {
+    "id": "m445",
+    "grupo": "adversarial",
+    "video": "Ludmilla - Maldivas ft. Zé Neto e Cristiano",
+    "canal": "Ludmilla",
+    "esperado": {
+      "titulo": "Maldivas",
+      "artistas": ["Ludmilla", "Zé Neto e Cristiano"]
+    }
+  },
+  {
+    "id": "m446",
+    "grupo": "adversarial",
+    "video": "Thiaguinho | Tudo Que Eu Sempre Quis | Ao Vivo",
+    "canal": "Thiaguinho",
+    "esperado": {
+      "titulo": "Tudo Que Eu Sempre Quis",
+      "artistas": ["Thiaguinho"]
+    }
+  },
+  {
+    "id": "m447",
+    "grupo": "adversarial",
+    "video": "Menos É Mais - Meu Abrigo (Ao Vivo) DVD",
+    "canal": "Grupo Menos É Mais",
+    "esperado": {
+      "titulo": "Meu Abrigo",
+      "artistas": ["Menos É Mais"]
+    }
+  }
+]

@@ -48,6 +48,16 @@ vi.mock('@/lib/lyrics/recalibrar', async () => {
   return { ...real, buscarTempo, buscarAlinhamento, aplicarAlinhamento };
 });
 
+// A BORDA DOS ALINHAMENTOS PRONTOS (alinhamentoDaBorda.ts) fica de fora destes
+// testes: 404 ("ainda não tem") por padrão, que é o caminho que cai para o
+// importador — o que estes testes exercitam. A borda tem a suíte dela.
+vi.mock('@/lib/lyrics/alinhamentoDaBorda', async () => {
+  const real = await vi.importActual<typeof import('@/lib/lyrics/alinhamentoDaBorda')>(
+    '@/lib/lyrics/alinhamentoDaBorda',
+  );
+  return { ...real, buscarAlinhamentoNaBorda: vi.fn(async () => ({ tipo: 'nao-tem' as const })) };
+});
+
 const remoteUrlFor = vi.fn<(id: string) => string | null>();
 vi.mock('@/lib/local/localLibrary', () => ({ remoteUrlFor }));
 
@@ -104,6 +114,7 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     vi.clearAllMocks();
     vi.useFakeTimers();
     online = vi.spyOn(navigator, 'onLine', 'get').mockReturnValue(true);
+    window.localStorage.clear(); // desistências (desistencias.ts) não vazam entre testes
     cachedLyrics.mockReturnValue(null);
     remoteUrlFor.mockReturnValue('https://importer.x/blob/t1?k=abc');
   });
@@ -179,14 +190,18 @@ describe('pedirCalibracao / aquecerCalibracao', () => {
     ]);
     expect(buscarTempo).not.toHaveBeenCalled();
     expect(aplicarAlinhamento).toHaveBeenCalledWith(letra, [0, 1], alinhadas);
-    expect(writeLyrics).toHaveBeenCalledWith('t1', {
-      ...reancorada,
-      calibrada: true,
-      alinhada: true,
-      confianca: 0.9,
-      // Confiança 0,9 ≥ ALINHAMENTO_SELADO: carimbada — nunca mais volta ao retrabalho.
-      selada: true,
-    });
+    expect(writeLyrics).toHaveBeenCalledWith(
+      't1',
+      {
+        ...reancorada,
+        calibrada: true,
+        alinhada: true,
+        confianca: 0.9,
+        // Confiança 0,9 ≥ ALINHAMENTO_SELADO: carimbada — nunca mais volta ao retrabalho.
+        selada: true,
+      },
+      expect.objectContaining({ id: 't1' }),
+    );
     expect(resultado).toEqual({
       ...reancorada,
       calibrada: true,

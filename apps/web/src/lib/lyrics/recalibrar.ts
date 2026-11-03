@@ -126,7 +126,8 @@ export interface TranscricaoParcial {
 export type RespostaDoTempo =
   | { tipo: 'pronto'; words: AsrWord[] }
   | { tipo: 'esperar'; processando?: boolean; parcial?: TranscricaoParcial }
-  | { tipo: 'desistir' };
+  /** `status`: o HTTP que fez desistir (422 = o importador não faz esta faixa). */
+  | { tipo: 'desistir'; status?: number };
 
 /** Pergunta ao importador. Nunca lança. */
 export async function buscarTempo(url: string): Promise<RespostaDoTempo> {
@@ -136,7 +137,7 @@ export async function buscarTempo(url: string): Promise<RespostaDoTempo> {
       const corpo = (await res.json()) as { words?: AsrWord[] };
       return corpo.words && corpo.words.length > 0
         ? { tipo: 'pronto', words: corpo.words }
-        : { tipo: 'desistir' };
+        : { tipo: 'desistir', status: 200 };
     }
     if (res.status === 202) {
       const corpo = (await res.json().catch(() => ({}))) as {
@@ -150,7 +151,7 @@ export async function buscarTempo(url: string): Promise<RespostaDoTempo> {
       };
     }
     if (res.status === 503) return { tipo: 'esperar' };
-    return { tipo: 'desistir' };
+    return { tipo: 'desistir', status: res.status };
   } catch {
     return { tipo: 'esperar' };
   }
@@ -173,6 +174,12 @@ export interface PalavraAlinhada {
 }
 
 export interface LinhaAlinhada {
+  /**
+   * O texto que o alinhador encaixou (palavras.py manda desde 03/11/2026). Com
+   * ele a linha é casada pelo TEXTO (alinhamentoDaBorda.ts): o stable-ts às
+   * vezes junta ou parte segmentos, e a contagem deixa de ser 1 para 1.
+   */
+  text?: string;
   startMs: number;
   endMs: number;
   words: PalavraAlinhada[];
@@ -424,7 +431,7 @@ export type RespostaDoAlinhamento =
    * (ainda nem começou, martelar não adianta nada).
    */
   | { tipo: 'esperar'; processando?: boolean }
-  | { tipo: 'desistir' };
+  | { tipo: 'desistir'; status?: number };
 
 /** Pede o alinhamento destas linhas. Nunca lança. */
 export async function buscarAlinhamento(
@@ -441,7 +448,7 @@ export async function buscarAlinhamento(
       const corpo = (await res.json()) as { linhas?: LinhaAlinhada[] };
       return corpo.linhas && corpo.linhas.length > 0
         ? { tipo: 'pronto', linhas: corpo.linhas }
-        : { tipo: 'desistir' };
+        : { tipo: 'desistir', status: 200 };
     }
     if (res.status === 202) {
       // O importador manda `status: 'processando' | 'na-fila'` no corpo (ver
@@ -454,7 +461,7 @@ export async function buscarAlinhamento(
       return { tipo: 'esperar', processando: corpo.status === 'processando' };
     }
     if (res.status === 503) return { tipo: 'esperar' };
-    return { tipo: 'desistir' };
+    return { tipo: 'desistir', status: res.status };
   } catch {
     return { tipo: 'esperar' };
   }

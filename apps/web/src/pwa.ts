@@ -1,18 +1,27 @@
 /**
- * PWA auto-updater — mantém TODO usuário na versão nova, sem ninguém mexer.
+ * PWA auto-updater — mantém TODO usuário na versão nova, sem ninguém mexer,
+ * e SEM travar o app no caminho.
  *
- * O SW é `autoUpdate` (ver vite.config): quando o navegador baixa um worker
- * novo, ele PULA A ESPERA (`skipWaiting`) e ASSUME as abas abertas
- * (`clientsClaim`). No instante em que assume, o evento `controllerchange`
- * dispara — e é aqui que a página se recarrega sozinha para pegar o bundle novo.
+ * Como funciona (ver vite.config, `registerType: 'prompt'`):
+ *   1. o navegador baixa o worker novo e ele fica EM ESPERA (`onNeedRefresh`);
+ *   2. quando a pessoa sossega (sem toque, tecla ou rolagem por `SOSSEGO_MS`)
+ *      e não está ouvindo com a tela apagada, a página manda o worker novo
+ *      pular a espera (`updateSW` → SKIP_WAITING);
+ *   3. o worker assume as abas (`clientsClaim`), `controllerchange` dispara,
+ *      e a página se recarrega preservando a música e a tela.
  *
- * A versão anterior ("prompt": avisa e espera pausar) foi o que deixou o menu e
- * outros consertos presos no bundle velho: quem ouve música o tempo todo nunca
- * "pausava", e não dá para pedir a cada usuário que limpe o cache na mão.
+ * POR QUE A ESPERA IMPORTA. O desenho anterior era `autoUpdate`: o worker novo
+ * ativava sozinho na hora do deploy e APAGAVA o precache da versão antiga
+ * enquanto a página velha continuava aberta esperando "sossego". A próxima
+ * tela que a pessoa tocava pedia um chunk que já não existia em lugar nenhum:
+ * a URL mudava, nada pintava, o vigia do menu recarregava, e a recarga
+ * encadeava outras. No iPhone do dono (03/11/2026) foram quatro boots em 30 s
+ * na hora do deploy — "o app trava e reinicia". Com o worker em espera, o
+ * precache antigo fica inteiro até a recarga, que é uma só.
  *
- * Preserva a reprodução: se a música estava tocando, grava a retomada TOCANDO
- * antes de recarregar (ver `prepararRetomadaTocando`), então a faixa volta do
- * ponto exato assim que a página sobe de novo.
+ * E o que o `prompt` antigo (2026-10) tinha de errado não volta: não se espera
+ * a música PARAR, só a pessoa sossegar — quem ouve o dia inteiro recebe a
+ * versão nova no primeiro intervalo de seis segundos sem mexer na tela.
  */
 import { registerSW } from 'virtual:pwa-register';
 import { recarregarPreservandoMusica } from '@/lib/recarregar';
@@ -36,6 +45,8 @@ function apagarCacheDeCapasAntigo(): void {
 
 export function initPwaUpdater(): void {
   apagarCacheDeCapasAntigo();
+  /** Manda o worker em espera assumir (SKIP_WAITING). Preenchido por registerSW. */
+  let pedirTroca: (() => void) | null = null;
   if (typeof navigator !== 'undefined' && 'serviceWorker' in navigator) {
     // Só é ATUALIZAÇÃO se já havia um worker no controle. Na primeira visita
     // (sem controller) o `clientsClaim` também dispara `controllerchange`, e
@@ -76,33 +87,56 @@ export function initPwaUpdater(): void {
         recarregarPreservandoMusica();
       });
     };
-    navigator.serviceWorker.addEventListener('controllerchange', () => {
-      if (recarregando || !tinhaControle) return;
-      // NUNCA COM A TELA APAGADA E A MÚSICA TOCANDO. Recarregar ali matava a
-      // música: a página nova sobe sem gesto nenhum da pessoa, e o navegador
-      // (Android e iPhone) não deixa ela voltar a tocar em segundo plano. O
-      // bundle antigo continua funcionando perfeitamente; a versão nova entra
-      // quando a tela acender ou quando a música parar — o que vier primeiro.
-      const tocandoNoEscuro = (): boolean => document.hidden && usePlayerStore.getState().isPlaying;
+    // NUNCA COM A TELA APAGADA E A MÚSICA TOCANDO. Recarregar ali matava a
+    // música: a página nova sobe sem gesto nenhum da pessoa, e o navegador
+    // (Android e iPhone) não deixa ela voltar a tocar em segundo plano. O
+    // bundle antigo continua funcionando perfeitamente; a versão nova entra
+    // quando a tela acender ou quando a música parar — o que vier primeiro.
+    const tocandoNoEscuro = (): boolean => document.hidden && usePlayerStore.getState().isPlaying;
+    const quandoDerParaTrocar = (fazer: () => void): void => {
       if (!tocandoNoEscuro()) {
-        recarregar();
+        fazer();
         return;
       }
       const tentar = (): void => {
         if (tocandoNoEscuro()) return;
         document.removeEventListener('visibilitychange', tentar);
         pararDeOuvir();
-        recarregar();
+        fazer();
       };
       const pararDeOuvir = usePlayerStore.subscribe((s, antes) => {
         if (s.isPlaying !== antes.isPlaying) tentar();
       });
       document.addEventListener('visibilitychange', tentar);
+    };
+    let trocaPedida = false;
+    // O worker novo está EM ESPERA: só o mandamos assumir quando a recarga
+    // pode acontecer em seguida (sossego, tela acesa ou música parada). Até
+    // lá o precache antigo fica inteiro e toda tela continua abrindo.
+    pedirTroca = (): void => {
+      if (trocaPedida) return;
+      trocaPedida = true;
+      quandoDerParaTrocar(() =>
+        quandoSossegar(() => {
+          anotar('app', 'atualizar', 'versão nova: ativando o worker');
+          void updateSW(false);
+        }),
+      );
+    };
+    navigator.serviceWorker.addEventListener('controllerchange', () => {
+      if (recarregando || !tinhaControle) return;
+      // Assumiu (porque pedimos, ou porque outra aba pediu): recarrega —
+      // o precache antigo já se foi, e a página velha não pode seguir sem ele.
+      quandoDerParaTrocar(recarregar);
     });
   }
 
-  registerSW({
+  const updateSW = registerSW({
     immediate: true,
+    // Worker novo baixado e em espera (registerType 'prompt').
+    onNeedRefresh() {
+      pedirTroca?.();
+    },
     onRegisteredSW(_swUrl, registration) {
       if (!registration) return;
       // Procura versão nova com frequência: na carga, a cada 60s, e sempre que

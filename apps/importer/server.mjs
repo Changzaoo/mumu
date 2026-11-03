@@ -2063,7 +2063,10 @@ function decodificarSeguro(s) {
   }
 }
 
-function readBody(req) {
+/** Entrada do cliente que já foi RESPONDIDA (400/413): quem pega isto só retorna. */
+class EntradaRecusada extends Error {}
+
+function readBody(req, res = null) {
   return new Promise((resolve, reject) => {
     let data = '';
     let estourou = false;
@@ -2075,6 +2078,16 @@ function readBody(req) {
       if (data.length > 1_000_000) {
         estourou = true;
         data = '';
+        // 413 ANTES de derrubar: sem resposta o cliente só via ECONNRESET
+        // (auditoria de rotas, 03/11/2026) e tentava de novo o mesmo corpo.
+        if (res && !res.headersSent) {
+          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
+          res.end(JSON.stringify({ error: 'Corpo grande demais (máximo 1 MB).' }), () =>
+            req.destroy(),
+          );
+          reject(new EntradaRecusada('body too large'));
+          return;
+        }
         reject(new Error('body too large'));
         req.destroy();
       }
@@ -2082,6 +2095,35 @@ function readBody(req) {
     req.on('end', () => resolve(data));
     req.on('error', reject);
   });
+}
+
+/**
+ * Corpo JSON de uma rota: objeto (vazio quando não veio nada). JSON quebrado,
+ * `null`, número ou lista respondem 400 AQUI e devolvem `null` — antes caíam
+ * no catch genérico de cada rota como 500/503 "Erro interno", com uma linha de
+ * log por pedido torto.
+ */
+async function lerJson(req, res) {
+  let bruto;
+  try {
+    bruto = await readBody(req, res);
+  } catch (err) {
+    if (err instanceof EntradaRecusada) return null;
+    throw err;
+  }
+  if (!bruto || !bruto.trim()) return {};
+  let corpo;
+  try {
+    corpo = JSON.parse(bruto);
+  } catch {
+    corpo = undefined;
+  }
+  if (!corpo || typeof corpo !== 'object' || Array.isArray(corpo)) {
+    res.writeHead(400, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({ error: 'Corpo JSON inválido: esperava um objeto.' }));
+    return null;
+  }
+  return corpo;
 }
 
 /**
@@ -2575,9 +2617,23 @@ async function main() {
         res.end();
         return;
       }
-      const { pathname } = new URL(req.url ?? '/', `http://localhost:${PORT}`);
+      let pathname;
+      try {
+        ({ pathname } = new URL(req.url ?? '/', `http://localhost:${PORT}`));
+      } catch {
+        // `GET //` e afins: `new URL` lança; antes virava 500 com linha de log.
+        res.writeHead(400, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ error: 'URL inválida.' }));
+        return;
+      }
 
-      if (req.method === 'GET' && pathname === '/health') {
+      if ((req.method === 'GET' || req.method === 'HEAD') && pathname === '/health') {
+        if (req.method === 'HEAD') {
+          // Monitor de disponibilidade que usa HEAD não pode ler "fora do ar".
+          res.writeHead(200, { 'Content-Type': 'application/json' });
+          res.end();
+          return;
+        }
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
           JSON.stringify({
@@ -3031,7 +3087,9 @@ async function main() {
         }
         let corpo = null;
         try {
-          corpo = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson1 = await lerJson(req, res);
+          if (!corpoJson1) return;
+          corpo = corpoJson1;
         } catch {
           corpo = null;
         }
@@ -3278,7 +3336,9 @@ async function main() {
         }
         let linhas = null;
         try {
-          const corpo = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson2 = await lerJson(req, res);
+          if (!corpoJson2) return;
+          const corpo = corpoJson2;
           linhas = Array.isArray(corpo.linhas)
             ? corpo.linhas
                 .filter((l) => typeof l === 'string')
@@ -3291,6 +3351,14 @@ async function main() {
         if (!linhas || linhas.length === 0 || linhas.length > 600) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'linhas inválidas.' }));
+          return;
+        }
+        const idioma = (params.get('lang') ?? 'pt').toLowerCase().startsWith('en') ? 'en' : 'pt';
+        // Motor desligado (TEMPO_LOCAL=0) ou falha recente e nada pronto em
+        // disco: 422 ANTES de baixar o áudio inteiro da borda à toa.
+        if (await tempoDasPalavras.recusaSemAudio({ tipo: 'alinhar', id, idioma, linhas })) {
+          res.writeHead(422, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ status: 'falhou' }));
           return;
         }
         // Cofre local, ou a cópia da borda (ver audioDoRelogio) — o token vai
@@ -3306,7 +3374,6 @@ async function main() {
           res.end(JSON.stringify({ status: 'sem-audio' }));
           return;
         }
-        const idioma = (params.get('lang') ?? 'pt').toLowerCase().startsWith('en') ? 'en' : 'pt';
         const r = await tempoDasPalavras.pedirAlinhamento(id, audio.arquivo, idioma, linhas);
         if ('pronto' in r) {
           res.writeHead(200, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
@@ -3334,6 +3401,15 @@ async function main() {
           res.end(JSON.stringify({ error: 'id inválido.' }));
           return;
         }
+        const pedido = (params.get('lang') ?? 'auto').toLowerCase();
+        const idioma = pedido.startsWith('en') ? 'en' : pedido.startsWith('pt') ? 'pt' : 'auto';
+        // Mesma regra do /alinhar: sem motor e sem resultado pronto, 422 sem
+        // baixar o áudio.
+        if (await tempoDasPalavras.recusaSemAudio({ tipo: 'transcrever', id, idioma })) {
+          res.writeHead(422, { 'Content-Type': 'application/json', 'Cache-Control': 'no-store' });
+          res.end(JSON.stringify({ status: 'falhou' }));
+          return;
+        }
         const audio = await audioDoRelogio(id, params.get('k'));
         if ('erro' in audio) {
           if (audio.erro === 403) {
@@ -3345,8 +3421,6 @@ async function main() {
           res.end(JSON.stringify({ status: 'sem-audio' }));
           return;
         }
-        const pedido = (params.get('lang') ?? 'auto').toLowerCase();
-        const idioma = pedido.startsWith('en') ? 'en' : pedido.startsWith('pt') ? 'pt' : 'auto';
         // Artista da faixa (opcional): só empresta o vocabulário já aprendido
         // dele para a transcrição livre — ver vocabulario.mjs.
         const artista = (params.get('artista') || '').trim().slice(0, 200) || undefined;
@@ -3642,7 +3716,9 @@ async function main() {
         }
         let urls = [];
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson3 = await lerJson(req, res);
+          if (!corpoJson3) return;
+          const body = corpoJson3;
           urls = Array.isArray(body.urls) ? body.urls : [];
         } catch {
           urls = [];
@@ -3850,7 +3926,9 @@ async function main() {
           return;
         }
         try {
-          const { url } = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson4 = await lerJson(req, res);
+          if (!corpoJson4) return;
+          const { url } = corpoJson4;
           const musica = linkDeMusica(url);
           const listaDeServico = musica && musica.tipo !== 'faixa';
           const privado = motivoDeLinkPrivado(url);
@@ -3902,7 +3980,9 @@ async function main() {
           return;
         }
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson5 = await lerJson(req, res);
+          if (!corpoJson5) return;
+          const body = corpoJson5;
           const query = typeof body.query === 'string' ? body.query.trim() : '';
           if (!query) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -4008,7 +4088,9 @@ async function main() {
           return;
         }
         try {
-          const { url } = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson6 = await lerJson(req, res);
+          if (!corpoJson6) return;
+          const { url } = corpoJson6;
           if (typeof url !== 'string' || !hostSupported(url)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
@@ -4046,7 +4128,9 @@ async function main() {
           return;
         }
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson7 = await lerJson(req, res);
+          if (!corpoJson7) return;
+          const body = corpoJson7;
           const questions =
             body.questions && typeof body.questions === 'object' ? body.questions : {};
           if (
@@ -4094,7 +4178,9 @@ async function main() {
           return;
         }
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson8 = await lerJson(req, res);
+          if (!corpoJson8) return;
+          const body = corpoJson8;
           const itens = Array.isArray(body.examples) ? body.examples : [body];
           let novos = 0;
           for (const it of itens.slice(0, 200)) {
@@ -4141,7 +4227,9 @@ async function main() {
         }
         if (!limiteDeIa(res, quemPede(req))) return;
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson9 = await lerJson(req, res);
+          if (!corpoJson9) return;
+          const body = corpoJson9;
           const messages = (Array.isArray(body.messages) ? body.messages : []).filter(
             (m) =>
               m &&
@@ -4216,7 +4304,17 @@ async function main() {
           const language =
             new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('language') ||
             undefined;
-          const wav = await toWav16k(audio, FFMPEG_BIN);
+          let wav;
+          try {
+            wav = await toWav16k(audio, FFMPEG_BIN);
+          } catch (err) {
+            // O ffmpeg não reconheceu o corpo como áudio: é entrada do cliente,
+            // não falha de fornecedor (502).
+            log('transcribe: corpo não é áudio —', err instanceof Error ? err.message : err);
+            res.writeHead(415, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'O corpo não é um áudio que o ffmpeg reconheça.' }));
+            return;
+          }
           // 1) NVIDIA na nuvem (rápido). Inglês → TDT (tempo por PALAVRA).
           //    pt-BR/outros → whisper-large-v3 (tempo por LINHA). Cada tipo tem
           //    reservas no riva.mjs; aqui só despachamos o resultado.
@@ -4300,7 +4398,9 @@ async function main() {
         }
         if (!limiteDeIa(res, quemPede(req))) return;
         try {
-          const body = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson10 = await lerJson(req, res);
+          if (!corpoJson10) return;
+          const body = corpoJson10;
           const input = Array.isArray(body.input)
             ? body.input.filter((t) => typeof t === 'string')
             : [];
@@ -4362,7 +4462,9 @@ async function main() {
           return;
         }
         try {
-          const { url, quality } = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson11 = await lerJson(req, res);
+          if (!corpoJson11) return;
+          const { url, quality } = corpoJson11;
           const musica = linkDeMusica(url);
           const faixaDeServico = musica && musica.tipo === 'faixa' ? musica : null;
           const privado = motivoDeLinkPrivado(url);
@@ -4455,7 +4557,9 @@ async function main() {
         }
         let job;
         try {
-          const { url, quality } = JSON.parse((await readBody(req)) || '{}');
+          const corpoJson12 = await lerJson(req, res);
+          if (!corpoJson12) return;
+          const { url, quality } = corpoJson12;
           if (typeof url !== 'string' || !hostSupported(url)) {
             res.writeHead(400, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ error: 'Link não suportado.' }));
