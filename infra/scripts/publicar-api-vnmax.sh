@@ -64,7 +64,7 @@ cd "${DESTINO}.novo"
 # sharp vem com o binário do Windows (a pasta nasce no PC); o worker precisa do linux-x64.
 if [[ -d node_modules/sharp ]] && ! ls node_modules/@img 2>/dev/null | grep -q linux-x64; then
   # (num diretório à parte: o package.json da pasta tem "workspace:*", que o npm não lê)
-  v="$(node -p 'require("sharp/package.json").version')"
+  v="$(node -p 'JSON.parse(require("fs").readFileSync("node_modules/sharp/package.json","utf8")).version')"
   t="$(mktemp -d)"; ( cd "$t" && npm init -y >/dev/null && nice -n 10 npm install --no-audit --no-fund --os=linux --cpu=x64 --include=optional "sharp@${v}" >/dev/null 2>&1 ) \
     && cp -r "$t"/node_modules/@img/sharp-linux-x64 "$t"/node_modules/@img/sharp-libvips-linux-x64 node_modules/@img/ \
     && echo "sharp ${v} linux-x64 ok" || { echo "sharp linux-x64 falhou" >&2; rm -rf "$t"; exit 1; }
