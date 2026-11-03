@@ -18,7 +18,8 @@ function baseHandle(identity: VerifiedIdentity): string {
 
 async function findOrCreateUser(identity: VerifiedIdentity): Promise<User> {
   // Quem é dono do acervo é ADMIN — a lista mora em shared, uma cópia só.
-  const papelDevido: UserRole = ehEmailAdmin(identity.email) ? 'ADMIN' : 'USER';
+  const papelDevido: UserRole =
+    identity.emailVerified && ehEmailAdmin(identity.email) ? 'ADMIN' : 'USER';
 
   const existing = await prisma.user.findUnique({ where: { firebaseUid: identity.uid } });
   if (existing) {

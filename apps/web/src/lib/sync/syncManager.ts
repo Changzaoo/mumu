@@ -11,6 +11,8 @@ import * as localLikes from '@/lib/local/localLikes';
 import * as localHistory from '@/lib/local/localHistory';
 import * as localPlaylists from '@/lib/local/localPlaylists';
 import * as localLibrary from '@/lib/local/localLibrary';
+import * as importQueue from '@/lib/local/importQueue';
+import { definirUsuario, limparFila } from '@/lib/sync/filaOffline';
 
 let started = false;
 
@@ -30,6 +32,7 @@ export function initCloudSync(): void {
   void localPlaylists.reidratarCapas().catch(() => undefined);
   subscribeAuth((user) => {
     const uid = user?.uid ?? null;
+    definirUsuario(uid);
     localLikes.setUser(uid);
     localPlaylists.setUser(uid);
     localLibrary.setUser(uid);
@@ -38,4 +41,22 @@ export function initCloudSync(): void {
     importacoesNaConta.setUser(uid);
     artistasSeguidos.setUser(uid);
   });
+}
+
+/**
+ * Chamado pelo logout. Apaga o que e DA CONTA que saiu:
+ *  - cache `aurial-api` do service worker (respostas da API);
+ *  - fila de escritas offline;
+ *  - links de import ja conhecidos e os ainda pendentes na fila.
+ * FICAM: biblioteca local e downloads (acervo offline da pessoa no aparelho).
+ */
+export async function limparEstadoDaConta(): Promise<void> {
+  try {
+    if (typeof caches !== 'undefined') await caches.delete('aurial-api');
+  } catch {
+    /* sem Cache Storage: nada a apagar */
+  }
+  await limparFila();
+  importacoesNaConta.limpar();
+  importQueue.limparPendentesDaConta();
 }

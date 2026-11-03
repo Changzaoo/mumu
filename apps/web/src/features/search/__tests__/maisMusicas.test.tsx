@@ -12,7 +12,9 @@ import type * as ImporterHelper from '@/lib/local/importerHelper';
 
 const estado = vi.hoisted(() => ({
   user: { uid: 'u1', isAnonymous: false } as { uid: string; isAnonymous: boolean } | null,
-  playQueue: vi.fn(),
+  playTrack: vi.fn(),
+  setUpNext: vi.fn(),
+  maisDoArtista: vi.fn(),
   enqueue: vi.fn(),
   buscar: vi.fn(),
   itens: [] as unknown[],
@@ -21,9 +23,22 @@ const estado = vi.hoisted(() => ({
 vi.mock('@/hooks/useAuthUser', () => ({
   useAuthUser: () => ({ user: estado.user, profile: null, loading: false }),
 }));
-vi.mock('@/stores/playerStore', () => ({
-  usePlayerStore: (sel: (s: unknown) => unknown) =>
-    sel({ playQueue: estado.playQueue, currentTrack: null, isPlaying: false }),
+vi.mock('@/stores/playerStore', () => {
+  const state = () => ({
+    playTrack: estado.playTrack,
+    setUpNext: estado.setUpNext,
+    currentTrack: { id: 'youtube:dQw4w9WgXcQ' },
+    isPlaying: false,
+  });
+  return {
+    usePlayerStore: Object.assign((sel: (s: unknown) => unknown) => sel(state()), {
+      getState: state,
+    }),
+  };
+});
+vi.mock('@/features/search/filaDoArtista', async (original) => ({
+  ...(await original<typeof import('@/features/search/filaDoArtista')>()),
+  maisDoArtista: estado.maisDoArtista,
 }));
 vi.mock('@/lib/local/importQueue', () => ({
   subscribe: () => () => undefined,
@@ -99,7 +114,10 @@ function montar(ui: ReactNode) {
 
 beforeEach(() => {
   estado.user = { uid: 'u1', isAnonymous: false };
-  estado.playQueue.mockReset();
+  estado.playTrack.mockReset();
+  estado.setUpNext.mockReset();
+  estado.maisDoArtista.mockReset();
+  estado.maisDoArtista.mockResolvedValue([{ id: 'local:2' }]);
   estado.enqueue.mockReset();
   estado.buscar.mockReset();
   estado.buscar.mockResolvedValue({ ok: true, resultados: RESULTADOS });
@@ -114,13 +132,15 @@ describe('MaisMusicas', () => {
     expect(container.textContent).not.toMatch(/youtube|clipe|vevo|topic/i);
   });
 
-  it('tocar: fila inteira a partir da clicada, e baixa por baixo só ela', async () => {
+  it('tocar: toca a clicada, a fila vira o mesmo artista, e baixa por baixo só ela', async () => {
     montar(<MaisMusicas termo="mantem" jaNaTela={[]} semNadaNoAcervo={false} />);
     fireEvent.click(await screen.findByText('Kenny G — Matuê', {}, { timeout: 3000 }));
-    await waitFor(() => expect(estado.playQueue).toHaveBeenCalled());
-    const [faixas, inicio] = estado.playQueue.mock.calls[0] as [Array<{ id: string }>, number];
-    expect(faixas.map((f) => f.id)).toEqual(['youtube:fgysUhl98As', 'youtube:dQw4w9WgXcQ']);
-    expect(inicio).toBe(1);
+    await waitFor(() => expect(estado.playTrack).toHaveBeenCalled());
+    const [tocada, origem] = estado.playTrack.mock.calls[0] as [{ id: string }, { source: string }];
+    expect(tocada.id).toBe('youtube:dQw4w9WgXcQ');
+    expect(origem.source).toBe('search');
+    // A fila NÃO é o resultado da busca: é o que `maisDoArtista` devolve.
+    await waitFor(() => expect(estado.setUpNext).toHaveBeenCalledWith([{ id: 'local:2' }]));
     expect(estado.enqueue).toHaveBeenCalledWith('https://www.youtube.com/watch?v=dQw4w9WgXcQ');
   });
 

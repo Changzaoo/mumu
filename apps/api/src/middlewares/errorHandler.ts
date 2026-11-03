@@ -2,6 +2,7 @@ import type { ErrorRequestHandler, RequestHandler } from 'express';
 import { ZodError } from 'zod';
 import { AppError } from '../core/errors/index.js';
 import { logger } from '../core/logger.js';
+import { urlSemSegredos } from './urlSemSegredos.js';
 
 export const notFoundHandler: RequestHandler = (req, res) => {
   res.status(404).json({
@@ -57,7 +58,7 @@ export const errorHandler: ErrorRequestHandler = (err, req, res, _next) => {
     return;
   }
 
-  logger.error({ err, requestId: req.id, url: req.originalUrl }, 'unhandled error');
+  logger.error({ err, requestId: req.id, url: urlSemSegredos(req.originalUrl) }, 'unhandled error');
   res.status(500).json({
     error: {
       code: 'INTERNAL',

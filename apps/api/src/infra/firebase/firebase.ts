@@ -9,6 +9,8 @@ export interface VerifiedIdentity {
   email: string | null;
   name: string | null;
   picture: string | null;
+  /** E-mail confirmado pelo provedor. Sem isto, e-mail nao vale como identidade de dono. */
+  emailVerified: boolean;
 }
 
 let app: App | null = null;
@@ -59,7 +61,7 @@ export async function verifyIdToken(token: string): Promise<VerifiedIdentity> {
     if (isDev && token.startsWith('dev:') && token.length > 4) {
       warnDegradedOnce();
       const uid = token.slice(4);
-      return { uid, email: `${uid}@dev.local`, name: uid, picture: null };
+      return { uid, email: `${uid}@dev.local`, name: uid, picture: null, emailVerified: true };
     }
     throw new UnauthorizedError('Authentication is not configured');
   }
@@ -70,6 +72,7 @@ export async function verifyIdToken(token: string): Promise<VerifiedIdentity> {
       email: decoded.email ?? null,
       name: typeof decoded['name'] === 'string' ? (decoded['name'] as string) : null,
       picture: decoded.picture ?? null,
+      emailVerified: decoded.email_verified === true,
     };
   } catch {
     throw new UnauthorizedError('Invalid or expired token');

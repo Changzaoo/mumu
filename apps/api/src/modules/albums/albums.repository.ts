@@ -18,9 +18,11 @@ export const albumsRepository = {
 
   tracksOf(albumId: string): Promise<TrackRow[]> {
     return prisma.track.findMany({
-      where: { albumId },
+      // Só o público: o resultado é cacheado para todos (albums.service getById).
+      where: { albumId, isPublic: true },
       include: trackInclude,
       orderBy: [{ discNumber: 'asc' }, { trackNumber: 'asc' }, { title: 'asc' }],
+      take: 200,
     });
   },
 

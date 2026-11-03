@@ -283,8 +283,26 @@ export default defineConfig({
            * a casar com este padrão; o buraco era só o do próprio acervo.
            */
           {
-            urlPattern: ({ url }: { url: URL }) =>
-              url.pathname.includes('/api/v1/') && !url.pathname.includes('/api/v1/stream/'),
+            // SO GETs PUBLICOS. Espelho de src/lib/swRegras.ts (`ehCacheavelDaApi`):
+            // /me, /admin, /auth, /telemetria, /jornada, /home e /stream ficam fora,
+            // para dados de conta nao sobreviverem ao logout num aparelho compartilhado.
+            urlPattern: ({ url, request }: { url: URL; request: Request }) => {
+              if (request.method !== 'GET') return false;
+              const marca = '/api/v1/';
+              const i = url.pathname.indexOf(marca);
+              if (i < 0) return false;
+              const primeiro = url.pathname.slice(i + marca.length).split('/')[0] ?? '';
+              return [
+                'catalogo',
+                'em-alta',
+                'artists',
+                'albums',
+                'radios',
+                'podcasts',
+                'mundo',
+                'categorias',
+              ].includes(primeiro);
+            },
             handler: 'NetworkFirst',
             options: {
               cacheName: 'aurial-api',

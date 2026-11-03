@@ -42,6 +42,9 @@ import {
   guardarNoCofre,
 } from './varreduraNoturna.worker.js';
 
+/** Chamadas de controle ao importador/LRCLIB: sem resposta em 30 s, desiste. */
+const TIMEOUT_CONTROLE_MS = 30_000;
+
 const log = logger.child({ worker: 'pesquisador' });
 
 /** Artistas investigados por pessoa por batida. */
@@ -207,6 +210,7 @@ async function oQueJaTem(userId: string): Promise<JaTem> {
 async function buscar(termo: string): Promise<ResultadoDaBusca[]> {
   const res = await fetch(`${baseInterna()}/buscar-youtube?q=${encodeURIComponent(termo)}`, {
     headers: cabecalhos(),
+    signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
   });
   if (!res.ok) throw new Error(`busca respondeu ${res.status}`);
   const dados = (await res.json()) as { resultados?: ResultadoDaBusca[] };
@@ -238,7 +242,10 @@ async function letraDe(
   url.searchParams.set('track_name', titulo);
   url.searchParams.set('artist_name', artista);
   url.searchParams.set('duration', String(Math.round(duracaoSeg)));
-  const res = await fetch(url, { headers: { Accept: 'application/json' } }).catch(() => null);
+  const res = await fetch(url, {
+    headers: { Accept: 'application/json' },
+    signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
+  }).catch(() => null);
   if (!res?.ok) return null;
   const row = (await res.json().catch(() => null)) as {
     syncedLyrics?: string | null;
@@ -272,10 +279,13 @@ async function prepararLetra(
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ linhas }),
+        signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
       });
       return res.ok || res.status === 202 ? 'alinhando' : 'falhou';
     }
-    const res = await fetch(`${base}/tempo?k=${encodeURIComponent(token)}&lang=auto`);
+    const res = await fetch(`${base}/tempo?k=${encodeURIComponent(token)}&lang=auto`, {
+      signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
+    });
     return res.ok || res.status === 202 ? 'transcrevendo' : 'falhou';
   } catch {
     return 'falhou';
@@ -345,9 +355,45 @@ async function trazer(
 
 /** Artista → quando foi pesquisado (em memória: um reinício só adianta a vez). */
 const pesquisadoEm = new Map<string, number>();
-/** Faixas trazidas hoje (teto diário). */
+/** Faixas trazidas hoje (teto diário) — persistidas em `WorkerState`. */
 let dia = '';
 let trazidasHoje = 0;
+const CHAVE_DO_TETO = 'pesquisador.teto';
+
+/** O dia no relógio do servidor (America/Sao_Paulo), não em UTC. */
+export function diaLocal(agora: Date): string {
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'America/Sao_Paulo',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+  }).format(agora);
+}
+
+async function carregarTeto(hoje: string): Promise<void> {
+  dia = hoje;
+  trazidasHoje = 0;
+  try {
+    const linha = await prisma.workerState.findUnique({ where: { key: CHAVE_DO_TETO } });
+    const v = (linha?.value ?? {}) as { dia?: string; trazidasHoje?: number };
+    if (v.dia === hoje && typeof v.trazidasHoje === 'number') trazidasHoje = v.trazidasHoje;
+  } catch {
+    /* sem banco, conta a partir de zero neste processo */
+  }
+}
+
+async function guardarTeto(): Promise<void> {
+  const value = { dia, trazidasHoje };
+  try {
+    await prisma.workerState.upsert({
+      where: { key: CHAVE_DO_TETO },
+      create: { key: CHAVE_DO_TETO, value },
+      update: { value },
+    });
+  } catch {
+    /* o teto em memória continua valendo */
+  }
+}
 
 export async function pesquisarUmaVez(agora = new Date()): Promise<{
   rodou: boolean;
@@ -358,11 +404,8 @@ export async function pesquisarUmaVez(agora = new Date()): Promise<{
   if (!baseInterna()) return parado('IMPORTER_URL não configurado');
   if (!env.IMPORT_SERVICE_TOKEN) return parado('IMPORT_SERVICE_TOKEN não configurado');
 
-  const hoje = agora.toISOString().slice(0, 10);
-  if (hoje !== dia) {
-    dia = hoje;
-    trazidasHoje = 0;
-  }
+  const hoje = diaLocal(agora);
+  if (hoje !== dia) await carregarTeto(hoje);
   if (trazidasHoje >= env.PESQUISADOR_MAX_POR_DIA) return parado('teto do dia alcançado');
 
   const usuarios = await usuariosQueLigaram();
@@ -410,6 +453,7 @@ export async function pesquisarUmaVez(agora = new Date()): Promise<{
           doArtista++;
           trazidas++;
           trazidasHoje++;
+          await guardarTeto();
         }
       }
     }

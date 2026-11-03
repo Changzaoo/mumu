@@ -22,7 +22,7 @@
  * Não é spec do Playwright de propósito: mede a PRODUÇÃO (rede, LRCLIB,
  * importador), que não cabe num portão de CI.
  */
-/* global window, HTMLMediaElement, localStorage, sessionStorage, document, performance -- os corpos de evaluate/addInitScript rodam no navegador */
+/* global window, HTMLMediaElement, localStorage, sessionStorage, document, MutationObserver -- os corpos de evaluate/addInitScript rodam no navegador */
 import { chromium } from '@playwright/test';
 
 const posicionais = process.argv.slice(2).filter((a) => !a.startsWith('--'));
@@ -144,8 +144,32 @@ async function passada(nome) {
     const clique = await page.evaluate(() => performance.now());
     // Na 2ª passada a tela cheia (restaurada) cobre a prateleira: o clique vai
     // direto ao elemento, sem passar pela checagem de "quem está por cima".
-    if (i === 0) await botao.dispatchEvent('click');
-    else await botao.click();
+    // Clique de verdade; se a tela cheia restaurada estiver por cima (2ª
+    // passada), o clique vai direto ao elemento.
+    const rotuloDoBotao = await botao.getAttribute('aria-label').catch(() => null);
+    await botao.click({ timeout: 5_000 }).catch(() => botao.dispatchEvent('click'));
+    if (i === 0) {
+      // A 1ª faixa precisa abrir a tela cheia (com a letra); se a prateleira
+      // da frente não tocar (faixa de fora do acervo), tenta as seguintes.
+      let abriu = await page
+        .locator('[aria-label="Tocando agora"]')
+        .waitFor({ timeout: 10_000 })
+        .then(() => true)
+        .catch(() => false);
+      for (let k = 1; !abriu && k < 6; k++) {
+        console.log(`   "${rotuloDoBotao}" não abriu a tela cheia; tentando o botão ${k + 1}`);
+        await botoes.nth(k).click({ timeout: 5_000 }).catch(() => botoes.nth(k).dispatchEvent('click'));
+        abriu = await page
+          .locator('[aria-label="Tocando agora"]')
+          .waitFor({ timeout: 10_000 })
+          .then(() => true)
+          .catch(() => false);
+      }
+      if (!abriu) {
+        await page.screenshot({ path: 'sonda-letra-travou.png' });
+        console.log(`   tela cheia não abriu — foto em sonda-letra-travou.png · ${(await page.evaluate(() => document.body.innerText)).replace(/\s+/g, ' ').slice(0, 300)}`);
+      }
+    }
     const ok = await page
       .waitForFunction(
         () => {

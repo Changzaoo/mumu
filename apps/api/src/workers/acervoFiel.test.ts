@@ -4,7 +4,7 @@
  * Este agente apaga o `remoteUrl` de entradas do acervo, e o app esconde
  * entrada sem cópia. Errar para o lado de "morta" tira do ar música que estava
  * viva; errar para o lado de "viva" só adia. Por isso os dois testes que
- * importam são: 404/403 é morte, e QUALQUER outra coisa não é — em especial o
+ * importam são: 404 é morte, e QUALQUER outra coisa não é — em especial o
  * 503, que é o cofre RECONSTRUINDO uma faixa podada e prestes a devolvê-la.
  *
  * E o patch não pode levar nada junto: o `sourceUrl` é o caminho de volta da
@@ -14,9 +14,13 @@ import { describe, expect, it } from 'vitest';
 import { semACopiaMorta, vereditoDeStatus } from './acervoFiel.worker.js';
 
 describe('vereditoDeStatus', () => {
-  it('404 e 403 são morte: o cofre não tem nem a meta da faixa', () => {
+  it('só 404 é morte: o cofre não tem nem a meta da faixa', () => {
     expect(vereditoDeStatus(404)).toBe('morta');
-    expect(vereditoDeStatus(403)).toBe('morta');
+  });
+
+  it('403 e 416 são incertos: desafio da Cloudflare ou token trocado não prova morte', () => {
+    expect(vereditoDeStatus(403)).toBe('incerta');
+    expect(vereditoDeStatus(416)).toBe('incerta');
   });
 
   it('2xx/3xx é vida', () => {

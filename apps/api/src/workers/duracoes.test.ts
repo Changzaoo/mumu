@@ -61,6 +61,14 @@ beforeAll(async () => {
       res.writeHead(404).end();
       return;
     }
+    if (req.url?.startsWith('/blob/proibida')) {
+      res.writeHead(403).end();
+      return;
+    }
+    if (req.url?.startsWith('/blob/fora')) {
+      res.writeHead(416).end();
+      return;
+    }
     if (req.url?.startsWith('/blob/texto')) {
       res.writeHead(200, { 'Content-Length': '5' }).end('olá!!');
       return;
@@ -84,7 +92,8 @@ beforeEach(() => {
   $queryRaw.mockReset().mockResolvedValue([]);
   $executeRaw.mockReset().mockResolvedValue(0);
   upsertCatalogTrack.mockReset();
-  delete env.IMPORTER_URL;
+  env.IMPORTER_URL = base; // o dublê é o cofre: host permitido
+  delete env.IMPORTER_PUBLIC_URL;
 });
 
 describe('medirCopia', () => {
@@ -98,6 +107,8 @@ describe('medirCopia', () => {
 
   it('404 é "morta"; arquivo que não é MP3 é "não sei"; rede fora é "incerta"', async () => {
     expect(await medirCopia(`${base}/blob/morta?k=t`)).toBe('morta');
+    expect(await medirCopia(`${base}/blob/proibida?k=t`)).toBe('incerta'); // 403
+    expect(await medirCopia(`${base}/blob/fora?k=t`)).toBe('incerta'); // 416
     expect(await medirCopia(`${base}/blob/texto?k=t`)).toBeNull();
     expect(await medirCopia('http://127.0.0.1:1/blob/x?k=t')).toBe('incerta');
   });
@@ -106,9 +117,12 @@ describe('medirCopia', () => {
 describe('urlParaLer', () => {
   it('troca o endereço público pelo interno quando é o cofre', () => {
     env.IMPORTER_URL = 'http://importer:8790/';
+    env.IMPORTER_PUBLIC_URL = 'https://importer.exemplo';
     expect(urlParaLer('https://importer.exemplo/blob/local%3A1?k=abc')).toBe(
       'http://importer:8790/blob/local%3A1?k=abc',
     );
+    // Host alheio não é reescrito para o endereço interno, mesmo com /blob/.
+    expect(urlParaLer('https://outro.cdn/blob/x?k=1')).toBe('https://outro.cdn/blob/x?k=1');
     expect(urlParaLer('https://outro.cdn/audio.mp3')).toBe('https://outro.cdn/audio.mp3');
     expect(urlParaLer('blob:http://x/1')).toBeNull();
     expect(urlParaLer('lixo')).toBeNull();
@@ -174,5 +188,50 @@ describe('medirLote', () => {
     expect(upsertCatalogTrack).not.toHaveBeenCalled();
     // Só o preenchimento das bibliotecas pelo acervo rodou.
     expect($executeRaw).toHaveBeenCalledTimes(1);
+  });
+
+  it('403 não marca duracaoSemMedida', async () => {
+    $queryRaw.mockResolvedValueOnce([
+      { id: 'local:4', data: { track: { id: 'local:4' }, remoteUrl: `${base}/blob/proibida?k=t` } },
+    ]);
+    const r = await medirLote();
+    expect(r).toMatchObject({ vistas: 1, medidas: 0, semMedida: 0 });
+    expect($executeRaw).toHaveBeenCalledTimes(1); // só o preenchimento das bibliotecas
+  });
+
+  it('host fora do cofre: não consulta e não marca (SSRF)', async () => {
+    $queryRaw.mockResolvedValueOnce([
+      {
+        id: 'local:5',
+        data: { track: { id: 'local:5' }, remoteUrl: 'http://169.254.169.254/blob/x' },
+      },
+    ]);
+    const r = await medirLote();
+    expect(r).toMatchObject({ vistas: 1, medidas: 0, semMedida: 0 });
+    expect(pedidos).toHaveLength(0);
+  });
+
+  it('8 mortas seguidas: para a volta e não marca nenhuma', async () => {
+    $queryRaw.mockResolvedValueOnce(
+      Array.from({ length: 10 }, (_, i) => ({
+        id: `local:m${i}`,
+        data: { track: { id: `local:m${i}` }, remoteUrl: `${base}/blob/morta?k=${i}` },
+      })),
+    );
+    const r = await medirLote();
+    expect(r).toMatchObject({ vistas: 10, medidas: 0, semMedida: 0 });
+    expect(pedidos).toHaveLength(8);
+    expect($executeRaw).toHaveBeenCalledTimes(1); // só o preenchimento
+  });
+
+  it('poucas mortas seguidas ainda são marcadas', async () => {
+    $queryRaw.mockResolvedValueOnce(
+      Array.from({ length: 3 }, (_, i) => ({
+        id: `local:m${i}`,
+        data: { track: { id: `local:m${i}` }, remoteUrl: `${base}/blob/morta?k=${i}` },
+      })),
+    );
+    const r = await medirLote();
+    expect(r).toMatchObject({ vistas: 3, semMedida: 3 });
   });
 });

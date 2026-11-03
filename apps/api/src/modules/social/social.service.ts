@@ -7,7 +7,7 @@ import { socialRepository } from './social.repository.js';
 export const socialService = {
   // ── comments ──
   async addComment(trackId: string, userId: string, body: string): Promise<CommentDto> {
-    const exists = await socialRepository.trackExists(trackId);
+    const exists = await socialRepository.trackExists(trackId, userId);
     if (!exists) throw new NotFoundError('Track');
     const row = await socialRepository.createComment(trackId, userId, body);
     return toCommentDto(row, { likedSet: new Set() });
@@ -77,7 +77,7 @@ export const socialService = {
   // ── listen sessions ──
   async createSession(hostUserId: string, trackId: string | null): Promise<ListenSessionDto> {
     if (trackId) {
-      const exists = await socialRepository.trackExists(trackId);
+      const exists = await socialRepository.trackExists(trackId, hostUserId);
       if (!exists) throw new NotFoundError('Track');
     }
     const row = await socialRepository.createSession(hostUserId, trackId);

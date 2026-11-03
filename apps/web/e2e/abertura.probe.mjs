@@ -53,6 +53,7 @@ for (const ms of quadros) {
   await page.screenshot({ path: join(SAIDA, `quadro-${String(ms).padStart(4, '0')}.png`) });
 }
 const app = await page
+  // eslint-disable-next-line no-undef -- o corpo do waitForFunction roda no navegador
   .waitForFunction(() => !document.getElementById('abertura'), null, { timeout: 30_000 })
   .then(() => Date.now() - t0)
   .catch(() => null);

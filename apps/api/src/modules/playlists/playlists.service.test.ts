@@ -9,6 +9,8 @@ vi.mock('./playlists.repository.js', () => ({
     entryIdsOrdered: vi.fn(),
     replacePositions: vi.fn(),
     usersByIds: vi.fn(),
+    countExistingTracks: vi.fn(),
+    insertTracks: vi.fn(),
   },
 }));
 vi.mock('../library/library.repository.js', () => ({
@@ -114,5 +116,29 @@ describe('playlistsService.reorder', () => {
     await expect(
       playlistsService.reorder('nope', 'user-1', { entryId: 'e1', toPosition: 1 }),
     ).rejects.toThrow(NotFoundError);
+  });
+});
+
+describe('playlistsService.addTracks — visibilidade', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    repo.findAccess.mockResolvedValue({
+      id: 'pl1',
+      ownerId: 'user-1',
+      isPublic: true,
+      isCollaborative: false,
+      collaboratorIds: [],
+    });
+  });
+
+  it('recusa faixa que o usuário não enxerga (a contagem filtrada vem menor)', async () => {
+    repo.countExistingTracks.mockResolvedValue(1);
+    await expect(
+      playlistsService.addTracks('pl1', 'user-1', {
+        trackIds: ['pub', 'privada-de-outro'],
+      } as never),
+    ).rejects.toThrow(NotFoundError);
+    expect(repo.countExistingTracks).toHaveBeenCalledWith(['pub', 'privada-de-outro'], 'user-1');
+    expect(repo.insertTracks).not.toHaveBeenCalled();
   });
 });

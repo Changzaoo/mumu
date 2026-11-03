@@ -1019,6 +1019,21 @@ const NVIDIA_MODEL_RESERVA =
 // 2026-08-25 e responde `410 Gone`. O substituto foi conferido contra a API:
 // está vivo e devolve as mesmas 2048 dimensões. Ver `EMBED_MODEL` no shared.
 const NVIDIA_EMBED_MODEL = process.env.NVIDIA_EMBED_MODEL ?? 'nvidia/nemotron-3-embed-1b';
+// Modelos que o app pode PEDIR em /ai/chat e /ai/embed: os de CHAT_MODELS
+// (packages/shared/src/ai/models.ts) + os configurados aqui + os apelidos do
+// Claude CLI. Qualquer outro valor é ignorado (a chave NVIDIA não é proxy aberto).
+const MODELOS_DE_CHAT_PERMITIDOS = new Set([
+  'nvidia/nemotron-3.5-lightning-30b-a3b',
+  'nvidia/nemotron-3-ultra-550b-a55b',
+  'writer/palmyra-creative-122b',
+  'nvidia/llama-3.1-nemoguard-8b-content-safety',
+  'nvidia/riva-translate-4b-instruct-v2',
+  'haiku',
+  'sonnet',
+  NVIDIA_MODEL,
+  NVIDIA_MODEL_RESERVA,
+]);
+const MODELOS_DE_EMBED_PERMITIDOS = new Set(['nvidia/nemotron-3-embed-1b', NVIDIA_EMBED_MODEL]);
 // A NVIDIA não documenta o teto de lote do endpoint hospedado; 32 é
 // conservador o bastante para não tomar 4xx e grande o bastante para não
 // transformar uma biblioteca em centenas de requisições.
@@ -1878,6 +1893,10 @@ async function authorizeToken(token) {
   return true;
 }
 
+// Prazo de 120 s para as leituras de metadados: um yt-dlp pendurado (rede
+// morta, YouTube segurando) prendia o pedido e o processo para sempre.
+const YTDLP_PRAZO_MS = 120_000;
+
 /** Dump a single video's full metadata JSON WITHOUT downloading the media. */
 async function dumpJson(ytdlp, url) {
   const args = [
@@ -1897,7 +1916,7 @@ async function dumpJson(ytdlp, url) {
   const out = await new Promise((resolve, reject) => {
     let stdout = '';
     let stderr = '';
-    const p = spawn(ytdlp, args, { windowsHide: true });
+    const p = spawn(ytdlp, args, { windowsHide: true, timeout: YTDLP_PRAZO_MS, killSignal: 'SIGKILL' });
     p.stdout.on('data', (c) => {
       stdout += c;
       if (stdout.length > 50_000_000) p.kill();
@@ -1931,7 +1950,7 @@ async function listPlaylist(ytdlp, url) {
   const stdout = await new Promise((resolve, reject) => {
     let out = '';
     let stderr = '';
-    const p = spawn(ytdlp, args, { windowsHide: true });
+    const p = spawn(ytdlp, args, { windowsHide: true, timeout: YTDLP_PRAZO_MS, killSignal: 'SIGKILL' });
     p.stdout.on('data', (c) => {
       out += c;
       if (out.length > 50_000_000) p.kill(); // runaway guard
@@ -2030,12 +2049,35 @@ function applyCors(req, res) {
     res.setHeader('Access-Control-Allow-Private-Network', 'true');
 }
 
+/**
+ * `decodeURIComponent` LANÇA `URIError` com `%E0%A4%A` (sequência truncada), e
+ * o id do `/blob/` vem direto da URL, sem login. Sem tratamento, um GET de uma
+ * linha derrubava o processo inteiro. Devolve `null` em erro e o chamador
+ * responde 400.
+ */
+function decodificarSeguro(s) {
+  try {
+    return decodeURIComponent(s);
+  } catch {
+    return null;
+  }
+}
+
 function readBody(req) {
   return new Promise((resolve, reject) => {
     let data = '';
+    let estourou = false;
     req.on('data', (c) => {
+      // Depois do teto, NÃO continua concatenando: o `reject` sozinho não parava
+      // o fluxo, e quem mandava gigabytes seguia enchendo a memória.
+      if (estourou) return;
       data += c;
-      if (data.length > 1_000_000) reject(new Error('body too large'));
+      if (data.length > 1_000_000) {
+        estourou = true;
+        data = '';
+        reject(new Error('body too large'));
+        req.destroy();
+      }
     });
     req.on('end', () => resolve(data));
     req.on('error', reject);
@@ -2101,9 +2143,15 @@ const limiteDeImport = criarLimiteDeImport({
  * acesso direto), cai no socket. O `x-forwarded-for` nunca entra na chave.
  */
 function ipConfiavel(req) {
+  // `cf-connecting-ip` só vale quando o pedido chegou pelo túnel do Cloudflare,
+  // que roda NESTA máquina e fala por loopback. Vindo de qualquer outro endereço
+  // (LAN, Tailscale, porta exposta) o cabeçalho é do cliente: aceitá-lo deixava
+  // trocar de "IP" a cada pedido e zerar o limite de taxa.
+  const remoto = req.socket?.remoteAddress || '';
+  const veioDoTunel = remoto === '127.0.0.1' || remoto === '::1' || remoto === '::ffff:127.0.0.1';
   const cf = req.headers['cf-connecting-ip'];
-  if (typeof cf === 'string' && cf.trim()) return cf.trim();
-  return req.socket?.remoteAddress || '?';
+  if (veioDoTunel && typeof cf === 'string' && cf.trim()) return cf.trim();
+  return remoto || '?';
 }
 
 /** Quem está pedindo: a conta (do token já verificado) ou o IP; null = serviço. */
@@ -2142,10 +2190,13 @@ async function authorize(req) {
       const claims = await verifyFirebaseToken(bearer);
       // Anonymous accounts carry no email claim → blocked here.
       if (!claims.email) return false;
-      // REQUIRE_LOGIN mode: any registered user (verified or not).
+      // E-MAIL VERIFICADO SEMPRE. Conta de e-mail/senha não verificada deixa
+      // qualquer um registrar o endereço de outra pessoa; contas Google já vêm
+      // verificadas, então isto só barra o cadastro avulso.
+      if (claims.email_verified !== true) return false;
+      // REQUIRE_LOGIN mode: any verified registered user.
       if (ALLOWED_EMAILS.length === 0) return true;
-      // Allow-list mode stays strict: verified AND listed.
-      if (!claims.email_verified) return false;
+      // Allow-list mode: verified AND listed.
       return ALLOWED_EMAILS.includes(String(claims.email).toLowerCase());
     } catch {
       return false;
@@ -2155,6 +2206,82 @@ async function authorize(req) {
     return bearer === IMPORT_TOKEN || req.headers['x-aurial-token'] === IMPORT_TOKEN;
   return true;
 }
+
+/**
+ * ADMINS do acervo. Cópia de `ADMIN_EMAILS` em `packages/shared/src/constants.ts`
+ * (fonte): o importador não depende do pacote shared, então a lista é repetida
+ * aqui — se mudar lá, mude aqui.
+ */
+const ADMIN_EMAILS = ['perdibitcoin@gmail.com', 'redcanidsvinicius@gmail.com'];
+
+/** Admin = e-mail VERIFICADO e na lista. E-mail sem verificação não vale nada. */
+function ehAdminVerificado(claims) {
+  if (!claims || claims.email_verified !== true || typeof claims.email !== 'string') return false;
+  return ADMIN_EMAILS.includes(claims.email.trim().toLowerCase());
+}
+
+/** Crachá de máquina nesta requisição (Bearer ou X-Aurial-Service)? */
+function ehServico(req) {
+  const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  return ehTokenDeServico(bearer) || ehTokenDeServico(req.headers['x-aurial-service']);
+}
+
+/**
+ * Portão de ADMIN (ou máquina). Rotas que mexem no aprendizado do servidor ou
+ * mostram o estado dele não são "de qualquer conta". Sem portão de login
+ * (token legado ou modo aberto, uso local) não há identidade para checar e vale
+ * o `authorize` de sempre.
+ */
+async function authorizeAdmin(req) {
+  if (ehServico(req)) return true;
+  if (!FIREBASE_GATED) return authorize(req);
+  const bearer = (req.headers['authorization'] || '').replace(/^Bearer\s+/i, '');
+  if (!bearer) return false;
+  try {
+    return ehAdminVerificado(await verifyFirebaseToken(bearer));
+  } catch {
+    return false;
+  }
+}
+
+/** Compara o `k` do pedido com o token do cofre em tempo constante (sha256 iguala o tamanho). */
+function tokenDoCofreConfere(k, token) {
+  if (typeof k !== 'string' || !k || typeof token !== 'string' || !token) return false;
+  const a = crypto.createHash('sha256').update(k).digest();
+  const b = crypto.createHash('sha256').update(token).digest();
+  return crypto.timingSafeEqual(a, b);
+}
+
+/**
+ * Janela deslizante por conta para rotas caras (IA, transcrição). `null` em
+ * `quem` (crachá de serviço) nunca é limitado. Responde 429 e devolve false ao
+ * estourar.
+ */
+function criarJanelaPorConta(max, janelaMs) {
+  const hist = new Map();
+  return (res, quem) => {
+    if (!quem) return true;
+    const t = Date.now();
+    const recentes = (hist.get(quem) ?? []).filter((em) => t - em < janelaMs);
+    if (recentes.length >= max) {
+      hist.set(quem, recentes);
+      const esperarSeg = Math.max(1, Math.ceil((recentes[0] + janelaMs - t) / 1000));
+      res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': String(esperarSeg) });
+      res.end(JSON.stringify({ error: 'Limite de chamadas alcançado — tente mais tarde.' }));
+      return false;
+    }
+    recentes.push(t);
+    hist.set(quem, recentes);
+    if (hist.size > 10_000) {
+      for (const [k, v] of hist) if (!v.some((em) => t - em < janelaMs)) hist.delete(k);
+    }
+    return true;
+  };
+}
+const limiteDeIa = criarJanelaPorConta(30, 10 * 60_000);
+const limiteDeTranscricao = criarJanelaPorConta(3, 10 * 60_000);
+// Só uma transcrição fora da fila por vez: o whisper local satura a CPU.
+let transcricaoEmCurso = false;
 
 // ── Capa & créditos (Deezer + MusicBrainz/Cover Art Archive) ──────────────────
 // Por que aqui e não no navegador: a api.deezer.com não manda cabeçalho de CORS
@@ -2494,7 +2621,7 @@ async function main() {
       // Autenticado porque revela espaço em disco e tamanho do acervo — não é
       // segredo, mas também não é da conta de quem só está ouvindo música.
       if (req.method === 'GET' && pathname === '/cofre/estado') {
-        if (!(await authorize(req))) {
+        if (!(await authorizeAdmin(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
@@ -2891,6 +3018,12 @@ async function main() {
       // texto solto sem prova. Mesmo freio de taxa que `/letra/outras-fontes`
       // (é o mesmo tipo de rota pública, sem login, sujeita a abuso).
       if (req.method === 'POST' && pathname === '/letra/aprendizado') {
+        // Era aberta: qualquer um ensinava o vocabulário. Agora exige conta.
+        if (!(await authorize(req))) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Acesso negado.' }));
+          return;
+        }
         if (!permitirRequisicaoDeLetra(ipDoPedido(req))) {
           res.writeHead(429, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Muitos pedidos — tente novamente em instantes.' }));
@@ -2918,7 +3051,7 @@ async function main() {
       // GET  /speed?bytes=N → N random bytes (timed by the client = download).
       // POST /speed         → swallow the body, ack its size (= upload).
       if (pathname === '/speed' && (req.method === 'GET' || req.method === 'POST')) {
-        if (!(await authorize(req))) {
+        if (!(req.method === 'POST' ? await authorizeAdmin(req) : await authorize(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
@@ -3011,6 +3144,13 @@ async function main() {
           res.end(JSON.stringify({ error: 'Corpo vazio.' }));
           return;
         }
+        // SÓ ÁUDIO ENTRA NO COFRE: o GET serve estes bytes de volta na nossa
+        // origem; um HTML disfarçado de faixa seria uma página nossa.
+        if (!pareceAudio(buf.subarray(0, 16))) {
+          res.writeHead(415, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'O conteúdo não parece áudio.' }));
+          return;
+        }
         // ESPAÇO REAL, não só o teto contábil: o cofre divide o disco com coisas
         // que não são dele e que crescem sozinhas. Ver `garantirEspaco`.
         if (!(await garantirEspaco(buf.length))) {
@@ -3041,7 +3181,13 @@ async function main() {
             ? anterior.token
             : null;
         const token = tokenAnterior ?? crypto.randomBytes(16).toString('hex');
-        const contentType = req.headers['content-type'] || 'audio/mpeg';
+        // Content-Type só `audio/*` (sem parâmetros estranhos); qualquer outro
+        // valor, como text/html, viraria o tipo que o GET devolve.
+        const ctPedido = String(req.headers['content-type'] || '')
+          .split(';')[0]
+          .trim()
+          .toLowerCase();
+        const contentType = /^audio\/[a-z0-9.+-]{1,40}$/.test(ctPedido) ? ctPedido : 'audio/mpeg';
         // DE ONDE ESTE ÁUDIO VEIO — é o que permite reconstruí-lo quando a poda
         // levar os bytes embora. Sem isso, a faixa descartada vira 404 eterno.
         // Ver o `GET /blob/` e `sweepBlobStore`. Um reenvio sem origem não apaga
@@ -3067,6 +3213,20 @@ async function main() {
             log('blob já guardado (mesmos bytes):', id);
             res.writeHead(200, { 'Content-Type': 'application/json' });
             res.end(JSON.stringify({ id, token }));
+            return;
+          }
+        }
+        // REENVIO COM BYTES DIFERENTES SOBRE ID EXISTENTE = SOBRESCRITA. Quem só
+        // tem conta não pode trocar o áudio de uma faixa que já existe (nem
+        // ficar com o token dela): exige o `k` (query ou X-Aurial-Token) ou o
+        // crachá de serviço. O reenvio idêntico foi tratado acima.
+        if (anterior) {
+          const kUp =
+            new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('k') ??
+            req.headers['x-aurial-token'];
+          if (!ehServico(req) && !tokenDoCofreConfere(kUp, anterior.token)) {
+            res.writeHead(403, { 'Content-Type': 'application/json' });
+            res.end(JSON.stringify({ error: 'Faixa já existe: token necessário para substituir.' }));
             return;
           }
         }
@@ -3109,7 +3269,7 @@ async function main() {
       // de cada linha e palavra (200), 202 enquanto calcula, 422 se falhou. Mesmo
       // token de capacidade do áudio. O texto nunca muda: só ganha relógio.
       if (req.method === 'POST' && /^\/blob\/[^/]+\/alinhar$/.test(pathname)) {
-        const id = decodeURIComponent(pathname.slice('/blob/'.length, -'/alinhar'.length));
+        const id = decodificarSeguro(pathname.slice('/blob/'.length, -'/alinhar'.length));
         const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -3167,7 +3327,7 @@ async function main() {
       // letra. 200 com as palavras quando pronto; 202 enquanto calcula (o app
       // pergunta de novo); 422 quando o motor não conseguiu.
       if (req.method === 'GET' && /^\/blob\/[^/]+\/tempo$/.test(pathname)) {
-        const id = decodeURIComponent(pathname.slice('/blob/'.length, -'/tempo'.length));
+        const id = decodificarSeguro(pathname.slice('/blob/'.length, -'/tempo'.length));
         const params = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams;
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
@@ -3213,7 +3373,7 @@ async function main() {
       // 404 genérico do fim do arquivo. Player que confere o tamanho antes de
       // tocar (e todo probe de "a cópia ainda está viva?") recebia "não existe".
       if ((req.method === 'GET' || req.method === 'HEAD') && pathname.startsWith('/blob/')) {
-        const id = decodeURIComponent(pathname.slice('/blob/'.length));
+        const id = decodificarSeguro(pathname.slice('/blob/'.length));
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'text/plain' });
           res.end('bad id');
@@ -3365,6 +3525,10 @@ async function main() {
           'Content-Length': String(end - start + 1),
           'Accept-Ranges': 'bytes',
           'Cache-Control': 'private, max-age=31536000',
+          // Bytes de usuário servidos na nossa origem: nada de adivinhar tipo
+          // nem de executar como página.
+          'X-Content-Type-Options': 'nosniff',
+          'Content-Security-Policy': 'sandbox',
           // A mesma URL tem duas formas (com e sem a tag): o cache do navegador
           // precisa separá-las, senão o download para offline poderia receber
           // a versão sem capa que o player guardou.
@@ -3409,10 +3573,29 @@ async function main() {
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
         }
-        const id = decodeURIComponent(pathname.slice('/blob/'.length));
+        const id = decodificarSeguro(pathname.slice('/blob/'.length));
         if (!safeBlobId(id)) {
           res.writeHead(400, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'id inválido.' }));
+          return;
+        }
+        // Ter conta não basta para apagar a cópia de outra pessoa: exige o token
+        // de capacidade da faixa (`k`) ou o crachá de serviço.
+        let metaDel = null;
+        try {
+          metaDel = JSON.parse(await readFile(blobMetaPath(id), 'utf8'));
+        } catch {
+          metaDel = null;
+        }
+        if (!metaDel) {
+          res.writeHead(404, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'não encontrado.' }));
+          return;
+        }
+        const kDel = new URL(req.url ?? '/', `http://localhost:${PORT}`).searchParams.get('k');
+        if (!ehServico(req) && !tokenDoCofreConfere(kDel, metaDel.token)) {
+          res.writeHead(403, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Token da faixa inválido.' }));
           return;
         }
         await unlink(blobPath(id)).catch(() => undefined);
@@ -3885,7 +4068,7 @@ async function main() {
 
       // ── /jev/aprender: um rótulo confirmado vira exemplo para os próximos ──
       if (req.method === 'POST' && pathname === '/jev/aprender') {
-        if (!(await authorize(req))) {
+        if (!(await authorizeAdmin(req))) {
           res.writeHead(403, { 'Content-Type': 'application/json' });
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
@@ -3936,6 +4119,7 @@ async function main() {
           res.end(JSON.stringify({ error: 'IA não configurada no servidor.' }));
           return;
         }
+        if (!limiteDeIa(res, quemPede(req))) return;
         try {
           const body = JSON.parse((await readBody(req)) || '{}');
           const messages = (Array.isArray(body.messages) ? body.messages : []).filter(
@@ -3954,8 +4138,10 @@ async function main() {
             r = await iaChat.conversar({
               messages,
               tarefa: body.task,
-              model: body.model,
-              maxTokens: body.max_tokens,
+              // Lista fixa: `model` livre fazia disto um proxy aberto da chave
+              // NVIDIA. Fora da lista, ignora e deixa a tarefa escolher.
+              model: MODELOS_DE_CHAT_PERMITIDOS.has(body.model) ? body.model : undefined,
+              maxTokens: Math.min(Math.max(Number(body.max_tokens) || 0, 0), 1024) || undefined,
               temperature: body.temperature,
             });
           } catch (err) {
@@ -3997,6 +4183,7 @@ async function main() {
           res.end(JSON.stringify({ error: 'Acesso negado.' }));
           return;
         }
+        if (!limiteDeTranscricao(res, quemPede(req))) return;
         // SEM CHAVE DA NVIDIA NÃO É MAIS 503: o whisper local (faster-whisper,
         // large-v3-turbo) transcreve do mesmo jeito — só mais devagar.
         try {
@@ -4039,7 +4226,20 @@ async function main() {
           try {
             const lang = (language ?? '').toLowerCase();
             const idioma = lang.startsWith('en') ? 'en' : lang.startsWith('pt') ? 'pt' : 'auto';
-            const r = await tempoDasPalavras.transcreverAgora(tmpWav, idioma);
+            // Semáforo global de 1: `transcreverAgora` roda FORA da fila e satura
+            // a CPU; duas ao mesmo tempo travam o servidor inteiro.
+            if (transcricaoEmCurso) {
+              res.writeHead(429, { 'Content-Type': 'application/json', 'Retry-After': '30' });
+              res.end(JSON.stringify({ error: 'Já há uma transcrição em andamento.' }));
+              return;
+            }
+            transcricaoEmCurso = true;
+            let r;
+            try {
+              r = await tempoDasPalavras.transcreverAgora(tmpWav, idioma);
+            } finally {
+              transcricaoEmCurso = false;
+            }
             const words = (r.words ?? [])
               .filter((w) => w.prob === undefined || w.prob >= 0.35)
               .map((w) => ({ text: w.text, startMs: w.startMs }));
@@ -4078,6 +4278,7 @@ async function main() {
           res.end(JSON.stringify({ error: 'IA não configurada no servidor.' }));
           return;
         }
+        if (!limiteDeIa(res, quemPede(req))) return;
         try {
           const body = JSON.parse((await readBody(req)) || '{}');
           const input = Array.isArray(body.input)
@@ -4104,7 +4305,7 @@ async function main() {
               'Content-Type': 'application/json',
             },
             body: JSON.stringify({
-              model: typeof body.model === 'string' ? body.model : NVIDIA_EMBED_MODEL,
+              model: MODELOS_DE_EMBED_PERMITIDOS.has(body.model) ? body.model : NVIDIA_EMBED_MODEL,
               input,
               input_type: inputType,
               encoding_format: 'float',
@@ -4285,7 +4486,21 @@ async function main() {
 
       res.writeHead(404, { 'Content-Type': 'application/json' });
       res.end(JSON.stringify({ error: 'not found' }));
-    })();
+    })().catch((err) => {
+      // Sem este `.catch`, qualquer exceção esquecida num ramo vira
+      // unhandledRejection — e o Node derruba o processo (cofre e rádio junto).
+      log('erro não tratado em', req.method, String(req.url ?? '').slice(0, 120), '—', err instanceof Error ? err.message : err);
+      try {
+        if (!res.headersSent) {
+          res.writeHead(500, { 'Content-Type': 'application/json' });
+          res.end(JSON.stringify({ error: 'Erro interno.' }));
+        } else {
+          res.destroy();
+        }
+      } catch {
+        res.destroy();
+      }
+    });
   });
 
   server.listen(PORT, HOST, () => {
@@ -4296,6 +4511,15 @@ async function main() {
     log('⚠️  Personal use only — import only content you are authorized to download.');
   });
 }
+
+// Rede de segurança: um erro solto num callback não pode derrubar o servidor
+// (e o cofre/rádio com ele). Só registra; quem decide parar é o `main` abaixo.
+process.on('unhandledRejection', (err) => {
+  console.error('[radinho-importer] unhandledRejection:', err);
+});
+process.on('uncaughtException', (err) => {
+  console.error('[radinho-importer] uncaughtException:', err);
+});
 
 main().catch((err) => {
   console.error('[radinho-importer] fatal:', err);

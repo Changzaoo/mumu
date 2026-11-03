@@ -1,5 +1,5 @@
 import { Router } from 'express';
-import { requireAuth } from '../../middlewares/auth.js';
+import { requireAuth, requireRole } from '../../middlewares/auth.js';
 import { catalogController } from './catalog.controller.js';
 
 /** Montado em /catalogo. */
@@ -16,4 +16,4 @@ catalogRoutes.get('/:id', catalogController.detail);
 // casaria "bulk" como se fosse um id de faixa.
 catalogRoutes.post('/bulk', requireAuth, catalogController.upsertMany);
 catalogRoutes.put('/:id', requireAuth, catalogController.upsert);
-catalogRoutes.delete('/:id', requireAuth, catalogController.remove);
+catalogRoutes.delete('/:id', requireAuth, requireRole('ADMIN'), catalogController.remove);

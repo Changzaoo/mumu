@@ -14,7 +14,14 @@
 import { z } from 'zod';
 import { asyncHandler } from '../../core/http/asyncHandler.js';
 import { noContent, ok } from '../../core/http/respond.js';
-import { NotFoundError, ValidationError } from '../../core/errors/index.js';
+import {
+  AppError,
+  ForbiddenError,
+  NotFoundError,
+  ValidationError,
+} from '../../core/errors/index.js';
+import { currentUser } from '../../middlewares/auth.js';
+import { hostsDaEntradaValidos } from './catalog.hosts.js';
 import {
   catalogEtag,
   deleteCatalogTrack,
@@ -95,16 +102,34 @@ export const catalogController = {
   }),
 
   upsert: asyncHandler(async (req, res) => {
+    const user = currentUser(req);
+    const admin = user.role === 'ADMIN';
     const entrada = entradaSchema.parse(req.body);
-    await upsertCatalogTrack(idDa(entrada), entrada);
+    const id = idDa(entrada);
+    if (String(req.params.id ?? '').trim() !== id) {
+      throw new AppError('BAD_REQUEST', 'O id da URL nao bate com track.id do corpo.', 400);
+    }
+    if (!admin && !hostsDaEntradaValidos(entrada)) {
+      throw new AppError('BAD_REQUEST', 'Endereco de audio fora dos hosts permitidos.', 400);
+    }
+    const gravou = await upsertCatalogTrack(id, entrada, { id: user.id, admin });
+    if (!gravou) throw new ForbiddenError('Esta faixa pertence a outro usuario.');
     noContent(res);
   }),
 
-  /** Publica em lote — a reconciliação do cliente sobe o que falta de uma vez. */
+  /** Publica em lote. Violacoes sao puladas (contadas em `recusadas`), nunca
+   *  falham o lote. */
   upsertMany: asyncHandler(async (req, res) => {
+    const user = currentUser(req);
+    const admin = user.role === 'ADMIN';
     const { entradas } = loteSchema.parse(req.body);
-    const publicadas = await upsertCatalogTracks(entradas.map((e) => ({ id: idDa(e), data: e })));
-    ok(res, { publicadas });
+    const aceitas = entradas.filter((e) => admin || hostsDaEntradaValidos(e));
+    const porHost = entradas.length - aceitas.length;
+    const r = await upsertCatalogTracks(
+      aceitas.map((e) => ({ id: idDa(e), data: e })),
+      { id: user.id, admin },
+    );
+    ok(res, { publicadas: r.publicadas, recusadas: r.recusadas + porHost });
   }),
 
   remove: asyncHandler(async (req, res) => {

@@ -48,7 +48,7 @@ export type Canal =
   /** O médico (`medico.ts`): o que diagnosticou, tratou e curou. */
   | 'medico'
   /** O mundo da música: cliques em ingresso, transmissão, prêmio, aviso. */
-  | 'mundo'
+  | 'mundo';
 
 export interface Linha {
   /** Hora local HH:MM:SS. */

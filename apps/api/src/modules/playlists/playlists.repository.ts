@@ -100,8 +100,14 @@ export const playlistsRepository = {
       .then((rows) => rows.map((r) => r.id));
   },
 
-  countExistingTracks(trackIds: string[]): Promise<number> {
-    return prisma.track.count({ where: { id: { in: trackIds } } });
+  /** Conta só faixas que o usuário pode ver (públicas ou enviadas por ele). */
+  countExistingTracks(trackIds: string[], userId: string): Promise<number> {
+    return prisma.track.count({
+      where: {
+        id: { in: trackIds },
+        OR: [{ isPublic: true }, { uploadedByUserId: userId }],
+      },
+    });
   },
 
   /** Users referenced by PlaylistTrack.addedById (no Prisma relation on purpose). */

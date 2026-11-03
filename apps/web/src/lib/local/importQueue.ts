@@ -219,6 +219,20 @@ export function cancelAll(): void {
   emit();
 }
 
+/**
+ * Logout: descarta os links que a conta anterior colou e AINDA NAO comecaram
+ * (pendentes). Download em andamento termina; concluidos ja estao na biblioteca
+ * local, que fica.
+ */
+export function limparPendentesDaConta(): void {
+  items = items.filter((it) => it.status !== 'pending');
+  if (wakeTimer) {
+    clearTimeout(wakeTimer);
+    wakeTimer = null;
+  }
+  emit();
+}
+
 /** Limpa o estado de pausa (sem emitir nem bombear — os chamadores decidem). */
 function clearPause(): void {
   pausedFor = null;

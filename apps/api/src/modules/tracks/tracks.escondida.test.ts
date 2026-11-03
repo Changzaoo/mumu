@@ -14,6 +14,7 @@ import { Readable } from 'node:stream';
 const bancoFalso = vi.hoisted(() => ({
   user: { findUnique: vi.fn(), update: vi.fn() },
   track: { findUnique: vi.fn() },
+  lyrics: { findUnique: vi.fn() },
   likedTrack: { findMany: vi.fn() },
   download: { upsert: vi.fn() },
 }));
@@ -202,5 +203,43 @@ describe('GET /tracks/:id/download', () => {
       .get('/api/v1/tracks/t1/download')
       .set('Authorization', 'Bearer t');
     expect(res.status).toBe(404);
+  });
+});
+
+describe('GET /tracks/:id/waveform e /lyrics de faixa escondida', () => {
+  const letra = (dono: string) => ({
+    trackId: 't1',
+    synced: false,
+    lines: [],
+    source: null,
+    track: { isPublic: false, uploadedByUserId: dono },
+  });
+
+  it('waveform: 404 para visitante e outra conta, 200 para o dono', async () => {
+    bancoFalso.track.findUnique.mockResolvedValue(faixa({ waveform: [1, 2, 3] }));
+    expect((await request(app).get('/api/v1/tracks/t1/waveform')).status).toBe(404);
+    entrarComo(INTRUSO);
+    expect(
+      (await request(app).get('/api/v1/tracks/t1/waveform').set('Authorization', 'Bearer t'))
+        .status,
+    ).toBe(404);
+    entrarComo(DONO);
+    expect(
+      (await request(app).get('/api/v1/tracks/t1/waveform').set('Authorization', 'Bearer t'))
+        .status,
+    ).toBe(200);
+  });
+
+  it('letra: 404 para visitante e outra conta, 200 para o dono', async () => {
+    bancoFalso.lyrics.findUnique.mockResolvedValue(letra(DONO));
+    expect((await request(app).get('/api/v1/tracks/t1/lyrics')).status).toBe(404);
+    entrarComo(INTRUSO);
+    expect(
+      (await request(app).get('/api/v1/tracks/t1/lyrics').set('Authorization', 'Bearer t')).status,
+    ).toBe(404);
+    entrarComo(DONO);
+    expect(
+      (await request(app).get('/api/v1/tracks/t1/lyrics').set('Authorization', 'Bearer t')).status,
+    ).toBe(200);
   });
 });

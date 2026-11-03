@@ -47,6 +47,7 @@ export function isBlockedAddress(ip: string): boolean {
   if (/^f[cd]/.test(normalized)) return true; // fc00::/7 unique-local
   if (/^fe[89ab]/.test(normalized)) return true; // fe80::/10 link-local
   if (normalized.startsWith('ff')) return true; // multicast
+  if (/^64:ff9b:/.test(normalized)) return true; // 64:ff9b::/96 NAT64 (alcança v4 interno)
   return false;
 }
 

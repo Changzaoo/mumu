@@ -19,7 +19,7 @@
  *   node e2e/puloCalaAAnterior.probe.mjs https://radinho.online antes.png
  *   node e2e/puloCalaAAnterior.probe.mjs http://localhost:5173 depois.png
  */
-/* global window, HTMLMediaElement, localStorage, document, performance -- os corpos de evaluate/addInitScript rodam no navegador */
+/* global window, HTMLMediaElement, localStorage, document -- os corpos de evaluate/addInitScript rodam no navegador */
 import { chromium } from '@playwright/test';
 
 const [url = 'https://radinho.online', foto = 'pulo.png'] = process.argv.slice(2);

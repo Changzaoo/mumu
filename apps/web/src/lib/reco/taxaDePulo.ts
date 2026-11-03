@@ -73,15 +73,15 @@ export function taxaDePulo(
     const em = Date.parse(h.playedAt);
     if (!Number.isFinite(em)) continue;
     const reco = ehRecomendacao(`${h.source}:`);
-    if (em >= desde) reco ? n.recoDepois++ : n.outDepois++;
-    else reco ? n.recoAntes++ : n.outAntes++;
+    if (em >= desde) n[reco ? 'recoDepois' : 'outDepois']++;
+    else n[reco ? 'recoAntes' : 'outAntes']++;
   }
   for (const pulo of pulos) {
     // Pulo antigo sem fonte: não dá para dizer de onde veio — fica fora.
     if (!pulo.fonte) continue;
     const reco = ehRecomendacao(pulo.fonte);
-    if (pulo.em >= desde) reco ? p.recoDepois++ : p.outDepois++;
-    else reco ? p.recoAntes++ : p.outAntes++;
+    if (pulo.em >= desde) p[reco ? 'recoDepois' : 'outDepois']++;
+    else p[reco ? 'recoAntes' : 'outAntes']++;
   }
   return {
     antes: medida(n.recoAntes, p.recoAntes),
@@ -92,7 +92,9 @@ export function taxaDePulo(
 }
 
 const pct = (m: Medida): string =>
-  m.taxa === null ? 'sem amostra' : `${Math.round(m.taxa * 100)}% (${m.pulos} pulos em ${m.plays + m.pulos})`;
+  m.taxa === null
+    ? 'sem amostra'
+    : `${Math.round(m.taxa * 100)}% (${m.pulos} pulos em ${m.plays + m.pulos})`;
 
 /** Texto para o diagnóstico e para o relato. */
 export function relatorioDeRecomendacao(

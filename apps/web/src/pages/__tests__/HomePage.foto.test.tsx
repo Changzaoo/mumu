@@ -28,6 +28,8 @@ vi.mock('@/lib/audio/AudioEngine', () => ({
 }));
 vi.mock('@/components/media/CommunityTracksRow', () => ({ CommunityTracksRow: () => null }));
 vi.mock('@/components/media/DeviceTracksRow', () => ({ DeviceTracksRow: () => null }));
+// Prateleira própria (busca de rede + `genreGroups()` em cache a cada montagem): fora do que este teste mede.
+vi.mock('@/components/media/PrateleiraEmAlta', () => ({ PrateleiraEmAlta: () => null }));
 vi.mock('@/lib/artistImage', () => ({ useArtistImage: () => null }));
 
 /** As prateleiras TARDIAS (recomendações, mixes) são o trabalho caro que não pode repetir a cada volta. */

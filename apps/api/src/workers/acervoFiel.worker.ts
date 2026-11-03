@@ -15,7 +15,7 @@
  * servidor é remendo — o servidor é que não pode mentir.
  *
  * O QUE ELE FAZ. Varre o acervo devagar, em lotes, perguntando ao cofre se cada
- * cópia ainda serve. Quando a resposta é definitiva — 404/403, "não tenho isso"
+ * cópia ainda serve. Quando a resposta é definitiva — 404, "não tenho isso"
  * —, apaga o `remoteUrl` e o `track.streamUrl` da entrada. O app já esconde
  * entrada sem cópia (ver `temComoTocar` em localLibrary), então a faixa some da
  * tela em vez de virar um card mudo.
@@ -26,8 +26,8 @@
  *    agente esconde o que não toca; não joga fora o caminho de volta.
  *  • Não conclui nada de erro de rede, tempo esgotado ou 5xx. O cofre responde
  *    503 enquanto RECONSTRÓI uma faixa podada — tratar isso como morte mataria
- *    justamente a cópia que estava voltando. Só 404/403 é morte, que é a mesma
- *    regra que o app usa em `reportDeadRemote`.
+ *    justamente a cópia que estava voltando. Só 404 é morte; 403 pode ser desafio
+ *    da Cloudflare ou token trocado, e apagaria cópias vivas em lote.
  *
  * RITMO. O cofre roda na mesma máquina, então a varredura é deliberadamente
  * lenta: um lote pequeno por volta, com um cursor que dá a volta no acervo em
@@ -37,6 +37,7 @@
 import { env } from '../config/index.js';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
+import { hostConfiavel } from './hostConfiavel.js';
 
 const log = logger.child({ worker: 'acervo-fiel' });
 
@@ -46,6 +47,8 @@ const LOTE = 60;
 const SIMULTANEAS = 6;
 /** Uma cópia que não respondeu neste tempo não provou nada. */
 const TIMEOUT_MS = 10_000;
+/** Mortas seguidas numa volta que fazem desconfiar do cofre, não das faixas. */
+export const MORTAS_SEGUIDAS_PARA_PARAR = 8;
 
 /** Onde a varredura parou — o cursor dá a volta no acervo sozinho. */
 let cursor: string | null = null;
@@ -59,13 +62,22 @@ export type Veredito = 'viva' | 'morta' | 'incerta';
  * decide se uma faixa some do acervo, e ela precisa ser óbvia de ler.
  */
 export function vereditoDeStatus(status: number): Veredito {
-  if (status === 404 || status === 403) return 'morta';
+  if (status === 404) return 'morta';
   if (status >= 200 && status < 400) return 'viva';
-  return 'incerta'; // 5xx, 429, 503 do cofre reconstruindo…
+  // 403 (desafio da Cloudflare, token trocado), 416, 5xx, 429, 503 do cofre
+  // reconstruindo… nada disso prova que a cópia sumiu.
+  return 'incerta';
 }
 
 /** Pergunta ao cofre se a cópia ainda serve, sem baixar a música inteira. */
-export async function conferirCopia(url: string): Promise<Veredito> {
+export async function conferirCopia(
+  url: string,
+  avisar?: (url: string) => void,
+): Promise<Veredito> {
+  if (!hostConfiavel(url)) {
+    avisar?.(url);
+    return 'incerta'; // host fora do cofre: nunca consultado, nunca "morta"
+  }
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -131,12 +143,16 @@ export async function conferirLote(limite = LOTE): Promise<{ conferidas: number;
     );
 
   let mortas = 0;
-  for (let i = 0; i < candidatas.length; i += SIMULTANEAS) {
-    const fatia = candidatas.slice(i, i + SIMULTANEAS);
-    const vereditos = await Promise.all(fatia.map((c) => conferirCopia(c.dados.remoteUrl)));
-    for (const [j, veredito] of vereditos.entries()) {
-      const alvo = fatia[j];
-      if (!alvo || veredito !== 'morta') continue;
+  let avisou = false;
+  const avisar = (url: string): void => {
+    if (avisou) return;
+    avisou = true;
+    log.warn({ url: url.slice(0, 80) }, 'remoteUrl com host fora do cofre — ignorado nesta volta');
+  };
+  type Alvo = (typeof candidatas)[number];
+  let pendentes: Alvo[] = [];
+  const aplicar = async (lista: Alvo[]): Promise<void> => {
+    for (const alvo of lista) {
       const novos = semACopiaMorta(alvo.dados, alvo.dados.remoteUrl);
       if (!novos) continue;
       try {
@@ -150,7 +166,32 @@ export async function conferirLote(limite = LOTE): Promise<{ conferidas: number;
         log.warn({ err, faixa: alvo.id }, 'falha ao remover cópia morta do acervo');
       }
     }
+  };
+  let parou = false;
+  for (let i = 0; i < candidatas.length && !parou; i += SIMULTANEAS) {
+    const fatia = candidatas.slice(i, i + SIMULTANEAS);
+    const vereditos = await Promise.all(fatia.map((c) => conferirCopia(c.dados.remoteUrl, avisar)));
+    for (const [j, veredito] of vereditos.entries()) {
+      const alvo = fatia[j];
+      if (!alvo) continue;
+      if (veredito === 'morta') {
+        pendentes.push(alvo);
+        if (pendentes.length >= MORTAS_SEGUIDAS_PARA_PARAR) {
+          log.warn(
+            { seguidas: pendentes.length },
+            'mortas demais em sequência — suspeita do cofre, volta interrompida sem apagar nada',
+          );
+          pendentes = [];
+          parou = true;
+          break;
+        }
+        continue;
+      }
+      await aplicar(pendentes);
+      pendentes = [];
+    }
   }
+  await aplicar(pendentes);
 
   return { conferidas: candidatas.length, mortas };
 }

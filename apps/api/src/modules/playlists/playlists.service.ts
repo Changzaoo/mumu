@@ -143,7 +143,7 @@ export const playlistsService = {
     const access = await requireAccess(playlistId);
     if (!canEditTracks(access, userId))
       throw new ForbiddenError('No permission to edit playlist tracks');
-    const existing = await playlistsRepository.countExistingTracks(input.trackIds);
+    const existing = await playlistsRepository.countExistingTracks(input.trackIds, userId);
     if (existing !== new Set(input.trackIds).size) throw new NotFoundError('Track');
     await playlistsRepository.insertTracks(playlistId, input.trackIds, input.position, userId);
     return buildWithTracks(playlistId, userId);

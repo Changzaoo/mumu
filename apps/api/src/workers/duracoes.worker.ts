@@ -34,6 +34,7 @@ import { duracaoDoMp3, tamanhoDoId3 } from '@radinho/shared';
 import { logger } from '../core/logger.js';
 import { prisma } from '../infra/db/prisma.js';
 import { upsertCatalogTrack, type CatalogEntry } from '../modules/catalog/catalog.repository.js';
+import { hostConfiavel } from './hostConfiavel.js';
 import { baseInterna } from './varreduraNoturna.worker.js';
 
 const log = logger.child({ worker: 'duracoes' });
@@ -62,7 +63,14 @@ const SUSPEITA_MS = 30_000;
 
 type Obj = Record<string, unknown>;
 
-/** O endereço por onde ESTE servidor alcança a cópia. */
+/** Mortas seguidas numa volta que fazem desconfiar do cofre, não das faixas. */
+export const MORTAS_SEGUIDAS_PARA_PARAR = 8;
+
+/**
+ * O endereço por onde ESTE servidor alcança a cópia. `null` quando não é uma
+ * URL http(s) válida; só reescreve para o endereço interno se o host for o do
+ * cofre (ver `hostConfiavel`) — quem chama decide o que fazer com host alheio.
+ */
 export function urlParaLer(remoteUrl: string): string | null {
   let u: URL;
   try {
@@ -74,7 +82,8 @@ export function urlParaLer(remoteUrl: string): string | null {
   // A URL gravada é a PÚBLICA (túnel, Cloudflare). Daqui, o caminho interno é
   // mais curto e não passa por limite nenhum do túnel.
   const interna = baseInterna();
-  if (interna && u.pathname.startsWith('/blob/')) return `${interna}${u.pathname}${u.search}`;
+  if (interna && hostConfiavel(remoteUrl) && u.pathname.startsWith('/blob/'))
+    return `${interna}${u.pathname}${u.search}`;
   return u.toString();
 }
 
@@ -90,7 +99,8 @@ async function lerTrecho(url: string, inicio: number, n: number): Promise<Leitur
       headers: { Range: `bytes=${inicio}-${inicio + n - 1}` },
       signal: controller.signal,
     });
-    if (res.status === 404 || res.status === 403 || res.status === 416) return 'morta';
+    // Só 404 é morte: 403 (Cloudflare, token trocado) e 416 não provam nada.
+    if (res.status === 404) return 'morta';
     if (!res.ok || !res.body) return 'incerta';
     const faixa = /\/(\d+)\s*$/.exec(res.headers.get('content-range') ?? '');
     const total = faixa
@@ -232,15 +242,51 @@ export async function medirLote(
   const lista = await candidatas(limite);
   let medidas = 0;
   let semMedida = 0;
+  let avisou = false;
+  let seguidasMortas = 0;
+  let pendentesSemMedida: string[] = [];
+  const marcarPendentes = async (): Promise<void> => {
+    for (const id of pendentesSemMedida) {
+      await marcar(id, 'duracaoSemMedida');
+      semMedida++;
+    }
+    pendentesSemMedida = [];
+  };
   for (const c of lista) {
     const dados = c.data as Obj;
     const track = (dados.track ?? {}) as Obj;
     const remota = String(dados.remoteUrl ?? track.streamUrl ?? '');
     const url = urlParaLer(remota);
+    if (url && !hostConfiavel(remota)) {
+      if (!avisou) {
+        avisou = true;
+        log.warn(
+          { url: remota.slice(0, 80) },
+          'remoteUrl com host fora do cofre — ignorado nesta volta',
+        );
+      }
+      continue; // incerta: nada lido, nada marcado
+    }
     const r = url ? await medirCopia(url) : null;
     if (r === 'incerta') continue; // tenta na próxima volta
-    if (r === null || r === 'morta') {
-      // Morta é assunto do acervo fiel; aqui só sai da fila de durações.
+    if (r === 'morta') {
+      // Morta é assunto do acervo fiel; aqui só sai da fila de durações — mas
+      // a marca só vale se não for um cofre inteiro respondendo 404.
+      seguidasMortas++;
+      pendentesSemMedida.push(c.id);
+      if (seguidasMortas >= MORTAS_SEGUIDAS_PARA_PARAR) {
+        log.warn(
+          { seguidas: seguidasMortas },
+          'mortas demais em sequência — suspeita do cofre, volta interrompida sem marcar nada',
+        );
+        pendentesSemMedida = [];
+        break;
+      }
+      continue;
+    }
+    seguidasMortas = 0;
+    await marcarPendentes();
+    if (r === null) {
       semMedida++;
       await marcar(c.id, 'duracaoSemMedida');
       continue;
@@ -263,6 +309,7 @@ export async function medirLote(
     });
     if (contas > 0) log.debug({ faixa: c.id, contas }, 'duração levada às bibliotecas');
   }
+  await marcarPendentes();
   const bibliotecas = await preencherBibliotecasPeloAcervo().catch((err: unknown) => {
     log.warn({ err }, 'bibliotecas não receberam as durações do acervo');
     return 0;

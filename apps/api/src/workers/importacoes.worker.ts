@@ -120,6 +120,8 @@ async function expandir(r: Registro): Promise<void> {
     method: 'POST',
     headers: { ...cabecalhos(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: r.data.url }),
+    // Listar playlist grande leva mais que uma chamada de controle comum.
+    signal: AbortSignal.timeout(60_000),
   });
   if (res.status === 400 || res.status === 404 || res.status === 422) {
     await gravar(r.userId, r.itemId, { ...r.data, estado: 'erro', atualizadoEm: agoraIso() });

@@ -8,7 +8,7 @@ import {
   trackEmbeddingText,
   translateMessages,
 } from '../ai/agents.js';
-import { escalationFor, modelFor, CHAT_MODELS } from '../ai/models.js';
+import { escalationFor, modelFor, CHAT_MODELS, TASK_TIER } from '../ai/models.js';
 
 describe('parseSafety', () => {
   it('lê o JSON que o NemoGuard devolve de verdade', () => {
@@ -147,7 +147,9 @@ describe('política de modelos', () => {
   });
 
   it('o ultra é escalação da identidade, não o padrão dela', () => {
-    expect(modelFor('identity')).not.toBe(CHAT_MODELS.ultra);
+    // Compara o DEGRAU, não o ID: com o super original fora da conta (404), `super` aponta
+    // para o mesmo modelo do ultra, então comparar IDs seria sempre igual.
+    expect(TASK_TIER.identity).not.toBe('ultra');
     expect(escalationFor('identity')).toBe(CHAT_MODELS.ultra);
   });
 

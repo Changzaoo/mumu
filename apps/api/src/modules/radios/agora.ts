@@ -20,10 +20,10 @@
  * catálogo da Apple (iTunes Search), que devolve também capa e duração.
  */
 import { lookup } from 'node:dns/promises';
-import { isIP } from 'node:net';
 import type { MusicaDaRadioDto } from '@radinho/shared';
 import { NotFoundError, ValidationError } from '../../core/errors/index.js';
 import { logger } from '../../core/logger.js';
+import { isBlockedAddress } from '../../infra/http/remoteImage.js';
 
 const log = logger.child({ mod: 'radio-agora' });
 
@@ -45,6 +45,24 @@ interface Estacao {
 // ── Estação: só as do Radio Browser (nada de URL arbitrária vinda do cliente) ──
 
 const estacoes = new Map<string, { estacao: Estacao | null; em: number }>();
+/** Teto do mapa: ids inventados não podem fazê-lo crescer para sempre. */
+export const MAX_ESTACOES = 2_000;
+
+/** Guarda no mapa respeitando o teto: descarta as entradas mais antigas (ordem de inserção). */
+export function guardarComTeto<V>(
+  mapa: Map<string, V>,
+  chave: string,
+  valor: V,
+  max: number,
+): void {
+  mapa.delete(chave); // reinserir move para o fim (mais novo)
+  while (mapa.size >= max) {
+    const maisAntiga = mapa.keys().next();
+    if (maisAntiga.done) break;
+    mapa.delete(maisAntiga.value);
+  }
+  mapa.set(chave, valor);
+}
 
 async function estacaoPorId(id: string): Promise<Estacao> {
   const cache = estacoes.get(id);
@@ -71,50 +89,52 @@ async function estacaoPorId(id: string): Promise<Estacao> {
         pais: (e.countrycode || 'us').toLowerCase(),
       }
     : null;
-  estacoes.set(id, { estacao, em: Date.now() });
+  guardarComTeto(estacoes, id, { estacao, em: Date.now() }, MAX_ESTACOES);
   if (!estacao) throw new NotFoundError('Radio station');
   return estacao;
 }
 
-/** O servidor não pode ser usado para alcançar a rede interna (SSRF). */
-function ipPrivado(ip: string): boolean {
-  if (isIP(ip) === 6) {
-    const v = ip.toLowerCase();
-    if (v.startsWith('::ffff:')) return ipPrivado(v.slice(7));
-    return (
-      v === '::1' || v === '::' || v.startsWith('fc') || v.startsWith('fd') || v.startsWith('fe80')
-    );
-  }
-  const [a = 0, b = 0] = ip.split('.').map(Number);
-  return (
-    a === 10 ||
-    a === 127 ||
-    a === 0 ||
-    (a === 169 && b === 254) ||
-    (a === 172 && b >= 16 && b <= 31) ||
-    (a === 192 && b === 168) ||
-    (a === 100 && b >= 64 && b <= 127) ||
-    a >= 224
-  );
-}
-
-async function urlPublica(url: string): Promise<URL> {
+/** Valida o destino e devolve também o IP já vetado (para o fetch não resolver de novo). */
+async function resolverPublico(url: string): Promise<{ url: URL; ip: string }> {
   const u = new URL(url);
   if (u.protocol !== 'https:' && u.protocol !== 'http:')
     throw new ValidationError('stream inválido');
   const enderecos = await lookup(u.hostname, { all: true });
-  if (enderecos.length === 0 || enderecos.some((e) => ipPrivado(e.address))) {
+  const primeiro = enderecos[0];
+  if (!primeiro || enderecos.some((e) => isBlockedAddress(e.address))) {
     throw new ValidationError('stream inválido');
   }
-  return u;
+  return { url: u, ip: primeiro.address };
 }
 
-/** `fetch` que confere CADA salto de redirecionamento contra a rede interna. */
+async function urlPublica(url: string): Promise<URL> {
+  return (await resolverPublico(url)).url;
+}
+
+/**
+ * `fetch` que confere CADA salto de redirecionamento contra a rede interna.
+ *
+ * DNS rebinding: em http: o fetch vai direto ao IP JÁ validado, com o `Host`
+ * original no cabeçalho, então não há segunda resolução. LIMITAÇÃO em https:
+ * o `fetch` nativo não deixa fixar o IP sem perder SNI/validação do certificado
+ * (e o pacote undici não é dependência), então o https só é validado antes; a
+ * janela de rebinding fica restrita a quem controla DNS E tem certificado válido
+ * para o nome. Para fechar, usar um Agent do undici com `connect.lookup` fixo.
+ */
 async function buscarPublico(url: URL, init: RequestInit): Promise<Response> {
   let atual = url;
   for (let salto = 0; salto < 4; salto++) {
-    await urlPublica(atual.href);
-    const r = await fetch(atual, { ...init, redirect: 'manual' });
+    const { url: alvo, ip } = await resolverPublico(atual.href);
+    let r: Response;
+    if (alvo.protocol === 'http:') {
+      const fixo = new URL(alvo.href);
+      fixo.hostname = ip.includes(':') ? `[${ip}]` : ip;
+      const headers = new Headers(init.headers);
+      headers.set('Host', alvo.host);
+      r = await fetch(fixo, { ...init, headers, redirect: 'manual' });
+    } else {
+      r = await fetch(alvo, { ...init, redirect: 'manual' });
+    }
     const destino = r.headers.get('location');
     if (r.status < 300 || r.status >= 400 || !destino) return r;
     void r.body?.cancel();

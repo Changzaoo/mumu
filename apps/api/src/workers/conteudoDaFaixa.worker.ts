@@ -254,7 +254,8 @@ async function letraDaFaixa(track: {
 async function semVeredicto(limite: number): Promise<FaixaDoAcervo[]> {
   const linhas = await prisma.$queryRaw<Array<{ id: string; data: unknown }>>`
     SELECT id, data FROM "CatalogTrack"
-    WHERE COALESCE((data->'conteudo'->>'versao')::int, 0) < ${VERSAO_DO_LEXICO}
+    WHERE (CASE WHEN (data->'conteudo'->>'versao') ~ '^[0-9]{1,9}$'
+                  THEN (data->'conteudo'->>'versao')::int ELSE 0 END) < ${VERSAO_DO_LEXICO}
     ORDER BY "updatedAt" DESC
     LIMIT ${limite}
   `;

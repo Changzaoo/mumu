@@ -63,7 +63,7 @@ export async function catalogEtag(): Promise<string> {
  * Só ela as lê; se o cliente pudesse apagá-las, a mesma faixa seria baixada e
  * medida de novo a cada batida.
  */
-const CAMPOS_DO_SERVIDOR = ['dna', 'duracaoMedidaEm', 'duracaoSemMedida'] as const;
+const CAMPOS_DO_SERVIDOR = ['dna', 'duracaoMedidaEm', 'duracaoSemMedida', 'publicadoPor'] as const;
 
 /**
  * PESO MORTO DENTRO DA FAIXA — campos que descem para todo aparelho e que
@@ -282,18 +282,24 @@ export async function getCatalogTrack(id: string): Promise<CatalogEntry | null> 
 export function comCamposDoServidor(
   recebida: CatalogEntry,
   anterior: CatalogEntry | null,
+  publicadoPor?: string,
 ): CatalogEntry {
   // `tocavel` e `conteudoVeredicto` são calculados na listagem, não são dado:
   // gravá-los criaria uma cópia do estado que envelhece sozinha e passa a
   // mentir — o primeiro quando o cofre podar, o segundo quando o léxico mudar e
   // a faixa for reclassificada.
-  let limpa = sem(recebida as Obj, ['tocavel', 'conteudoVeredicto']) as CatalogEntry;
+  // `publicadoPor` e decidido pelo servidor: o que o cliente mandar e descartado.
+  let limpa = sem(recebida as Obj, [
+    'tocavel',
+    'conteudoVeredicto',
+    'publicadoPor',
+  ]) as CatalogEntry;
   const faixaRecebida = (limpa as Obj).track;
   if (faixaRecebida && typeof faixaRecebida === 'object') {
     const separada = comArtistasSeparados(faixaRecebida as Obj);
     if (separada !== faixaRecebida) limpa = { ...limpa, track: separada } as CatalogEntry;
   }
-  if (!anterior) return limpa;
+  if (!anterior) return publicadoPor ? ({ ...limpa, publicadoPor } as CatalogEntry) : limpa;
   let saida = limpa;
   for (const campo of [...CAMPOS_DO_SERVIDOR, ...CAMPOS_SOB_DEMANDA_DA_ENTRADA]) {
     if (campo in limpa) continue; // veio preenchido: respeita quem mandou
@@ -413,50 +419,79 @@ export async function listCatalog(): Promise<CatalogSnapshot> {
   return { entries, etag };
 }
 
-/** Publica (ou atualiza) uma faixa. O id é o do cliente — ver o schema. */
-export async function upsertCatalogTrack(id: string, data: CatalogEntry): Promise<void> {
-  const anterior = await prisma.catalogTrack.findUnique({ where: { id }, select: { data: true } });
-  const completa = comCamposDoServidor(data, (anterior?.data as CatalogEntry) ?? null);
+/** Quem escreve: o id do usuario e se e ADMIN. */
+export interface Autor {
+  id: string;
+  admin: boolean;
+}
+
+/**
+ * Pode este autor gravar sobre `anterior`? Nova: qualquer logado. Existente:
+ * o dono ou ADMIN. Existente sem dono (legado): so ADMIN.
+ */
+export function podeGravar(anterior: CatalogEntry | null, autor?: Autor): boolean {
+  // Sem autor = chamador interno de confianca (workers de curadoria).
+  if (!anterior || !autor || autor.admin) return true;
+  const dono = (anterior as Obj).publicadoPor;
+  return typeof dono === 'string' && dono === autor.id;
+}
+
+/** Publica (ou atualiza) uma faixa. Devolve false se o autor nao pode.
+ *  `autor` ausente = worker interno: sem checagem de dono e sem atribuir dono. */
+export async function upsertCatalogTrack(
+  id: string,
+  data: CatalogEntry,
+  autor?: Autor,
+): Promise<boolean> {
+  const linha = await prisma.catalogTrack.findUnique({ where: { id }, select: { data: true } });
+  const anterior = (linha?.data as CatalogEntry) ?? null;
+  if (!podeGravar(anterior, autor)) return false;
+  const completa = comCamposDoServidor(data, anterior, autor?.id);
   await prisma.catalogTrack.upsert({
     where: { id },
     create: { id, data: completa as object },
     update: { data: completa as object },
   });
+  return true;
 }
 
 /**
- * Publica várias de uma vez.
- *
- * Existe porque a reconciliação do cliente sobe o que falta — e um aparelho com
- * trezentas faixas faria trezentas requisições, cada uma com ida e volta pelo
- * túnel. Em lote é uma só.
+ * Publica varias de uma vez. As que o autor nao pode gravar sao PULADAS (nao
+ * falham o lote: a reconciliacao do cliente sobe centenas). Devolve as contas.
  */
 export async function upsertCatalogTracks(
   entradas: Array<{ id: string; data: CatalogEntry }>,
-): Promise<number> {
-  if (entradas.length === 0) return 0;
-  // UMA leitura para o lote inteiro: sem ela, preservar o `dna` custaria uma
-  // consulta por faixa e a reconciliação de um aparelho novo (500 por vez)
-  // viraria 500 idas ao banco.
+  autor?: Autor,
+): Promise<{ publicadas: number; recusadas: number }> {
+  if (entradas.length === 0) return { publicadas: 0, recusadas: 0 };
+  // UMA leitura para o lote inteiro (preservar o `dna` e checar o dono).
   const anteriores = await prisma.catalogTrack.findMany({
     where: { id: { in: entradas.map((e) => e.id) } },
     select: { id: true, data: true },
   });
   const porId = new Map(anteriores.map((a) => [a.id, a.data as CatalogEntry]));
-  const completas = entradas.map((e) => ({
-    id: e.id,
-    data: comCamposDoServidor(e.data, porId.get(e.id) ?? null),
-  }));
-  await prisma.$transaction(
-    completas.map((e) =>
-      prisma.catalogTrack.upsert({
-        where: { id: e.id },
-        create: { id: e.id, data: e.data as object },
-        update: { data: e.data as object },
-      }),
-    ),
-  );
-  return entradas.length;
+  const completas: Array<{ id: string; data: CatalogEntry }> = [];
+  let recusadas = 0;
+  for (const e of entradas) {
+    const anterior = porId.get(e.id) ?? null;
+    if (!podeGravar(anterior, autor)) {
+      recusadas += 1;
+      continue;
+    }
+    completas.push({ id: e.id, data: comCamposDoServidor(e.data, anterior, autor?.id) });
+  }
+  if (completas.length > 0) {
+    await prisma.$transaction(
+      completas.map((e) =>
+        prisma.catalogTrack.upsert({
+          where: { id: e.id },
+          create: { id: e.id, data: e.data as object },
+          update: { data: e.data as object },
+        }),
+      ),
+    );
+  }
+  return { publicadas: completas.length, recusadas };
 }
 
 export async function deleteCatalogTrack(id: string): Promise<void> {

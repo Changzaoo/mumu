@@ -86,6 +86,10 @@ const PASSO_DO_PROGRESSO = 25;
  * cada 8 faixas e andar quatro por rodada, com a fonte perfeitamente no ar.
  */
 const FALHAS_SEGUIDAS_PARA_DESISTIR = 8;
+/** Chamadas de controle ao importador: sem resposta em 30 s, desiste. */
+const TIMEOUT_CONTROLE_MS = 30_000;
+/** Chamadas que carregam a música inteira (`/import/file`, POST do `/blob`). */
+const TIMEOUT_ARQUIVO_MS = 10 * 60_000;
 
 interface Candidata {
   id: string;
@@ -155,7 +159,10 @@ export function dentroDaJanela(hora: number, inicio: number, fim: number): boole
 
 export async function folgaDoCofre(): Promise<number | null> {
   try {
-    const res = await fetch(`${baseInterna()}/cofre/estado`, { headers: cabecalhos() });
+    const res = await fetch(`${baseInterna()}/cofre/estado`, {
+      headers: cabecalhos(),
+      signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
+    });
     if (!res.ok) return null;
     const estado = (await res.json()) as EstadoDoCofre;
     if (!estado.pronto) return null;
@@ -230,6 +237,7 @@ export async function baixar(
     method: 'POST',
     headers: { ...cabecalhos(), 'Content-Type': 'application/json' },
     body: JSON.stringify({ url: sourceUrl }),
+    signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
   });
   if (!inicio.ok) {
     // 400 = link não suportado: não adianta tentar de novo amanhã.
@@ -243,6 +251,7 @@ export async function baixar(
     await esperar(POLL_MS);
     const res = await fetch(`${baseInterna()}/import/job/${encodeURIComponent(id)}`, {
       headers: cabecalhos(),
+      signal: AbortSignal.timeout(TIMEOUT_CONTROLE_MS),
     });
     if (!res.ok) return { ok: null, permanente: false };
     const job = (await res.json()) as {
@@ -255,6 +264,7 @@ export async function baixar(
 
     const arquivo = await fetch(`${baseInterna()}/import/file/${encodeURIComponent(id)}`, {
       headers: cabecalhos(),
+      signal: AbortSignal.timeout(TIMEOUT_ARQUIVO_MS),
     });
     if (!arquivo.ok) return { ok: null, permanente: false };
     const bytes = Buffer.from(await arquivo.arrayBuffer());
@@ -289,6 +299,7 @@ export async function guardarNoCofre(
       'X-Aurial-Source': sourceUrl,
     },
     body: new Uint8Array(arquivo.bytes),
+    signal: AbortSignal.timeout(TIMEOUT_ARQUIVO_MS),
   });
   // 413 = não cabe no cofre, e nunca vai caber. Medido: uma "coletânea de
   // românticas anos 80/90" de 76 minutos vira ~184 MB em MP3, contra o teto de

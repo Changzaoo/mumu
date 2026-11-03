@@ -19,6 +19,14 @@ export interface StreamPayload {
   stream?: Readable;
 }
 
+/**
+ * LIMITAÇÃO DOCUMENTADA: as rotas /stream não têm sessão (o player de HLS manda
+ * só `?token=`) e o token HMAC carrega apenas trackId+validade, não o usuário.
+ * Por isso a autorização de faixa privada acontece na EMISSÃO do token: `toTrackDto`
+ * só assina `streamUrl` depois da checagem de visibilidade/dono nos módulos
+ * tracks, playlists e social. Quem tem um token válido já foi autorizado; ele
+ * expira em STREAM_TOKEN_TTL_SECONDS. Revogar de verdade exigiria pôr o userId no token.
+ */
 function assertToken(trackId: string, token: string): void {
   if (!verifyStreamToken(trackId, token)) {
     throw new UnauthorizedError('Invalid or expired stream token');

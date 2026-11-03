@@ -6,12 +6,23 @@ export const tracksRepository = {
     return prisma.track.findUnique({ where: { id }, include: trackInclude });
   },
 
-  waveform(id: string): Promise<{ id: string; waveform: unknown } | null> {
-    return prisma.track.findUnique({ where: { id }, select: { id: true, waveform: true } });
+  waveform(id: string): Promise<{
+    id: string;
+    waveform: unknown;
+    isPublic: boolean;
+    uploadedByUserId: string | null;
+  } | null> {
+    return prisma.track.findUnique({
+      where: { id },
+      select: { id: true, waveform: true, isPublic: true, uploadedByUserId: true },
+    });
   },
 
   lyrics(trackId: string) {
-    return prisma.lyrics.findUnique({ where: { trackId } });
+    return prisma.lyrics.findUnique({
+      where: { trackId },
+      include: { track: { select: { isPublic: true, uploadedByUserId: true } } },
+    });
   },
 
   downloadSource(id: string): Promise<{

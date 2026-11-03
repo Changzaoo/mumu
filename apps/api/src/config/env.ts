@@ -183,6 +183,15 @@ const envSchema = z
      */
     IMPORTER_PUBLIC_URL: optionalString,
     /**
+     * Hosts (csv) de onde o ACERVO aceita audio de usuario comum (`remoteUrl`,
+     * `streamUrl`, `sourceUrl`). Soma-se aos hosts do IMPORTER_URL e
+     * IMPORTER_PUBLIC_URL. Admin nao passa por esta validacao.
+     */
+    CATALOGO_HOSTS_DE_AUDIO: z
+      .string()
+      .optional()
+      .default('musicas.radinho.online,importer.radinho.online,localhost,127.0.0.1'),
+    /**
      * O crachá de máquina para falar com o importador (`IMPORT_SERVICE_TOKEN`
      * em apps/importer/server.mjs). Sem ele a varredura não sobe: o importador
      * é fechado por conta do Firebase e um worker não tem conta.

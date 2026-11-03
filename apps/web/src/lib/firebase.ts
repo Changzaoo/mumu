@@ -501,9 +501,13 @@ export async function completeMagicLink(): Promise<UserCredential | null> {
 
 export async function logout(): Promise<void> {
   await sdkSeHouver();
-  if (!auth) return;
-  const { signOut } = await import('firebase/auth');
-  return signOut(auth);
+  if (auth) {
+    const { signOut } = await import('firebase/auth');
+    await signOut(auth);
+  }
+  // Dados da conta que saiu nao podem ficar para a proxima pessoa do aparelho.
+  const { limparEstadoDaConta } = await import('@/lib/sync/syncManager');
+  await limparEstadoDaConta();
 }
 
 /**

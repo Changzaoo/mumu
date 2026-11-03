@@ -87,3 +87,11 @@ export function marcar(url: string, estado: EstadoDaImportacao, titulo?: string)
   conhecidos.set(id, item);
   nuvem.push(id, item);
 }
+
+/**
+ * Logout: esquece o que se sabia da conta anterior. Sem isto o link ja "feito"
+ * por A continuava marcado e nunca virava registro para B.
+ */
+export function limpar(): void {
+  conhecidos.clear();
+}

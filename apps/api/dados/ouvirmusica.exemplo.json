@@ -1,0 +1,9 @@
+{
+  "fonte": "ouvirmusica.com.br",
+  "coletadoEm": "2026-11-03T12:00:00Z",
+  "musicas": [
+    { "artista": "Legião Urbana", "titulo": "Pais e Filhos", "genero": "Rock", "posicao": 1 },
+    { "artista": "Djavan", "titulo": "Oceano", "genero": "MPB", "posicao": 2 },
+    { "artista": "Marília Mendonça", "titulo": "Infiel", "genero": "Sertanejo", "posicao": 3 }
+  ]
+}

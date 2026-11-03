@@ -53,17 +53,17 @@ export const tracksService = {
     return toTrackDto(row, { likedSet });
   },
 
-  async getWaveform(id: string): Promise<WaveformDto> {
+  async getWaveform(id: string, userId?: string): Promise<WaveformDto> {
     const row = await tracksRepository.waveform(id);
-    if (!row) throw new NotFoundError('Track');
+    if (!row || !visivelPara(row, userId)) throw new NotFoundError('Track');
     if (!Array.isArray(row.waveform)) throw new NotFoundError('Waveform');
     // Stored by the audio pipeline as number[1024] — validated on write.
     return { trackId: row.id, peaks: row.waveform as number[] };
   },
 
-  async getLyrics(trackId: string): Promise<LyricsDto> {
+  async getLyrics(trackId: string, userId?: string): Promise<LyricsDto> {
     const row = await tracksRepository.lyrics(trackId);
-    if (!row) throw new NotFoundError('Lyrics');
+    if (!row || !visivelPara(row.track, userId)) throw new NotFoundError('Lyrics');
     return {
       trackId: row.trackId,
       synced: row.synced,

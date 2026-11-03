@@ -2,6 +2,7 @@ import type { IncomingMessage } from 'node:http';
 import { pinoHttp } from 'pino-http';
 import type { Request } from 'express';
 import { logger } from '../core/logger.js';
+import { urlSemSegredos } from './urlSemSegredos.js';
 
 export const httpLogger = pinoHttp({
   logger,
@@ -15,6 +16,9 @@ export const httpLogger = pinoHttp({
     return 'info';
   },
   serializers: {
-    req: (req: { method?: string; url?: string }) => ({ method: req.method, url: req.url }),
+    req: (req: { method?: string; url?: string }) => ({
+      method: req.method,
+      url: urlSemSegredos(req.url),
+    }),
   },
 });

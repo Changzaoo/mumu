@@ -74,8 +74,14 @@ export const socialRepository = {
     return new Set(rows.map((r) => r.commentId));
   },
 
-  trackExists(trackId: string): Promise<boolean> {
-    return prisma.track.findUnique({ where: { id: trackId }, select: { id: true } }).then(Boolean);
+  /** Existe E é visível ao usuário (pública ou enviada por ele). */
+  trackExists(trackId: string, userId: string): Promise<boolean> {
+    return prisma.track
+      .findFirst({
+        where: { id: trackId, OR: [{ isPublic: true }, { uploadedByUserId: userId }] },
+        select: { id: true },
+      })
+      .then(Boolean);
   },
 
   // ── feed ──

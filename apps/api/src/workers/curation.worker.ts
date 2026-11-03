@@ -41,9 +41,11 @@ import {
   lerTituloDeVideo,
   lerTituloDoAcervo,
   limparNomeDeArtista,
+  limparTitulo,
   promoverArtistaReal,
   separarArtistasGrudados,
   revisarGeneros as revisarGenerosDeFaixas,
+  semelhancaDeTitulo,
   type FaixaComparavel,
   type FaixaMinima,
   type Genre,
@@ -606,10 +608,7 @@ function docDoAcervo(linha: { id: string; data: unknown }): LibraryDoc {
     ref: {
       async update(patch) {
         dados = aplicarPatch(dados, patch);
-        await prisma.catalogTrack.update({
-          where: { id: linha.id },
-          data: { data: dados as object },
-        });
+        await gravarAcervoSemDna(linha.id, dados);
       },
       async delete() {
         /* o acervo não se apaga por aqui */
@@ -906,10 +905,7 @@ async function uniformizarTitulosDoAcervo(
     if (partes.label && !track.label) novoTrack.label = partes.label;
 
     try {
-      await prisma.catalogTrack.update({
-        where: { id: linha.id },
-        data: { data: { ...dados, track: novoTrack } as object },
-      });
+      await gravarAcervoSemDna(linha.id, { ...dados, track: novoTrack });
       dados.track = novoTrack; // as passagens seguintes leem já corrigido
       corrigidas += 1;
       log.info({ faixa: linha.id, de: track.title, para: partes.title }, 'título do acervo limpo');
@@ -921,8 +917,94 @@ async function uniformizarTitulosDoAcervo(
   return corrigidas;
 }
 
+/**
+ * Leitura do acervo SEM o vetor `dna` (39 KB por faixa — lido junto, a volta
+ * estourava a memória). `limiteIds` restringe a leitura quando preciso.
+ */
+async function acervoSemDna(): Promise<Array<{ id: string; data: unknown }>> {
+  return prisma.$queryRaw<Array<{ id: string; data: unknown }>>`
+    SELECT id, (data::jsonb - 'dna') AS data
+    FROM "CatalogTrack"
+    ORDER BY id ASC
+  `;
+}
+
+/**
+ * Grava uma entrada do acervo lida SEM o `dna`: regravá-la inteira APAGARIA o
+ * vetor. O banco devolve o que já tinha, a não ser que a própria mudança traga
+ * um vetor novo. `updatedAt` é carimbado à mão (SQL cru não passa pelo
+ * `@updatedAt` do Prisma) — é por ele que os aparelhos sabem que o acervo mudou.
+ */
+export async function gravarAcervoSemDna(id: string, dados: unknown): Promise<void> {
+  const json = JSON.stringify(dados);
+  await prisma.$executeRaw`
+    UPDATE "CatalogTrack"
+    SET data = CASE
+          WHEN ${json}::jsonb ? 'dna' OR NOT (data::jsonb ? 'dna') THEN ${json}::jsonb
+          ELSE ${json}::jsonb || jsonb_build_object('dna', data::jsonb -> 'dna')
+        END,
+        "updatedAt" = now()
+    WHERE id = ${id}
+  `;
+}
+
+/** Quantos ids por leitura do `dna` — ver `dnaDasCandidatas`. */
+const LOTE_DE_DNA = 200;
+
+/**
+ * Faixas que PODEM ser duplicata de outra pelo caminho do DNA. Esse caminho só
+ * fecha com título parecido (>= 0.86 por palavras em comum), então só quem tem
+ * um parceiro de título parecido precisa do vetor. Indexa por palavra do título
+ * limpo; palavra comuníssima (balde enorme) é ignorada.
+ */
+export function candidatasAoDna(faixas: Array<{ id: string; title: string }>): Set<string> {
+  const MAX_BALDE = 1500;
+  const limpos = faixas.map((f) => limparTitulo(f.title));
+  const baldes = new Map<string, number[]>();
+  limpos.forEach((t, i) => {
+    for (const p of new Set(t.split(' ').filter(Boolean))) {
+      const l = baldes.get(p);
+      if (l) l.push(i);
+      else baldes.set(p, [i]);
+    }
+  });
+  const ids = new Set<string>();
+  for (const lista of baldes.values()) {
+    if (lista.length < 2 || lista.length > MAX_BALDE) continue;
+    for (let x = 0; x < lista.length; x += 1) {
+      for (let y = x + 1; y < lista.length; y += 1) {
+        const a = lista[x]!;
+        const b = lista[y]!;
+        if (ids.has(faixas[a]!.id) && ids.has(faixas[b]!.id)) continue;
+        if (semelhancaDeTitulo(limpos[a]!, limpos[b]!) >= 0.86) {
+          ids.add(faixas[a]!.id);
+          ids.add(faixas[b]!.id);
+        }
+      }
+    }
+  }
+  return ids;
+}
+
+/** O `dna` só das candidatas, em lotes de no máximo `LOTE_DE_DNA` ids. */
+export async function dnaDasCandidatas(ids: string[]): Promise<Map<string, number[]>> {
+  const out = new Map<string, number[]>();
+  for (let i = 0; i < ids.length; i += LOTE_DE_DNA) {
+    const lote = ids.slice(i, i + LOTE_DE_DNA);
+    const linhas = await prisma.$queryRaw<Array<{ id: string; dna: unknown }>>`
+      SELECT id, data::jsonb -> 'dna' AS dna
+      FROM "CatalogTrack"
+      WHERE id = ANY(${lote}::text[]) AND data::jsonb ? 'dna'
+    `;
+    for (const l of linhas) {
+      if (Array.isArray(l.dna) && l.dna.length === EMBED_DIMS) out.set(l.id, l.dna as number[]);
+    }
+  }
+  return out;
+}
+
 async function curarAcervo(): Promise<number> {
-  const linhas = await prisma.catalogTrack.findMany();
+  const linhas = await acervoSemDna();
   if (linhas.length === 0) return 0;
 
   // O TÍTULO PRIMEIRO, como na biblioteca: gênero por artista, foto e
@@ -949,9 +1031,9 @@ async function curarAcervo(): Promise<number> {
     const dados = linha.data as { track?: Record<string, unknown> };
     if (!dados.track) return false;
     try {
-      await prisma.catalogTrack.update({
-        where: { id: mudanca.id },
-        data: { data: { ...dados, track: { ...dados.track, genre: mudanca.para } } },
+      await gravarAcervoSemDna(mudanca.id, {
+        ...dados,
+        track: { ...dados.track, genre: mudanca.para },
       });
       dados.track.genre = mudanca.para;
       const faixa = faixaById.get(mudanca.id);
@@ -1015,18 +1097,22 @@ async function fundirDuplicatasDoAcervo(
     const entry = (linha.data ?? {}) as LibraryEntry;
     const track = entry.track;
     if (!track || typeof track.title !== 'string' || !track.title.trim()) continue;
-    const dnaBruto = entry[DNA_FIELD];
     faixas.push({
       id: linha.id,
       title: track.title,
       artists: artistNames(track),
       durationMs: typeof track.durationMs === 'number' ? track.durationMs : null,
-      dna:
-        Array.isArray(dnaBruto) && dnaBruto.length === EMBED_DIMS ? (dnaBruto as number[]) : null,
+      dna: null,
       coverUrl: typeof track.coverUrl === 'string' ? track.coverUrl : null,
       album: albumDe(track).title || null,
       addedAt: typeof entry.addedAt === 'string' ? entry.addedAt : null,
     });
+  }
+  // O vetor só de quem pode casar pelo caminho do DNA, em lotes pequenos.
+  const candidatas = candidatasAoDna(faixas);
+  if (candidatas.size > 0) {
+    const vetores = await dnaDasCandidatas([...candidatas]);
+    for (const f of faixas) f.dna = vetores.get(f.id) ?? null;
   }
   const grupos = faxineiro(faixas).slice(0, MAX_FUSOES_BIBLIOTECA);
   if (grupos.length === 0) return 0;
@@ -1040,9 +1126,9 @@ async function fundirDuplicatasDoAcervo(
       const fica = linhas.find((l) => l.id === grupo.manter.id);
       if (fica) {
         const dados = (fica.data ?? {}) as Record<string, unknown>;
-        await prisma.catalogTrack.update({
-          where: { id: fica.id },
-          data: { data: { ...dados, duplicatasFundidas: grupo.remover.map((r) => r.title) } },
+        await gravarAcervoSemDna(fica.id, {
+          ...dados,
+          duplicatasFundidas: grupo.remover.map((r) => r.title),
         });
       }
       removidas += ids.length;

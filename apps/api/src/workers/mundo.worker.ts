@@ -47,6 +47,13 @@ import {
   type LinksDoArtista,
 } from './mundo.fontes.js';
 
+/**
+ * Folga para a transação: o banco pode estar do outro lado de um túnel (em
+ * desenvolvimento) ou ocupado; os 5 s padrão do Prisma já estouraram numa
+ * gravação de cinco linhas.
+ */
+const TRANSACAO = { timeout: 30_000, maxWait: 10_000 } as const;
+
 const log = logger.child({ worker: 'mundo' });
 
 const CHAVE_DO_ORCAMENTO = 'mundo.orcamento';
@@ -347,7 +354,7 @@ async function gravarLeitura(
         chamadas: { increment: gastas },
       },
     });
-  });
+  }, TRANSACAO);
 }
 
 /** O orçamento do dia, lembrado no banco para sobreviver a reinício. */

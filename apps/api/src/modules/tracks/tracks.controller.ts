@@ -11,12 +11,12 @@ export const tracksController = {
 
   getWaveform: asyncHandler(async (req, res) => {
     const { id } = req.valid.params as { id: string };
-    ok(res, await tracksService.getWaveform(id));
+    ok(res, await tracksService.getWaveform(id, req.user?.id));
   }),
 
   getLyrics: asyncHandler(async (req, res) => {
     const { id } = req.valid.params as { id: string };
-    ok(res, await tracksService.getLyrics(id));
+    ok(res, await tracksService.getLyrics(id, req.user?.id));
   }),
 
   download: asyncHandler(async (req, res) => {
