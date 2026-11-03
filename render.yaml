@@ -22,7 +22,7 @@ services:
     plan: free
     region: oregon
     dockerfilePath: ./apps/importer/Dockerfile
-    dockerContext: .
+    dockerContext: ./apps/importer
     healthCheckPath: /health
     autoDeploy: true
     envVars:

@@ -1,7 +1,8 @@
 # syntax=docker/dockerfile:1
 # O IMPORTADOR DE RESERVA NA NUVEM (Render, plano grátis) — ver render.yaml.
 #
-# Contexto de build = raiz do repositório (o render.yaml aponta `dockerContext: .`).
+# Contexto de build = apps/importer (o render.yaml aponta `dockerContext: ./apps/importer`):
+# o .dockerignore da raiz exclui apps/importer de propósito (é o contexto da API).
 # Sobe o mesmo server.mjs do importador, sem whisper local (TEMPO_LOCAL=0): o
 # relógio da letra vem pré-computado pela borda do GitHub, e o que esta cópia
 # faz é o que um navegador não consegue — busca no YouTube, /stream por yt-dlp,
@@ -18,11 +19,11 @@ RUN apt-get update \
   && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
-COPY apps/importer/package.json ./
+COPY package.json ./
 # Sem pnpm aqui de propósito (o importador não depende do workspace): npm resolve
 # as três dependências diretas do package.json.
 RUN npm install --omit=dev --no-audit --no-fund
-COPY apps/importer/ ./
+COPY . ./
 
 ENV NODE_ENV=production \
     HOST=0.0.0.0 \

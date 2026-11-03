@@ -1,0 +1,10 @@
+# Contexto do importador de reserva (render.yaml → dockerContext ./apps/importer).
+node_modules
+.bin
+blobs
+tempos
+__pycache__
+diagnostico
+*.log
+*.test.mjs
+cache-links-de-musica.json
