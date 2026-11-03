@@ -108,7 +108,8 @@ Serve para o app ter para onde ir quando o importador principal cai.
 4. Preencher os segredos da tabela acima.
 5. Esperar o primeiro deploy e conferir `/health`.
 
-> O serviço **ainda não foi criado**. Só a conta do dono pode criar.
+> Criado em 03/11/2026 pela API do Render (serviço `radinho-importador`, contexto docker
+> `./apps/importer`); `/health` responde 200 e `/blob/<id>?k=` redireciona para a borda.
 
 Comportamento do plano grátis: dorme após 15 min sem tráfego e acorda em
 cerca de 1 min. A primeira busca depois de dormir demora.
