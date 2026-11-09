@@ -179,6 +179,38 @@ describe('enxugar a faixa para a listagem', () => {
     expect(semNada.tocavel).toBe(false);
   });
 
+  it('SEM CÓPIA MAS COM ORIGEM EXTRAÍVEL também toca — não some da página do artista', () => {
+    // "Heart of Gold" (Shawn Mendes) só tinha o link do YouTube: a listagem a
+    // dava como muda, o app a escondia, e o artista aparecia com uma a menos.
+    // O player toca esse caso pela extração ao vivo do importador.
+    const soYoutube = semCamposDoServidor({
+      track: { id: 't', title: 'x' },
+      sourceUrl: 'https://www.youtube.com/watch?v=r7__5jmJ-tA',
+    }) as Objeto;
+    expect(soYoutube.tocavel).toBe(true);
+    expect('sourceUrl' in soYoutube).toBe(false); // o link continua só no clique
+
+    const youtuBe = semCamposDoServidor({
+      track: { id: 't', title: 'x' },
+      sourceUrl: 'https://youtu.be/abc',
+    }) as Objeto;
+    expect(youtuBe.tocavel).toBe(true);
+
+    // Origem de onde o importador NÃO extrai continua muda: card que promete
+    // som e não toca é pior que card ausente.
+    const outroSite = semCamposDoServidor({
+      track: { id: 't', title: 'x' },
+      sourceUrl: 'https://exemplo.com/musica.html',
+    }) as Objeto;
+    expect(outroSite.tocavel).toBe(false);
+
+    const lixo = semCamposDoServidor({
+      track: { id: 't', title: 'x' },
+      sourceUrl: 'não é url',
+    }) as Objeto;
+    expect(lixo.tocavel).toBe(false);
+  });
+
   it('o conteúdo sob demanda também sobrevive à republicação', () => {
     const anterior = {
       track: { id: 't', title: 'x', streamUrl: 'http://cofre/t' },

@@ -12,6 +12,7 @@
  */
 import { separarArtistasDaFaixa } from '@radinho/shared';
 import { prisma } from '../../infra/db/prisma.js';
+import { origemExtraivel } from './catalog.hosts.js';
 
 /** A entrada como o cliente a conhece — trafega inteira, sem tradução. */
 export type CatalogEntry = Record<string, unknown>;
@@ -158,7 +159,11 @@ const CAMPOS_SOB_DEMANDA_DA_FAIXA = ['streamUrl'] as const;
 function ehTocavel(entry: Obj): boolean {
   const track = entry.track;
   const stream = track && typeof track === 'object' ? (track as Obj).streamUrl : undefined;
-  return Boolean(entry.remoteUrl ?? stream);
+  if (entry.remoteUrl ?? stream) return true;
+  // SEM CÓPIA, MAS COM ORIGEM EXTRAÍVEL (YouTube, SoundCloud…): toca pela
+  // extração ao vivo do importador enquanto a varredura noturna não traz a
+  // cópia. Escondê-la deixava a página do artista incompleta.
+  return origemExtraivel(entry.sourceUrl);
 }
 
 type Obj = Record<string, unknown>;

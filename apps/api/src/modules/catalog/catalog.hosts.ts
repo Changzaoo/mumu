@@ -16,6 +16,19 @@ const HOSTS_DE_ORIGEM = [
   'vimeo.com',
 ];
 
+/**
+ * O link de ORIGEM é de um site de onde o importador extrai o áudio na hora
+ * (`/stream`)? Uma faixa assim TOCA mesmo sem cópia no cofre — o player já
+ * sabe esse caminho (ver `ensurePlayableSource` no app). Sem esta resposta, a
+ * listagem a declarava muda e o app a escondia: era assim que "Heart of Gold"
+ * sumia da página do Shawn Mendes, e outras 71 faixas junto.
+ */
+export function origemExtraivel(url: unknown): boolean {
+  if (typeof url !== 'string') return false;
+  const host = hostDe(url);
+  return host !== null && casa(host, HOSTS_DE_ORIGEM);
+}
+
 function hostDe(url: string | undefined): string | null {
   if (!url?.trim()) return null;
   try {

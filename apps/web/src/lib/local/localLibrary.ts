@@ -2754,9 +2754,44 @@ function chavesCompativeis(p: { base: string; balde: number }): string[] {
  */
 function fundirParaExibir(a: LibraryEntry, b: LibraryEntry): LibraryEntry {
   const vencedora = preferredEntry(a, b);
+  const perdedora = vencedora === a ? b : a;
   const explicita = Boolean(a.track.explicit) || Boolean(b.track.explicit);
-  if (explicita === Boolean(vencedora.track.explicit)) return vencedora;
-  return { ...vencedora, track: { ...vencedora.track, explicit: explicita } };
+  const artists = creditosSomados(vencedora.track.artists, perdedora.track.artists);
+  const mudouExplicito = explicita !== Boolean(vencedora.track.explicit);
+  if (!mudouExplicito && artists === vencedora.track.artists) return vencedora;
+  return { ...vencedora, track: { ...vencedora.track, explicit: explicita, artists } };
+}
+
+/**
+ * OS CRÉDITOS TAMBÉM SOBREVIVEM À FUSÃO.
+ *
+ * Duas cópias da mesma música chegam com créditos de tamanhos diferentes: a do
+ * clipe traz só "Mc IG", a do álbum traz "MC IG, MC Ryan SP, MC PH, DJ Oreia".
+ * A fusão escolhia UMA cópia, e os créditos da outra sumiam junto — a música
+ * desaparecia da página de todo artista que só a cópia perdedora citava. Era
+ * assim que artistas com várias músicas apareciam com menos do que tinham.
+ *
+ * A soma é por IDENTIDADE ("Mc IG" = "MC IG"), na ordem da vencedora e
+ * depois os que só a outra tinha. "Desconhecido" nunca entra ao lado de um nome
+ * real. Devolve o MESMO array quando não há o que acrescentar.
+ */
+function creditosSomados(
+  daVencedora: TrackDto['artists'],
+  daOutra: TrackDto['artists'],
+): TrackDto['artists'] {
+  const real = (n: string | undefined): boolean => Boolean(n?.trim()) && n !== 'Desconhecido';
+  const chave = (n: string): string => artistIdentityKey(n) || normName(n);
+  const base = daVencedora.some((x) => real(x.name)) ? daVencedora : [];
+  const vistos = new Set(base.map((x) => chave(x.name)));
+  const extras = daOutra.filter((x) => {
+    if (!real(x.name)) return false;
+    const k = chave(x.name);
+    if (vistos.has(k)) return false;
+    vistos.add(k);
+    return true;
+  });
+  if (extras.length === 0) return daVencedora;
+  return [...base, ...extras];
 }
 
 export function artistaEhDesconhecido(track: TrackDto): boolean {
