@@ -93,6 +93,24 @@ const RUIDO_PALAVRAS = [
   // "(Lyrics)" no plural passava batido: a regra pedia a palavra inteira e
   // "lyric" não é palavra inteira dentro de "lyrics".
   'lyrics',
+  // Selo de qualidade e de formato que o canal cola no fim: "Human Nature HQ",
+  // "Fame -- HQ Audio", "Coco Jambo videoclip", "Hollow Music Video",
+  // "Gloria! *WITH LYRICS*", "Step by Step - Subtitulado Español".
+  'hq',
+  'hq audio',
+  'high quality',
+  'best quality',
+  'music video',
+  'music videos',
+  'videoclip',
+  'video clip',
+  'with lyrics',
+  'subtitulado',
+  'subtitulado español',
+  'subtitulado espanol',
+  'legendado pt-br',
+  'legendado em pt-br',
+  'remastered audio',
 ];
 
 /**
@@ -206,13 +224,18 @@ function limparParenteses(texto: string): string {
  * "ALL THE WAY / Audio)". Achatado, o grupo inteiro é julgado de uma vez.
  */
 function achatarParenteses(texto: string): string {
-  let atual = texto;
-  for (let i = 0; i < 4; i += 1) {
-    const proximo = atual.replace(/\(([^()]*)\(([^()]*)\)([^()]*)\)/g, '($1$2$3)');
-    if (proximo === atual) break;
-    atual = proximo;
-  }
-  return atual;
+  // O grupo aninhado é JULGADO achatado, mas só some se for ruído. Devolvê-lo
+  // achatado estragava o que era do nome: "(Album Version (Explicit))" virava
+  // "(Album Version Explicit)" e "(Spider-Verse Remix (Spider-Man: …))" perdia
+  // o parêntese de dentro.
+  return texto.replace(
+    /\(([^()]*)\(([^()]*)\)([^()]*)\)/g,
+    (todo, a: string, b: string, c: string) => {
+      const dentro = `${a}${b}${c}`;
+      if (ehGravadora(dentro)) return ' ';
+      return RUIDO_NA_CHAVE.test(` ${chave(dentro)} `) ? ' ' : todo;
+    },
+  );
 }
 
 /**
@@ -241,6 +264,22 @@ function limpar(texto: string): string {
           // divisão "Música - Artista" de acontecer: o travessão exige espaço.
           .replace(/[\u{1F000}-\u{1FAFF}\u{2600}-\u{27BF}\u{2B00}-\u{2BFF}]/gu, ' ')
           .replace(/\u{FE0F}/gu, '')
+          // Junta de emoji (ZWJ) que sobra quando o emoji sai: fica invisível
+          // no nome e impede a faixa de casar com a cópia limpa.
+          .replace(/\u200B|\u200C|\u200D|\u2060/g, '')
+          // Comentário do canal depois de "||": "Triple Lavada (Letra) || si
+          // saben cómo soy…" — o que vem depois nunca é o nome da música.
+          .replace(/\s*\|\|.*$/, ' ')
+          // Moldura de enfeite: "*HQ*", "~With Lyrics~", "【HD】". Só na borda
+          // da palavra — "G-S**T" tem asterisco DENTRO e fica como está.
+          .replace(/[【】]/g, ' ')
+          // O asterisco só sai em PAR ("*HQ*"): sozinho ele é censura do
+          // próprio nome ("POPPIN' MY S***", "F* F* M*").
+          .replace(/(^|\s)\*+([^*\s][^*]*?)\*+(?=\s|$)/g, '$1$2')
+          .replace(/(^|\s)~+(?=\S)/g, '$1')
+          .replace(/(\S)~+(?=\s|$)/g, '$1')
+          // Extensão de arquivo que subiu junto: "… 2010.mp4", "(360p).avi".
+          .replace(/\.(?:avi|mp4|flv|webm|mkv|wmv|mpe?g|mov|mp3)\s*$/i, ' ')
           // Número da faixa no DVD ("… Faixa 6 - DVD Mundão Girou").
           .replace(/\s*\bfaixa\s+\d{1,3}\b/gi, ' '),
       ).replace(DESCRICAO_DO_CANAL, ' '),
@@ -255,7 +294,13 @@ function limpar(texto: string): string {
       .replace(/#[\p{L}\p{N}_]+/gu, ' ')
       // Resolução e taxa de quadros ("1080p", "60fps", "1080p60"), selo de
       // formato ("M/V") e divulgação ("Lançamento 2026") não são do nome.
-      .replace(/\b\d{3,4}p(?:\s*\d{2,3}\s*fps|\d{2,3})?\b/gi, ' ')
+      .replace(/(?:\bin\s+)?\b\d{3,4}p(?:\s*\d{2,3}\s*fps|\d{2,3})?\b/gi, ' ')
+      // Parêntese que ficou vazio depois que a resolução saiu: "(360p)" → "( )".
+      .replace(/[([]\s*[)\]]/g, ' ')
+      // "Vídeo" solto logo depois de um parêntese é o canal anunciando o
+      // formato ("Viver Tranquilo (Deejhay RB) Video"). Solto em outro lugar
+      // pode ser nome de música ("Vídeo Game"), por isso exige o parêntese.
+      .replace(/([)\]])\s*(?:lyric\s+)?v+[ií]+deo(?:\s+clipe)?(?:\s+oficial)?\s*$/i, '$1')
       .replace(/\b\d{2,3}\s*fps\b/gi, ' ')
       .replace(/\bm\s*\/\s*v\b/gi, ' ')
       .replace(/\s*[-–—|]?\s*\blan[çc]amento(?:\s+(?:19|20)\d{2})?\s*$/i, ' ')
@@ -608,7 +653,7 @@ function trechoEntreAspas(texto: string): string | null {
 // DENTRO de parêntese — "Starboy (with Daft Punk)" —, porque solto ele é parte
 // do nome de muita música ("Dancing with Myself").
 const CONVIDADOS =
-  /\s*(?:[-–—|([]?\s*\b(?:featuring|feat|ft|part|participacao|participação)\b\.?(?:\s+especial\b)?|[([]\s*with\b)\s*:?\s+(.+)$/i;
+  /\s*(?:[-–—|([]?\s*\b(?:featuring|feat|ft|part|participacao|participação)\b\.?(?:\s+especial\b)?|[([]\s*with\b(?!\s+(?:me|my|you|your|u|us|him|her|it|love|or|no|all|this|that|lyrics|subtitles)\b))\s*:?\s+(.+)$/i;
 
 /** Pedaço que COMEÇA pelo convidado: "Pipoco - Part. Melody". */
 const ABRE_COM_CONVIDADO =
@@ -937,11 +982,30 @@ const CREDITO_DE_DJ = /^(?:dj|mc)\s+\S/i;
 const PARENTESE_DE_CANAL =
   /\b(?:clipe|clip|video|videoclipe|audio|lyric|visualizer|oficial|official)\b/;
 
+/** "Desconhecido", "Vários intérpretes": marcador de quem não sabia, não é gente. */
+const SEM_ARTISTA =
+  /^(?:desconhecid[oa]|unknown(?: artist)?|v[aá]rios(?: (?:int[eé]rpretes|artistas))?|various artists)$/i;
+
+/** Palavra que o canal acrescenta ao nome do artista para se descrever. */
+const PALAVRA_DE_CANAL =
+  /^(?:official|oficial|youtube|channel|canal|vevo|tv|japan|korea|brasil|brazil|music|topic)$/;
+
+/** Apelido de quem subiu o vídeo ("catman916", "vzqk50nn"): conta, não artista. */
+function ehApelidoDeCanal(nome: string): boolean {
+  const n = nome.trim();
+  return /^[a-z0-9_.]{4,}$/.test(n) && /\d/.test(n) && /[a-z]/.test(n);
+}
+
 export function lerTituloDoAcervo(
   bruto: string,
   artistasAtuais: readonly string[],
 ): TituloDoAcervo | null {
-  const original = (bruto ?? '').trim();
+  // Aspas japonesas viram aspas comuns: `Stray Kids 『Hollow』 Music Video` é o
+  // mesmo desenho de `Stray Kids "RUN IT" M/V`.
+  const original = (bruto ?? '')
+    .replace(/[『「]/g, '“')
+    .replace(/[』」]/g, '”')
+    .trim();
   if (!original) return null;
 
   // Artista gravado como lista ("Purple Disco Machine, Kungs") vira nomes.
@@ -950,7 +1014,10 @@ export function lerTituloDoAcervo(
       // Respeita banda com vírgula no nome ("Tyler, The Creator").
       .flatMap((a) => quebrarListaDeNomes(a))
       .map((a) => a.trim())
-      .filter(Boolean),
+      .filter(Boolean)
+      // "Desconhecido" não é alguém: se o título nomear quem canta, o marcador
+      // sai em vez de ficar ao lado ("Desconhecido, Rick Astley").
+      .filter((a) => !SEM_ARTISTA.test(a)),
   );
   const chaves = conhecidos.map((a) => chave(a)).filter(Boolean);
   const ehConhecido = (texto: string): boolean => {
@@ -976,7 +1043,7 @@ export function lerTituloDoAcervo(
     // Artista entre aspas ("“Panamera”") é a música com certeza — basta a lista.
     // Um nome só no título basta ("Luiz Melodia" / "“Pérola Negra”"), desde que
     // o título não tenha aspas próprias nem pareça frase.
-    (/^["“”].+["“”]$/.test(unicoArtista)
+    (/^["“”][^"“”]{2,}["“”]/.test(unicoArtista)
       ? nomesNoTitulo.length >= 2 ||
         (nomesNoTitulo.length === 1 &&
           !/["“”]/.test(original) &&
@@ -988,6 +1055,11 @@ export function lerTituloDoAcervo(
           nomesNoTitulo.every(ehCredito) &&
           // Nome de MC/DJ é curto; "DJ Got Us Fallin' in Love" é música.
           nomesNoTitulo.every((n) => n.split(/\s+/).length <= 4) &&
+          // …e o "artista" tem de parecer MÚSICA: frase de duas palavras ou
+          // mais, ou tudo em maiúsculas. "MC Paiva" / "Fepache" é um MC e um
+          // produtor — destrocar ali inventava a música "Fepache".
+          (unicoArtista.split(/\s+/).length >= 2 ||
+            (unicoArtista.length >= 4 && unicoArtista === unicoArtista.toUpperCase())) &&
           !/\b(?:feat|ft)\b/i.test(original) &&
           !/["“”]/.test(original))) &&
     !ehCredito(unicoArtista) &&
@@ -996,7 +1068,10 @@ export function lerTituloDoAcervo(
     // Produtora/canal no campo do artista não é a música ("GR6 EXPLODE").
     !/\b(?:gr6|kondzilla|love funk|explode|records|filmes|playlist)\b/i.test(unicoArtista)
   ) {
-    const musica = unicoArtista.replace(/^["“”](.+)["“”]$/, '$1').trim();
+    const musica = unicoArtista
+      .replace(/["“”]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
     const djs: string[] = [];
     original.replace(PARENTESES, (todo, dentro: string) => {
       if (/^\s*dj\s/i.test(dentro)) djs.push(...separarNomes(dentro));
@@ -1013,7 +1088,7 @@ export function lerTituloDoAcervo(
             .replace(/\bprod\.?\s+/gi, '  '),
         )
         .flatMap((n) => n.split(/\s{2,}|\s+-\s+/))
-        .map((n) => n.trim())
+        .map((n) => n.replace(/^[\s\-–—]+|[\s\-–—]+$/g, ''))
         .filter((n) => n.length >= 2),
     );
     if (musica.length >= 2) return { title: musica, artists: artistas, label };
@@ -1115,6 +1190,16 @@ export function lerTituloDoAcervo(
       nomesFora.every((n) => !/\d/.test(n) && n.split(/\s+/).length <= 4);
     if (!sobra || SO_RUIDO.test(sobra) || parecemNomes) {
       texto = citado;
+      // `Stray Kids "Hollow"` com o artista gravado como "Stray Kids Japan
+      // Official YouTube": o título já diz o nome certo, e o que sobra no
+      // cadastro é só o canal se descrevendo.
+      if (!sobra && fora && conhecidos.length === 1) {
+        const k = chave(conhecidos[0]!);
+        const rabo = k.startsWith(`${fora} `) ? k.slice(fora.length + 1).split(' ') : [];
+        if (rabo.length > 0 && rabo.every((p) => PALAVRA_DE_CANAL.test(p))) {
+          conhecidos[0] = foraBruto;
+        }
+      }
       if (sobra && parecemNomes) extras.push(...nomesFora);
       if (convidadosFora) extras.push(convidadosFora[1]!.trim());
     }
@@ -1160,8 +1245,20 @@ export function lerTituloDoAcervo(
       .trim();
   for (const c of [...convidados, ...extras.flatMap((e) => separarNomes(e))].map(semParentese)) {
     if (!c) continue;
+    // Hashtag e sigla de formato não são gente: `"DIÑERO" - #OBGLÉTRAP`,
+    // `EP "CAINDO EM SI"`.
+    if (/^#/.test(c) || /^(?:ep|lp|album|álbum|single|dvd|cd)$/i.test(c)) continue;
     if (!ehGravadora(c) && !nomes.some((n) => chave(n) === chave(c))) nomes.push(c);
   }
+  // O título nomeou quem canta e o que havia era só o apelido de quem subiu o
+  // vídeo ("catman916"): o apelido sai. Só quando ele é o ÚNICO que havia.
+  if (nomes.length >= 2 && conhecidos.length === 1 && ehApelidoDeCanal(conhecidos[0]!)) {
+    nomes.shift();
+  }
+  // Nunca devolve faixa sem ninguém: quando o título não nomeou ninguém, fica
+  // o que havia (inclusive o marcador "Desconhecido").
+  if (nomes.length === 0) nomes.push(...artistasAtuais.map((a) => a.trim()).filter(Boolean));
+  if (nomes.length === 0) return null;
 
   // Aspas que embrulham o título inteiro não são parte do nome.
   const title = titulo

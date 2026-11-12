@@ -188,3 +188,97 @@ describe('lerTituloDoAcervo — destroca não confunde música nem produtora', (
     ).toEqual(['Ana Castela', 'Melody']);
   });
 });
+
+/**
+ * ACERVO DE 12/11/2026 — o relato: "os títulos tão zoados, precisa saber
+ * diferenciar o título e quem canta". Casos copiados da listagem pública.
+ */
+describe('lerTituloDoAcervo — acervo de 12/11/2026', () => {
+  const ler = (t: string, a: string[]) => lerTituloDoAcervo(t, a);
+
+  it('"(With Me Baby)" é parte do nome, não convidado', () => {
+    expect(ler('Come Home (With Me Baby)', ['Dead or Alive'])).toBeNull();
+    expect(ler('Quit Playing Games (With My Heart)', ['Backstreet Boys'])).toBeNull();
+    expect(ler('Stairway to Heaven [With Jason Bonham]', ['Heart'])?.artists).toEqual([
+      'Heart',
+      'Jason Bonham',
+    ]);
+  });
+
+  it('parêntese aninhado que é do nome fica inteiro', () => {
+    expect(ler('Fire (Album Version (Explicit))', ['50 Cent'])).toBeNull();
+    expect(ler("LYIN' (LIVE FROM COACHELLA (Weekend II) / Audio)", ['Justin Bieber'])?.title).toBe(
+      "LYIN'",
+    );
+  });
+
+  it('nunca devolve faixa sem artista nem inventa a música "Fepache"', () => {
+    expect(ler('MC Paiva', ['Fepache'])).toBeNull();
+    expect(ler('MC Meno K (DJ Japa NK)', ['EU JA SEI O QUE FAZER PRA ESQUECER DE VOCÊ'])).toEqual({
+      title: 'EU JA SEI O QUE FAZER PRA ESQUECER DE VOCÊ',
+      artists: ['MC Meno K', 'DJ Japa NK'],
+      label: null,
+    });
+  });
+
+  it('música entre aspas no campo do artista volta para o título', () => {
+    expect(ler('WizKid -', ['"Essence" (Remix)'])).toMatchObject({
+      title: 'Essence (Remix)',
+      artists: ['WizKid'],
+    });
+  });
+
+  it('"Desconhecido" e apelido de canal saem quando o título diz quem canta', () => {
+    expect(ler('Rick Astley "Move Right Out"', ['Desconhecido'])).toMatchObject({
+      title: 'Move Right Out',
+      artists: ['Rick Astley'],
+    });
+    expect(ler('"I\'ll Follow the Sun" The Beatles', ['catman916'])).toMatchObject({
+      title: "I'll Follow the Sun",
+      artists: ['The Beatles'],
+    });
+    expect(ler('7 Seconds', ['Desconhecido', 'Neneh Cherry'])?.artists).toEqual(['Neneh Cherry']);
+    // Sem ninguém nomeado, o marcador fica: melhor "Desconhecido" que vazio.
+    expect(ler('Sunrise Avenue Fairytale Gone Bad Video Clip', ['Desconhecido'])?.artists).toEqual([
+      'Desconhecido',
+    ]);
+  });
+
+  it('canal que se descreve no nome do artista vira o artista', () => {
+    expect(
+      ler('Stray Kids 『Hollow』 Music Video', ['Stray Kids Japan Official YouTube']),
+    ).toMatchObject({ title: 'Hollow', artists: ['Stray Kids'] });
+  });
+
+  it('hashtag e "EP" não são gente', () => {
+    expect(ler('"DIÑERO" - #OBGLÉTRAP', ['JÉ'])).toMatchObject({
+      title: 'DIÑERO',
+      artists: ['JÉ'],
+    });
+    expect(ler('EP "CAINDO EM SI"', ['Derxan'])?.artists).toEqual(['Derxan']);
+  });
+
+  it('selo de qualidade, extensão de arquivo e comentário do canal saem', () => {
+    expect(ler('Human Nature HQ', ['Michael Jackson'])?.title).toBe('Human Nature');
+    expect(ler('Manboy *HQ*', ['Eric Saade'])?.title).toBe('Manboy');
+    expect(ler('Gloria! *WITH LYRICS*', ['Van Morrison'])?.title).toBe('Gloria!');
+    expect(ler('Coco Jambo videoclip', ['Mr. President'])?.title).toBe('Coco Jambo');
+    expect(ler('Losing My Religion Legendado PT-BR', ['R.E.M.'])?.title).toBe('Losing My Religion');
+    expect(ler('Go your own way Live 1979 (360p).avi', ['Fleetwood Mac'])?.title).toBe(
+      'Go your own way Live 1979',
+    );
+    expect(ler('Viver Tranquilo (Deejhay RB) Video', ['MC Tuto'])?.title).toBe(
+      'Viver Tranquilo (Deejhay RB)',
+    );
+    expect(
+      ler("Triple Lavada (Letra) || si saben cómo soy, ¿pa' qué me invitan? 🤠", ['Marinosaurio'])
+        ?.title,
+    ).toBe('Triple Lavada');
+  });
+
+  it('asterisco de censura é do nome', () => {
+    expect(ler('POPPIN’ MY S***', ['Justin Bieber', 'Hurricane Chris'])).toBeNull();
+    expect(ler('F* F* M*', ['Filipe Ret', 'Dallass'])).toBeNull();
+    expect(ler('Video Games', ['Lana Del Rey'])).toBeNull();
+  });
+});

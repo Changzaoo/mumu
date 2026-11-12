@@ -38,6 +38,7 @@ import {
   EMBED_DIMS,
   forcarGeneroReal,
   generoDoArtista,
+  corrigirTituloConhecido,
   lerTituloDeVideo,
   lerTituloDoAcervo,
   limparNomeDeArtista,
@@ -903,19 +904,32 @@ async function uniformizarTitulos(docs: LibraryDoc[]): Promise<number> {
  * REVERSÍVEL: a mudança guarda `tituloOriginal` e `artistasOriginais` na própria
  * faixa, e quem já tem essa marca não é reescrito de novo.
  *
- * DESLIGADO POR PADRÃO: reescreve mais de mil faixas de uma vez. Liga com
- * `CURADORIA_TITULOS_ACERVO=1` depois de conferir a prévia.
+ * LIGADO POR PADRÃO desde 12/11/2026. Nasceu desligado ("reescreve mais de mil
+ * faixas de uma vez, liga depois de conferir a prévia"), rodou uma vez e voltou
+ * a ficar desligado: o que entrou depois ficou sujo, e o acervo chegou a ~400
+ * títulos tortos à vista de todo mundo. A prévia foi
+ * conferida nesse dia contra a listagem pública (6.094 faixas: 223 pela regra,
+ * 175 pela tabela conferida à mão). `CURADORIA_TITULOS_ACERVO=0` desliga.
+ *
+ * A TABELA CONFERIDA À MÃO (`corrigirTituloConhecido`) passa na frente da
+ * regra e vale mesmo para faixa que a regra já tinha reescrito — nesse caso o
+ * `tituloOriginal` mais antigo é o que fica guardado.
  */
 async function uniformizarTitulosDoAcervo(
   linhas: { id: string; data: unknown }[],
 ): Promise<number> {
-  if (process.env.CURADORIA_TITULOS_ACERVO !== '1') return 0;
+  if (process.env.CURADORIA_TITULOS_ACERVO === '0') return 0;
   let corrigidas = 0;
   for (const linha of linhas) {
     const dados = linha.data as { track?: Record<string, unknown> };
     const track = dados.track;
-    if (!track || typeof track.title !== 'string' || track.tituloOriginal) continue;
-    const partes = lerTituloDoAcervo(track.title, artistNames(track as LibraryTrack));
+    if (!track || typeof track.title !== 'string') continue;
+    const atuais = artistNames(track as LibraryTrack);
+    const conferida = corrigirTituloConhecido(track.title, atuais);
+    if (!conferida && track.tituloOriginal) continue;
+    const partes = conferida
+      ? { ...conferida, label: null as string | null }
+      : lerTituloDoAcervo(track.title, atuais);
     if (!partes) continue;
 
     const slug = (name: string): string =>
@@ -941,8 +955,8 @@ async function uniformizarTitulosDoAcervo(
       ...track,
       title: partes.title,
       artists: artistas,
-      tituloOriginal: track.title,
-      artistasOriginais: track.artists ?? [],
+      tituloOriginal: track.tituloOriginal ?? track.title,
+      artistasOriginais: track.artistasOriginais ?? track.artists ?? [],
     };
     if (partes.label && !track.label) novoTrack.label = partes.label;
 
