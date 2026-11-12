@@ -68,6 +68,7 @@ import { soMusicas } from './ehMusica.mjs';
 import { analisarLinkDeMusica } from './linkDeMusica.mjs';
 import { criarResolvedorDeMusica, NaoAchei } from './resolverDeMusica.mjs';
 import { criarCentralDeTransmissoes } from './transmissaoCompartilhada.mjs';
+import { criarFilaDeEspera } from './filaDeEspera.mjs';
 import {
   ARGS_DE_SEGURANCA,
   criarLimiteDeImport,
@@ -1381,6 +1382,14 @@ const MAX_RECONSTRUCOES = Number(process.env.MAX_RECONSTRUCOES ?? 3);
 let reconstrucoesAtivas = 0;
 /** Uma faixa pedida por dois ouvintes ao mesmo tempo extrai UMA vez só. */
 const reconstruindo = new Map();
+/**
+ * Quem chegou com as vagas ocupadas ESPERA, em vez de ser esquecido (ver
+ * filaDeEspera.mjs: em 12/11/2026 faixas ficavam em 503 "reconstruindo" sem
+ * ninguém reconstruindo). Guarda a meta do blob, que é o que a extração usa.
+ */
+const esperandoReconstrucao = criarFilaDeEspera({
+  teto: Number(process.env.MAX_FILA_RECONSTRUCAO ?? 50),
+});
 
 /**
  * Teto de tempo de UMA reconstrução. Sem ele, um yt-dlp que trava na rede (o
@@ -1449,7 +1458,15 @@ async function reconstruirBlob(id, meta) {
   }
   const emAndamento = reconstruindo.get(id);
   if (emAndamento) return emAndamento;
-  if (reconstrucoesAtivas >= MAX_RECONSTRUCOES) return 'ocupado';
+  if (reconstrucoesAtivas >= MAX_RECONSTRUCOES) {
+    const jaEsperava = esperandoReconstrucao.tem(id);
+    esperandoReconstrucao.entrar(id, meta);
+    if (!jaEsperava) {
+      log('reconstrução na fila de espera:', id, `(${esperandoReconstrucao.tamanho} esperando)`);
+    }
+    return 'ocupado';
+  }
+  esperandoReconstrucao.sair(id);
 
   reconstrucoesAtivas += 1;
   const parcial = `${blobPath(id)}.parcial`;
@@ -1595,10 +1612,32 @@ async function reconstruirBlob(id, meta) {
       reconstrucoesAtivas -= 1;
       reconstruindo.delete(id);
       void rm(parcial, { force: true }).catch(() => undefined);
+      // A vaga abriu: o próximo da fila entra sozinho, sem depender de alguém
+      // pedir a mesma faixa de novo.
+      const proximo = esperandoReconstrucao.proximo();
+      if (proximo) void reconstruirEAnotar(proximo.id, proximo.valor);
     });
 
   reconstruindo.set(id, tarefa);
   return tarefa;
+}
+
+/**
+ * Reconstrói e ANOTA O VEREDITO — o mesmo desfecho para o pedido que veio do
+ * ouvinte e para o que saiu da fila de espera.
+ *
+ * Só `false` é morte (a extração rodou e falhou). 'ocupado', 'estourou' e
+ * 'sem-espaco' são "tente de novo" — anotá-los como morte faria o app
+ * descartar um link de capacidade vivo, que ninguém consegue reemitir.
+ */
+function reconstruirEAnotar(id, meta) {
+  return reconstruirBlob(id, meta)
+    .then((r) => {
+      if (r === false) ultimaReconstrucao.set(id, { morta: true, em: Date.now() });
+      else if (r === true) ultimaReconstrucao.delete(id);
+      return r;
+    })
+    .catch(() => undefined);
 }
 
 async function sweepBlobStore({ liberar = 0 } = {}) {
@@ -3570,16 +3609,7 @@ async function main() {
             return;
           }
           if (meta.sourceUrl) {
-            void reconstruirBlob(id, meta)
-              .then((r) => {
-                // Só `false` é morte (a extração rodou e falhou). 'ocupado',
-                // 'estourou' e 'sem-espaco' são "tente de novo" — anotá-los
-                // como morte faria o app descartar um link de capacidade vivo,
-                // que ninguém consegue reemitir.
-                if (r === false) ultimaReconstrucao.set(id, { morta: true, em: Date.now() });
-                else if (r === true) ultimaReconstrucao.delete(id);
-              })
-              .catch(() => undefined);
+            void reconstruirEAnotar(id, meta);
           }
           // 503 ≠ 404, DE PROPÓSITO. O app trata 404/403 como MORTE da cópia e
           // apaga o `remoteUrl` da faixa. "Estou refazendo" não é morte.
