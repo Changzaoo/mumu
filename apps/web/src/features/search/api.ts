@@ -91,7 +91,10 @@ export function useRecentSearches(): RecentSearches {
   const addRecent = useCallback((term: string) => {
     const value = term.trim();
     if (!value) return;
-    const next = [value, ...readRecent().filter((t) => t.toLowerCase() !== value.toLowerCase())];
+    // Quem digita devagar deixava um rastro: "Pedro", "Pedro pedr", "Pedro pedro".
+    // O termo novo engole os anteriores que são só o começo dele.
+    const chave = value.toLowerCase();
+    const next = [value, ...readRecent().filter((t) => !chave.startsWith(t.trim().toLowerCase()))];
     writeRecent(next.slice(0, RECENT_MAX));
   }, []);
 

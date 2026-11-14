@@ -188,10 +188,22 @@ const PARTICIPACAO =
   /\s*[([]?\s*\b(?:feat(?:\.|uring)?|ft\.?|part(?:\.|icipa[cç][aã]o(?:\s+especial)?)?|com|with)\b\.?\s*/gi;
 
 /**
+ * O que NÃO pode vir logo depois de um " vs "/" x " para ele ser separador.
+ * "Mc PP da VS & MC Ryan SP", "MC PP da VS e MC Ryan SP" e "MC PP da VS (DJ X)"
+ * têm um "VS" que é o fim do nome do time, e o "&"/"e"/"x"/"(" que vem depois é
+ * o separador de verdade. "vs" de encontro entre artistas ("Alok vs Sevenn")
+ * tem um NOME logo depois.
+ */
+export const DEPOIS_DE_VS = String.raw`(?!\s|[&+,;(⁣]|(?:e|and|x|vs|com|feat|ft|part)\b)`; // ⁣ = marcador de parêntese protegido
+
+/**
  * Separadores seguros: vírgula, "&", "+", ";", " x ", " vs ". "x" e "vs" exigem
  * espaço dos DOIS lados — "MC PP da VS" termina em "VS" e não pode ser cortado.
  */
-const SEPARADOR_SEGURO = /\s*(?:,|&|\+|;)\s*|\s+(?:x|vs\.?)\s+/gi;
+const SEPARADOR_SEGURO = new RegExp(
+  String.raw`\s*(?:,|&|\+|;)\s*|\s+(?:x|vs\.?)\s+${DEPOIS_DE_VS}`,
+  'gi',
+);
 
 /** "A e B", "A and B" — só separa com prova (ver `deveSepararConjuncao`). */
 const CONJUNCAO = /\s+(?:e|and)\s+/gi;

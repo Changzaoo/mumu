@@ -403,7 +403,11 @@ export function NowPlaying() {
                   transport + the "Letra" toggle below stay reachable). */}
               <div
                 className={cn(
-                  'relative overflow-hidden rounded-xl bg-fg/6 shadow-2xl',
+                  'relative overflow-hidden rounded-xl shadow-2xl',
+                  // Capa clara atrás da letra apagava as linhas (visto no moto g34:
+                  // só a linha cantada dava para ler). Um véu da cor do fundo devolve
+                  // o contraste nos dois temas, sem desfoque — que o aparelho fraco paga caro.
+                  lyricsOpen && !visualizer && !clipeAtivo ? 'bg-bg/55' : 'bg-fg/6',
                   // O clipe ocupa o quadro da capa, no mesmo tamanho: a tela
                   // não pula ao entrar nem ao sair do modo.
                   lyricsOpen && !visualizer && !clipeAtivo

@@ -30,7 +30,7 @@
  * melhor, porque recebe campos já separados em vez de uma frase inteira.
  */
 import { acharGravadora, canalNaoEhGente, ehGravadora, ehSelo } from './gravadoraComoArtista.js';
-import { aparar, ehGrupo, partir } from './creditosDeArtista.js';
+import { aparar, DEPOIS_DE_VS, ehGrupo, partir } from './creditosDeArtista.js';
 
 /**
  * Ruído que canal põe no nome do vídeo e que não é parte de nada.
@@ -382,8 +382,13 @@ function separarNomesDaLista(texto: string): string[] {
   return separarNomesSimples(texto);
 }
 
-const SEPARADOR_DE_NOMES =
-  /\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bpart\.|\bparticipa[cç][aã]o\b|\bcom\b|\be\b|\band\b)\s*|\s+(?:vs\.?|x)\s+|\s+\/\s+/i;
+const SEPARADOR_DE_NOMES = new RegExp(
+  String.raw`\s*(?:,|&|\+|\bfeat\.?\b|\bft\.?\b|\bpart\.|\bparticipa[cç][aã]o\b|\bcom\b|\be\b|\band\b)\s*|` +
+    // "vs"/"x" só separam com um NOME depois: "Mc PP da VS & MC Ryan SP" tem um
+    // "VS" que fecha o nome do time (ver DEPOIS_DE_VS).
+    String.raw`\s+(?:vs\.?|x)\s+${DEPOIS_DE_VS}|\s+\/\s+`,
+  'i',
+);
 const SEPARADOR_DE_NOMES_G = new RegExp(SEPARADOR_DE_NOMES.source, 'gi');
 
 function separarNomesSimples(texto: string): string[] {
@@ -699,6 +704,22 @@ function ehCreditoDeFunk(nome: string): boolean {
 }
 
 /**
+ * "Racionais MC's", "Racionais Mcs", "Pavilhão 9 MCs": nome de GRUPO que acaba
+ * em "MC's"/"MCs". É pista suficiente para saber que o pedaço é quem canta, sem
+ * tabela de grupos e sem o canal confirmar. Curto (até três palavras) e sem
+ * artigo ou preposição antes do "MCs": "Rap dos MCs", "Funk dos MCs" e "Hino
+ * das MCs" são nome de música.
+ */
+function ehGrupoDeMcs(texto: string): boolean {
+  const palavras = texto.trim().split(/\s+/);
+  if (palavras.length < 2 || palavras.length > 3) return false;
+  if (!/^mc['’`´]?s$/i.test(palavras[palavras.length - 1]!)) return false;
+  const anterior = palavras[palavras.length - 2]!.toLowerCase();
+  if (/^(?:d[aeo]s?|e|os|as|o|a|para|pra|dos)$/.test(anterior)) return false;
+  return !/^(?:rap|funk|hino|hinos|o|a|os|as|um|uma|samba|trap)$/i.test(palavras[0]!);
+}
+
+/**
  * O pedaço é uma LISTA DE CANTORES, não o nome de uma música? Dois créditos de
  * MC/DJ ("MC Tuto, Meno K, FR da Norte e MC Joãozinho VT"), ou um só e curto
  * ("MC Kevin"). "DJ Got Us Fallin' in Love" é música: um crédito só, e longo.
@@ -878,7 +899,7 @@ export function lerTituloDeVideo(bruto: string, canal?: string | null): PartesDo
       const listaNaDireita = ehListaDeNomes(tirarDjsEntreParenteses(b)) && !ehListaDeNomes(a);
       // Dupla/grupo CONHECIDO de um lado só ("Liberdade Provisória - Henrique e
       // Juliano") decide sem precisar do canal.
-      const grupoNaDireita = ehGrupo(b) && !ehGrupo(a);
+      const grupoNaDireita = (ehGrupo(b) && !ehGrupo(a)) || (ehGrupoDeMcs(b) && !ehGrupoDeMcs(a));
       const invertido = canta
         ? (canta(b) && !canta(a)) || (!canta(a) && !canta(b) && (listaNaDireita || grupoNaDireita))
         : listaNaDireita || grupoNaDireita;
@@ -1037,6 +1058,26 @@ export function lerTituloDoAcervo(
   const nomesNoTitulo = separarNomes(semParentesesDoTitulo);
   const ehCredito = (n: string): boolean => /^(?:mc'?s?|dj)\s/i.test(n.replace(/[’']/g, "'"));
   const unicoArtista = artistasAtuais.length === 1 ? artistasAtuais[0]!.trim() : '';
+  // 0a) GRUPO DE MCs NO TÍTULO, música no artista: "Racionais Mcs" / "Voz ativa".
+  //     Sem lista de créditos para provar, a pista é o próprio nome do grupo
+  //     ("…MC's"). Só destroca quando o "artista" não é grupo, nem crédito, nem
+  //     lista, nem selo — senão é gente de verdade e fica como está.
+  if (
+    unicoArtista &&
+    !/^desconhecido$/i.test(unicoArtista) &&
+    ehGrupoDeMcs(original) &&
+    !/["“”]/.test(original) &&
+    !ehGrupoDeMcs(unicoArtista) &&
+    !ehCredito(unicoArtista) &&
+    !/,/.test(unicoArtista) &&
+    !ehGravadora(unicoArtista)
+  ) {
+    const musica = unicoArtista
+      .replace(/["“”]/g, '')
+      .replace(/\s{2,}/g, ' ')
+      .trim();
+    if (musica.length >= 2) return { title: musica, artists: [original], label: null };
+  }
   if (
     unicoArtista &&
     !/^desconhecido$/i.test(unicoArtista) &&
@@ -1089,7 +1130,11 @@ export function lerTituloDoAcervo(
         )
         .flatMap((n) => n.split(/\s{2,}|\s+-\s+/))
         .map((n) => n.replace(/^[\s\-–—]+|[\s\-–—]+$/g, ''))
-        .filter((n) => n.length >= 2),
+        .filter((n) => n.length >= 2)
+        // "PAM PAM - MC Cebezinho, MC Tuto, MC Ryan SP": o título já nomeia a
+        // música antes do travessão, e o corte por " - " a deixava entrar
+        // como se fosse um cantor.
+        .filter((n) => chave(n) !== chave(musica)),
     );
     if (musica.length >= 2) return { title: musica, artists: artistas, label };
   }
@@ -1218,7 +1263,31 @@ export function lerTituloDoAcervo(
     const [esquerda, ...resto] = partes;
     const direita = resto.join(' - ');
     const kDireita = chave(direita);
-    if (ehConhecido(esquerda!) && !ehConhecido(direita)) {
+    // "PAM PAM - MC Cebezinho, MC Tuto, MC Ryan SP (DJ Oreia)": o formato é
+    // "Música - Artistas" e quem leu o vídeo tomou o lado esquerdo por artista
+    // (`artistFromVideo` só olha o primeiro travessão). Lista de créditos de
+    // MC/DJ nunca é nome de música: o lado esquerdo é a música, a lista canta,
+    // e o "artista" gravado era a música (sai). Exige dois nomes ou mais à
+    // direita: "Matuê - MC Kevin" é artista e convidado, não música e lista.
+    const direitaSemDj = tirarDjsEntreParenteses(direita);
+    if (
+      resto.length === 1 &&
+      !ehListaDeCreditos(esquerda!) &&
+      separarNomes(direitaSemDj).length >= 2 &&
+      ehListaDeCreditos(direitaSemDj)
+    ) {
+      const cantores = [
+        ...separarNomes(direitaSemDj),
+        ...separarNomes(direita.replace(direitaSemDj, ' ').replace(/[()]/g, ' ')).filter((n) =>
+          /^djs?\s/i.test(n),
+        ),
+      ];
+      for (let i = conhecidos.length - 1; i >= 0; i -= 1) {
+        if (chave(conhecidos[i]!) === chave(esquerda!)) conhecidos.splice(i, 1);
+      }
+      extras.push(...cantores);
+      texto = esquerda!;
+    } else if (ehConhecido(esquerda!) && !ehConhecido(direita)) {
       texto = direita;
     } else if (ehConhecido(direita) && !ehConhecido(esquerda!)) {
       texto = esquerda!;

@@ -277,6 +277,33 @@ describe('lerTituloDeVideo — regressões vistas em produção', () => {
     expect(lerTituloDeVideo('Alok vs. Sevenn - BYOB').artists).toEqual(['Alok', 'Sevenn']);
   });
 
+  it('"VS" no fim do nome sobrevive a "&", "e" e "x" logo depois (14/11)', () => {
+    expect(lerTituloDeVideo('Atividade (Ao Vivo) - Mc PP da VS & MC Ryan SP').artists).toEqual([
+      'Mc PP da VS',
+      'MC Ryan SP',
+    ]);
+    expect(lerTituloDeVideo('Atividade - MC PP da VS e MC Ryan SP').artists).toEqual([
+      'MC PP da VS',
+      'MC Ryan SP',
+    ]);
+  });
+
+  it('"Música - Grupo de MCs": "Voz Ativa - Racionais Mcs" não troca os campos (14/11)', () => {
+    // Sem lista de 3 nomes nem grupo na tabela, o lado direito virava a
+    // música. Nome que termina em "MC's"/"MCs" é grupo, e o canal não precisa
+    // confirmar.
+    expect(lerTituloDeVideo("Voz Ativa - Racionais MC's")).toMatchObject({
+      title: 'Voz Ativa',
+      artists: ["Racionais MC's"],
+    });
+    expect(lerTituloDeVideo('Voz ativa - Racionais Mcs')).toMatchObject({
+      title: 'Voz ativa',
+      artists: ['Racionais Mcs'],
+    });
+    // Música com "MCs" no nome continua sendo música.
+    expect(lerTituloDeVideo('Pavilhão 9 - Rap dos MCs')).toMatchObject({ title: 'Rap dos MCs' });
+  });
+
   it('formatos de funk/rap: a lista de MCs fica no artista, a música no título', () => {
     // "MC A, MC B - Título"
     expect(lerTituloDeVideo('MC GP, MC MENO K - Vida Louca')).toMatchObject({

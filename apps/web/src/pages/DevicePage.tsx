@@ -213,8 +213,12 @@ export default function DevicePage() {
             <p className="flex items-center gap-1.5 text-[13px] text-fg-subtle">
               <HardDrive className="size-3.5" />
               {entries.length} {entries.length === 1 ? 'faixa' : 'faixas'} ·{' '}
-              {formatBytes(localLibrary.totalBytes())}
-              {quota && quota.quota > 0 && ` de ${formatBytes(quota.quota)} disponíveis`}
+              {/* O total do acervo inclui faixas que ainda moram na nuvem: comparar com
+                  o espaço do aparelho dava "49.8 GB de 20.9 GB". Com a medida do
+                  navegador em mãos, mostra o que está de fato gravado aqui. */}
+              {quota && quota.quota > 0
+                ? `${formatBytes(quota.usage)} usados de ${formatBytes(quota.quota)} neste aparelho`
+                : formatBytes(localLibrary.totalBytes())}
             </p>
           )}
         </div>

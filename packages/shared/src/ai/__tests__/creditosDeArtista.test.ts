@@ -25,6 +25,17 @@ describe('separarCreditos', () => {
     expect(separarCreditos('MC PP da VS')).toEqual(['MC PP da VS']);
   });
 
+  it('"VS" no fim do nome não é separador, mesmo com outro separador logo depois (14/11)', () => {
+    // O time "MC PP da VS" virava "MC PP da" quando vinha seguido de "&", "e",
+    // "x" ou "(DJ …)": o " VS " ficava cercado de espaço e o `vs` separava.
+    // "vs"/"x" só separam com um NOME depois, não com outro separador.
+    expect(separarCreditos('Mc PP da VS & MC Ryan SP')).toEqual(['Mc PP da VS', 'MC Ryan SP']);
+    expect(separarCreditos('MC PP da VS e MC Ryan SP')).toEqual(['MC PP da VS', 'MC Ryan SP']);
+    expect(separarCreditos('Mc PP da VS x MC Ryan SP')).toEqual(['Mc PP da VS', 'MC Ryan SP']);
+    expect(separarCreditos('MC PP da VS (DJ X)')).toEqual(['MC PP da VS (DJ X)']);
+    expect(separarCreditos('Alok vs Sevenn')).toEqual(['Alok', 'Sevenn']);
+  });
+
   it('participação sempre separa, com ou sem ponto, com ou sem parêntese', () => {
     expect(separarCreditos('Djonga feat. Rincon Sapiência')).toEqual([
       'Djonga',

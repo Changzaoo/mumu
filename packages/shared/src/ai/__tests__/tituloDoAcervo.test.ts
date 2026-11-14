@@ -104,6 +104,36 @@ describe('lerTituloDoAcervo', () => {
     });
   });
 
+  it('"Música - lista de MCs" com a música gravada como artista não vira título (PAM PAM, 14/11)', () => {
+    // artistFromVideo lê o lado esquerdo como artista; o leitor então jogava o
+    // lado direito (a lista de MCs) para o título. Lista de créditos de MC/DJ
+    // nunca é música: o lado esquerdo é a música e a lista canta.
+    expect(
+      lerTituloDoAcervo('PAM PAM - MC Cebezinho, MC Tuto, MC Ryan SP (DJ Oreia)', ['PAM PAM']),
+    ).toEqual({
+      title: 'PAM PAM',
+      artists: ['MC Cebezinho', 'MC Tuto', 'MC Ryan SP', 'DJ Oreia'],
+      label: null,
+    });
+    // Artista de verdade à esquerda com um MC só à direita não é lista.
+    expect(lerTituloDoAcervo('Matuê - MC Kevin', ['Matuê'])?.title ?? 'Matuê - MC Kevin').not.toBe(
+      'Matuê',
+    );
+  });
+
+  it('grupo de MCs gravado como título e a música como artista: destroca (Voz Ativa, 14/11)', () => {
+    expect(lerTituloDoAcervo('Racionais Mcs', ['Voz ativa'])).toMatchObject({
+      title: 'Voz ativa',
+      artists: ['Racionais Mcs'],
+    });
+    expect(lerTituloDoAcervo("Racionais MC's", ['Voz Ativa'])).toMatchObject({
+      title: 'Voz Ativa',
+      artists: ["Racionais MC's"],
+    });
+    // Artista gravado que também é grupo de MCs: não mexe.
+    expect(lerTituloDoAcervo("Racionais MC's", ["Racionais MC's"])).toBeNull();
+  });
+
   it('ambíguo fica como está', () => {
     expect(lerTituloDoAcervo('Flor da pele - Revelação', ['Fagner e Zeca Baleiro'])).toBeNull();
     expect(lerTituloDoAcervo('Garota de Ipanema', ['Tom Jobim'])).toBeNull();

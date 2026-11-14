@@ -17,7 +17,10 @@ export const iconButtonVariants = cva(
         lg: 'size-10 [&_svg]:size-5',
       },
       active: {
-        true: 'text-accent hover:text-accent',
+        // No tema escuro o destaque é branco e o ícone apagado é cinza-claro: sobre
+        // a capa do player os dois ficavam iguais (repetir ligado sem ninguém ver).
+        // O ponto embaixo diz "ligado" sem depender da cor.
+        true: 'relative text-accent hover:text-accent after:absolute after:bottom-0 after:left-1/2 after:size-1 after:-translate-x-1/2 after:rounded-full after:bg-current after:content-[""]',
         false: '',
       },
     },
