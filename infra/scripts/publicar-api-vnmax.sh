@@ -27,10 +27,63 @@ passo() { printf '\n\033[1;32m==> %s\033[0m\n' "$*"; }
 passo "1/5 exportando ${REF} limpa"
 git fetch -q origin main
 SHA="$(git rev-parse --short "$REF")"
-EXPORT="$(mktemp -d "${TMPDIR:-/tmp}/radinho-api-build.XXXXXX")"
-trap 'rm -rf "$EXPORT"' EXIT
+# Pasta de build FIXA (não mais um mktemp por vez): o node_modules fica de uma
+# publicação para a outra e o `pnpm install` vira segundos. O código-fonte é
+# trocado inteiro a cada vez (nada de arquivo apagado sobrando no build).
+EXPORT="${RADINHO_BUILD_CACHE:-$HOME/.cache/radinho-api-build}"
+mkdir -p "$EXPORT"
+rm -rf "$EXPORT/_deploy" "$EXPORT/apps" "$EXPORT/packages" "$EXPORT/infra" "$EXPORT/docs"
 git archive "$REF" | tar -x -C "$EXPORT"
 echo "commit ${SHA} em ${EXPORT}"
+
+# ASSINATURA DAS DEPENDÊNCIAS: lockfile, prisma e os package.json. Enquanto ela
+# for a mesma que está no servidor, a publicação é RÁPIDA — só o código
+# compilado viaja (~2 MB em vez dos 560 MB do node_modules), sem `pnpm deploy`,
+# sem sharp e sem `prisma generate`. Medido em 14/11/2026: a completa passava
+# de 10 minutos. `COMPLETO=1` força o caminho inteiro.
+ASSINATURA="$(git rev-parse "$REF:pnpm-lock.yaml" "$REF:apps/api/prisma" "$REF:apps/api/package.json" "$REF:packages/shared/package.json" | sha1sum | cut -c1-16)"
+NO_AR="$(ssh -o BatchMode=yes "$HOST_SSH" "cat '${DESTINO}/.assinatura' 2>/dev/null" || true)"
+if [[ "${COMPLETO:-0}" != "1" && "${ESTAGIAR:-0}" != "1" && -n "$NO_AR" && "$NO_AR" == "$ASSINATURA" ]]; then
+  passo "rápida 2/3: buildando (shared + api) — ${SHA}"
+  cd "$EXPORT"
+  pnpm install --frozen-lockfile --prefer-offline --filter "@radinho/api..." >/dev/null
+  pnpm --filter @radinho/shared build >/dev/null
+  pnpm --filter @radinho/api build >/dev/null
+  [[ -f apps/api/dist/main.js && -f packages/shared/dist/index.js ]] || { echo "build incompleto" >&2; exit 1; }
+
+  passo "rápida 3/3: enviando só o código e trocando"
+  # Cópia por hardlink da pasta no ar (instantânea, sem gastar disco), com os
+  # dois `dist` trocados; depois a mesma troca atômica do caminho completo.
+  tar -C "$EXPORT" -cf - apps/api/dist packages/shared/dist | ssh -o BatchMode=yes "$HOST_SSH" "
+    set -euo pipefail
+    cd /home/v
+    rm -rf '${DESTINO}.novo' '${DESTINO}.velho'
+    cp -al '${DESTINO}' '${DESTINO}.novo'
+    cd '${DESTINO}.novo'
+    rm -rf dist node_modules/@radinho/shared/dist _in VERSAO
+    mkdir _in && tar -m -C _in -xf -
+    mv _in/apps/api/dist dist
+    mv _in/packages/shared/dist node_modules/@radinho/shared/dist
+    rm -rf _in
+    echo '${SHA}' > VERSAO
+    node -e 'import(\"@radinho/shared\").then(() => console.log(\"shared carrega\"))'
+    cd /home/v
+    mv '${DESTINO}' '${DESTINO}.velho'
+    mv '${DESTINO}.novo' '${DESTINO}'
+    sed -i 's/^GIT_SHA=.*/GIT_SHA=${SHA}/' /home/v/radinho-api.env
+    systemctl --user restart radinho-api.service radinho-worker.service
+    for i in \$(seq 1 20); do
+      b=\"\$(curl -fsS --max-time 3 http://127.0.0.1:4000/healthz 2>/dev/null || true)\"
+      case \"\$b\" in *'\"version\":\"${SHA}\"'*) echo 'API no ar em ${SHA} (rápida)'; rm -rf '${DESTINO}.velho'; exit 0;; esac
+      sleep 3
+    done
+    echo 'API nao respondeu ${SHA}; voltando para a anterior' >&2
+    mv '${DESTINO}' '${DESTINO}.falhou' && mv '${DESTINO}.velho' '${DESTINO}'
+    systemctl --user restart radinho-api.service radinho-worker.service
+    exit 1
+  "
+  exit 0
+fi
 
 passo "2/5 instalando e buildando (shared + api) — ${SHA}"
 cd "$EXPORT"
@@ -50,6 +103,7 @@ pnpm --filter @radinho/api deploy --legacy --config.node-linker=hoisted "$SAIDA"
 [[ -d "$SAIDA/node_modules/@prisma/client" ]] || { echo "@prisma/client ausente na pasta (links?)" >&2; exit 1; }
 find "$SAIDA/node_modules" -maxdepth 1 -type l | grep -q . && { echo "node_modules ainda tem links; o tar os perderia" >&2; exit 1; }
 echo "$SHA" > "$SAIDA/VERSAO"
+echo "$ASSINATURA" > "$SAIDA/.assinatura"
 du -sh "$SAIDA" | cut -f1
 
 passo "4/5 enviando para ${HOST_SSH}:${DESTINO}.novo"
