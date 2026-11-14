@@ -10,8 +10,12 @@ import { api } from '@/lib/api';
 export function useEmAlta(): UseQueryResult<EmAltaDto | null> {
   return useQuery({
     queryKey: ['em-alta'],
-    // O worker regrava a cada ~3 h; dez minutos de cache não deixam nada velho.
-    staleTime: 10 * 60_000,
+    // O worker regrava a cada 30 min. A prateleira se atualiza sozinha: confere
+    // de 2 em 2 minutos com a tela aberta e toda vez que o app volta à frente.
+    staleTime: 60_000,
+    refetchInterval: 2 * 60_000,
+    refetchOnWindowFocus: true,
+    refetchOnReconnect: true,
     gcTime: 60 * 60_000,
     retry: 1,
     queryFn: async () => (await api.get<EmAltaDto | null>('/em-alta', { anonymous: true })).data,

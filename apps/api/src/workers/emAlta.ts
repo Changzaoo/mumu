@@ -332,6 +332,50 @@ export function entradasDoYoutube(
 
 // ── Fusão ───────────────────────────────────────────────────────────────────
 
+/** O link já é de um vídeo do YouTube (o importador toca sem procurar nada)? */
+export function ehLinkDoYoutube(url: string | null | undefined): boolean {
+  return (
+    !!url &&
+    /^https:\/\/(?:www\.|music\.)?youtube\.com\/watch\?(?:.*&)?v=[A-Za-z0-9_-]{11}/.test(url)
+  );
+}
+
+export interface ResultadoDeBusca {
+  url: string;
+  titulo: string;
+  canal?: string;
+  duracaoSeg?: number;
+}
+
+/**
+ * O resultado da busca que é ESTA música — a mesma regra que o aparelho usava
+ * na hora do toque (`PrateleiraEmAlta.escolherVideo`), agora no servidor: o
+ * vídeo tem de trazer o título E o artista (no título ou no canal), não pode
+ * ser versão alterada, e a duração tem de bater (±20 s) quando a parada a deu.
+ * Mais estrito que o aparelho de propósito: aqui ninguém vê a escolha antes de
+ * ela valer para todo mundo. Na dúvida, `null` — o aparelho procura na hora.
+ */
+export function escolherVideoDaFaixa(
+  resultados: ReadonlyArray<ResultadoDeBusca>,
+  faixa: { titulo: string; artista: string; duracaoMs: number | null },
+): string | null {
+  const titulo = norm(faixa.titulo);
+  const artista = norm(faixa.artista);
+  if (!titulo || !artista) return null;
+  const duracaoSeg = faixa.duracaoMs && faixa.duracaoMs > 0 ? faixa.duracaoMs / 1000 : null;
+  for (const r of resultados) {
+    if (!r || !ehLinkDoYoutube(r.url) || typeof r.titulo !== 'string') continue;
+    if (VERSAO_ALTERADA.test(r.titulo) && !VERSAO_ALTERADA.test(faixa.titulo)) continue;
+    const texto = ` ${norm(`${r.titulo} ${r.canal ?? ''}`)} `;
+    if (!texto.includes(` ${titulo} `) || !texto.includes(` ${artista} `)) continue;
+    if (duracaoSeg && typeof r.duracaoSeg === 'number' && r.duracaoSeg > 0) {
+      if (Math.abs(r.duracaoSeg - duracaoSeg) > 20) continue;
+    }
+    return r.url;
+  }
+  return null;
+}
+
 /** Quanto cada fonte pesa: o YouTube mede o que toca; a Apple é a loja menor. */
 const PESO_DA_FONTE: Readonly<Record<FonteDeParada, number>> = {
   youtube: 1,

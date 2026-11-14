@@ -589,7 +589,11 @@ function urlDiretaServe(direta) {
 
 /** Os clientes a tentar, em ordem: o rápido e, de reserva, a lista do download. */
 function clientesParaResolver() {
-  const rapido = (process.env.YTDLP_RESOLVE_CLIENT ?? 'android').trim();
+  // `android` parou de entregar formato (2.095 falhas seguidas no log até
+  // 14/11/2026, 3–4 s jogados fora em TODO toque). `android_vr` resolve em
+  // ~2,6 s e a URL passou na prova em 7 de 10 vídeos; quando não passa, a
+  // lista completa assume como antes.
+  const rapido = (process.env.YTDLP_RESOLVE_CLIENT ?? 'android_vr').trim();
   const completo = (process.env.YTDLP_PLAYER_CLIENT ?? 'web_embedded,default').trim();
   return rapido && rapido !== completo ? [rapido, completo] : [completo];
 }

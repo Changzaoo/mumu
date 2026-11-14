@@ -1,7 +1,7 @@
 /**
  * O AGENTE DE PARADAS — "em alta" por gênero, sempre fresco, no servidor.
  *
- * De tempos em tempos (`EM_ALTA_INTERVALO_MIN`, 3 h por padrão) ele lê as
+ * De tempos em tempos (`EM_ALTA_INTERVALO_MIN`, 30 min por padrão) ele lê as
  * paradas públicas — Deezer por gênero, Apple por gênero, YouTube "Top 100
  * Brazil/Global" pelo importador — funde tudo por música (`emAlta.ts`), marca o
  * que o acervo já tem, e grava UM retrato em `WorkerState` (`emAlta.paradas`).
@@ -26,7 +26,9 @@ import { gravarEmAlta } from '../modules/emAlta/emAlta.repository.js';
 import {
   entradasDaApple,
   entradasDoDeezer,
+  ehLinkDoYoutube,
   entradasDoYoutube,
+  escolherVideoDaFaixa,
   fundirParadas,
   generoDoFunkDaApple,
   idsDoRssDaApple,
@@ -37,7 +39,9 @@ import {
   type AppleLookup,
   type EntradaDeParada,
   type FaixaDoAcervo,
+  type ResultadoDeBusca,
 } from './emAlta.js';
+import type { FaixaEmAlta, GeneroEmAlta } from '@radinho/shared';
 import { baseInterna, cabecalhos } from './varreduraNoturna.worker.js';
 
 const log = logger.child({ worker: 'emAlta' });
@@ -198,6 +202,7 @@ export interface ResultadoDaBatida {
   falhas: Record<string, string>;
   generos: number;
   faixas: number;
+  videosNovos?: number;
 }
 
 export async function lerParadasUmaVez(agora = new Date()): Promise<ResultadoDaBatida> {
@@ -219,9 +224,97 @@ export async function lerParadasUmaVez(agora = new Date()): Promise<ResultadoDaB
   const generos = fundirParadas(entradas, acervo, {
     porGenero: numero('EM_ALTA_POR_GENERO', 30, 5),
   });
+  // O retrato sai JÁ com os links do YouTube conhecidos; só depois o agente
+  // procura os que faltam (devagar) e regrava se achou algum.
+  const videos = await lerVideos();
+  aplicarVideos(generos, videos);
   await gravarEmAlta({ atualizadoEm: agora.toISOString(), generos });
+  const novos = await procurarVideos(generos, videos).catch((err) => {
+    log.warn({ err }, 'paradas: busca de vídeos falhou');
+    return 0;
+  });
+  if (novos > 0) {
+    aplicarVideos(generos, videos);
+    await gravarEmAlta({ atualizadoEm: agora.toISOString(), generos });
+  }
   const faixas = generos[0]?.faixas.length ?? 0;
-  return { gravou: true, porFonte, falhas, generos: generos.length, faixas };
+  return { gravou: true, porFonte, falhas, generos: generos.length, faixas, videosNovos: novos };
+}
+
+// ── O link do YouTube de cada faixa de fora do acervo ───────────────────────
+//
+// Medido em 14/11/2026: das 569 faixas de fora, só 18 traziam link do YouTube;
+// as outras traziam o do Deezer/Apple, e o toque tinha de PROCURAR o vídeo e
+// só então extrair o áudio — nada disso podia ser aquecido antes. Aqui o
+// agente procura uma vez, guarda (`emAlta.videos`) e o retrato já sai com o
+// link: o aparelho aquece o que está à vista e o toque começa em segundos.
+
+const CHAVE_VIDEOS = 'emAlta.videos';
+/** Buscas por batida — o importador aceita 40/min por origem; vamos a 24/min. */
+const BUSCAS_POR_BATIDA = 120;
+const RESPIRO_DE_BUSCA_MS = 2_500;
+/** "Não achei" vale por um dia; depois tenta de novo. */
+const REVER_VAZIO_MS = 24 * 3600_000;
+
+type Videos = Record<string, { url: string | null; em: number }>;
+
+async function lerVideos(): Promise<Videos> {
+  const linha = await prisma.workerState.findUnique({ where: { key: CHAVE_VIDEOS } });
+  const v = linha?.value;
+  return v && typeof v === 'object' && !Array.isArray(v) ? (v as unknown as Videos) : {};
+}
+
+function aplicarVideos(generos: GeneroEmAlta[], videos: Videos): void {
+  for (const g of generos)
+    for (const f of g.faixas) {
+      const url = videos[f.chave]?.url;
+      if (!f.acervoId && url && !ehLinkDoYoutube(f.origem)) f.origem = url;
+    }
+}
+
+async function procurarVideos(generos: GeneroEmAlta[], videos: Videos): Promise<number> {
+  if (!baseInterna() || !env.IMPORT_SERVICE_TOKEN) return 0;
+  // Quem está mais no topo primeiro — é o que aparece na tela.
+  const pendentes = new Map<string, FaixaEmAlta>();
+  const vivas = new Set<string>();
+  const todas = generos.flatMap((g) => g.faixas).sort((a, b) => a.posicao - b.posicao);
+  const agora = Date.now();
+  for (const f of todas) {
+    vivas.add(f.chave);
+    if (f.acervoId || ehLinkDoYoutube(f.origem)) continue;
+    const sabido = videos[f.chave];
+    if (sabido && (sabido.url || agora - sabido.em < REVER_VAZIO_MS)) continue;
+    if (!pendentes.has(f.chave)) pendentes.set(f.chave, f);
+  }
+  let novos = 0;
+  let buscas = 0;
+  for (const f of pendentes.values()) {
+    if (buscas >= BUSCAS_POR_BATIDA) break;
+    buscas += 1;
+    try {
+      const json = (await lerJson(
+        `${baseInterna()}/buscar-youtube?q=${encodeURIComponent(`${f.artista} ${f.titulo}`)}`,
+        { headers: cabecalhos() },
+      )) as { resultados?: ResultadoDeBusca[] };
+      const url = escolherVideoDaFaixa(json.resultados ?? [], f);
+      videos[f.chave] = { url, em: Date.now() };
+      if (url) novos += 1;
+    } catch (err) {
+      // 429/502: o importador pediu calma — para por aqui, a próxima batida continua.
+      log.warn({ err: String(err), feitas: buscas }, 'paradas: busca de vídeo interrompida');
+      break;
+    }
+    await esperar(RESPIRO_DE_BUSCA_MS);
+  }
+  // Só guarda o que ainda está em alguma parada: o mapa não cresce para sempre.
+  for (const chave of Object.keys(videos)) if (!vivas.has(chave)) delete videos[chave];
+  await prisma.workerState.upsert({
+    where: { key: CHAVE_VIDEOS },
+    create: { key: CHAVE_VIDEOS, value: videos as object },
+    update: { value: videos as object },
+  });
+  if (buscas > 0) log.info({ buscas, novos, faltam: pendentes.size - buscas }, 'paradas: vídeos');
+  return novos;
 }
 
 export function startEmAltaWorker(): () => void {
@@ -229,7 +322,7 @@ export function startEmAltaWorker(): () => void {
     log.info('agente de paradas desligado (EM_ALTA_ENABLED=false)');
     return () => undefined;
   }
-  const intervaloMin = numero('EM_ALTA_INTERVALO_MIN', 180, 30);
+  const intervaloMin = numero('EM_ALTA_INTERVALO_MIN', 30, 30);
   let parado = false;
   let rodando = false;
   const bater = (): void => {
@@ -240,7 +333,13 @@ export function startEmAltaWorker(): () => void {
         if (!r.gravou) log.warn({ motivo: r.motivo, falhas: r.falhas }, 'paradas: nada gravado');
         else
           log.info(
-            { porFonte: r.porFonte, generos: r.generos, noTopo: r.faixas, falhas: r.falhas },
+            {
+              porFonte: r.porFonte,
+              generos: r.generos,
+              noTopo: r.faixas,
+              videosNovos: r.videosNovos,
+              falhas: r.falhas,
+            },
             'paradas gravadas',
           );
       })

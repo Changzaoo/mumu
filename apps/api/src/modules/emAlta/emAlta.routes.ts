@@ -14,7 +14,7 @@ emAltaRoutes.get(
   asyncHandler(async (req, res) => {
     const dto = await lerEmAlta();
     const genero = typeof req.query.genero === 'string' ? req.query.genero.trim() : '';
-    res.setHeader('Cache-Control', 'public, max-age=300');
+    res.setHeader('Cache-Control', 'public, max-age=60');
     if (!dto) {
       ok(res, null);
       return;
