@@ -770,16 +770,39 @@ async function importToMp3(ytdlp, url, quality) {
   if (process.env.FFMPEG_PATH) args.push('--ffmpeg-location', process.env.FFMPEG_PATH);
   args.push('--', linkParaYtdlp(url));
 
-  await new Promise((resolve, reject) => {
-    let stderr = '';
-    const p = spawn(ytdlp, args, { windowsHide: true });
-    p.stderr.on('data', (c) => {
-      stderr += c;
-      if (stderr.length > 8192) stderr = stderr.slice(-8192);
+  const rodar = (lista) =>
+    new Promise((resolve, reject) => {
+      let stderr = '';
+      const p = spawn(ytdlp, lista, { windowsHide: true });
+      p.stderr.on('data', (c) => {
+        stderr += c;
+        if (stderr.length > 8192) stderr = stderr.slice(-8192);
+      });
+      p.on('error', reject);
+      p.on('close', (code) => {
+        if (code === 0) return resolve();
+        const erro = new Error(interpret(stderr));
+        // O motivo de verdade (a última linha "ERROR:" do yt-dlp) viaja junto:
+        // sem ele o log só dizia "Não foi possível baixar desse link." e
+        // ninguém sabia se era 403, formato ou vídeo morto.
+        erro.bruto = ultimaLinhaDeErro(stderr);
+        reject(erro);
+      });
     });
-    p.on('error', reject);
-    p.on('close', (code) => (code === 0 ? resolve() : reject(new Error(interpret(stderr)))));
-  });
+  try {
+    await rodar(args);
+  } catch (err) {
+    // VÍDEO QUE PROÍBE EMBED E DÁ 403 NOS BYTES (medido em 14/11/2026 com
+    // Zennsm7y9KA): `web_embedded` responde "Video unavailable", `default`
+    // resolve o formato 251 e leva 403 ao baixar. `mweb` entrega o formato 18
+    // (mp4 com áudio) e baixa. Uma segunda tentativa, só nesse caso.
+    const reserva = argsComClienteDeReserva(args);
+    if (!reserva || !/\b403\b/.test(err?.bruto ?? '')) throw err;
+    log('download levou 403; tentando com o cliente de reserva:', err.bruto);
+    for (const f of await readdir(dir).catch(() => []))
+      await rm(path.join(dir, f), { force: true }).catch(() => undefined);
+    await rodar(reserva);
+  }
 
   const files = await readdir(dir);
   const mp3 = files.find((f) => f.endsWith('.mp3'));
@@ -841,6 +864,35 @@ async function importToMp3(ytdlp, url, quality) {
     uploader,
     durationMs,
   };
+}
+
+/** A última linha "ERROR:" do yt-dlp, curta — é o motivo de verdade da falha. */
+export function ultimaLinhaDeErro(stderr) {
+  const linhas = String(stderr ?? '')
+    .split(/[\r\n]+/)
+    .map((l) => l.trim())
+    .filter(Boolean);
+  const erro = linhas.filter((l) => l.startsWith('ERROR')).pop() ?? linhas.pop() ?? '';
+  return erro.slice(0, 300);
+}
+
+/**
+ * Os mesmos argumentos, trocando o cliente do YouTube pelo de reserva
+ * (`YTDLP_PLAYER_CLIENT_RESERVA`, padrão `mweb`; vazio desliga). `null` quando
+ * não há o que trocar.
+ */
+export function argsComClienteDeReserva(args) {
+  const reserva = (process.env.YTDLP_PLAYER_CLIENT_RESERVA ?? 'mweb').trim();
+  if (!reserva) return null;
+  const valor = `youtube:player_client=${reserva}`;
+  const i = args.findIndex((a) => typeof a === 'string' && a.startsWith('youtube:player_client='));
+  if (i >= 0) {
+    if (args[i] === valor) return null;
+    return args.map((a, j) => (j === i ? valor : a));
+  }
+  const f = args.indexOf('-f');
+  if (f < 0) return null;
+  return [...args.slice(0, f), '--extractor-args', valor, ...args.slice(f)];
 }
 
 function interpret(stderr) {
@@ -968,7 +1020,7 @@ function startImportJob(url, quality, quem = null, musica = null) {
       job.status = 'error';
       job.error = message;
       job.permanent = err instanceof NaoAchei || isPermanentImportError(message);
-      log('job error:', message);
+      log('job error:', message, err?.bruto ? `— ${err.bruto}` : '');
     })
     .finally(() => {
       if (quem) limiteDeImport.terminou(quem);
