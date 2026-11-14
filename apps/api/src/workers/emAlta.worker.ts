@@ -237,8 +237,54 @@ export async function lerParadasUmaVez(agora = new Date()): Promise<ResultadoDaB
     aplicarVideos(generos, videos);
     await gravarEmAlta({ atualizadoEm: agora.toISOString(), generos });
   }
+  await aquecerTopo(generos).catch((err) => log.warn({ err }, 'paradas: aquecimento falhou'));
   const faixas = generos[0]?.faixas.length ?? 0;
   return { gravou: true, porFonte, falhas, generos: generos.length, faixas, videosNovos: novos };
+}
+
+// ── O topo já sai AQUECIDO ──────────────────────────────────────────────────
+//
+// Medido em 14/11/2026 no importador: faixa de fora do acervo, a frio, levou
+// 36–40 s até o primeiro byte (extrair o áudio do YouTube custa 10–40 s com a
+// máquina ocupada); com a URL direta já em cache, 0,46 s. O aparelho só aquece
+// depois que a prateleira aparece — tarde para quem toca no primeiro cartão.
+// Então o servidor mantém quente o que está no topo: a cada batida pede ao
+// importador as URLs que ainda não estão em cache (ele mesmo pula as que
+// estão), em levas pequenas e espaçadas, porque extrair é o que o YouTube
+// limita por IP.
+
+const TOPO_GERAL = 10;
+const TOPO_POR_GENERO = 3;
+const LEVA_DE_AQUECIMENTO = 8;
+const RESPIRO_ENTRE_LEVAS_MS = 90_000;
+
+/** Os links do YouTube do topo (geral e de cada gênero), sem repetir. */
+export function linksDoTopo(generos: GeneroEmAlta[]): string[] {
+  const links = new Set<string>();
+  for (const [i, g] of generos.entries()) {
+    const ate = i === 0 ? TOPO_GERAL : TOPO_POR_GENERO;
+    for (const f of g.faixas.slice(0, ate))
+      if (!f.acervoId && f.origem && ehLinkDoYoutube(f.origem)) links.add(f.origem);
+  }
+  return [...links];
+}
+
+async function aquecerTopo(generos: GeneroEmAlta[]): Promise<void> {
+  if (!ligado('EM_ALTA_AQUECER') || !baseInterna() || !env.IMPORT_SERVICE_TOKEN) return;
+  const links = linksDoTopo(generos);
+  let pedidas = 0;
+  for (let i = 0; i < links.length; i += LEVA_DE_AQUECIMENTO) {
+    const json = (await lerJson(`${baseInterna()}/aquecer`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json', ...cabecalhos() },
+      body: JSON.stringify({ urls: links.slice(i, i + LEVA_DE_AQUECIMENTO) }),
+    })) as { aquecendo?: number };
+    const n = Number(json.aquecendo ?? 0);
+    pedidas += n;
+    // Leva que já estava toda em cache não custa nada: segue sem esperar.
+    if (n > 0 && i + LEVA_DE_AQUECIMENTO < links.length) await esperar(RESPIRO_ENTRE_LEVAS_MS);
+  }
+  log.info({ topo: links.length, pedidas }, 'paradas: topo aquecido');
 }
 
 // ── O link do YouTube de cada faixa de fora do acervo ───────────────────────
