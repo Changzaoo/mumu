@@ -55,3 +55,23 @@ describe('corrigirTituloConhecido', () => {
     expect(TOTAL_DE_CORRECOES_DE_TITULO).toBeGreaterThan(150);
   });
 });
+
+describe('prévia de 14/11/2026', () => {
+  it('devolve o "VS" cortado de MC PP da VS e sossega depois', () => {
+    expect(corrigirTituloConhecido('Atividade', ['Mc PP da', 'MC Ryan SP'])?.artists).toEqual([
+      'MC PP da VS',
+      'MC Ryan SP',
+    ]);
+    expect(corrigirTituloConhecido('Atividade', ['MC PP da VS', 'MC Ryan SP'])).toBeNull();
+    expect(corrigirTituloConhecido('Tamo Ai Na Atividade', ['Charlie Brown Jr.'])).toBeNull();
+    expect(corrigirTituloConhecido('Atividade', ['Outro Artista'])).toBeNull();
+  });
+
+  it('destroca a lista de MCs e a música', () => {
+    const c = corrigirTituloConhecido('MC Kevin, MC IG, MC PH', ['Deus', 'por favor', 'Dj WN']);
+    expect(c).toEqual({
+      title: 'Deus, Por Favor',
+      artists: ['MC Kevin', 'MC IG', 'MC PH', 'DJ WN'],
+    });
+  });
+});

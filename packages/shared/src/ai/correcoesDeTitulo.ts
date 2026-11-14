@@ -564,6 +564,45 @@ const LINHAS: readonly Linha[] = [
   ['Metallica: Nothing Else Matters', 'metallica', 'Nothing Else Matters', 'Metallica'],
   ['Brolle, Playing with fire', 'brolle', 'Playing with Fire', 'Brolle'],
   ['Lei Anti Oruam (Prod. Maurin, Victor Wao)', 'oruam', 'Lei Anti Oruam', 'Oruam'],
+
+  // ── Prévia de 14/11/2026 (docs/PREVIA-TITULOS-TROCADOS-2026-11-14.md) ─────
+  // Artista cortado no "VS" de "MC PP da VS".
+  ['Atividade', 'pp da', 'Atividade', 'MC PP da VS; MC Ryan SP'],
+  ['Pernoite', 'pp da', 'Pernoite', 'MC PP da VS; MC Ryan SP'],
+  ['Tem que Ser de Luxo', 'pp da', 'Tem que Ser de Luxo', 'MC PP da VS; MC Ryan SP; DJ Pedro'],
+  // Lista de MCs no título e a música no campo do artista.
+  [
+    'WR ORIGINAL, MC IGÃO MC MYRES',
+    'beat japones',
+    'Beat Japonês Bunda Pula Pula',
+    'WR Original; MC Igão; MC Myres; DJ Kennedy Obrabo; DJ Ruan ZS',
+  ],
+  [
+    'Silva Mc, Mc Kitinho ( Dj Kennedy Obraboo & Dj Jhow Beats )',
+    'tchuca',
+    'Tchuca Trepadeira',
+    'Silva MC; MC Kitinho; DJ Kennedy Obraboo; DJ Jhow Beats',
+  ],
+  [
+    'MC MENO K MC NEGÃO ORIGINAL e MC RYAN SP',
+    'procedimento',
+    'Procedimento da Casa',
+    'MC Meno K; MC Negão Original; MC Ryan SP',
+  ],
+  [
+    'MC JVila, MC Negão Original, MC Meno K e MC Willian',
+    'pela madrugada',
+    'Pela Madrugada Eu Vou, Encontrar um Novo Amor',
+    'MC JVila; MC Negão Original; MC Meno K; MC Willian',
+  ],
+  ['MC GEDAI, MC MENO DANI', 'berimbau', 'Berimbau Italiano', 'MC Gedai; MC Meno Dani; DJ Arana'],
+  [
+    'MC Ig, MC Lele JP , MC Neguinho Prt (Oldilla)',
+    'novinha',
+    'To, Uma Novinha Mídia',
+    'MC IG; MC Lele JP; MC Neguinho PRT; Oldilla',
+  ],
+  ['MC Kevin, MC IG, MC PH', 'deus', 'Deus, Por Favor', 'MC Kevin; MC IG; MC PH; DJ WN'],
 ];
 
 /** Sem caixa, sem acento, sem enfeite de fonte ("𝕻𝖗𝖔𝖈𝖔𝖑" → "procol"), sem emoji. */
